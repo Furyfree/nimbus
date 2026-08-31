@@ -41,7 +41,8 @@ not encode the `desktop-session` group.
 
 ## Cross-repo state
 
-The 2026-09-01 handoff work lives in two repositories:
+The 2026-08-31 review's handoff commits (created 2026-09-01) live in two
+repositories:
 
 - dotfiles, committed directly to `main` as
   `2c14046 feat: adopt Nimbus profile handoff and machine manifests`: new
@@ -67,6 +68,9 @@ Chezmoi analysis for the dotfiles change (chezmoi 2.72.0, all read-only):
   returns persisted `[data] Profiles` on later inits without prompting.
 
 ## Resolved alongside this change
+
+Historical record only; durable requirements live in `SPEC.md` and
+`ROADMAP.md`.
 
 - Fixed the `windows` platform profile regression in the dotfiles template.
 - Moved the 1Password SSH prompt out of the Linux-only branch so the choice is
