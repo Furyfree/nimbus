@@ -179,9 +179,9 @@ The initial Bubble Tea flow is:
 6. Choose whether eligible unmanaged packages should be pruned.
 7. Approve apply or exit without changing the system.
 
-Configuration is saved atomically after its review. Exiting before that point
-writes nothing. Exiting from the plan screen keeps the reviewed configuration
-but performs no system changes.
+Configuration is saved atomically after its review. Before approval, Nimbus
+writes no machine manifest and changes no system state. Exiting from the plan
+screen keeps the reviewed configuration but performs no system changes.
 
 The package screen distinguishes:
 
