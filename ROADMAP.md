@@ -123,6 +123,11 @@ Machine manifests are plain, versioned TOML, not templates. On a reinstallation,
 an explicit `--machine ID`. Nimbus links its default config path to the
 selected manifest.
 
+`nimbus init` also completes without a repository locator: it creates a
+reviewed plain local manifest at `~/.config/nimbus/machine.toml`, runs the
+same plan and apply path, and documents adoption into a tracked
+`machines/<id>.toml` later.
+
 The repository locator is an explicit bootstrap input. A new manifest records
 it; an existing manifest must match it. Nimbus runs `chezmoi init <repo>`
 without `--apply` and supplies the resolved selection through Chezmoi's native
@@ -166,6 +171,12 @@ under the catalog update policies in `SPEC.md`. Its exact membership, package
 sources, and verification checks require a separate
 analysis before catalog entries are implemented; until then, catalog files
 must not encode the group.
+
+The `hyprland-noctalia` profile includes a Nimbus-owned seed `hyprland.lua`
+with minimal keybinds and `exec-once noctalia --daemon`, rendered from the
+machine's desktop selection. Plan writes it only when Chezmoi does not manage
+the path; once `chezmoi apply` takes the path over, Nimbus reports the path as
+Chezmoi-managed and stops restoring the seed.
 
 ## Later
 
