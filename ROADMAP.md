@@ -113,8 +113,11 @@ may mutate state before its recovery path is defined.
 ## 4. Bootstrap and Chezmoi handoff
 
 Implement the minimal bootstrap of Nimbus, Chezmoi, and the required Git
-transport. Fetch the configured dotfiles source without applying targets, then
-support both creating a new `machines/<id>.toml` and restoring an existing one.
+transport. Fetch the configured dotfiles source without applying targets: the
+bootstrap clones the repository once, directly into the Chezmoi source
+directory, and `chezmoi init` then detects that existing repository without
+fetching again. Support both creating a new `machines/<id>.toml` and restoring
+an existing one.
 Machine manifests are plain, versioned TOML, not templates. On a reinstallation,
 `nimbus init` lists the tracked manifests and the user selects one, or passes
 an explicit `--machine ID`. Nimbus links its default config path to the
@@ -160,7 +163,7 @@ either is missing.
 The coordinated `desktop-session` update group applies the Hyprland, Noctalia,
 greeter, portal, and session integration stack as one reviewed transaction
 under the catalog update policies in `SPEC.md`. Its exact membership, package
-sources, version constraints, and verification checks require a separate
+sources, and verification checks require a separate
 analysis before catalog entries are implemented; until then, catalog files
 must not encode the group.
 

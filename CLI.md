@@ -145,11 +145,12 @@ interface. The repository locator is fetched only after it is shown for
 review, and it must match the repository recorded by an existing manifest.
 Nimbus makes the source available without applying any home-directory targets.
 
-`init` performs exactly one Git read: a clone or fetch of the provided
-repository locator. It never commits, pulls, or pushes. An existing checkout
-that is dirty or stale is reported and refused, never reconciled, and a later
-origin divergence from the manifest record is a visible warning, not a
-mutation.
+`init` performs exactly one Git read: a clone of the provided locator directly
+into the Chezmoi source directory. It never commits, pulls, or pushes.
+`chezmoi init` then detects that existing repository and does not fetch again.
+An existing checkout that is dirty or stale is reported and refused, never
+reconciled, and a later origin divergence from the manifest record is a
+visible warning, not a mutation.
 
 ### Fresh install
 

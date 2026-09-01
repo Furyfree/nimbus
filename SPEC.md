@@ -133,12 +133,14 @@ them before matching. The dotfiles repository is currently public, so init
 fetches it anonymously over HTTPS; a private repository instead requires
 whatever credential the transport needs, entered interactively and never
 stored. The bootstrap installs only Nimbus, Chezmoi, and Git. Init performs
-exactly one Git read - a clone or fetch of the provided locator - and leaves
-the working tree untouched; a checkout that is dirty or stale is reported and
-refused, never reconciled. Afterward the user and Chezmoi own all Git
-operations, and a checkout origin that later diverges from the manifest record
-is a visible warning, not a mutation. The full Nimbus plan and apply run
-before the user reviews and runs `chezmoi apply`.
+exactly one Git read - a clone of the provided locator directly into the
+Chezmoi source directory - and leaves the working tree untouched; a checkout
+that is dirty or stale is reported and refused, never reconciled.
+`chezmoi init` then detects that existing repository and does not fetch again,
+so the bootstrap performs one fetch in total. Afterward the user and Chezmoi
+own all Git operations, and a checkout origin that later diverges from the
+manifest record is a visible warning, not a mutation. The full Nimbus plan and
+apply run before the user reviews and runs `chezmoi apply`.
 
 ## Required behavior
 
