@@ -141,6 +141,8 @@ After first boot:
 3. Determine the Btrfs resume offset.
 4. Configure the kernel and initramfs resume parameters.
 5. Test hibernation.
+6. Verify zram remains active for memory pressure while the disk swap is the
+   hibernation target.
 
 Size the disk swap roughly to physical RAM, with some headroom when reliable
 hibernation is required.

@@ -7,7 +7,9 @@ Plan: [Configuration resolver](ROADMAP.md#1-configuration-resolver).
 - [ ] Create the Go module and Cobra-based `nimbus config resolve` command.
 - [ ] Define versioned machine, profile, component, and catalog types.
 - [ ] Add the initial four profiles and their component references.
-- [ ] Define the first package-specific catalog entries separately from profiles.
+- [ ] Define the first package-specific catalog entries separately from
+  profiles: a few seed entries per source; the full profile composition is
+  filled in later.
 - [ ] Embed and load built-in profile, component, and catalog TOML.
 - [ ] Load `machine.toml`, including a symlinked manifest, with `--config FILE`
   as an override.
@@ -18,6 +20,8 @@ Plan: [Configuration resolver](ROADMAP.md#1-configuration-resolver).
 - [ ] Add `nimbus why` provenance output over the resolved desired graph.
 - [ ] Add valid, invalid, and golden fixtures.
 - [ ] Run `gofmt`, `go vet ./...`, `go test ./...`, and `git diff --check`.
+- [ ] Add the `gomod` ecosystem to `.github/dependabot.yml` when `go.mod`
+  lands.
 - [ ] Inspect the final diff and record residual risk below.
 
 ## Evidence
