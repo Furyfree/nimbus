@@ -3,7 +3,8 @@
 ## Purpose
 
 Nimbus installs and manages Linux workstation state that does not belong in a
-Chezmoi dotfiles repository.
+Chezmoi dotfiles repository. The first target is post-install Fedora 44 setup
+on x86_64.
 
 ## Working rules
 
@@ -11,55 +12,38 @@ Chezmoi dotfiles repository.
   changing architecture or scope.
 - Keep one bounded outcome per change and preserve unrelated work.
 - Prefer native system tools and existing Go dependencies over custom
-  replacements.
+  replacements. Do not add abstractions for hypothetical future backends.
 - Keep package-specific data in versioned catalog files, not package-name
   branches in Go.
 - Implement inspection and planning before mutation.
-- Do not add compatibility or abstractions for hypothetical future backends.
 - Do not commit, push, create or update a pull request, install, deploy, or run
   privileged operations without explicit permission.
-- Treat `~/git/docs` as history, not a source of truth. It records past
-  decisions, superseded plans, and previous implementations such as niriland.
-  The active contracts live in this repository and in the dotfiles repository.
+- Treat `~/git/docs` as history, not a source of truth: past decisions,
+  superseded plans, and previous implementations such as niriland. The active
+  contracts live in this repository and in the dotfiles repository.
 
 ## Ownership
 
 - Nimbus owns Linux packages, repositories, services, system files, hardware,
   boot policy, profiles, planning, applied state, and recovery.
-- Chezmoi owns user files, templates, and its normal diff, apply, and update
-  lifecycle.
-- Nimbus owns `machines/` manifests stored outside the Chezmoi source root;
-  Chezmoi owns the surrounding checkout and all Git operations.
-- Nimbus may install Chezmoi and perform an explicit first bootstrap. It must
-  not implement another dotfiles engine or hide Chezmoi operations.
+- Chezmoi owns user files, templates, and its diff, apply, and update
+  lifecycle. Nimbus may install and bootstrap Chezmoi explicitly; it must not
+  reimplement or hide Chezmoi.
+- Nimbus owns `machines/` manifests outside the Chezmoi source state; Chezmoi
+  owns the checkout and all Git operations.
 
 ## Repository map
 
-- `profiles/` will own built-in profile composition.
-- `catalog/` will own package and resource definitions.
-- `history/` holds dated analysis records; it is not active foundation.
-- `justfile` exposes development commands.
-- `tools/package-query/` is a development-only Fedora and RPM Fusion package
-  research image.
+- `profiles/`, `components/`, and `catalog/` will own embedded definitions.
+- `history/` holds dated analysis records, not active foundation.
+- `justfile` exposes development commands; `just check` runs the local gate.
+- `tools/package-query/` is a development-only Fedora and RPM Fusion image.
 
 ## Validation
 
-For documentation-only changes, run:
-
-```sh
-git diff --check
-```
-
-Once Go code exists, the complete local gate is:
-
-```sh
-gofmt -w .
-go vet ./...
-go test ./...
-git diff --check
-```
-
-Run destructive integration tests only in disposable environments.
+`just check` runs the available local checks: `git diff --check` today, plus
+`gofmt -w .`, `go vet ./...`, and `go test ./...` once Go code exists. Run
+destructive integration tests only in disposable environments.
 
 ## Safety
 
@@ -67,19 +51,18 @@ Run destructive integration tests only in disposable environments.
   runtime state in the repository, plans, logs, or Nimbus state.
 - Keep desired configuration, observed state, and last-applied state separate.
 - Never guess removal commands or delete paths Nimbus does not own.
-- Scope privilege elevation to the operation that needs it.
-- Use direct `sudo` for each privileged native command. Do not add a root
-  daemon, privileged helper, or custom sudo keepalive without a new decision.
+- Scope privilege elevation to the operation that needs it: direct `sudo` per
+  command, no root daemon, no privileged helper, no sudo keepalive.
 - Define verification and recovery before enabling a mutating resource.
 
 ## Documentation
 
-- `SPEC.md` owns accepted requirements and boundaries.
-- `ROADMAP.md` owns phase order, risks, validation, recovery, and exit criteria.
-- `TASKS.md` owns the current checklist and evidence.
-- `OPEN_QUESTIONS.md` owns unresolved decisions. Move accepted answers into the
-  relevant owning document.
-- `README.md` is the short user-facing entry point.
+- `SPEC.md`: accepted requirements and boundaries.
+- `ROADMAP.md`: phase order, risks, validation, recovery, exit criteria.
+- `TASKS.md`: current checklist and evidence.
+- `OPEN_QUESTIONS.md`: unresolved decisions; move accepted answers into the
+  owning document.
+- `README.md`: short user-facing entry point.
 
 ## Code review rules
 

@@ -36,8 +36,9 @@ The dotfiles repository may also contain Nimbus-owned machine manifests under
 `machines/`, outside its Chezmoi source root. Chezmoi owns the surrounding
 checkout and Git lifecycle but does not deploy or edit those manifests. Nimbus
 may edit a selected manifest after showing its diff, but never commits, pulls,
-or pushes the repository. Manifests are plain, versioned TOML files, not
-templates.
+or pushes the repository; the one Git read Nimbus performs is the init-time
+clone or fetch defined under Configuration and state. Manifests are plain,
+versioned TOML files, not templates.
 
 Nimbus passes the ordered resolved profile IDs to Chezmoi unchanged. It does
 not own a second dotfiles profile list, file database, template language, or
@@ -62,22 +63,32 @@ compatible provider variant. Detection must not silently enable optional
 components.
 
 Built-in definitions are versioned TOML files under `profiles/`, `components/`,
-and `catalog/`. They are embedded in the Go binary at build time. There are no
-user catalog overrides. Updating definitions requires a new Nimbus release and
-package build; Nimbus does not fetch profile or catalog updates independently
-from Git or the network.
+and `catalog/`. These files are the source of truth and are embedded in the Go
+binary at build time, so an installed Nimbus always resolves exactly the
+definitions of its release. There are no user catalog overrides. During
+development, Nimbus runs from the working tree and uses the edited files
+directly; delivering changed definitions to installed machines requires a new
+Nimbus release and package build. Nimbus does not fetch profile or catalog
+updates independently from Git or the network.
+
+The catalog holds curated, reusable definitions. A machine manifest can add
+ad-hoc packages directly through `packages` with provider-qualified native
+entries, so personal one-off packages never require a catalog entry or a new
+release.
 
 Catalog entries carry update policies. Coordinated update groups apply related
-packages as one reviewed transaction. The initial `desktop-session` group keeps
-Hyprland within its reviewed `0.56.x` line, allows patch updates, requires a
-new catalog release to move to another minor line, and pins Noctalia Shell,
-Noctalia Greeter, and their unstable integration packages to exact reviewed
-versions while they are unstable. Constraints change only through a new
-release; `plan` shows the complete transaction; `apply` requires the defined
-snapshot, verification, and logout or reboot reporting. Stable packages such as
-`greetd` follow Fedora unless a demonstrated compatibility requirement says
-otherwise. The group's exact membership, package sources, version constraints,
-and verification checks are tracked in [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md).
+packages as one reviewed transaction; the initial `desktop-session` group
+covers the Hyprland, Noctalia, greeter, portal, and session integration stack.
+`plan` shows the complete transaction; `apply` requires the defined snapshot,
+verification, and logout or reboot reporting. The group's exact membership,
+package sources, and verification checks are tracked in
+[OPEN_QUESTIONS.md](OPEN_QUESTIONS.md).
+
+Version constraints live only in machine manifests. `package_constraints`
+entries use comparison syntax such as `>=0.56, <0.57` or an exact `=1.2.3`,
+evaluated by the provider that owns the source with the provider's native
+version ordering. The catalog carries no constraints. Profiles never pin
+versions; Go code contains no package-specific constraints.
 
 ## Configuration and state
 
@@ -103,8 +114,11 @@ components = []
 packages = ["ripgrep", "btop"]
 package_exclusions = []
 
+[package_constraints]
+hyprland = ">=0.56, <0.57"
+
 [dotfiles]
-repo = "git@github.com:Furyfree/dotfiles.git"
+repo = "https://github.com/Furyfree/dotfiles.git"
 ```
 
 Desired configuration never comes from `state.json`. Phase 1 is read-only and
@@ -114,15 +128,24 @@ On a fresh installation, Nimbus fetches an explicitly selected dotfiles source
 without applying it, creates a reviewed `machines/<id>.toml`, and selects it.
 On a reinstallation, Nimbus lists the tracked manifests, the user selects one,
 and Nimbus verifies that its recorded repository matches the bootstrap input.
-The bootstrap installs only Nimbus, Chezmoi, and the Git transport needed to
-make this source available. The full Nimbus plan and apply run before the user
-reviews and runs `chezmoi apply`.
+Nimbus accepts SSH and HTTPS locators for the same repository and normalizes
+them before matching. The dotfiles repository is currently public, so init
+fetches it anonymously over HTTPS; a private repository instead requires
+whatever credential the transport needs, entered interactively and never
+stored. The bootstrap installs only Nimbus, Chezmoi, and Git. Init performs
+exactly one Git read - a clone or fetch of the provided locator - and leaves
+the working tree untouched; a checkout that is dirty or stale is reported and
+refused, never reconciled. Afterward the user and Chezmoi own all Git
+operations, and a checkout origin that later diverges from the manifest record
+is a visible warning, not a mutation. The full Nimbus plan and apply run
+before the user reviews and runs `chezmoi apply`.
 
 ## Required behavior
 
 - Load versioned TOML machine, profile, component, and catalog data.
 - Resolve imports deterministically and reject cycles, missing references,
-  duplicate IDs, and incompatible intent.
+  duplicate IDs, and incompatible intent. Profiles import components only;
+  profiles never import other profiles.
 - Keep configuration resolution independent of the current machine.
 - Inspect actual state without mutation before producing a plan.
 - Show privileges, risk, warnings, manual steps, and reboot requirements before

@@ -57,9 +57,9 @@ The repository contains a small `bootstrap` script that:
 1. Verifies Fedora 44 and x86_64.
 2. Shows the COPR project and package that will be trusted.
 3. Verifies DNF5 COPR capability, enables the COPR, and installs Nimbus,
-   Chezmoi, and the required Git transport through DNF. The exact package that
-   provides COPR support on Fedora 44 is verified in the test environment
-   rather than assumed to be part of the Anaconda base.
+   Chezmoi, and Git through DNF. The exact package that provides COPR support
+   on Fedora 44 is verified in the test environment rather than assumed to be
+   part of the Anaconda base.
 4. Drops privileges and runs `nimbus init`.
 
 These are the only packages installed before a Nimbus plan. A later apply
@@ -102,8 +102,11 @@ components = []
 packages = ["ripgrep", "btop"]
 package_exclusions = []
 
+[package_constraints]
+hyprland = ">=0.56, <0.57"
+
 [dotfiles]
-repo = "git@github.com:Furyfree/dotfiles.git"
+repo = "https://github.com/Furyfree/dotfiles.git"
 ```
 
 - `profiles` selects reusable bundles.
@@ -112,6 +115,10 @@ repo = "git@github.com:Furyfree/dotfiles.git"
 - `packages` adds catalog IDs or provider-qualified native packages.
 - `package_exclusions` removes selected packages contributed by a profile on
   this machine.
+- `package_constraints` sets a package's version on this machine with
+  comparison syntax (`>=0.56, <0.57`, `=1.2.3`). The catalog carries no
+  constraints; this is the only place versions are set. It applies however the
+  package is selected and never defines sources or lifecycles.
 
 Nimbus validates and resolves configuration before inspecting or changing the
 system. Invalid references, cycles, conflicts, exclusions, or schema versions
@@ -121,6 +128,8 @@ stop before planning.
 
 ```text
 nimbus init
+nimbus init REPO
+nimbus init REPO --machine ID
 nimbus init --repo REPO --machine ID
 nimbus
 ```
@@ -129,10 +138,18 @@ nimbus
 configuration silently. If compatible Nimbus configuration already exists, it
 opens the normal dashboard instead.
 
-`--repo` and `--machine` may be omitted in a terminal and entered in the setup
+The repository locator may be passed as a positional argument, mirroring
+`chezmoi init`, or through `--repo`. `--machine` selects the machine ID
+explicitly. Both may be omitted in a terminal and entered in the setup
 interface. The repository locator is fetched only after it is shown for
 review, and it must match the repository recorded by an existing manifest.
 Nimbus makes the source available without applying any home-directory targets.
+
+`init` performs exactly one Git read: a clone or fetch of the provided
+repository locator. It never commits, pulls, or pushes. An existing checkout
+that is dirty or stale is reported and refused, never reconciled, and a later
+origin divergence from the manifest record is a visible warning, not a
+mutation.
 
 ### Fresh install
 

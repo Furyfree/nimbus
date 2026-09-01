@@ -71,8 +71,12 @@ requirement.
 
 ## 3. Providers and apply
 
-Add typed Fedora package and repository providers, then a small reviewed set of
-other sources. Apply immutable plans with scoped privilege, verification,
+Add typed providers, then a small reviewed set of sources, one family at a
+time: DNF first (with RPM Fusion and COPR as enabled repositories), then
+Flatpak, Mise (runtimes plus npm-, go-, and pipx-backed tools), Cargo, uv, and
+verified upstream artifacts with pinned digests. Each provider owns install,
+verify, update, and removal for its sources; one provider owns an executable.
+Apply immutable plans with scoped privilege, verification,
 failure reporting, and source-specific removal. Providers define health and
 quarantine with the provider model: a failed provider stays visible, blocks
 only its own resources and dependants, and never hides unrelated resources.
@@ -147,6 +151,11 @@ Add services, system files, desktop integration, hardware policy, firewall,
 mount, swap, system locale and console keymap, and other resource groups
 incrementally. Each group gains apply only after inspection, planning,
 validation, and recovery are complete.
+
+Hibernation keeps zram enabled for memory pressure and hibernates to the disk
+swap. Inspection verifies that zram is active and that a disk-backed swap with
+a working resume target exists; hibernation support reports a manual step when
+either is missing.
 
 The coordinated `desktop-session` update group applies the Hyprland, Noctalia,
 greeter, portal, and session integration stack as one reviewed transaction
