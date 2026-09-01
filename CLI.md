@@ -141,7 +141,8 @@ opens the normal dashboard instead.
 The repository locator may be passed as a positional argument, mirroring
 `chezmoi init`, or through `--repo`. `--machine` selects the machine ID
 explicitly. Both may be omitted in a terminal and entered in the setup
-interface. The repository locator is fetched only after it is shown for
+interface; declining the repository selects the no-repository flow. The
+repository locator is fetched only after it is shown for
 review, and it must match the repository recorded by an existing manifest.
 Nimbus makes the source available without applying any home-directory targets.
 
@@ -177,6 +178,24 @@ Use this flow when `machines/<id>.toml` is already tracked:
 4. Review and apply the complete Nimbus system plan.
 5. Run `chezmoi diff`, then `chezmoi apply` when the dotfiles are ready.
 
+### Without a dotfiles repository
+
+Use this flow when there is no dotfiles repository yet:
+
+1. Run the same `bootstrap` on the clean Fedora installation.
+2. Run `nimbus init` without a repository locator.
+3. Select profiles, components, and extra packages.
+4. Review and write the plain local manifest to
+   `~/.config/nimbus/machine.toml`.
+5. Review and apply the complete Nimbus system plan.
+6. Initialize Chezmoi's local config with the resolved profiles so a later
+   repository adoption restores the same selection.
+
+When a dotfiles repository is adopted later, add `machines/<id>.toml`, run
+`nimbus init REPO`, and select the tracked manifest. Nimbus then links the
+tracked manifest over the local file and shows the diff for review; the local
+file is superseded, never silently merged.
+
 Nimbus never applies dotfiles before the system plan. User configuration may
 depend on shells, applications, and desktop resources installed by Nimbus.
 
@@ -200,6 +219,12 @@ The initial Bubble Tea flow is:
 Configuration is saved atomically after its review. Before approval, Nimbus
 writes no machine manifest and changes no system state. Exiting from the plan
 screen keeps the reviewed configuration but performs no system changes.
+
+Deselecting every optional component is always a valid outcome. `common` is
+default-selected, and every selection is reversible until approval. The plan
+carries explicit warnings when the selection leaves the machine without a
+desktop session, and when inspection detects NVIDIA hardware without a
+matching selected component. Warnings never change selections silently.
 
 The package screen distinguishes:
 
@@ -480,6 +505,14 @@ without requiring the `op` binary.
 
 Nimbus never adds `--apply`, synchronizes the repository, or hides normal
 Chezmoi commands.
+
+The `hyprland-noctalia` profile also ships one Nimbus-owned seed session
+file: a single `hyprland.lua` rendered from the machine's desktop selection,
+with minimal keybinds and `exec-once noctalia --daemon`. Plan checks whether
+Chezmoi manages that path and includes the seed write only when it does not.
+When `chezmoi apply` later takes the path over, the seed yields: Nimbus
+reports the path as Chezmoi-managed and stops restoring its own version. This
+is a bounded first-login fallback, not a dotfiles deployment feature.
 
 ## Windows
 

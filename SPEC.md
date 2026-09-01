@@ -84,6 +84,15 @@ verification, and logout or reboot reporting. The group's exact membership,
 package sources, and verification checks are tracked in
 [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md).
 
+The `hyprland-noctalia` profile ships a Nimbus-owned seed session file: a
+single `hyprland.lua` rendered from the machine's desktop selection, with
+minimal keybinds and `exec-once noctalia --daemon`. It is a first-login
+fallback, not a dotfiles engine. Nimbus writes it only when Chezmoi does not
+manage that path; once `chezmoi apply` takes the path over, the seed yields
+and Nimbus reports the path as Chezmoi-managed instead of restoring its own
+version. This is the only home-directory file Nimbus writes on its own
+behalf.
+
 Version constraints live only in machine manifests. `package_constraints`
 entries use comparison syntax such as `>=0.56, <0.57` or an exact `=1.2.3`,
 evaluated by the provider that owns the source with the provider's native
@@ -95,7 +104,8 @@ versions; Go code contains no package-specific constraints.
 - `<dotfiles checkout>/machines/<id>.toml` is the canonical, Git-trackable
   machine configuration.
 - `~/.config/nimbus/machine.toml` is a Nimbus-owned link to the selected
-  manifest and remains the default CLI path.
+  manifest and remains the default CLI path. In the no-repository workflow it
+  is a plain Nimbus-owned manifest instead of a link.
 - `nimbus config resolve --config FILE` selects an explicit alternative.
 - Built-in profiles and catalog entries ship with Nimbus.
 - `/var/lib/nimbus/` records verified applied state and receipts, including the
@@ -142,6 +152,14 @@ own all Git operations, and a checkout origin that later diverges from the
 manifest record is a visible warning, not a mutation. The full Nimbus plan and
 apply run before the user reviews and runs `chezmoi apply`.
 
+`nimbus init` also completes without a dotfiles repository. In that workflow
+it creates a reviewed, plain local manifest at `~/.config/nimbus/machine.toml`
+instead of a link, still records the resolved profile selection in Chezmoi's
+local config for a later repository adoption, and runs the same review, plan,
+and apply path. Adoption into a tracked `machines/<id>.toml` is documented
+manual work: once a repository is selected, init links the tracked manifest,
+shows the diff, and the local file is superseded.
+
 ## Required behavior
 
 - Load versioned TOML machine, profile, component, and catalog data.
@@ -171,6 +189,9 @@ apply run before the user reviews and runs `chezmoi apply`.
   the Nimbus version, embedded-definition digest, exact resource lifecycle, and
   verification result.
 - Own system locale and the console keymap as explicit `common` resources.
+- Treat selecting no optional component as valid, and surface selection gaps
+  such as a missing desktop session or NVIDIA hardware without a matching
+  component as explicit plan warnings rather than silent defaults.
 
 The Phase 1 CLI uses Cobra. TOML decoding uses `go-toml/v2`. Bubble Tea is
 reserved for a later interactive TUI and is not a Phase 1 dependency.
