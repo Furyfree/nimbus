@@ -284,13 +284,13 @@ and the direct repair command.
 
 nimbus init writes only the local selector and a reviewed new machine manifest
 when requested. Existing tracked manifests are loaded unchanged. The handoff
-passes the machine ID and ordered profile IDs through tested supported Chezmoi
-initialization arguments.
+passes `machine`, `managed_by_nimbus`, and the ordered profile IDs through the
+Chezmoi prompt flags specified in SPEC.md.
 
 Normal chezmoi diff, apply, edit, and update stay direct. Nimbus performs no
-silent Git operation. Before this phase exits, the dotfiles repository must
-remove its obsolete Nimbus machine manifests and document the same handoff
-without introducing a second profile graph.
+silent Git operation. The dotfiles repository adopted this handoff on
+2026-09-02 and holds no machine manifest; this phase verifies the flags against
+its real template before exit.
 
 ### Risks and recovery
 
@@ -384,12 +384,31 @@ points for disruptive transactions.
 Verify DNF5 version-lock capabilities before extending constraint syntax.
 Define exact desktop-session membership from real Fedora, Hyprland, Noctalia,
 greeter, portal, and session packages. Q-009 fixes the supported UEFI, boot,
-LUKS2, and Btrfs subvolume topology. Recovery points contain a read-only root
-snapshot, conditional system-Flatpak snapshot and boot archives, plus
-checksummed self-contained restore metadata. Home, logs, caches, swap, VM data,
-and container data stay outside. Retain the newest three complete points and
+LUKS2, and Btrfs subvolume topology and the recovery requirements; on
+2026-09-02 the owner replaced its custom snapshot manager with Snapper. Nimbus
+declares the Snapper configurations, creates pre and post snapshot pairs around
+reviewed operations, and owns the boot and EFI archives, manifest, restore
+guide, retention, and space preflight. Home, logs, caches, swap, VM data, and
+container data stay outside. Retain the newest three complete points and
 protect unresolved failures; after eligible cleanup, less than 20 GiB of
 Btrfs-aware usable space blocks mutation.
+
+Run this Snapper fit check in a disposable Fedora VM with the exact layout
+before freezing the implementation, and record the results in TASKS.md:
+
+- `snapper create-config` on a root whose `/.snapshots` is already a separate
+  mounted subvolume, since Fedora's Snapper expects to create it
+- pre and post pairs with the `number` cleanup algorithm, `NUMBER_LIMIT`, and
+  `important` userdata as the protection mechanism for failed operations
+- timeline and background cleanup disabled so only Nimbus creates and retires
+  points
+- a second configuration for `flatpak` and how its pairs are tied to a root
+  point
+- manual restore on this layout without `snapper rollback`: create a writable
+  snapshot from `/.snapshots/<n>/snapshot` and swap `root`
+- Btrfs-aware free-space measurement as a Nimbus preflight, separate from
+  Snapper's own cleanup limits
+- confirmation that no excluded subvolume nests below `root`
 
 Upgrade may refresh native metadata, shows its own exact reviewed plan, never
 prunes, and does not silently apply unrelated desired-state drift. It blocks
@@ -435,7 +454,7 @@ for already-applied optional components. Deliver:
 
 ~~~text
 nimbus postinstall
-nimbus windows status|setup|start|connect|stop|purge-data
+nimbus windows setup|status|start|connect [--keep-alive]|stop|purge-data
 nimbus launch browser [URL] [--private]
 nimbus launch webapp URL
 ~~~
@@ -446,13 +465,20 @@ runs arbitrary scripts. Certificates, gaming resources, and virtualization
 host setup remain normal plan and apply resources; external application-data
 repositories remain outside Nimbus.
 
-Q-010 selects QEMU/KVM through `qemu:///system`. The one supported Windows
-guest is contained below `/var/lib/libvirt/images/nimbus/windows/`. Runtime
-commands never install a missing component. Normal removal stops and undefines
-the owned domain but preserves its data. Purge rejects an active, referenced,
-symlinked, foreign, or escaped target, names the exact directory, and requires a
-second confirmation. Domain configuration is reproducible; guest disks require
-separate VM-aware backup and are not part of Nimbus recovery.
+Q-010 chose system libvirt; on 2026-09-02 the owner replaced it with the
+`dockurr/windows` container on Docker with KVM, following Omarchy's
+`omarchy-windows-vm` as the reference implementation. The one supported guest
+is contained below `/var/lib/nimbus/windows/` on the `windows` subvolume with a
+root-owned Compose definition, a user-owned `0600` credentials file, and
+loopback-only ports. Runtime commands never install a missing component.
+`connect` starts the guest when needed, waits for Windows, opens FreeRDP, and
+stops the guest afterwards unless `--keep-alive` is set. Normal removal stops
+and removes the container but preserves the data root. Purge rejects a
+running, symlinked, foreign, or escaped target, names the exact directory, and
+requires a second confirmation. The Compose definition is reproducible; the
+guest disk requires separate VM-aware backup and is not part of Nimbus
+recovery. Phase 8 also decides how FreeRDP receives the password without
+exposing it in process arguments.
 
 Launch helpers safely resolve the XDG browser, translate supported private-mode
 flags, use an explicit Chromium-family webapp fallback, accept only HTTP(S)
@@ -460,9 +486,10 @@ URLs, and execute no shell-derived command. Chezmoi retains ownership of the
 keybindings and desktop entries that call them.
 
 Validate the typed task list in terminal, non-terminal, and JSON modes. Test the
-Windows lifecycle, absent component refusal, native ownership, path containment,
-normal removal, preserved data, unknown references, double-confirmed purge, and
-domain reconstruction in a disposable VM. Test browser-family private flags,
+Windows lifecycle, absent component refusal, root-owned Compose integrity,
+credentials-file mode and non-disclosure, path containment, normal removal,
+preserved data, keep-alive, double-confirmed purge, and container
+reconstruction in a disposable VM. Test browser-family private flags,
 desktop-entry parsing, fallback selection, argv preservation, invalid schemes,
 and missing browsers without writing user configuration.
 
