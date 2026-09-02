@@ -471,9 +471,9 @@ runs arbitrary scripts. Certificates, gaming resources, and virtualization
 host setup remain normal plan and apply resources; external application-data
 repositories remain outside Nimbus.
 
-Q-010 chose system libvirt; on 2026-09-02 the owner replaced it with the
-`dockurr/windows` container on Docker with KVM, following Omarchy's
-`omarchy-windows-vm` as the reference implementation. The one supported guest
+Q-010, as amended, selects the `dockurr/windows` container on Docker with KVM,
+following Omarchy's `omarchy-windows-vm` as the reference implementation, on
+top of the `docker` component. The one supported guest
 is contained below `/var/lib/nimbus/windows/` on the `windows` subvolume with a
 root-owned Compose definition, a user-owned `0600` credentials file, and
 loopback-only ports. `setup` is the entry point: it stages the `windows-vm`

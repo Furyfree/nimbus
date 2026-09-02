@@ -129,6 +129,18 @@ Terra trust cannot be represented, because the owner prefers native RPMs with
 system Java; and a PrismLauncher COPR, because Terra already carries the
 package with a maintained signing key.
 
+Amended 2026-09-02 after the coherence pass. `virtualization` joins the
+vocabulary for the owner's Linux and other guests: Fedora's QEMU/KVM host
+packages plus VM Curator, a QEMU front end that needs no libvirt and keeps
+disks below `~/vm-space`, so no subvolume returns and guests stay outside
+Nimbus. VM Curator is installed by the user with `cargo install`, user scope,
+because neither Fedora nor Terra packages it and the owner already uses Cargo
+for tools such as `just`; the maker's release RPM as a pinned artifact was
+rejected as a manual pin for a fast-moving tool. Nix is Fedora's `nix`
+package, tier 1, so the Nix
+installer scripts are not needed. The Windows guest stays the one VM Nimbus
+owns.
+
 #### D-010: SECURITY.md owns the workstation security policy
 
 Added 2026-09-02. Software-source trust tiers, encryption, Secure Boot,

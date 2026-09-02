@@ -183,7 +183,11 @@ silently augments the manifest.
 The initial profile vocabulary is:
 
 - `common`: the base every machine needs
-- `development`: developer tooling and the system dependencies Mise needs
+- `development`: developer tooling, Docker, Nix, and the system dependencies
+  Mise needs
+- `virtualization`: QEMU/KVM host packages for Linux and other guests the
+  user manages directly through VM Curator, which the user installs with
+  Cargo; guest disks live in the user's home and are not Nimbus resources
 - `gaming`: the complete gaming stack for the desktop
 - `laptop-gaming`: light gaming for the laptop, currently PrismLauncher from
   the Terra repository as `catalog:prismlauncher` with Fedora's
@@ -362,7 +366,8 @@ Nimbus owns:
 - graphical-session, greeter, portal, and recovery-session integration
 - hardware, kernel, boot, update, and recovery policy it declares
 - inspection, plans, apply, verification, removal, state, and receipts
-- installation of system tools including Git, Chezmoi, Mise, and 1Password
+- installation of system tools including Git, Chezmoi, Mise, Docker, Nix, and
+  1Password
 - the explicit first Chezmoi initialization
 - the Windows guest data root and its protected credentials file
 - typed manual workflows and Nimbus runtime commands
@@ -382,8 +387,12 @@ systemd, Flatpak, Mise, Git, Chezmoi, and other specialist tools rather than
 reimplementing them.
 
 Credentials, tokens, private keys, application databases, histories, caches,
-documents, unrelated containers and virtual machines, and undeclared local
-system configuration remain unmanaged.
+documents, containers and virtual machines other than the Windows guest, and
+undeclared local system configuration remain unmanaged. Tools the user installs
+below `~/.local`
+through their maker's installer, such as Zed, belong to the user under
+[SECURITY.md](SECURITY.md) tier 3; Nimbus tracks them only as manual tasks and
+Chezmoi owns their configuration.
 
 ## Desired, observed, and applied state
 
@@ -735,11 +744,13 @@ resources rather than post-install actions.
 ### Windows guest
 
 The `windows-vm` component, selected by the `windows-vm` profile, runs one
-Windows guest through the `dockurr/windows` container on Docker with KVM. Apply
-installs the reviewed host packages (Docker, FreeRDP, KVM support), the
-container image pinned by digest, and a root-owned Compose definition. Nimbus
-does not wrap libvirt or Quickemu and does not manage arbitrary VMs or
-containers.
+Windows guest through the `dockurr/windows` container on Docker with KVM. It
+requires the `docker` component, which the `development` profile also selects
+and which owns the Docker packages, `docker.service`, the daemon settings, and
+the owner's `docker` group membership as [SECURITY.md](SECURITY.md) specifies.
+Apply installs FreeRDP and KVM support, the container image pinned by digest,
+and a root-owned Compose definition. Nimbus does not wrap libvirt or Quickemu
+and does not manage arbitrary VMs or containers.
 
 Persistent guest data is contained below:
 
@@ -788,7 +799,8 @@ for anything the unattended path cannot finish. On an installed guest it
 reports the state and points to `connect`. `status` is read-only and reports
 component, host, container, storage, credentials-file, and RDP and web-port
 state. `start` and `stop` run Compose on the root-owned definition as the
-user, whose `docker` group membership the component declares. `connect`
+user through the `docker` group membership the `docker` component declares.
+`connect`
 starts the guest when needed, waits for the container to report Windows as
 started, opens FreeRDP against `127.0.0.1:3389` with the stored credentials,
 and stops the guest when the session closes unless `--keep-alive` is set.
