@@ -25,10 +25,11 @@ Open gates: none.
   independently configurable.
 - [ ] Parse the selector's required normalized origin and compare it with local
   Git configuration without command execution or network access.
-- [ ] Add tracked desktop and laptop machine manifests under machines/.
-- [ ] Add the initial common, development, gaming, hyprland-noctalia, and
-  windows-vm profiles and only the components needed to exercise their real
-  graph.
+- [ ] Add tracked desktop and laptop machine manifests under machines/, with
+  the desktop selecting gaming and the laptop selecting laptop-gaming.
+- [ ] Add the initial common, development, gaming, laptop-gaming,
+  hyprland-noctalia, and windows-vm profiles and only the components needed to
+  exercise their real graph.
 - [ ] Add representative package references that exercise bare and explicit DNF,
   direct system Flatpak, and explicit exceptional catalog paths without
   implementing package operations.
@@ -114,8 +115,6 @@ Open gates: none.
 ## Blockers and residual risk
 
 - No unresolved decision blocks the configuration-resolver implementation.
-- DECISIONS.md still records the pre-2026-09-02 mechanism for Q-009 and Q-010
-  and the open state of D-007; amendment entries are pending.
 - Exact DNF5 constraint and desktop-session update behavior remains deliberately
   outside this phase.
 

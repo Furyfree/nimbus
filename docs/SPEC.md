@@ -182,11 +182,16 @@ silently augments the manifest.
 
 The initial profile vocabulary is:
 
-- common
-- development
-- gaming
-- hyprland-noctalia
-- windows-vm
+- `common`: the base every machine needs
+- `development`: developer tooling and the system dependencies Mise needs
+- `gaming`: the complete gaming stack for the desktop
+- `laptop-gaming`: light gaming for the laptop, currently PrismLauncher from
+  the Terra repository as `catalog:prismlauncher` with Fedora's
+  `java-25-openjdk` and small helpers such as `gamemode`; a machine selects
+  `gaming` or `laptop-gaming`, and the two share components rather than
+  repeating packages
+- `hyprland-noctalia`: the Hyprland and Noctalia session
+- `windows-vm`: the Windows guest
 
 The `windows-vm` profile selects the `windows-vm` component; it is a profile
 rather than a bare component so the Chezmoi handoff can see it. It is not
@@ -279,7 +284,7 @@ ownership and fail validation.
 
 A catalog entry exists only for exceptional behavior such as:
 
-- a required Fedora repository, RPM Fusion source, or COPR
+- a required third-party repository such as RPM Fusion, Terra, or a COPR
 - a provider other than DNF
 - a coordinated update group
 - special verification or removal
@@ -289,6 +294,11 @@ A catalog entry exists only for exceptional behavior such as:
 The catalog is an exception list, not a registry of every Fedora package.
 Package-specific behavior belongs in catalog data, never package-name
 conditionals in Go.
+
+A third-party repository enters through a catalog entry that pins its release
+package by digest or its signing key by fingerprint. Nimbus never enables a
+repository or installs its release package with signature checking disabled
+unless that pinned digest is verified first, and the plan shows the pin.
 
 One provider owns an installed executable lifecycle. Nimbus may manage
 system-scoped Flatpaks. User-scoped runtimes and tools declared in
@@ -673,6 +683,13 @@ Nimbus never runs chezmoi apply or chezmoi update. After initialization it
 prints the direct commands needed to inspect and apply user configuration.
 Removing Nimbus leaves the dotfiles checkout and Chezmoi lifecycle usable.
 
+The handoff runs once. When the selected profiles change later, the
+`profiles add` and `profiles remove` commands end by printing the direct
+`chezmoi init` command carrying the new `Profiles` value, and `nimbus doctor`
+reports a mismatch between the manifest profiles and Chezmoi's stored
+selection using Chezmoi's read-only data output. Nimbus never reruns the
+initialization itself.
+
 ## Desktop and recovery session
 
 The hyprland-noctalia profile owns the system requirements for Hyprland,
@@ -691,7 +708,9 @@ directory.
 
 Components may contribute typed manual tasks for work requiring human
 interaction, such as signing in to 1Password, enrolling an NVIDIA MOK,
-enrolling a fingerprint, completing a Windows guest, or rebooting.
+enrolling a fingerprint, completing a Windows guest, installing a user-scope
+tool through its maker's installer as [SECURITY.md](SECURITY.md) tier 3
+allows, or rebooting.
 
 A task has a stable owner, prerequisites, status check, instructions or a typed
 action, verification, completion state, recovery, and reboot or logout
@@ -699,7 +718,9 @@ requirements. Status checks remain authoritative after a receipt. Tasks are not
 arbitrary shell scripts.
 
 Runtime command groups operate only on already selected and applied components.
-They never install missing components implicitly.
+A group's `setup` command is the one explicit entry point that may stage the
+owning profile and take it through the normal plan and approval; every other
+runtime command refuses when the component is not applied and names `setup`.
 
 `nimbus postinstall` is the terminal presentation of typed pending work from
 the selected components and observed state. It can present 1Password readiness,
@@ -752,25 +773,35 @@ nimbus windows status
 nimbus windows start
 nimbus windows connect [--keep-alive]
 nimbus windows stop
+nimbus windows remove
 nimbus windows purge-data
 ~~~
 
-`setup` is available only after the component is applied. It prompts for the
-guest credentials, writes `credentials.env`, starts the container for the
-unattended Windows installation, and directs the user to the web console for
-anything the unattended path cannot finish. `status` is read-only and reports
+`setup` is the single entry point and is rerunnable. When the `windows-vm`
+profile is not selected it stages the same manifest change as
+`profiles add windows-vm`, shows the manifest diff and complete system plan,
+and applies after approval. When the component is selected but drifted it
+shows and applies that plan. It then prompts for the guest credentials when
+`credentials.env` is missing, starts the container for the unattended Windows
+installation when `storage/` is empty, and directs the user to the web console
+for anything the unattended path cannot finish. On an installed guest it
+reports the state and points to `connect`. `status` is read-only and reports
 component, host, container, storage, credentials-file, and RDP and web-port
-state. `start` and `stop` run Compose on the root-owned definition through sudo.
-`connect` starts the guest when needed, waits for the container to report
-Windows as started, opens FreeRDP against `127.0.0.1:3389` with the stored
-credentials, and stops the guest when the session closes unless `--keep-alive`
-is set. Runtime commands never install a missing component.
+state. `start` and `stop` run Compose on the root-owned definition as the
+user, whose `docker` group membership the component declares. `connect`
+starts the guest when needed, waits for the container to report Windows as
+started, opens FreeRDP against `127.0.0.1:3389` with the stored credentials,
+and stops the guest when the session closes unless `--keep-alive` is set.
+`status`, `start`, `stop`, and `connect` never install a missing component;
+they name `setup`.
 
-Normal component removal stops and removes the container and the safe owned
-host integration while preserving `/var/lib/nimbus/windows/`. `purge-data`
-requires the component to be removed or an otherwise explicit purge context, a
-stopped guest, an exact resolved path below the fixed root, proof that Nimbus
-owns the data, and a second confirmation. It deletes only that data, including
+`remove` is `profiles remove windows-vm` with the same diff, plan, and
+approval. The resulting owned removals stop and remove the container and the
+safe owned host integration while preserving `/var/lib/nimbus/windows/`, and
+the command ends by naming `purge-data`. `purge-data` requires the component to
+be removed or an otherwise explicit purge context, a stopped guest, an exact
+resolved path below the fixed root, proof that Nimbus owns the data, and a
+second confirmation. It deletes only that data, including
 the credentials file. The container and Compose definition can be recreated
 from desired state, but the guest disk is excluded from Nimbus recovery points
 and requires a separate VM-aware backup. Purge has no Nimbus rollback.
@@ -792,8 +823,38 @@ evaluation, and launch an exact argv vector. Chezmoi may call them from its
 owned keybindings and desktop entries. They do not install browsers, write user
 configuration, or become generic process launchers.
 
-A future interactive interface is a presentation layer over the same resolver,
-facts, plans, tasks, and commands. It has no independent business logic.
+### Interactive dashboard
+
+Bare `nimbus` in a terminal opens the dashboard once it is delivered. In a
+non-terminal context, or with `--json`, bare `nimbus` prints grouped help. The
+dashboard is a presentation layer over the same resolver, facts, plans, tasks,
+and commands. It owns no business logic, state, configuration, or approval
+rule of its own, and every action it offers exists as a command whose name it
+shows.
+
+Its screens are:
+
+- Overview: selector, machine, checkout identity, doctor summary, status
+  counts, and pending manual tasks.
+- Profiles and Components: every ID defined in the checkout with its selected
+  state and selection path. Toggling an entry stages a manifest change.
+- Packages: the `packages installed` view and the `packages install` and
+  `packages remove` pickers.
+- Review: the staged manifest diff and the complete system plan, the approval
+  step, apply progress, verification, and the receipt summary.
+- Tasks: the `postinstall` list and its typed actions.
+
+Staged edits exist only in the running session. Approval writes the manifest
+atomically and applies through the normal path with the same lock, digest
+refusal, and privilege boundary; leaving the dashboard discards unapproved
+edits. Read-only screens never invoke sudo or mutate. `nimbus init` reuses the
+machine, profile, component, and package screens when creating a new machine,
+so a machine can add individual packages beyond its profiles before the first
+apply. Profiles and components themselves are authored by editing their files
+in the checkout and running `nimbus validate`; the dashboard edits only the
+machine manifest. The
+dashboard is keyboard-driven, works without a mouse, and shares its widget
+library with the command-line pickers.
 
 ## Updates and recovery
 
@@ -927,11 +988,17 @@ disposable Fedora VM. Nimbus provides no automatic rollback.
 
 ## Security
 
+[SECURITY.md](SECURITY.md) owns the workstation policy: accepted software
+sources and their trust pins, disk encryption, Secure Boot, SELinux, firewall,
+privilege, secrets, and the doctor checks. The engine invariants are:
+
 - Configuration, plans, state, receipts, and logs contain no secrets.
 - External artifacts require an approved source and cryptographic digest or
   supported signature.
-- Remote shell scripts are not a resource type.
-- Native package signatures remain enabled.
+- Remote shell scripts are not a resource type. A maker's installer script is
+  at most a user-scope manual task that Nimbus never runs.
+- Native package signatures remain enabled, and a repository is enabled only
+  with a pinned release package or key.
 - Paths are validated against traversal, symlink escape, and unsafe ownership.
 - Destructive operations name their exact target and require explicit approval.
 - Unknown ownership prevents automatic removal.
@@ -958,6 +1025,12 @@ nimbus postinstall
 nimbus packages install [QUERY]
 nimbus packages remove [QUERY]
 nimbus packages installed [QUERY]
+nimbus profiles list
+nimbus profiles add [ID...]
+nimbus profiles remove [ID...]
+nimbus components list
+nimbus components add [ID...]
+nimbus components remove [ID...]
 nimbus files accept /etc/PATH
 nimbus managed
 nimbus unmanaged
@@ -967,6 +1040,7 @@ nimbus windows status
 nimbus windows start
 nimbus windows connect [--keep-alive]
 nimbus windows stop
+nimbus windows remove
 nimbus windows purge-data
 nimbus launch browser [URL] [--private]
 nimbus launch webapp URL
@@ -974,10 +1048,10 @@ nimbus doctor
 nimbus version
 ~~~
 
-Bare `nimbus` opens the interactive dashboard when one is delivered and a
-terminal is available; otherwise it prints grouped help. A release lists only
-commands it implements completely. Future mutating commands never appear as
-stubs.
+Bare `nimbus` opens the interactive dashboard described above when one is
+delivered and a terminal is available; otherwise it prints grouped help. A
+release lists only commands it implements completely. Future mutating commands
+never appear as stubs.
 
 `nimbus validate` is the configuration authoring check. It validates the full
 selected checkout and resolves every tracked machine, reports every discovered
@@ -1014,6 +1088,25 @@ remaining drift. The remove picker does not offer unmanaged packages; eligible
 unmanaged removal remains part of `apply --prune`. In a non-interactive context,
 a package command that still requires selection or approval fails rather than
 guessing.
+
+The selection commands edit the two manifest lists a user would otherwise
+change by hand:
+
+- `profiles list` and `components list` are read-only. They show every profile
+  or component defined in the checkout, whether the selected machine selects
+  it, and through which path.
+- `profiles add [ID...]`, `profiles remove [ID...]`, `components add [ID...]`,
+  and `components remove [ID...]` change the selected machine manifest. Without
+  IDs they open a multi-select picker over the valid choices. Remove offers
+  only entries the manifest names explicitly; a component selected through a
+  profile is removed by removing the profile.
+
+They follow the package workflow: show the manifest diff and the complete
+system plan, require approval, write the manifest atomically, apply through
+the normal path, and leave the Git change for the user. Removing a profile or
+component turns its no-longer-desired resources into owned removals in that
+plan. A profile change on a machine with an initialized Chezmoi checkout ends
+by printing the direct `chezmoi init` command with the new `Profiles` value.
 
 `nimbus files accept /etc/PATH` is the narrow reverse workflow for an
 intentional edit to an already Nimbus-owned generic system file. It shows the
