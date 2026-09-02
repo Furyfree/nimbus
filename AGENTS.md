@@ -27,16 +27,39 @@ repository owns Chezmoi source state and user configuration.
 - Read live definitions from the selected Nimbus checkout. Do not embed live
   personal definitions in the engine; embedding is allowed only for a future
   example tree used to create a new checkout.
-- Keep the local selector at ~/.config/nimbus/config.toml. It identifies the
-  checkout and machine; it does not duplicate the machine manifest.
+- Keep the regular local selector at ~/.config/nimbus/config.toml. Nimbus owns
+  it; it is not a symlink or Chezmoi-managed file. It identifies the checkout,
+  reviewed origin, and machine without duplicating the machine manifest.
+- Allow the selected checkout root to be a symlink, resolve it to one canonical
+  directory before use, and reject symlinks or special files inside the
+  definition boundary.
 - Profiles select components. Components may require other components. Profiles
   never import profiles.
 - Keep package-specific behavior in catalog data, never package-name branches in
   Go. A bare Fedora package name uses the typed default DNF lifecycle; catalog
   entries describe exceptions.
+- Restrict the generic system-file provider to regular files below /etc. Derive
+  each target from its source below system/root/etc; use native packages or a
+  separately specified typed resource for every other target root.
 - Resolve desired configuration without inspecting the current machine.
 - Keep desired, observed, and last-applied state separate.
 - Implement inspection and planning before mutation.
+- Keep resolution and fact collection as internal engine capabilities. The
+  public CLI exposes validate, status, plan, doctor, and focused ownership or
+  package workflows rather than raw engine debug commands.
+- Make package install and remove convenience commands update reviewed desired
+  configuration and reuse the same planner and apply path; never add a second
+  package lifecycle.
+- Keep install.sh as the minimal curl entry point. It may obtain Git and the
+  trusted checkout, then must hand control to the checkout's versioned
+  bootstrap script; neither script owns Chezmoi or normal system provisioning.
+- Delegate Fedora release upgrades permanently to native DNF5 tooling. Keep
+  `nimbus upgrade` within the installed release, report release compatibility,
+  and refuse system mutation on unsupported releases.
+- Keep post-install work typed and component-owned. Browser and webapp launchers
+  are narrow runtime helpers; they never become a generic command runner.
+- Support only the reviewed Btrfs recovery topology and system-libvirt Windows
+  guest. Preserve home and guest data outside Nimbus system recovery.
 - Prefer native system tools and established specialist tools over custom
   replacements.
 
@@ -45,13 +68,17 @@ repository owns Chezmoi source state and user configuration.
 - Nimbus owns packages, repositories, system services, system files, hardware
   integration, boot policy, profiles, planning, applied state, receipts, and
   recovery.
-- Chezmoi owns files and templates below the user's home directory and its normal
-  diff, apply, edit, and update lifecycle.
+- Chezmoi owns files and templates below the user's home directory except the
+  Nimbus local selector, plus its normal diff, apply, edit, and update
+  lifecycle.
 - Nimbus may install Chezmoi and perform one explicit first initialization. It
   must not run normal Chezmoi apply or update operations or reimplement Chezmoi.
 - Mise owns runtimes declared in its Chezmoi-managed configuration. Nimbus may
   install Mise and report missing runtimes, but it has no user-scope runtime
   provider.
+- Chezmoi owns the development-profile-gated onchange action that invokes Mise
+  as the normal user with `MISE_SYSTEM_DEPS=warn`; Nimbus never invokes that
+  action or repairs missing user runtimes itself.
 - Nimbus owns machine manifests under machines/. The dotfiles repository must
   not contain a second machine manifest, component graph, or package catalog.
 - Nimbus may read local Git metadata. Outside the explicit bootstrap and first
@@ -62,8 +89,7 @@ repository owns Chezmoi source state and user configuration.
 
 - Run Nimbus as the normal user; refuse the whole CLI when invoked as root.
 - Read-only system commands never invoke sudo or mutate the system.
-- An explicitly named output file is the only write permitted to an otherwise
-  read-only plan command.
+- Read-only plan commands never write files or state.
 - Show every privileged operation and system-file diff in the reviewed plan.
 - Use direct sudo for native commands. Narrow internal subcommands may only
   install an approved atomic system-file payload or record approved root-owned
@@ -74,6 +100,11 @@ repository owns Chezmoi source state and user configuration.
   secret values in configuration, plans, logs, state, or receipts.
 - Never guess removal commands or delete paths Nimbus cannot prove it owns.
 - Define verification and recovery before enabling a mutating resource.
+- Use the normal user's lock at `$XDG_RUNTIME_DIR/nimbus/operation.lock` for
+  every Nimbus mutation and hold it through verification and receipt recording.
+- Keep Windows guest data below `/var/lib/libvirt/images/nimbus/windows/`;
+  normal removal preserves it and only explicit double-confirmed purge may
+  delete proven owned data.
 - Never repartition or encrypt a mounted live system.
 - Never disable Secure Boot automatically.
 
@@ -84,6 +115,8 @@ repository owns Chezmoi source state and user configuration.
 - components/ contains reusable capabilities and their resources.
 - catalog/ contains package definitions with non-default behavior.
 - system/ contains Nimbus-owned system file sources, migrations, and triggers.
+- install.sh is the minimal remote bootstrap entry point; bootstrap is the
+  checkout-owned installer handoff.
 - cmd/ and internal/ contain the Go engine.
 - history/ contains superseded designs and dated research, never active
   requirements or task status.
