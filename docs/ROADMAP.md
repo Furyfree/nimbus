@@ -180,8 +180,8 @@ complete non-mutating plan for a small DNF-backed resource set.
 
 Introduce typed resource identities, DNF repository and RPM inspection,
 adoption, install, owned removal, verification, risk classes, dependency
-ordering, and the nimbus status, plan, packages installed, managed, unmanaged,
-and why views.
+ordering, and the nimbus status, plan, packages installed, profiles list,
+components list, managed, unmanaged, and why views.
 
 The planner renders exact native argv, canonicalizes the plan, and calculates
 its digest. Plan writes nothing. It shows normal apply operations, prune
@@ -195,8 +195,9 @@ explicitly installed supported packages and labels desired, managed, unmanaged,
 dependency, exclusion, provenance, update, and prune state. Structured output
 returns the same data without requiring an interactive picker.
 
-The first catalog entries use low-risk official Fedora packages. RPM Fusion and
-COPR enter only after repository trust and removal can be represented.
+The first catalog entries use low-risk official Fedora packages. RPM Fusion,
+Terra, and COPR enter only after repository trust, pinned release-package or
+key identity, and removal can be represented.
 
 ### Risks and recovery
 
@@ -214,9 +215,9 @@ every selected package without executing a mutating command.
 
 ### Outcome
 
-Apply one reviewed unchanged DNF plan, add the focused package install and
-remove workflows, verify each successful operation, and record complete
-versioned receipts under /var/lib/nimbus.
+Apply one reviewed unchanged DNF plan, add the focused package, profile, and
+component selection workflows, verify each successful operation, and record
+complete versioned receipts under /var/lib/nimbus.
 
 ### Context and decisions
 
@@ -233,7 +234,10 @@ multi-selection, change only the selected machine manifest, and show both the
 manifest diff and complete system plan before approval. They then reuse the
 same apply path. Remove is limited to desired or Nimbus-managed packages;
 eligible unmanaged packages remain the responsibility of `apply --prune`.
-Nimbus leaves every manifest edit as an uncommitted Git change.
+`profiles add|remove` and `components add|remove` edit the manifest's
+selection lists through the same diff, plan, approval, and apply path; a
+profile change prints the direct Chezmoi re-initialization command once
+Phase 5 exists. Nimbus leaves every manifest edit as an uncommitted Git change.
 
 Bootstrap packages retain correct DNF install reasons. Removal is permitted
 only from the lifecycle recorded in the receipt.
@@ -247,7 +251,8 @@ history needed for recovery. Status and plan then expose the remaining drift.
 
 ### Validation and exit criteria
 
-Exercise install, package-picker install and remove, profile exclusion,
+Exercise install, package-picker install and remove, profile and component
+add and remove including the resulting owned removals, profile exclusion,
 already-present adoption, verification failure, digest change, interrupted
 operation, owned removal, explicit pruning, and protected dependency cases.
 Exit when a small representative DNF component and the package shortcuts can
@@ -288,9 +293,10 @@ passes `machine`, `managed_by_nimbus`, and the ordered profile IDs through the
 Chezmoi prompt flags specified in SPEC.md.
 
 Normal chezmoi diff, apply, edit, and update stay direct. Nimbus performs no
-silent Git operation. The dotfiles repository adopted this handoff on
-2026-09-02 and holds no machine manifest; this phase verifies the flags against
-its real template before exit.
+silent Git operation. The handoff runs once; later profile changes print the
+`chezmoi init` command and doctor reports a stale Chezmoi selection. The
+dotfiles repository adopted this handoff on 2026-09-02 and holds no machine
+manifest; this phase verifies the flags against its real template before exit.
 
 ### Risks and recovery
 
@@ -454,7 +460,7 @@ for already-applied optional components. Deliver:
 
 ~~~text
 nimbus postinstall
-nimbus windows setup|status|start|connect [--keep-alive]|stop|purge-data
+nimbus windows setup|status|start|connect [--keep-alive]|stop|remove|purge-data
 nimbus launch browser [URL] [--private]
 nimbus launch webapp URL
 ~~~
@@ -470,10 +476,13 @@ Q-010 chose system libvirt; on 2026-09-02 the owner replaced it with the
 `omarchy-windows-vm` as the reference implementation. The one supported guest
 is contained below `/var/lib/nimbus/windows/` on the `windows` subvolume with a
 root-owned Compose definition, a user-owned `0600` credentials file, and
-loopback-only ports. Runtime commands never install a missing component.
+loopback-only ports. `setup` is the entry point: it stages the `windows-vm`
+profile through the normal diff, plan, and approval when missing, then handles
+credentials and the unattended install; `remove` is the profile removal with
+the same review. The other runtime commands never install a missing component.
 `connect` starts the guest when needed, waits for Windows, opens FreeRDP, and
-stops the guest afterwards unless `--keep-alive` is set. Normal removal stops
-and removes the container but preserves the data root. Purge rejects a
+stops the guest afterwards unless `--keep-alive` is set. Removal stops and
+removes the container but preserves the data root. Purge rejects a
 running, symlinked, foreign, or escaped target, names the exact directory, and
 requires a second confirmation. The Compose definition is reproducible; the
 guest disk requires separate VM-aware backup and is not part of Nimbus
@@ -493,10 +502,39 @@ reconstruction in a disposable VM. Test browser-family private flags,
 desktop-entry parsing, fallback selection, argv preservation, invalid schemes,
 and missing browsers without writing user configuration.
 
-The interactive dashboard waits until the underlying commands have stable
-structured output. In a terminal, bare `nimbus` then opens it; non-terminal use
-prints grouped help. Its package screens reuse the established package
-workflows and own no separate state.
+## 9. Interactive dashboard
+
+### Outcome
+
+Deliver the dashboard behind bare `nimbus`: overview, profile and component
+selection, package pickers, review and apply, and post-install tasks, as one
+presentation layer over the commands delivered in Phases 1 through 8.
+
+### Context and decisions
+
+Every screen renders existing structured output and calls existing command
+paths; the dashboard adds no resolver, planner, state, or approval logic.
+Staged manifest edits live only in the session until the review screen's
+approval writes and applies them through the Phase 4 path. `nimbus init`
+reuses the selection screens for a new machine. Q-012 selects the widget
+library, shared with the command-line pickers introduced in Phase 4, so the
+pickers are the first delivered pieces of the dashboard.
+
+### Risks and recovery
+
+A dashboard can hide what a command would have shown. Every screen names the
+equivalent command, every mutation goes through the same review screen, and
+nothing runs on navigation. Terminal size and keyboard-only operation are
+tested. The phase adds no new mutation, so recovery is the underlying
+command's recovery.
+
+### Validation and exit criteria
+
+Test each screen against golden structured output, staged-edit discard on
+exit, approval parity with the command line, non-terminal fallback to grouped
+help, and keyboard-only operation in a disposable VM. Exit when the dashboard
+can select profiles, components, and packages, review and apply the resulting
+plan, and present tasks without any behavior the commands lack.
 
 ## Later
 

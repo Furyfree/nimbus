@@ -15,8 +15,6 @@ work here without rediscovering them.
   tests must prove that.
 - Branch docs/project-foundation carries the foundation documents and has an
   open draft pull request against main.
-- docs/REVIEW-2026-09-02.md holds audit findings and owner decisions not yet
-  moved into SPEC, ROADMAP, or TASKS. Check it before editing those files.
 
 ## Commands
 
@@ -34,6 +32,7 @@ The package-search result is research input, never desired state.
 | --- | --- |
 | Accepted behavior, schema, invariant, safety rule | docs/SPEC.md |
 | Rationale, rejected alternatives, open question | docs/DECISIONS.md |
+| Security policy: sources, encryption, boot, firewall | docs/SECURITY.md |
 | Phase order, gates, risks, exit criteria | docs/ROADMAP.md |
 | Current checklist, evidence, blockers | docs/TASKS.md |
 | Fedora base install steps | docs/INSTALLATION.md |
