@@ -37,6 +37,8 @@ The Nimbus repository contains one complete personal system:
 
 ~~~text
 nimbus/
+  install.sh
+  bootstrap
   cmd/
   internal/
   machines/
@@ -51,22 +53,49 @@ nimbus/
 ~~~
 
 - Go code implements the engine.
+- install.sh is the minimal remote entry point and bootstrap is the versioned
+  checkout-owned installation handoff.
 - Machine manifests select intended workstation compositions.
 - Profiles are user-facing system bundles.
 - Components describe reusable capabilities and own resources.
 - Catalog entries describe packages with non-default lifecycle.
-- system/root mirrors Nimbus-owned system-file targets.
+- system/root/etc mirrors Nimbus-owned system-file targets below /etc.
 - Migrations represent controlled transitions that cannot be expressed as
   steady-state resources.
 
 An installed engine reads live definitions from an explicitly selected Nimbus
-checkout. nimbus.toml declares the definition schema and minimum compatible
-engine version. The engine rejects unsupported schemas.
+checkout. nimbus.toml declares the definition schema, supported Fedora
+releases, and minimum compatible engine version. The engine rejects unsupported
+schemas and invalid compatibility metadata.
 
-The canonical definition digest covers the path, mode, and content of every
-regular definition and system-source file in sorted order. Symlinks inside the
-definition tree are rejected. Plans and receipts identify the engine version,
-checkout origin, commit, dirty state, and definition digest.
+The canonical definition boundary is `nimbus.toml` plus every regular file
+recursively below `machines/`, `profiles/`, `components/`, `catalog/`, and
+`system/`. The complete boundary participates even when one machine selects
+only part of it. Engine code, Git metadata, documentation, history, development
+tooling, directories themselves, and every other checkout path are excluded.
+
+The definition digest is SHA-256 over an unambiguously framed sequence of
+entries sorted bytewise by slash-separated checkout-relative path. The input
+starts with `nimbus-definitions-v1` followed by a zero byte. Each entry encodes
+the path length as an unsigned 64-bit big-endian integer, the path bytes, mode as
+an unsigned 32-bit big-endian integer holding octal `0100644` or `0100755`,
+content length as an unsigned 64-bit big-endian integer, and the exact content
+bytes. The digest renders as `sha256:` followed by lowercase hexadecimal.
+
+Regular-file mode is normalized to `100755` when any executable bit is set and
+to `100644` otherwise. Other permission bits and directory modes are ignored. A
+system file's desired target ownership and mode remain explicit resource data
+and participate through the content of the declaring definition.
+
+The configured checkout root may be a symlink. Nimbus resolves it once at the
+start of an operation and uses the resulting canonical directory for origin
+checking, containment validation, loading, and hashing. `nimbus.toml` and every
+entry within the definition directories must be a regular file or directory;
+symlinks and special files within that boundary are errors. Plans and receipts
+identify the engine version, checkout origin, commit, dirty state, and
+definition digest. Apply re-resolves and re-hashes the checkout, so a changed
+root target cannot reuse an earlier plan when its trust identity, commit, or
+effective definition input differs.
 
 The engine may embed an example definition tree only to create a new local
 checkout. Embedded data is never the live personal desired state.
@@ -88,11 +117,33 @@ Example:
 schema = 1
 checkout = "/home/pby/.local/share/nimbus"
 machine = "desktop"
+origin = "github.com/Furyfree/nimbus"
 ~~~
 
-The selector points to one checkout and one tracked manifest. It does not copy
-profiles, components, packages, constraints, or dotfiles configuration.
-Commands may accept explicit checkout and machine overrides.
+The selector is a regular Nimbus-owned local file written only through an
+explicit reviewed selector operation. It is not a symlink, is not managed by
+Chezmoi, and does not contain desired system configuration. The checkout is the
+root of the selected Nimbus repository, and the machine value selects
+`machines/<machine>.toml` within it. The selector does not copy profiles,
+components, packages, constraints, or dotfiles configuration. Commands may
+accept explicit checkout and machine overrides.
+
+The required origin is the repository identity approved for the checkout. It
+does not pin a commit or prevent the checkout from being updated. Nimbus
+normalizes supported Git locators by removing transport and user information,
+lowercasing the host, removing trailing slashes and then one trailing `.git`
+suffix from the repository path, and preserving the remaining path. For example,
+`git@github.com:Furyfree/nimbus.git` and
+`https://github.com/Furyfree/nimbus` both normalize to
+`github.com/Furyfree/nimbus`.
+
+For selector-based loading, Nimbus reads the checkout's local Git configuration
+without invoking Git or accessing the network and compares its normalized
+origin with the selector. A missing, invalid, or different origin is an error.
+A legitimate origin change requires a separate explicit reviewed trust action
+that rewrites the selector; Nimbus never changes the remote. Commit,
+working-tree, and definition changes do not alter this repository trust and
+remain identified separately in plans and receipts.
 
 A machine manifest has a stable ID:
 
@@ -163,11 +214,14 @@ machine
 Resolution reads configuration only. It never inspects hardware, the installed
 system, native package databases, or Nimbus applied state.
 
-nimbus validate checks every definition and machine manifest in the selected
-checkout. nimbus config resolve resolves one selected machine. Selecting no
-optional component is valid; later inspection may warn that the machine lacks a
-desktop session or that detected hardware has no selected supporting component,
-but it never changes the selection.
+`nimbus validate` checks every definition in the selected checkout and resolves
+every tracked machine manifest so schema and graph errors are found before a
+change is committed or applied. Resolution remains an internal engine
+capability reused by validation, status, planning, package workflows, and
+tests; it is not a separate public command. Selecting no optional component is
+valid. Later inspection may warn that the machine lacks a desktop session or
+that detected hardware has no selected supporting component, but it never
+changes the selection.
 
 Validation rejects:
 
@@ -181,6 +235,7 @@ Validation rejects:
 - invalid provider configuration
 - arbitrary shell operations
 - path traversal, symlink escape, and system sources outside the checkout
+- system-file sources outside system/root/etc or mappings outside /etc
 
 The same checkout content and machine selection always resolve to the same
 desired graph and canonical digest.
@@ -284,6 +339,7 @@ records every profile, component, or explicit machine path that selected it.
 
 Nimbus owns:
 
+- the local selector at ~/.config/nimbus/config.toml
 - Fedora and approved third-party repositories
 - Nimbus-selected RPMs and system Flatpaks
 - system services, timers, groups, files, and drop-ins
@@ -296,7 +352,8 @@ Nimbus owns:
 
 Chezmoi owns:
 
-- files and templates below the user's home directory
+- files and templates below the user's home directory except the Nimbus local
+  selector
 - Hyprland, Noctalia, shell, terminal, editor, browser, and application user
   configuration
 - systemd user unit files, user scripts, and desktop entries
@@ -345,7 +402,9 @@ previously completed independent operations remain after partial failure.
 
 ## Inspection, status, plan, and apply
 
-Inspection uses native read-only interfaces and produces structured facts.
+Internal inspection uses native read-only interfaces and produces structured
+facts for status, planning, doctor, ownership views, and tests. Raw fact
+collection is not a public command.
 Status compares desired, observed, and applied state without mutation.
 
 A plan contains:
@@ -356,22 +415,28 @@ A plan contains:
 - exact privileged commands and system-file diffs
 - verification, triggers, recovery, warnings, and reboot requirements
 - optional prune candidates kept separate from normal apply
+- known normal-update candidates kept separate from normal apply
 
 The canonical plan excludes volatile display data. Nimbus hashes it when shown
 for approval and refuses apply if configuration, definitions, facts, native
 transactions, or the digest changed before execution.
 
-Planning never mutates the system. A plan command may write only an explicitly
-named output file containing the canonical plan and digest.
+Planning never invokes sudo, accesses the network, writes files, or changes
+Nimbus state. Upgrade information uses locally available native metadata and
+reports when its freshness or availability is insufficient.
 
 Plain apply installs and repairs desired resources, adopts compatible existing
 resources, and removes resources previously owned by Nimbus that are no longer
-desired. It leaves unrelated unmanaged resources unchanged.
+desired. It leaves unrelated unmanaged resources unchanged and does not upgrade
+an already-satisfied resource merely because a newer version exists.
 
-Pruning is a separate expanded plan and approval. An unmanaged resource is
-eligible only when the native provider proves explicit installation,
-non-protected status, dependency safety, and an exact removal and verification
-path.
+`nimbus apply` re-resolves desired state, re-inspects the system, shows the
+complete plan, and requires explicit approval. Immediately before execution it
+repeats the relevant checks and refuses a changed digest or native transaction.
+`nimbus apply --prune` uses the same process with prune candidates promoted into
+a visibly separate expanded plan. An unmanaged resource is eligible only when
+the native provider proves explicit installation, non-protected status,
+dependency safety, and an exact removal and verification path.
 
 ## Privilege and concurrency
 
@@ -389,14 +454,47 @@ They accept only staged data bound to the approved plan digest. Nimbus has no
 general privileged executor, root daemon, helper service, or sudo keepalive.
 
 Only one mutating Nimbus operation may run at a time. Locks identify the
-operation and process and are never removed solely because they are old.
-Read-only commands may run concurrently when they can obtain consistent input.
+operation and process and are never removed solely because they are old. The
+normal user holds a kernel advisory lock at
+`$XDG_RUNTIME_DIR/nimbus/operation.lock`. Nimbus creates the containing
+directory with mode `0700` and the lock file with mode `0600`; both are owned by
+that user. A missing, foreign, symlinked, or otherwise invalid runtime directory
+blocks mutation.
+
+The lock is acquired after approval but before the final re-inspection, any
+manifest write, sudo, or other mutation, and is held through verification and
+receipt recording. Its content identifies the command, operation ID, PID, and
+start time for diagnostics. Kernel lock state is authoritative: stale content
+is replaced only after the file is successfully locked, never deleted merely
+because it is old. Read-only commands and unapproved plan review may run
+concurrently when they can obtain consistent input.
 
 ## System files, triggers, and migrations
 
-System file sources mirror their absolute targets under system/root. File
-resources declare source, target, ownership, mode, verification, change
-triggers, removal, and recovery. Nimbus shows complete diffs before apply.
+The generic system-file provider manages regular files below `/etc` only. Its
+sources live below `system/root/etc/`. The checkout-relative suffix determines
+the target directly: for example,
+`system/root/etc/modprobe.d/nvidia.conf` maps to
+`/etc/modprobe.d/nvidia.conf`. A file resource cannot declare a different
+target. It declares the source, desired ownership and mode, verification,
+change triggers, removal, and recovery. Nimbus shows the complete diff before
+apply.
+
+Static validation rejects an empty suffix, path traversal, symlinks or special
+files in the definition tree, and any mapping that does not remain below
+`/etc`. Observed-system validation checks every existing target-path component
+without following symlinks. The provider refuses a target whose path contains
+a symlink, whose type is not a regular file, or whose ownership belongs to
+another provider or cannot be established. Taking over such a target requires
+an explicit typed migration with its own preflight and recovery.
+
+The generic provider never targets `/usr`, `/boot`, `/var`, `/run`, `/tmp`,
+`/home`, `/root`, `/proc`, `/sys`, `/dev`, or any other root. Files below
+`/usr` are delivered by a native package or by a separately specified typed
+integration with exact targets. Boot resources, Nimbus state, user files, and
+runtime paths likewise retain their own providers and safety contracts rather
+than widening the system-file provider. All system-file content remains subject
+to the prohibition on secrets.
 
 Triggers use reviewed stable IDs and fixed argument vectors. A trigger runs at
 most once per apply even when several resources request it. Arbitrary shell is
@@ -409,10 +507,53 @@ become a growing sequence of migrations.
 
 ## Bootstrap and initialization
 
-Bootstrap does only enough to obtain a compatible Nimbus engine, Git transport,
-and trusted Nimbus checkout. It verifies the supported platform and shows every
-repository or artifact it will trust before changing the system. The first
-successful apply adopts bootstrap packages that belong to desired state.
+The supported installation entry point is:
+
+~~~sh
+curl -fsSL https://raw.githubusercontent.com/Furyfree/nimbus/main/install.sh | bash
+~~~
+
+Running it explicitly trusts the current `install.sh` on the approved Nimbus
+`main` branch. This remote entry point is deliberately small. It:
+
+1. requires a controlling terminal and refuses root
+2. verifies the supported Fedora release and architecture
+3. shows the HTTPS Nimbus origin and any DNF operation before approval
+4. obtains the required Git transport through DNF when absent
+5. clones the approved origin to `~/.local/share/nimbus`, or validates and
+   reuses an existing checkout there without changing it
+6. invokes that checkout's versioned `bootstrap` script
+
+An existing target is accepted only when its canonical checkout has the
+approved normalized origin and passes containment checks. A symlinked checkout
+root is accepted under the normal checkout rules. The installer never fetches,
+pulls, resets, stashes, changes a remote, replaces a directory, or resolves a
+conflict. Every other existing target is an error.
+
+The outer Bash process reads `install.sh` from a pipe, so it must not replace
+its own standard input. It runs the checked-out bootstrap script with that
+child's standard input redirected from `/dev/tty`; absence of a controlling
+terminal is an error before mutation. The checked-out script revalidates the
+checkout, shows and enables the approved COPR, installs a compatible signed
+Nimbus RPM through DNF, and runs:
+
+~~~text
+nimbus init --checkout ~/.local/share/nimbus
+~~~
+
+Neither installation script installs Chezmoi, applies workstation resources,
+or duplicates Nimbus planning. The reviewed first Nimbus apply installs
+Chezmoi when desired, after which init may perform the one permitted Chezmoi
+initialization. Git and repository resources installed during bootstrap may be
+adopted when they belong to desired state. The running Nimbus engine remains a
+DNF-owned prerequisite outside Nimbus resource ownership.
+
+The installation is rerunnable. It reuses only already-valid pieces and stops
+on ambiguity; partial DNF state remains recoverable through DNF, and a cloned
+checkout remains ordinary user-owned Git state. DNF invoked directly by the
+user or normal Fedora tooling owns later engine upgrades and removal. The user
+owns checkout updates through normal Git. Nimbus never updates its engine or
+checkout.
 
 nimbus init:
 
@@ -450,6 +591,36 @@ Chezmoi internal state directly. Direct Chezmoi initialization prompts for the
 same information when Nimbus is absent. Hardware facts and secrets do not cross
 the handoff.
 
+When the development profile is selected, the Chezmoi source includes a
+`run_onchange_after_install-mise-runtimes.sh.tmpl` action. It runs as the normal
+user after the rendered `~/.config/mise/config.toml` has been applied. Its
+rendered content includes a checksum of that rendered configuration, so
+Chezmoi presents it in the normal diff and reruns it only when the effective
+Mise configuration changes. The action executes:
+
+~~~sh
+MISE_SYSTEM_DEPS=warn mise -C "$HOME" install
+~~~
+
+It never invokes sudo. `MISE_SYSTEM_DEPS=warn` keeps system dependency handling
+non-privileged: Nimbus owns installation of Mise and selected system packages,
+Chezmoi owns the file and action, and Mise owns runtime installation. Chezmoi
+records the onchange action only after successful execution under its normal
+script lifecycle.
+
+A stricter user-controlled review uses:
+
+~~~sh
+chezmoi apply --exclude=scripts
+MISE_SYSTEM_DEPS=warn mise -C "$HOME" install --dry-run
+chezmoi apply --include=scripts
+~~~
+
+Deleting an installed runtime without changing the Mise configuration does not
+retrigger the onchange action. Nimbus inspection reports the missing runtime
+and directs the user to run the same `mise install` command; Nimbus does not
+invoke the repair or a normal Chezmoi apply.
+
 Nimbus never runs chezmoi apply or chezmoi update. After initialization it
 prints the direct commands needed to inspect and apply user configuration.
 Removing Nimbus leaves the dotfiles checkout and Chezmoi lifecycle usable.
@@ -480,9 +651,79 @@ requirements. Status checks remain authoritative after a receipt. Tasks are not
 arbitrary shell scripts.
 
 Runtime command groups operate only on already selected and applied components.
-They never install missing components implicitly. A later Windows component may
-provide setup, status, start, connect, stop, and explicit data-purge operations.
-Guest data survives normal component removal.
+They never install missing components implicitly.
+
+`nimbus postinstall` is the terminal presentation of typed pending work from
+the selected components and observed state. It can present 1Password readiness,
+fingerprint or MOK enrollment, Windows setup, logout, and reboot. Selecting an
+action invokes that task's same typed status, instructions, approval,
+verification, and recovery contract; it never discovers or executes arbitrary
+scripts. In a non-terminal context it prints the pending tasks and their direct
+commands without selecting one. Certificates, gaming packages, virtualization
+host packages, services, groups, and networks remain normal plan and apply
+resources rather than post-install actions.
+
+### Windows guest
+
+The optional `windows-vm` component uses QEMU/KVM through the system libvirt
+connection `qemu:///system`. Apply installs and configures the reviewed host
+packages and resources. Nimbus owns one stable domain definition and the host
+integration it declares; it does not wrap Quickemu or Dockur and does not
+manage arbitrary VMs.
+
+Persistent guest data is contained below:
+
+~~~text
+/var/lib/libvirt/images/nimbus/windows/
+~~~
+
+The directory resides on the separate `libvirt` Btrfs subvolume. Nimbus records
+its resource and provider ownership but uses libvirt's verified native access
+identity rather than guessing or recursively replacing ownership. Every path
+operation rejects traversal, symlinks, unexpected file types, foreign content,
+and references from another libvirt domain.
+
+The public lifecycle is:
+
+~~~text
+nimbus windows status
+nimbus windows setup
+nimbus windows start
+nimbus windows connect
+nimbus windows stop
+nimbus windows purge-data
+~~~
+
+`status` is read-only and reports component, host, domain, storage, and guest
+reachability. `setup` is the reviewed interactive guest-install workflow and is
+available only after the component is applied. Start and stop use the owned
+libvirt domain; connect opens the configured local console or RDP client without
+changing desired state. Normal component removal stops and undefines the domain
+and removes only safe owned host integration while preserving guest data.
+
+`purge-data` requires the component to be removed or an otherwise explicit
+purge context, a stopped and unreferenced guest, an exact resolved path below
+the fixed root, and a second confirmation. It deletes only guest data Nimbus can
+prove it owns. The domain definition can be recreated from desired state, but
+guest disks are excluded from Nimbus recovery points and require a separate
+VM-aware backup. Purge has no Nimbus rollback.
+
+### Desktop launch helpers
+
+The narrow desktop helpers are:
+
+~~~text
+nimbus launch browser [URL] [--private]
+nimbus launch webapp URL
+~~~
+
+The browser helper resolves the XDG default browser and translates private-mode
+arguments for supported browser families. The webapp helper uses that browser
+when it supports application mode or a configured Chromium-family fallback.
+Both accept only `http` and `https` URLs, parse desktop entries without shell
+evaluation, and launch an exact argv vector. Chezmoi may call them from its
+owned keybindings and desktop entries. They do not install browsers, write user
+configuration, or become generic process launchers.
 
 A future interactive interface is a presentation layer over the same resolver,
 facts, plans, tasks, and commands. It has no independent business logic.
@@ -494,13 +735,115 @@ managed packages, repository state, enforceable constraints, coordinated update
 groups, recovery requirements, and post-update verification. Nimbus does not
 silently update itself, its checkout, dotfiles, or system packages.
 
-Before disruptive, reboot-required, or stateful transactions, Nimbus creates a
-recovery point only after the applicable restore procedure and retention policy
-have been tested. Recovery may include Btrfs snapshots, boot and EFI archives,
-the approved plan, and related receipts.
+`nimbus upgrade` is the explicit workflow for normal updates of desired,
+Nimbus-managed resources. It may refresh native repository metadata, then shows
+the exact update transaction, verification, recovery, and reboot or logout
+requirements before approval. It never prunes. It does not silently reconcile
+unrelated desired-state drift and blocks with a direction to run `nimbus apply`
+first when that drift is a prerequisite for a safe update. The command operates
+only within the currently installed Fedora release and has no target-release
+flag.
 
-Automatic rollback is unsupported until a complete restore drill proves it.
-Manual recovery remains documented independently of Nimbus state.
+Fedora release upgrades are permanently owned by Fedora's native DNF5
+system-upgrade workflow and the user. Nimbus never invokes or wraps that
+workflow, prepares or approves its offline transaction, requests its reboot,
+records it as a Nimbus operation, or claims recovery for it. Fedora's native
+documentation, transaction log, and recovery procedures remain authoritative.
+
+The selected checkout declares its supported Fedora releases. `nimbus doctor`
+reports the installed release and that compatibility without claiming to
+preflight a future native transaction. `nimbus version` and static
+`nimbus validate` remain available on an unsupported installed release, and
+doctor can report the incompatibility, but Nimbus refuses system mutation until
+the installed release is supported by the compatible engine and checkout.
+There is no special Nimbus release-upgrade version beyond the normal declared
+minimum-engine contract.
+
+Before starting the native Fedora workflow, the user ensures that the installed
+engine and selected checkout declare support for the target release. After the
+native upgrade succeeds, the user runs `nimbus validate`, `nimbus status`, and
+then `nimbus plan` or `nimbus apply` as needed. These commands inspect and repair
+Nimbus-owned drift after the event; they do not retroactively make the Fedora
+release upgrade a Nimbus operation.
+
+The running Nimbus engine itself is excluded because its lifecycle remains a
+direct DNF operation rather than a Nimbus self-update.
+
+The first recovery-point implementation supports only this installed layout:
+
+~~~text
+UEFI/GPT
+|- 1 GiB FAT32  /boot/efi
+|- 2 GiB ext4   /boot
+`- remaining    LUKS2
+   `- Btrfs "fedora"
+      |- root         /
+      |- home         /home
+      |- snapshots    /.snapshots
+      |- log          /var/log
+      |- cache        /var/cache
+      |- swapfile     /var/swap
+      |- flatpak      /var/lib/flatpak
+      |- libvirt      /var/lib/libvirt/images
+      |- docker       /var/lib/docker
+      `- containerd   /var/lib/containerd
+~~~
+
+There is no separate `/var` subvolume. Nimbus validates this topology and never
+creates, converts, repartitions, or encrypts it on a mounted live system. A
+different layout remains usable for operations that need no recovery point, but
+blocks every operation whose provider requires one.
+
+Immediately before such a mutation, Nimbus creates
+`/.snapshots/nimbus/<id>/` as `root:root` recovery state with mode `0700`;
+non-subvolume files within it use mode `0600`. It contains:
+
+- a read-only snapshot of `root`
+- a read-only `flatpak` snapshot only when system Flatpaks will change
+- `/boot` and `/boot/efi` archives only for a kernel, initramfs, bootloader,
+  NVIDIA boot-integration, or EFI change
+- a manifest with the included items, source subvolume and filesystem UUIDs,
+  checksums, operation and plan digests, and completion state
+- a standalone restore guide containing the discovered device-independent
+  mount and restore inputs
+
+Btrfs snapshots are not recursive or one atomic multi-subvolume operation.
+Nimbus verifies every requested item before marking the point complete; a
+partial point never authorizes the mutation. A partial point created by the
+current attempt is removed as one proven-owned unit before any mutation; failed
+cleanup blocks the operation and preserves it for inspection. The `root`
+snapshot includes `/var/lib/nimbus`, while `home`, `log`, `cache`, `swapfile`,
+`libvirt`, `docker`, and `containerd` are excluded. Home and guest or container
+data require their own backup lifecycles. A recovery point is local same-disk
+state and is never described as a backup.
+
+Nimbus retains the newest three complete recovery points. A point tied to an
+unresolved failed operation is protected and does not count as an eligible old
+point. Before creating another, Nimbus may delete only older complete eligible
+points, wait for Btrfs deletion to finish, and remeasure using Btrfs-aware usable
+space rather than `df` alone. If less than 20 GiB remains, Nimbus blocks before
+mutation. It never deletes home, VM, container, unknown, partial, or protected
+state to make room.
+
+The initial restore procedure is manual and independent of a working Nimbus
+binary:
+
+1. Boot a supported Fedora live or rescue environment.
+2. Unlock the recorded LUKS2 container and mount the Btrfs top level plus the
+   `snapshots` subvolume.
+3. Verify the selected recovery manifest, snapshot identity, and boot-archive
+   checksums.
+4. Preserve the failed `root`, then create a writable `root` snapshot from the
+   selected read-only recovery snapshot.
+5. Restore the matching `/boot` and `/boot/efi` archives when the manifest
+   contains them; leave every excluded subvolume, including `home`, untouched.
+6. Reboot, run doctor and status, and retain the failed root until the restored
+   system is explicitly accepted.
+
+The generated guide records the exact discovered UUIDs and paths needed for
+these steps. Recovery-point creation remains disabled until this complete path,
+including boot archives, succeeds in a disposable Fedora VM. Nimbus provides no
+automatic rollback.
 
 ## Security
 
@@ -520,33 +863,103 @@ Manual recovery remains documented independently of Nimbus state.
 
 ## Command contract
 
-The intended non-interactive engine includes:
+The public CLI is:
 
 ~~~text
+nimbus
+nimbus init
 nimbus validate
-nimbus config resolve
-nimbus facts
 nimbus status
 nimbus plan
-nimbus apply
+nimbus apply [--prune]
+nimbus upgrade
+nimbus postinstall
+nimbus packages install [QUERY]
+nimbus packages remove [QUERY]
+nimbus packages installed [QUERY]
 nimbus managed
 nimbus unmanaged
 nimbus why RESOURCE
+nimbus windows status
+nimbus windows setup
+nimbus windows start
+nimbus windows connect
+nimbus windows stop
+nimbus windows purge-data
+nimbus launch browser [URL] [--private]
+nimbus launch webapp URL
 nimbus doctor
-nimbus packages
-nimbus init
 nimbus version
 ~~~
+
+Bare `nimbus` opens the interactive dashboard when one is delivered and a
+terminal is available; otherwise it prints grouped help. A release lists only
+commands it implements completely. Future mutating commands never appear as
+stubs.
+
+`nimbus validate` is the configuration authoring check. It validates the full
+selected checkout and resolves every tracked machine, reports every discovered
+error with its source location, and performs no system inspection. It accepts a
+checkout override but no machine override because validation is checkout-wide.
+
+`nimbus status` is the concise desired, observed, and last-applied overview.
+`nimbus plan` is its complete non-mutating explanation. `nimbus managed` lists
+resources Nimbus owns or has explicitly adopted; `nimbus unmanaged` lists only
+supported resources Nimbus can identify but does not own, not arbitrary user
+data. `nimbus why RESOURCE` reports every desired, dependency, adoption, and
+ownership path for one canonical resource.
+
+The package commands are focused conveniences over the same desired-state and
+apply lifecycle:
+
+- `packages install [QUERY]` opens a multi-select package picker, prefilled by
+  the optional query, and adds approved canonical references to the selected
+  machine manifest.
+- `packages remove [QUERY]` selects from desired or Nimbus-managed packages. It
+  removes an explicit machine reference or adds a valid profile exclusion, and
+  refuses technical dependencies, protected packages, foreign ownership, and
+  unknown removal lifecycles.
+- `packages installed [QUERY]` is read-only and browses explicitly installed
+  supported packages. It labels each package as desired, managed, unmanaged,
+  excluded, or required and shows its selection provenance and known update or
+  prune status.
+
+Install and remove show the proposed manifest diff and complete system plan,
+then require approval before writing the manifest atomically and applying it.
+They leave the Git change for the user and never commit, pull, or push. A failed
+apply leaves the reviewed desired configuration present and reports the
+remaining drift. The remove picker does not offer unmanaged packages; eligible
+unmanaged removal remains part of `apply --prune`. In a non-interactive context,
+a package command that still requires selection or approval fails rather than
+guessing.
+
+`nimbus doctor` performs read-only health checks for the capabilities available
+in the installed engine. Each failure already includes its observation, impact,
+and remediation; there is no separate explain mode. Doctor never repairs,
+invokes sudo, or accesses the network. `nimbus version` and the equivalent
+`nimbus --version` report engine build identity and the supported definition,
+state, receipt, and structured-output schema ranges without loading a checkout
+or inspecting the system.
+
+Human output is the default. Every delivered command that returns Nimbus data
+accepts `--json` and renders the same result in a versioned envelope containing
+the engine version, output schema, data, and structured errors. JSON output
+never supplies a missing choice, bypasses approval, or changes lifecycle
+behavior. Commands that hand control to a graphical browser, console, or RDP
+client reject `--json`; `postinstall --json` lists tasks without selecting one.
+
+Commands that load desired configuration accept invocation-local `--checkout`
+and `--machine` overrides where applicable. An omitted value comes from the
+selector. Overrides never rewrite the selector. `validate` accepts only
+`--checkout`; `version` accepts neither. Plans, approvals, and receipts identify
+the effective checkout, origin, machine, commit, dirty state, and definition
+digest.
 
 Commands return conventional exit codes:
 
 - 0 for success, including an empty result
 - 1 for validation, inspection, planning, verification, or operation failure
 - 2 for invalid usage
-
-Structured output uses a versioned JSON envelope containing the engine version,
-output schema, data, and structured errors. Human and JSON rendering use the
-same underlying data.
 
 ## Compatibility
 
