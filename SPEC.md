@@ -120,7 +120,7 @@ packages = [
 package_exclusions = []
 
 [package_constraints]
-hyprland = "=0.56.0"
+"dnf:hyprland" = "=0.56.0"
 
 [dotfiles]
 repo = "https://github.com/Furyfree/dotfiles.git"
@@ -197,6 +197,25 @@ lifecycle:
 - verify through the native package database
 - remove through DNF only when Nimbus owns the package and removal is safe
 
+Package references use a closed, versioned grammar. Values have no leading or
+trailing whitespace. A reference without a colon is a Fedora package name and
+canonicalizes to `dnf:<name>`. The accepted qualified forms are:
+
+- `dnf:<name>` for the same default DNF lifecycle
+- `flatpak:<app-id>` for the default system-scoped Flatpak lifecycle
+- `catalog:<id>` for an explicitly selected exceptional catalog entry
+
+The parser splits a qualified reference at its first colon. An empty value,
+empty suffix, unknown prefix, or invalid provider-native identifier is rejected.
+Provider prefixes are lowercase and reserved by the schema.
+
+A catalog ID is never resolved implicitly and never shadows a bare Fedora
+package name. A catalog entry resolves to one provider-native canonical package
+identity while retaining its catalog ID and every selection path as provenance.
+References that resolve to the same canonical identity merge provenance when
+their technical lifecycle agrees; incompatible lifecycles are duplicate
+ownership and fail validation.
+
 A catalog entry exists only for exceptional behavior such as:
 
 - a required Fedora repository, RPM Fusion source, or COPR
@@ -218,7 +237,11 @@ Cargo, uv, npm, pipx, or Go user-scope installation providers.
 
 A package constraint is accepted only when the native provider can enforce it
 during normal native updates. Unsupported comparison syntax is rejected rather
-than represented as an advisory-only constraint.
+than represented as an advisory-only constraint. Constraint keys use the
+canonical provider-qualified package identity, such as `dnf:hyprland`, rather
+than a bare name or catalog ID. A constraint attaches after all selection paths
+have been resolved and therefore applies to that canonical package regardless
+of which profile, component, machine entry, or catalog reference selected it.
 
 Compatibility-sensitive packages may form a coordinated update group. The
 desktop-session group covers the selected Hyprland, Noctalia, greeter, portal,
