@@ -65,6 +65,8 @@ drill, not only a successful backup or snapshot command.
 - `docs/SPEC.md` owns accepted product behavior, safety boundaries, and
   invariants.
 - `docs/DECISIONS.md` records rationale and unresolved questions.
+- `docs/SECURITY.md` owns the workstation security policy: software sources,
+  encryption, Secure Boot, SELinux, firewall, privilege, and secrets.
 - `docs/ROADMAP.md` owns implementation order, phase gates, risks, recovery,
   and exit criteria.
 - `docs/TASKS.md` owns the current checklist, evidence, blockers, and residual
