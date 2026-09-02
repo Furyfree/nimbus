@@ -161,6 +161,20 @@ alongside the permanent passphrase slot. Rejected: requiring a PIN, because the
 owner wants hands-free unlock and accepts that theft, not `/boot` tampering, is
 the protected case until unified kernel images add PCR 11.
 
+#### D-011: Docker comes from Docker's Fedora repository
+
+Decided 2026-09-02. The `docker` component uses Docker's own repository for
+Fedora with its signing key pinned, the five `docker-ce` packages, and an
+explicit `"selinux-enabled": true` in `daemon.json`. This is the procedure in
+Docker's Fedora documentation and in Chris Titus's linutil, verified to be the
+same repository, key, and packages. Rejected: Fedora's `moby-engine`,
+`docker-cli`, `docker-compose`, and `docker-buildx`, although they are tier 1,
+current at 29.7.2, and pull `container-selinux` as a dependency, because the
+owner prefers the channel that every Docker document and tutorial assumes and
+has lagged Fedora less often than the reverse. Both `moby-engine` and
+`podman-docker` are conflicts of the component. The Fedora packages remain the
+documented fallback if Docker's repository is ever late for a Fedora release.
+
 ### Resolved questions
 
 #### Q-001: Package reference grammar and catalog precedence (resolved)

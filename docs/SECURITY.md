@@ -58,8 +58,14 @@ Rules:
 - AppImages and manually downloaded binaries are not managed and not trusted.
 - Container images are pinned by digest and never run privileged. The Windows
   guest needs `/dev/kvm`, `/dev/net/tun`, and `NET_ADMIN`, nothing more.
-- Docker on Fedora is `moby-engine` from Fedora. Docker's own repository is a
-  vendor repository under the rule above if it is ever needed.
+- Docker comes from Docker's own Fedora repository, tier 2, as a catalog
+  entry pinning the signing key `060A 61C5 1B55 8A7F 742B 77AA C52F EB6B 621E
+  9F35`. The component installs `docker-ce`, `docker-ce-cli`, `containerd.io`,
+  `docker-buildx-plugin`, and `docker-compose-plugin`, enables
+  `docker.service`, sets `"selinux-enabled": true` in `/etc/docker/daemon.json`
+  because Docker's packages do not, and conflicts with Fedora's `moby-engine`
+  and with `podman-docker`, whose fake `docker` binary would shadow the real
+  one.
 
 ## Disk encryption
 
@@ -126,10 +132,12 @@ Rules:
 - Nimbus runs as the user and refuses to run as root. Each privileged command
   is rendered in the plan and executed through `sudo` directly.
 - The owner's account is in the `docker` group, declared as a group-membership
-  resource. That membership is root-equivalent and is treated as such: it is
-  the one standing privilege besides `sudo`, doctor reports any other member,
-  and the guest's Compose definition stays root-owned so the user cannot alter
-  what the daemon runs.
+  resource that the plan renders as `sudo usermod -aG docker <user>` and that
+  takes effect at the next login. That membership is root-equivalent and is
+  treated as such: it is the one standing privilege besides `sudo`, doctor
+  reports any other member, removal of the component removes it, and the
+  guest's Compose definition stays root-owned so the user cannot alter what
+  the daemon runs.
 - Polkit rules, sudoers drop-ins, and group memberships are typed resources
   with owned removal.
 
