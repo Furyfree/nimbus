@@ -28,8 +28,8 @@ Open gates: none.
 - [ ] Add tracked desktop and laptop machine manifests under machines/, with
   the desktop selecting gaming and the laptop selecting laptop-gaming.
 - [ ] Add the initial common, development, gaming, laptop-gaming,
-  hyprland-noctalia, and windows-vm profiles and only the components needed to
-  exercise their real graph.
+  hyprland-noctalia, virtualization, and windows-vm profiles and only the
+  components needed to exercise their real graph.
 - [ ] Add representative package references that exercise bare and explicit DNF,
   direct system Flatpak, and explicit exceptional catalog paths without
   implementing package operations.

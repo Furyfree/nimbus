@@ -55,12 +55,22 @@ Rules:
 - Runtimes and tools installed through Mise, Cargo, npm, pipx, or Go run as the
   user and are the user's responsibility. Nimbus reports missing runtimes and
   never elevates for them.
+- Nix comes from Fedora's `nix` package, tier 1, with `nix-daemon.service`
+  as a system resource. The Nix installer scripts are not used because Fedora
+  ships the package. Chezmoi owns `~/.config/nix`.
+- VM Curator has no Fedora or Terra package. The user installs it with
+  `cargo install vm-curator`, user scope like every Cargo tool. Nimbus owns its
+  QEMU, OVMF, swtpm, virt-viewer, passt, and dnsmasq dependencies as Fedora
+  packages, and its guest disks live below `~/vm-space` on the `home`
+  subvolume, outside Nimbus. How the Rust toolchain itself is installed is not
+  decided yet.
 - AppImages and manually downloaded binaries are not managed and not trusted.
 - Container images are pinned by digest and never run privileged. The Windows
   guest needs `/dev/kvm`, `/dev/net/tun`, and `NET_ADMIN`, nothing more.
 - Docker comes from Docker's own Fedora repository, tier 2, as a catalog
   entry pinning the signing key `060A 61C5 1B55 8A7F 742B 77AA C52F EB6B 621E
-  9F35`. The component installs `docker-ce`, `docker-ce-cli`, `containerd.io`,
+  9F35`. The `docker` component, selected by `development` and required by
+  `windows-vm`, installs `docker-ce`, `docker-ce-cli`, `containerd.io`,
   `docker-buildx-plugin`, and `docker-compose-plugin`, enables
   `docker.service`, sets `"selinux-enabled": true` in `/etc/docker/daemon.json`
   because Docker's packages do not, and conflicts with Fedora's `moby-engine`
@@ -122,8 +132,8 @@ Rules:
 - Windows guest ports 8006 and 3389 bind to 127.0.0.1 only.
 - `sshd` is not enabled unless a component declares it. When enabled, password
   authentication is off and keys come from the 1Password agent.
-- Nimbus itself makes no network calls except through DNF, Flatpak, and the
-  one explicit Chezmoi initialization.
+- Nimbus itself makes no network calls except through DNF, Flatpak, digest-
+  pinned container image pulls, and the one explicit Chezmoi initialization.
 
 ## Privilege
 
@@ -135,7 +145,7 @@ Rules:
   resource that the plan renders as `sudo usermod -aG docker <user>` and that
   takes effect at the next login. That membership is root-equivalent and is
   treated as such: it is the one standing privilege besides `sudo`, doctor
-  reports any other member, removal of the component removes it, and the
+  reports any other member, removal of the `docker` component removes it, and the
   guest's Compose definition stays root-owned so the user cannot alter what
   the daemon runs.
 - Polkit rules, sudoers drop-ins, and group memberships are typed resources
