@@ -3,41 +3,78 @@
 ## Current phase: Configuration resolver
 
 Plan: [Configuration resolver](ROADMAP.md#1-configuration-resolver).
+Open gates: [Q-001 through Q-005](DECISIONS.md#open-questions).
 
-- [ ] Create the Go module and Cobra-based `nimbus config resolve` command.
-- [ ] Define versioned machine, profile, component, and catalog types.
-- [ ] Add the initial four profiles and their component references.
-- [ ] Define the first package-specific catalog entries separately from
-  profiles: a few seed entries per source; the full profile composition is
-  filled in later.
-- [ ] Embed and load built-in profile, component, and catalog TOML.
-- [ ] Load `machine.toml`, including a symlinked manifest, with `--config FILE`
-  as an override.
-- [ ] Resolve imports and ordered profile IDs deterministically.
-- [ ] Reject cycles, conflicts, duplicates, and missing references.
-- [ ] Emit stable human and JSON output with source-aware errors.
-- [ ] Add a standalone read-only `nimbus validate` reusing the resolver loader.
-- [ ] Add `nimbus why` provenance output over the resolved desired graph.
-- [ ] Add valid, invalid, and golden fixtures.
-- [ ] Run `gofmt`, `go vet ./...`, `go test ./...`, and `git diff --check`.
-- [ ] Add the `gomod` ecosystem to `.github/dependabot.yml` when `go.mod`
-  lands.
-- [ ] Inspect the final diff and record residual risk below.
+### Foundation and entry points
+
+- [ ] Create the Go module and the Cobra command tree.
+- [ ] Implement nimbus validate and nimbus config resolve with explicit
+  checkout and machine overrides.
+- [ ] Add nimbus.toml with the first definition schema and engine compatibility
+  metadata.
+
+### Configuration model
+
+- [ ] Define strict versioned types for the local selector, machine, profile,
+  component, resource declaration, catalog exception, manual task, and runtime
+  command metadata.
+- [ ] Add tracked desktop and laptop machine manifests under machines/.
+- [ ] Add the initial common, development, gaming, and hyprland-noctalia
+  profiles and only the components needed to exercise their real graph.
+- [ ] Add representative package references that exercise the bare default DNF
+  path and exceptional catalog-entry fixtures without implementing package
+  operations.
+
+### Loading, validation, and resolution
+
+- [ ] Load definitions only from the selected Nimbus checkout.
+- [ ] Calculate the canonical definition-tree digest from sorted paths, modes,
+  and contents.
+- [ ] Reject symlinks, path escape, unsupported schemas, unknown fields,
+  duplicate IDs, missing references, component cycles, conflicts, invalid
+  exclusions, and duplicate lifecycle ownership.
+- [ ] Resolve profiles, explicit components, component requirements, packages,
+  resources, manual tasks, and runtime command groups deterministically.
+- [ ] Preserve ordered profile IDs and selection provenance in the resolved
+  model for the later Chezmoi handoff and why command.
+
+### Output and evidence
+
+- [ ] Emit stable human output and a versioned JSON envelope from the same
+  resolved data.
+- [ ] Add valid, invalid, digest, and golden-output fixtures.
+- [ ] Prove with tests that validation and resolution execute no external
+  command, access no network, invoke no privilege escalation, and write no
+  files or state.
+- [ ] Run gofmt, go vet ./..., go test ./..., and just check.
+- [ ] Add the gomod ecosystem to .github/dependabot.yml when go.mod lands.
+- [ ] Inspect the final diff and untracked files and record evidence and
+  residual risk below.
 
 ## Evidence
 
-- Repository planning foundation exists; implementation has not started.
-- The Fedora 44 package-query image builds and returns DNF5 results from Fedora,
-  RPM Fusion Free, and RPM Fusion Nonfree.
-- The 2026-08-31 cross-repo review decisions are folded into SPEC, CLI, and
-  ROADMAP; the desktop-session group analysis remains open in
-  [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md).
+- The 2026-09-02 documentation reconciliation establishes one architecture and
+  one active document hierarchy.
+- No Go implementation exists yet.
+- The Fedora 44 package-query tool is development evidence only and does not
+  define desired state.
 
 ## Blockers and residual risk
 
-- None currently known for Phase 1.
+- Q-001 through Q-005 in DECISIONS.md must be resolved before the corresponding
+  schemas and command contracts are frozen. They block implementation, not
+  further documentation work.
+- The dotfiles repository still contains obsolete Nimbus machine manifests and
+  an older profile handoff contract. Reconcile it before implementing the
+  bootstrap phase; it does not block an isolated resolver.
+- Exact DNF5 constraint and desktop-session update behavior remains deliberately
+  outside this phase.
 
 ## Completion rule
 
-Complete the phase only when every task passes, evidence is recorded, and the
-resolver has no system-inspection or mutation path.
+Complete the phase only when every checkbox passes, evidence is recorded, and
+the resolver contains no system inspection, state write, Git mutation, Chezmoi
+invocation, or apply path.
+
+Stop after the completed resolver and request separate authorization before
+starting Fedora inspection.
