@@ -44,6 +44,7 @@ direct Chezmoi commands.
 - [SPEC.md](docs/SPEC.md) defines the complete accepted system contract.
 - [DECISIONS.md](docs/DECISIONS.md) records decision rationale and unresolved
   questions.
+- [SECURITY.md](docs/SECURITY.md) is the workstation security policy.
 - [ROADMAP.md](docs/ROADMAP.md) defines implementation phases and their order.
 - [TASKS.md](docs/TASKS.md) tracks the current phase and its evidence.
 - [AGENTS.md](AGENTS.md) defines durable repository working rules.
