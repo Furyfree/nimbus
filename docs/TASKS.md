@@ -26,8 +26,9 @@ Open gates: none.
 - [ ] Parse the selector's required normalized origin and compare it with local
   Git configuration without command execution or network access.
 - [ ] Add tracked desktop and laptop machine manifests under machines/.
-- [ ] Add the initial common, development, gaming, and hyprland-noctalia
-  profiles and only the components needed to exercise their real graph.
+- [ ] Add the initial common, development, gaming, hyprland-noctalia, and
+  windows-vm profiles and only the components needed to exercise their real
+  graph.
 - [ ] Add representative package references that exercise bare and explicit DNF,
   direct system Flatpak, and explicit exceptional catalog paths without
   implementing package operations.
@@ -65,7 +66,8 @@ Open gates: none.
   command, access no network, invoke no privilege escalation, and write no
   files or state.
 - [ ] Run gofmt, go vet ./..., go test ./..., and just check.
-- [ ] Add the gomod ecosystem to .github/dependabot.yml when go.mod lands.
+- [ ] Add the gomod ecosystem to .github/dependabot.yml and a GitHub Actions
+  workflow that runs `just check` when go.mod lands.
 - [ ] Inspect the final diff and untracked files and record evidence and
   residual risk below.
 
@@ -97,9 +99,14 @@ Open gates: none.
   keeps `nimbus upgrade` within one release, and limits Nimbus to compatibility
   reporting plus post-upgrade drift inspection.
 - Q-009 fixes the supported recovery topology, three-point retention, 20 GiB
-  low-space refusal, manual restore drill, and user runtime operation lock.
-- Q-010 selects system libvirt for one Windows guest, fixes its persistent data
-  root and preservation boundary, and defines its runtime and purge lifecycle.
+  low-space refusal, manual restore drill, and user runtime operation lock. On
+  2026-09-02 the snapshot mechanism became Snapper; the requirements stand.
+- Q-010 defined one Windows guest with a fixed data root, preservation
+  boundary, and purge lifecycle. On 2026-09-02 the backend became the
+  `dockurr/windows` container below `/var/lib/nimbus/windows/`.
+- On 2026-09-02 the Chezmoi handoff gained `managed_by_nimbus`, the `windows-vm`
+  profile joined the vocabulary, and the dotfiles repository was reconciled to
+  the handoff (D-007), removing its machine manifests and symlink selector.
 - No Go implementation exists yet.
 - The Fedora 44 package-query tool is development evidence only and does not
   define desired state.
@@ -107,9 +114,8 @@ Open gates: none.
 ## Blockers and residual risk
 
 - No unresolved decision blocks the configuration-resolver implementation.
-- The dotfiles repository still contains obsolete Nimbus machine manifests and
-  an older profile handoff contract. Reconcile it before implementing the
-  bootstrap phase; it does not block an isolated resolver.
+- DECISIONS.md still records the pre-2026-09-02 mechanism for Q-009 and Q-010
+  and the open state of D-007; amendment entries are pending.
 - Exact DNF5 constraint and desktop-session update behavior remains deliberately
   outside this phase.
 

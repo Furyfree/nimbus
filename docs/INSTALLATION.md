@@ -30,12 +30,12 @@ Use the official Fedora 44 Everything/netinstall image and custom partitioning.
 
 Select only:
 
-```text
+~~~text
 Custom Operating System
 Standard
 Common NetworkManager Submodules
 Guest Agents                 # disposable test VM only
-```
+~~~
 
 Do not select a desktop environment, development tools, containers, Hyprland,
 Noctalia, or desktop applications. Nimbus installs the selected workstation
@@ -53,13 +53,13 @@ post-install work.
 
 Confirm the exact target disk before changing partitions. Use:
 
-```text
+~~~text
 UEFI/GPT disk
 |- 1 GiB       FAT32   /boot/efi
 |- 2 GiB       ext4    /boot
 `- remaining  LUKS2
    `- Btrfs filesystem labeled "fedora"
-```
+~~~
 
 `/boot/efi` and `/boot` remain unencrypted. The remaining partition is the
 LUKS2 container; Btrfs is created inside it. Verify that encryption is LUKS2
@@ -75,15 +75,16 @@ Create these Btrfs subvolumes without `@` prefixes:
 - `swapfile` -> `/var/swap`: excluded and reserved for later hibernation work.
 - `flatpak` -> `/var/lib/flatpak`: snapshotted only when system Flatpaks
   change.
-- `libvirt` -> `/var/lib/libvirt/images`: excluded; VM disks need VM-aware
-  backup.
+- `windows` -> `/var/lib/nimbus/windows`: excluded; the Windows guest disk
+  needs VM-aware backup.
 - `docker` -> `/var/lib/docker`: excluded; container data needs its own backup.
 - `containerd` -> `/var/lib/containerd`: excluded; container data needs its own
   backup.
 
 Do not create a separate `/var` subvolume. Ordinary `/var` state, including
-`/var/lib/nimbus`, must remain in `root`. Do not create
-`/var/lib/containers`; this system uses Docker rather than rootful Podman.
+Nimbus state in `/var/lib/nimbus`, must remain in `root`; only its `windows`
+subdirectory is a mountpoint. Do not create `/var/lib/containers`; this system
+uses Docker rather than rootful Podman.
 
 Keep Fedora zram enabled. Create the `swapfile` subvolume and mountpoint during
 installation, but do not configure disk-backed swap or hibernation as part of
@@ -107,20 +108,20 @@ Check:
 
 Sign in as the normal user and inspect the installed layout before bootstrap:
 
-```sh
+~~~sh
 lsblk -f
 findmnt -t btrfs,ext4,vfat
 sudo btrfs subvolume list /
-```
+~~~
 
 Confirm that networking and `sudo` work. Do not manually install the desktop or
 duplicate resources that Nimbus will own.
 
 When Nimbus bootstrap is implemented, continue with:
 
-```sh
+~~~sh
 curl -fsSL https://raw.githubusercontent.com/Furyfree/nimbus/main/install.sh | bash
-```
+~~~
 
 That script obtains Git when necessary, clones or validates the Nimbus checkout,
 installs the Nimbus engine through the approved COPR, and enters the reviewed

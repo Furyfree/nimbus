@@ -115,7 +115,7 @@ Example:
 
 ~~~toml
 schema = 1
-checkout = "/home/pby/.local/share/nimbus"
+checkout = "/home/user/.local/share/nimbus"
 machine = "desktop"
 origin = "github.com/Furyfree/nimbus"
 ~~~
@@ -156,11 +156,11 @@ profiles = [
   "development",
   "gaming",
   "hyprland-noctalia",
+  "windows-vm",
 ]
 
 components = [
   "nvidia",
-  "windows-vm",
 ]
 
 packages = [
@@ -186,6 +186,12 @@ The initial profile vocabulary is:
 - development
 - gaming
 - hyprland-noctalia
+- windows-vm
+
+The `windows-vm` profile selects the `windows-vm` component; it is a profile
+rather than a bare component so the Chezmoi handoff can see it. It is not
+named `windows` because the dotfiles repository derives a `windows` platform
+profile from the operating system.
 
 Profiles select components and never import other profiles. Components may
 require other components and contribute packages, repositories, services,
@@ -348,6 +354,7 @@ Nimbus owns:
 - inspection, plans, apply, verification, removal, state, and receipts
 - installation of system tools including Git, Chezmoi, Mise, and 1Password
 - the explicit first Chezmoi initialization
+- the Windows guest data root and its protected credentials file
 - typed manual workflows and Nimbus runtime commands
 
 Chezmoi owns:
@@ -382,9 +389,11 @@ Desired configuration never comes from state or receipts. Observed state never
 becomes desired merely because it exists. Applied state records only verified
 Nimbus operations and never replaces current inspection.
 
-State under /var/lib/nimbus is versioned, contains no secrets, and is written
-atomically through a narrow operation-scoped privileged action. A receipt
-records at least:
+Nimbus state and receipts below /var/lib/nimbus are versioned, contain no
+secrets, and are written atomically through a narrow operation-scoped
+privileged action. The Windows guest data root mounted at
+`/var/lib/nimbus/windows` is a separate subvolume holding guest data, not
+Nimbus state. A receipt records at least:
 
 - state and engine versions
 - definition origin, commit, dirty state, and digest
@@ -605,13 +614,30 @@ resolves conflicts.
 
 Nimbus passes only the context needed by user-file templates:
 
-- machine ID
-- ordered selected profile IDs
+- `machine`: the selected machine ID
+- `managed_by_nimbus`: `true`
+- `profiles`: the ordered selected profile IDs
 
-The transport uses supported Chezmoi initialization arguments and never edits
-Chezmoi internal state directly. Direct Chezmoi initialization prompts for the
-same information when Nimbus is absent. Hardware facts and secrets do not cross
-the handoff.
+The transport uses Chezmoi's prompt flags, whose keys are the template's prompt
+texts:
+
+~~~sh
+chezmoi init \
+  --promptString Machine=<machine id> \
+  --promptBool ManagedByNimbus=true \
+  --promptMultichoice 'Profiles=<id>/<id>/...' \
+  <dotfiles repository>
+~~~
+
+Nimbus never edits Chezmoi internal state directly. The dotfiles repository is
+cross-platform and standalone: direct Chezmoi initialization prompts for the
+machine name and profiles, sets `managed_by_nimbus` to `false`, and works on
+Linux, macOS, and Windows without Nimbus. Templates gate on
+`managed_by_nimbus` only for targets that call Nimbus, such as the desktop
+entry for `nimbus windows connect`. Hyprland and Noctalia configuration is
+selected by profile and never implies Nimbus. Hardware facts and secrets do not
+cross the handoff. The handoff keys are documented in the dotfiles repository's
+`PROFILES.md`.
 
 When the development profile is selected, the Chezmoi source includes a
 `run_onchange_after_install-mise-runtimes.sh.tmpl` action. It runs as the normal
@@ -687,48 +713,67 @@ resources rather than post-install actions.
 
 ### Windows guest
 
-The optional `windows-vm` component uses QEMU/KVM through the system libvirt
-connection `qemu:///system`. Apply installs and configures the reviewed host
-packages and resources. Nimbus owns one stable domain definition and the host
-integration it declares; it does not wrap Quickemu or Dockur and does not
-manage arbitrary VMs.
+The `windows-vm` component, selected by the `windows-vm` profile, runs one
+Windows guest through the `dockurr/windows` container on Docker with KVM. Apply
+installs the reviewed host packages (Docker, FreeRDP, KVM support), the
+container image pinned by digest, and a root-owned Compose definition. Nimbus
+does not wrap libvirt or Quickemu and does not manage arbitrary VMs or
+containers.
 
 Persistent guest data is contained below:
 
 ~~~text
-/var/lib/libvirt/images/nimbus/windows/
+/var/lib/nimbus/windows/
+  compose.yaml       root-owned, rendered from desired state
+  credentials.env    owned by the normal user, mode 0600
+  storage/           bind-mounted into the container as /storage
 ~~~
 
-The directory resides on the separate `libvirt` Btrfs subvolume. Nimbus records
-its resource and provider ownership but uses libvirt's verified native access
-identity rather than guessing or recursively replacing ownership. Every path
-operation rejects traversal, symlinks, unexpected file types, foreign content,
-and references from another libvirt domain.
+The directory is the mountpoint of the separate `windows` Btrfs subvolume, so
+guest data never enters a recovery point. The Compose definition declares the
+`/dev/kvm` and `/dev/net/tun` devices, the `NET_ADMIN` capability, the
+`storage/` bind mount, `env_file: credentials.env`, and ports 8006 (web
+installer and recovery console) and 3389 (RDP) bound to `127.0.0.1` only.
+Windows version, RAM, CPU, and disk size are typed desired data in the
+definitions, not prompts. Every path operation rejects traversal, symlinks,
+unexpected file types, and foreign content.
+
+`credentials.env` holds only the guest `USERNAME` and `PASSWORD`. It is
+created by `windows setup`, is never tracked, rendered into the checkout, shown
+in a plan or diff, logged, or recorded in state or receipts, and is deleted
+only by `purge-data`. `status` reports its presence, owner, and mode and never
+its content.
 
 The public lifecycle is:
 
 ~~~text
-nimbus windows status
 nimbus windows setup
+nimbus windows status
 nimbus windows start
-nimbus windows connect
+nimbus windows connect [--keep-alive]
 nimbus windows stop
 nimbus windows purge-data
 ~~~
 
-`status` is read-only and reports component, host, domain, storage, and guest
-reachability. `setup` is the reviewed interactive guest-install workflow and is
-available only after the component is applied. Start and stop use the owned
-libvirt domain; connect opens the configured local console or RDP client without
-changing desired state. Normal component removal stops and undefines the domain
-and removes only safe owned host integration while preserving guest data.
+`setup` is available only after the component is applied. It prompts for the
+guest credentials, writes `credentials.env`, starts the container for the
+unattended Windows installation, and directs the user to the web console for
+anything the unattended path cannot finish. `status` is read-only and reports
+component, host, container, storage, credentials-file, and RDP and web-port
+state. `start` and `stop` run Compose on the root-owned definition through sudo.
+`connect` starts the guest when needed, waits for the container to report
+Windows as started, opens FreeRDP against `127.0.0.1:3389` with the stored
+credentials, and stops the guest when the session closes unless `--keep-alive`
+is set. Runtime commands never install a missing component.
 
-`purge-data` requires the component to be removed or an otherwise explicit
-purge context, a stopped and unreferenced guest, an exact resolved path below
-the fixed root, and a second confirmation. It deletes only guest data Nimbus can
-prove it owns. The domain definition can be recreated from desired state, but
-guest disks are excluded from Nimbus recovery points and require a separate
-VM-aware backup. Purge has no Nimbus rollback.
+Normal component removal stops and removes the container and the safe owned
+host integration while preserving `/var/lib/nimbus/windows/`. `purge-data`
+requires the component to be removed or an otherwise explicit purge context, a
+stopped guest, an exact resolved path below the fixed root, proof that Nimbus
+owns the data, and a second confirmation. It deletes only that data, including
+the credentials file. The container and Compose definition can be recreated
+from desired state, but the guest disk is excluded from Nimbus recovery points
+and requires a separate VM-aware backup. Purge has no Nimbus rollback.
 
 ### Desktop launch helpers
 
@@ -806,7 +851,7 @@ UEFI/GPT
       |- cache        /var/cache
       |- swapfile     /var/swap
       |- flatpak      /var/lib/flatpak
-      |- libvirt      /var/lib/libvirt/images
+      |- windows      /var/lib/nimbus/windows
       |- docker       /var/lib/docker
       `- containerd   /var/lib/containerd
 ~~~
@@ -816,36 +861,47 @@ creates, converts, repartitions, or encrypts it on a mounted live system. A
 different layout remains usable for operations that need no recovery point, but
 blocks every operation whose provider requires one.
 
-Immediately before such a mutation, Nimbus creates
-`/.snapshots/nimbus/<id>/` as `root:root` recovery state with mode `0700`;
-non-subvolume files within it use mode `0600`. It contains:
+Snapshots are created and deleted through Snapper, never through direct
+`btrfs subvolume` commands. Nimbus declares the Snapper configurations for the
+`root` and `flatpak` subvolumes as system resources with timeline snapshots and
+background cleanup disabled, so only Nimbus creates and retires recovery
+snapshots. Immediately before such a mutation, Nimbus creates a recovery point
+consisting of:
 
-- a read-only snapshot of `root`
-- a read-only `flatpak` snapshot only when system Flatpaks will change
+- a read-only Snapper pre snapshot of `root`, paired with a post snapshot after
+  the operation
+- the same pair for `flatpak` only when system Flatpaks will change
 - `/boot` and `/boot/efi` archives only for a kernel, initramfs, bootloader,
   NVIDIA boot-integration, or EFI change
-- a manifest with the included items, source subvolume and filesystem UUIDs,
-  checksums, operation and plan digests, and completion state
+- a manifest with the Snapper snapshot numbers, source subvolume and
+  filesystem UUIDs, archive checksums, operation and plan digests, and
+  completion state
 - a standalone restore guide containing the discovered device-independent
   mount and restore inputs
 
-Btrfs snapshots are not recursive or one atomic multi-subvolume operation.
-Nimbus verifies every requested item before marking the point complete; a
-partial point never authorizes the mutation. A partial point created by the
-current attempt is removed as one proven-owned unit before any mutation; failed
-cleanup blocks the operation and preserves it for inspection. The `root`
-snapshot includes `/var/lib/nimbus`, while `home`, `log`, `cache`, `swapfile`,
-`libvirt`, `docker`, and `containerd` are excluded. Home and guest or container
-data require their own backup lifecycles. A recovery point is local same-disk
-state and is never described as a backup.
+Archives, manifest, and guide live in `/.snapshots/nimbus/<id>/` as
+`root:root` state with mode `0700`; files within it use mode `0600`. Snapshot
+descriptions and userdata carry the Nimbus operation ID so Snapper's own
+listing identifies them.
+
+Nimbus verifies every requested item through Snapper metadata and its own
+checksums before marking the point complete; a partial point never authorizes
+the mutation. A partial point created by the current attempt is removed through
+Snapper as one proven-owned unit before any mutation; failed cleanup blocks the
+operation and preserves it for inspection. The `root` snapshot includes Nimbus
+state below `/var/lib/nimbus`, while `home`, `log`, `cache`, `swapfile`,
+`windows`, `docker`, and `containerd` are separate subvolumes and are excluded.
+Home and guest or container data require their own backup lifecycles. A
+recovery point is local same-disk state and is never described as a backup.
 
 Nimbus retains the newest three complete recovery points. A point tied to an
-unresolved failed operation is protected and does not count as an eligible old
-point. Before creating another, Nimbus may delete only older complete eligible
-points, wait for Btrfs deletion to finish, and remeasure using Btrfs-aware usable
-space rather than `df` alone. If less than 20 GiB remains, Nimbus blocks before
-mutation. It never deletes home, VM, container, unknown, partial, or protected
-state to make room.
+unresolved failed operation is marked important in Snapper userdata, is
+protected, and does not count as an eligible old point. Before creating
+another, Nimbus may delete only older complete eligible points through Snapper,
+wait for Btrfs deletion to finish, and remeasure using Btrfs-aware usable space
+rather than `df` alone. If less than 20 GiB remains, Nimbus blocks before
+mutation. It never deletes home, VM, container, unknown, partial, protected, or
+non-Nimbus snapshots to make room.
 
 The initial restore procedure is manual and independent of a working Nimbus
 binary:
@@ -856,16 +912,18 @@ binary:
 3. Verify the selected recovery manifest, snapshot identity, and boot-archive
    checksums.
 4. Preserve the failed `root`, then create a writable `root` snapshot from the
-   selected read-only recovery snapshot.
+   selected read-only Snapper snapshot below `/.snapshots`.
 5. Restore the matching `/boot` and `/boot/efi` archives when the manifest
    contains them; leave every excluded subvolume, including `home`, untouched.
 6. Reboot, run doctor and status, and retain the failed root until the restored
    system is explicitly accepted.
 
-The generated guide records the exact discovered UUIDs and paths needed for
-these steps. Recovery-point creation remains disabled until this complete path,
-including boot archives, succeeds in a disposable Fedora VM. Nimbus provides no
-automatic rollback.
+`snapper rollback` assumes a different default-subvolume layout and is not the
+supported restore path. The generated guide records the exact discovered UUIDs,
+snapshot numbers, and paths needed for these steps. Recovery-point creation
+remains disabled until the Snapper fit check in [ROADMAP.md](ROADMAP.md) has
+passed and this complete path, including boot archives, succeeds in a
+disposable Fedora VM. Nimbus provides no automatic rollback.
 
 ## Security
 
@@ -878,6 +936,7 @@ automatic rollback.
 - Destructive operations name their exact target and require explicit approval.
 - Unknown ownership prevents automatic removal.
 - Guest management interfaces bind to loopback unless explicitly configured.
+- Guest credentials exist only in the protected credentials file.
 - Nimbus never disables Secure Boot.
 - Secure Boot key enrollment is explicit manual work with verification.
 - Nimbus never mutates live disk partitioning or root encryption.
@@ -903,10 +962,10 @@ nimbus files accept /etc/PATH
 nimbus managed
 nimbus unmanaged
 nimbus why RESOURCE
-nimbus windows status
 nimbus windows setup
+nimbus windows status
 nimbus windows start
-nimbus windows connect
+nimbus windows connect [--keep-alive]
 nimbus windows stop
 nimbus windows purge-data
 nimbus launch browser [URL] [--private]
