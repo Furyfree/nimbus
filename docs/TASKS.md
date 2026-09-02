@@ -84,6 +84,9 @@ Open gates: none.
   separates apply, pruning, upgrades, and package workflows, and later adds
   typed post-install, Windows, browser, and webapp commands without arbitrary
   script execution.
+- The system-file drift amendment assigns `nimbus files accept /etc/PATH` to
+  Phase 6 as a single proven-owned live-to-checkout content operation. Phase 1
+  models its source mapping but implements no reverse capture or mutation.
 - Q-006 selects the raw `install.sh` one-liner, a minimal Git/bootstrap handoff,
   a versioned checkout script with `/dev/tty`, direct DNF engine ownership, and
   user-owned checkout updates.

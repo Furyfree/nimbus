@@ -73,15 +73,16 @@ exceptions.
 The package-query container produces research evidence. Its results do not
 automatically become catalog entries or desired state.
 
-#### D-006: History must identify itself as superseded evidence
+#### D-006: Superseded evidence remains available through Git history
 
-Every file under history/ must state near its beginning that it is not an
-active contract. Archived wording may contradict the current design and must
-not be copied without revalidation against the active documents.
+The legacy `history/` tree was removed from the active checkout after the
+foundation documents were consolidated. Its last complete snapshot is commit
+`c0bb8a4660732e6e9556297da2c15ba0f286ee98`.
 
-History remains useful and is not deleted merely because it contains rejected
-designs. Dated filenames are required for new records; the undated 2026-08-31
-GLM record should be renamed consistently.
+Archived wording may contradict the current design. Inspect it from that commit
+without restoring it to the active tree, and never copy it without revalidation
+against the active documents. New accepted rationale belongs in this file;
+supporting research enters the active tree only when a current task needs it.
 
 #### D-007: The dotfiles reconciliation remains a bootstrap gate
 
@@ -182,6 +183,14 @@ migration. Every accepted change retains its full diff, atomic install,
 verification, receipt, removal behavior, and recovery contract. SPEC.md owns
 the normative system-file contract.
 
+Amended 2026-09-02. Intentional content drift in an already Nimbus-owned
+generic `/etc` file may be accepted back into its existing
+`system/root/etc` source through the narrow `files accept` workflow. It never
+captures foreign files, metadata, multiple targets, unreadable content, or
+other target roots. The reverse operation changes only the checkout; normal
+validation, plan, apply, verification, receipt, and user-owned Git steps remain
+separate.
+
 #### Q-005: Complete command semantics and phase ownership (resolved)
 
 Resolved 2026-09-02.
@@ -209,6 +218,13 @@ after approval. They reuse normal resolution, ownership, planning, and apply;
 Nimbus never commits the resulting Git change. Unmanaged packages are not
 removed through this shortcut. Top-level `managed`, `unmanaged`, and `why`
 remain provider-independent views for every resource type.
+
+Amended 2026-09-02 after the system-file drift review. `files accept
+/etc/PATH` provides one explicit live-to-checkout content operation for a
+selected, receipt-owned generic system file. The name states the direction and
+avoids a general `sync` command. Accidental drift still uses `apply`; accepted
+drift leaves an uncommitted checkout change and returns to validate, plan, and
+apply.
 
 Amended 2026-09-02 after Q-009 and Q-010. The later command surface also
 includes `postinstall` for the selected machine's typed pending work,
@@ -385,6 +401,7 @@ None.
 
 ### Consequences for the next documentation pass
 
-Q-002 through Q-010 are resolved. The next pass should perform the smaller
-history, README, package-query, and pull-request-template corrections before or
+Q-002 through Q-010 are resolved. The active documents are consolidated below
+`docs/`, and legacy history is retained only in the named Git snapshot. The
+remaining package-query and pull-request-template corrections may happen
 alongside the bounded Phase 1 Go implementation.
