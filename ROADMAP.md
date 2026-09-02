@@ -47,7 +47,7 @@ This phase freezes the smallest schema needed by later inspection and planning:
   task declarations, and runtime command declarations
 - source locations and selection provenance
 
-Before the schema is frozen, resolve Q-001 through Q-005 in DECISIONS.md.
+Before the schema is frozen, resolve Q-002 through Q-005 in DECISIONS.md.
 
 Definitions are read from the selected checkout. Live definitions are not
 embedded in the engine. The resolver accepts explicit checkout and machine
@@ -88,6 +88,8 @@ the code and definition change. It must not create ~/.config/nimbus or
 - valid and invalid graph fixtures
 - cycle, duplicate, missing reference, conflict, exclusion, and unknown-field
   cases
+- package-reference parsing, catalog non-shadowing, canonical identity,
+  lifecycle conflict, and constraint-attachment cases
 - symlink, traversal, and definition-digest fixtures
 - golden human and versioned JSON output
 - repeat resolution to prove stable ordering and digest

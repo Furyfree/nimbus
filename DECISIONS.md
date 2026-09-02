@@ -98,15 +98,24 @@ rewrite the stock Go gitignore, add a README license link, delete additional
 history, or make the local and raw package-query commands identical. Those
 items do not affect the product contract or the current phase gate.
 
+### Resolved questions
+
+#### Q-001: Package reference grammar and catalog precedence (resolved)
+
+Resolved 2026-09-02.
+
+Bare names always mean Fedora packages and canonicalize to `dnf:<name>`.
+Explicit `dnf:`, `flatpak:`, and `catalog:` forms are accepted. Catalog entries
+are selected only through `catalog:<id>` and never shadow bare names. Unknown or
+empty prefixes and invalid provider-native identifiers are errors.
+
+Canonical identity is the provider-qualified native package target. Duplicate
+selection paths merge provenance only when their technical lifecycle agrees;
+otherwise validation fails. Constraint keys use canonical provider-qualified
+identities and attach after selection resolution. SPEC.md owns the normative
+grammar.
+
 ### Open questions
-
-#### Q-001: Package reference grammar and catalog precedence
-
-Which provider-qualified forms are accepted, and how is a reference resolved
-when a bare name and a catalog ID overlap? The answer must define parsing,
-lookup precedence, canonical identity, and exact constraint attachment.
-
-Required before: configuration schema freeze.
 
 #### Q-002: Selector trust and checkout origin
 
@@ -186,7 +195,7 @@ Required before: Windows runtime commands.
 
 ### Consequences for the next documentation pass
 
-The next pass should resolve Q-001 through Q-005, expand the corresponding
+The next pass should resolve Q-002 through Q-005, expand the corresponding
 phase-independent contracts in SPEC.md, align ROADMAP.md exit criteria and
 TASKS.md with those answers, and then perform the smaller history, README,
 package-query, Phase 8, and pull-request-template corrections. Go implementation

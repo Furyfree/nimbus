@@ -3,7 +3,7 @@
 ## Current phase: Configuration resolver
 
 Plan: [Configuration resolver](ROADMAP.md#1-configuration-resolver).
-Open gates: [Q-001 through Q-005](DECISIONS.md#open-questions).
+Open gates: [Q-002 through Q-005](DECISIONS.md#open-questions).
 
 ### Foundation and entry points
 
@@ -21,9 +21,9 @@ Open gates: [Q-001 through Q-005](DECISIONS.md#open-questions).
 - [ ] Add tracked desktop and laptop machine manifests under machines/.
 - [ ] Add the initial common, development, gaming, and hyprland-noctalia
   profiles and only the components needed to exercise their real graph.
-- [ ] Add representative package references that exercise the bare default DNF
-  path and exceptional catalog-entry fixtures without implementing package
-  operations.
+- [ ] Add representative package references that exercise bare and explicit DNF,
+  direct system Flatpak, and explicit exceptional catalog paths without
+  implementing package operations.
 
 ### Loading, validation, and resolution
 
@@ -32,7 +32,9 @@ Open gates: [Q-001 through Q-005](DECISIONS.md#open-questions).
   and contents.
 - [ ] Reject symlinks, path escape, unsupported schemas, unknown fields,
   duplicate IDs, missing references, component cycles, conflicts, invalid
-  exclusions, and duplicate lifecycle ownership.
+  package references, invalid exclusions, and duplicate lifecycle ownership.
+- [ ] Test catalog non-shadowing, canonical package deduplication, lifecycle
+  conflicts, and constraint attachment to canonical provider identities.
 - [ ] Resolve profiles, explicit components, component requirements, packages,
   resources, manual tasks, and runtime command groups deterministically.
 - [ ] Preserve ordered profile IDs and selection provenance in the resolved
@@ -61,7 +63,7 @@ Open gates: [Q-001 through Q-005](DECISIONS.md#open-questions).
 
 ## Blockers and residual risk
 
-- Q-001 through Q-005 in DECISIONS.md must be resolved before the corresponding
+- Q-002 through Q-005 in DECISIONS.md must be resolved before the corresponding
   schemas and command contracts are frozen. They block implementation, not
   further documentation work.
 - The dotfiles repository still contains obsolete Nimbus machine manifests and
