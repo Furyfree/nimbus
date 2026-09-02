@@ -1,170 +1,142 @@
-# Repository instructions
-
-## Purpose
+# Nimbus
 
 Nimbus is a personal, opinionated Fedora workstation installer and system
-manager. This repository owns both its Go engine and the versioned definitions
-for the systems it manages.
+manager. It turns a supported Fedora base into the system its owner wants,
+keeps that system inspectable, and makes changes through reviewed plans rather
+than hidden automation.
 
-The first target is post-install Fedora 44 on x86_64. The separate dotfiles
-repository owns Chezmoi source state and user configuration.
+The repository contains the Go engine and the versioned definitions it uses.
+The first target is post-install Fedora 44 on x86_64. A separate dotfiles
+repository handles user configuration below the home directory.
+
+Nimbus is deliberately not a general-purpose configuration framework. Build
+the owner's workstation well before considering abstractions for hypothetical
+users, distributions, or providers.
+
+## What matters
+
+### 1. Simple, explicit systems
+
+Prefer the smallest model that makes correct behavior obvious. Do not preserve
+complexity merely because it already exists, and do not add layers, options, or
+extension points for imagined future needs.
+
+Configuration and code should say what the machine is meant to be. Avoid
+special cases hidden in control flow when the behavior belongs in typed data.
+
+### 2. Review before mutation
+
+A user must be able to understand what Nimbus observed, what it intends to
+change, why the change is needed, and what requires privilege before approving
+it. A mutation absent from the reviewed plan is a bug.
+
+Read-only work stays read-only. Do not add incidental writes, privilege
+escalation, network access, or native-tool mutation to validation, inspection,
+status, or planning paths.
+
+### 3. Native tools stay visible
+
+Use Fedora and established specialist tools through their supported interfaces.
+Nimbus coordinates and verifies them; it should not obscure their transactions
+or grow weak replacements for tools that already own a lifecycle.
+
+### 4. Recovery is part of the feature
+
+A stateful or destructive capability is incomplete until ownership,
+verification, removal, failure behavior, and recovery are defined and tested.
+Unknown ownership blocks deletion. Recovery claims require a real restore
+drill, not only a successful backup or snapshot command.
 
 ## Start with context
 
-- Read SPEC.md, DECISIONS.md, ROADMAP.md, TASKS.md, and this file before changing
-  architecture, scope, or implementation.
+- Read this file and the relevant active documents before planning or editing.
 - Inspect the current branch, base, upstream state, worktree, relevant files,
-  and existing validation before editing.
+  and existing validation.
 - Treat existing user changes as intentional and preserve unrelated work.
-- Keep one bounded outcome per change.
+- Trace affected flows and callers before changing behavior. Fix the root cause
+  at the narrowest correct layer.
 - Resolve uncertainty from repository evidence. Ask only when plausible choices
   materially change the result.
+- Keep one bounded outcome per change. Broad rewrites are a signal to recheck
+  scope before continuing.
 
-## Architecture
+## Sources of truth
 
-- Keep machines, profiles, components, catalog entries, system files, migrations,
-  and Go code in this repository.
-- Read live definitions from the selected Nimbus checkout. Do not embed live
-  personal definitions in the engine; embedding is allowed only for a future
-  example tree used to create a new checkout.
-- Keep the regular local selector at ~/.config/nimbus/config.toml. Nimbus owns
-  it; it is not a symlink or Chezmoi-managed file. It identifies the checkout,
-  reviewed origin, and machine without duplicating the machine manifest.
-- Allow the selected checkout root to be a symlink, resolve it to one canonical
-  directory before use, and reject symlinks or special files inside the
-  definition boundary.
-- Profiles select components. Components may require other components. Profiles
-  never import profiles.
-- Keep package-specific behavior in catalog data, never package-name branches in
-  Go. A bare Fedora package name uses the typed default DNF lifecycle; catalog
-  entries describe exceptions.
-- Restrict the generic system-file provider to regular files below /etc. Derive
-  each target from its source below system/root/etc; use native packages or a
-  separately specified typed resource for every other target root.
-- Resolve desired configuration without inspecting the current machine.
-- Keep desired, observed, and last-applied state separate.
-- Implement inspection and planning before mutation.
-- Keep resolution and fact collection as internal engine capabilities. The
-  public CLI exposes validate, status, plan, doctor, and focused ownership or
-  package workflows rather than raw engine debug commands.
-- Make package install and remove convenience commands update reviewed desired
-  configuration and reuse the same planner and apply path; never add a second
-  package lifecycle.
-- Keep install.sh as the minimal curl entry point. It may obtain Git and the
-  trusted checkout, then must hand control to the checkout's versioned
-  bootstrap script; neither script owns Chezmoi or normal system provisioning.
-- Delegate Fedora release upgrades permanently to native DNF5 tooling. Keep
-  `nimbus upgrade` within the installed release, report release compatibility,
-  and refuse system mutation on unsupported releases.
-- Keep post-install work typed and component-owned. Browser and webapp launchers
-  are narrow runtime helpers; they never become a generic command runner.
-- Support only the reviewed Btrfs recovery topology and system-libvirt Windows
-  guest. Preserve home and guest data outside Nimbus system recovery.
-- Prefer native system tools and established specialist tools over custom
-  replacements.
+- `SPEC.md` owns accepted product behavior, safety boundaries, and invariants.
+- `DECISIONS.md` records rationale and unresolved questions.
+- `ROADMAP.md` owns implementation order, phase gates, risks, recovery, and exit
+  criteria.
+- `TASKS.md` owns the current checklist, evidence, blockers, and residual risk.
+- `README.md` is the short user-facing entry point.
+- `history/` contains superseded evidence, not active requirements.
 
-## Ownership
+Do not duplicate the product contract in this file. When shared behavior
+changes, update `SPEC.md`, `ROADMAP.md`, and `TASKS.md` together while keeping
+their responsibilities distinct. Preserve useful historical material, but
+revalidate it against the active documents before reuse.
 
-- Nimbus owns packages, repositories, system services, system files, hardware
-  integration, boot policy, profiles, planning, applied state, receipts, and
-  recovery.
-- Chezmoi owns files and templates below the user's home directory except the
-  Nimbus local selector, plus its normal diff, apply, edit, and update
-  lifecycle.
-- Nimbus may install Chezmoi and perform one explicit first initialization. It
-  must not run normal Chezmoi apply or update operations or reimplement Chezmoi.
-- Mise owns runtimes declared in its Chezmoi-managed configuration. Nimbus may
-  install Mise and report missing runtimes, but it has no user-scope runtime
-  provider.
-- Chezmoi owns the development-profile-gated onchange action that invokes Mise
-  as the normal user with `MISE_SYSTEM_DEPS=warn`; Nimbus never invokes that
-  action or repairs missing user runtimes itself.
-- Nimbus owns machine manifests under machines/. The dotfiles repository must
-  not contain a second machine manifest, component graph, or package catalog.
-- Nimbus may read local Git metadata. Outside the explicit bootstrap and first
-  Chezmoi initialization, it never causes a clone or fetch. It never commits,
-  pulls, pushes, resets, stashes, or resolves Git conflicts.
+## Protect the workstation and user
 
-## Safety
+- Do not run bootstrap, installation, apply, package mutation, privileged
+  commands, or destructive integration tests on the live workstation unless
+  the user explicitly authorizes that exact action.
+- Never expose or commit credentials, tokens, keys, sessions, logs, caches,
+  private runtime state, or personal data.
+- Resolve destructive targets exactly. Reject ambiguous paths, foreign
+  ownership, traversal, symlink escape, and unproven removal behavior.
+- Never weaken trust, approval, signature, Secure Boot, sandbox, or permission
+  controls to make a task pass.
+- Do not edit live agent configuration, agent homes, authentication, or runtime
+  state unless the user explicitly asks for that exact system-level change.
+- Run destructive system tests only in disposable Fedora virtual machines.
 
-- Run Nimbus as the normal user; refuse the whole CLI when invoked as root.
-- Read-only system commands never invoke sudo or mutate the system.
-- Read-only plan commands never write files or state.
-- Show every privileged operation and system-file diff in the reviewed plan.
-- Use direct sudo for native commands. Narrow internal subcommands may only
-  install an approved atomic system-file payload or record approved root-owned
-  state; never add a general privileged executor, daemon, or sudo keepalive.
-- Validate system paths against traversal, symlink escape, and unsupported
-  targets.
-- Never store credentials, keys, tokens, sessions, private runtime state, or
-  secret values in configuration, plans, logs, state, or receipts.
-- Never guess removal commands or delete paths Nimbus cannot prove it owns.
-- Define verification and recovery before enabling a mutating resource.
-- Use the normal user's lock at `$XDG_RUNTIME_DIR/nimbus/operation.lock` for
-  every Nimbus mutation and hold it through verification and receipt recording.
-- Keep Windows guest data below `/var/lib/libvirt/images/nimbus/windows/`;
-  normal removal preserves it and only explicit double-confirmed purge may
-  delete proven owned data.
-- Never repartition or encrypt a mounted live system.
-- Never disable Secure Boot automatically.
+## Make controlled changes
 
-## Repository map
+- Follow existing code patterns, naming, schemas, and tests before introducing
+  a new pattern.
+- Prefer the standard library, platform capabilities, and dependencies already
+  declared by the project.
+- Keep schemas strict and versioned. Reject unknown or ambiguous input rather
+  than guessing intent.
+- Keep desired input, observed facts, and recorded results distinct in code and
+  tests.
+- Add context as errors propagate and render them once at the command boundary.
+- Test meaningful behavior and failure paths, not implementation-shaped
+  assertions that merely mirror the code.
+- Remove only orphans created by the current change. Leave unrelated cleanup
+  for its own bounded task.
+- Keep code, comments, and Markdown plain, direct, and proportional.
 
-- machines/ contains versioned machine manifests.
-- profiles/ contains user-facing composition bundles.
-- components/ contains reusable capabilities and their resources.
-- catalog/ contains package definitions with non-default behavior.
-- system/ contains Nimbus-owned system file sources, migrations, and triggers.
-- install.sh is the minimal remote bootstrap entry point; bootstrap is the
-  checkout-owned installer handoff.
-- cmd/ and internal/ contain the Go engine.
-- history/ contains superseded designs and dated research, never active
-  requirements or task status.
-- tools/ contains development-only helpers.
+## Verify honestly
 
-## Validation
+- Run focused checks while iterating and `just check` before handoff.
+- Once Go code exists, the complete local gate includes `gofmt`, `go vet ./...`,
+  `go test ./...`, and `git diff --check`.
+- Read complete errors and relevant logs before fixing their cause.
+- Inspect the final diff, staged diff when applicable, and untracked files.
+- Report the exact checks run, failures, skipped checks, and unavailable tools.
+- Do not claim that CI, review, deployment, recovery, or external state passed
+  without current evidence.
 
-Run focused tests while iterating and just check before handoff. Once Go code
-exists, the complete gate must run gofmt, go vet ./..., go test ./..., and
-git diff --check.
+## Git and delivery
 
-Run destructive integration tests only in disposable Fedora virtual machines.
-Test recovery before enabling the corresponding real mutation.
+- Local edits require a user request. Commit, push, pull-request creation or
+  update, merge, installation, deployment, privileged operations, and
+  infrastructure apply each require separate explicit authorization.
+- Use a task-named branch based on the current default branch unless the user
+  has authorized work on the existing branch.
+- Never discard user changes or use destructive Git operations to clear the
+  worktree.
+- Use conventional commit titles in plain language and keep one concern per
+  commit or pull request.
+- Never create or update a pull request, trigger hosted review, or merge unless
+  the user explicitly asks.
 
-Inspect the final diff and untracked files. Report exact commands, failures,
-skipped checks, and unavailable tools.
+## Taste
 
-## Documentation
-
-- SPEC.md owns the complete accepted system requirements and boundaries. It is
-  phase-independent.
-- DECISIONS.md records architectural rationale and unresolved questions without
-  replacing accepted contracts, phase order, or current work.
-- ROADMAP.md owns phase order, phase-specific decisions, risks, recovery,
-  validation, exit criteria, and the placement of decision gates.
-- TASKS.md owns current checkboxes, evidence, blockers, and residual risk.
-- README.md is the short user-facing entry point.
-- Supporting material and history must not become an alternative owner for
-  requirements, phase order, or current status.
-
-When a shared contract changes, update SPEC.md, ROADMAP.md, and TASKS.md
-together without mixing their responsibilities.
-
-## Authorization
-
-Local implementation and documentation edits require a user request. Commit,
-push, pull-request creation or update, merge, installation, deployment,
-privileged operations, and infrastructure apply each require separate explicit
-authorization.
-
-## Code review rules
-
-- Treat commands, paths, permissions, ownership, recovery, and documentation as
-  behavior that must match the implementation.
-- Reject a mutation absent from the reviewed plan or lacking ownership,
-  verification, and recovery.
-- Errors gain context as they propagate and render once at the command boundary.
-- Every receipt records the engine version, definition commit and tree digest,
-  plan digest, exact lifecycle, and verification result.
-- Report .rpmnew and .rpmsave files next to Nimbus-owned configuration; never
-  merge or delete them automatically.
+- Favor obvious behavior over clever machinery.
+- Fight scope creep and speculative generality.
+- Keep native commands, ownership, privilege, and recovery visible.
+- Make the safe path the easiest path to understand.
+- If these defaults conflict with the task or active contract, surface the
+  conflict and get the user's direction instead of quietly choosing a side.
