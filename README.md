@@ -19,23 +19,25 @@ management commands are implemented.
 This repository owns both the Go engine and the personal system definitions:
 
 ~~~text
+nimbus.toml     definition schema and engine compatibility metadata
 machines/       selected workstation compositions
 profiles/       user-facing system bundles
 components/     reusable system capabilities
 catalog/        package definitions with non-default lifecycle
 system/         Nimbus-owned system files and migrations
 cmd/, internal/ Go implementation
+install.sh      remote entry point; bootstrap is the checkout-owned handoff
 ~~~
 
 An installed Nimbus engine reads definitions from an explicitly selected
 checkout of this repository. Receipts identify both the engine version and the
 exact definition commit and tree digest.
 
-Under the accepted model, the separate dotfiles repository contains Chezmoi
-source state only. Nimbus may perform the explicit first Chezmoi initialization,
-but normal diff, apply, edit, and update operations remain direct Chezmoi
-commands. A follow-up change in that repository still needs to remove its old
-Nimbus machine manifests and align the handoff contract.
+The separate dotfiles repository contains Chezmoi source state only and works
+without Nimbus on every platform. Nimbus may perform the explicit first Chezmoi
+initialization, passing the machine ID, a managed-by-Nimbus flag, and the
+selected profiles; normal diff, apply, edit, and update operations remain
+direct Chezmoi commands.
 
 ## Project documents
 
