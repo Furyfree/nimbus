@@ -65,6 +65,7 @@ and Hypr-Screen-Mirror (hyprctl), Zed Provider (zed), GitHub Pull Requests
 - power-profiles-daemon and upower - power profiles and battery, used by
   Noctalia
 - fwupd - firmware updates
+- fprintd - fingerprint reader, used by Noctalia for unlock (laptop)
 - NVIDIA driver - akmod-nvidia, CUDA libs, libva-nvidia-driver (desktop)
 - akmods and mokutil - build and sign the NVIDIA module under Secure Boot
 - CUPS and Epson escpr, escpr2 - printing
@@ -178,7 +179,6 @@ and Hypr-Screen-Mirror (hyprctl), Zed Provider (zed), GitHub Pull Requests
 
 ## Maybe
 
-- fprintd - fingerprint unlock, supported by Noctalia (laptop)
 - KDE Connect - phone integration, tried before the Phone Connect plugin
 - thermald - Intel thermals (laptop)
 - pipewire-codec-aptx - Bluetooth audio codecs
