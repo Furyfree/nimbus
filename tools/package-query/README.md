@@ -1,7 +1,7 @@
 # Fedora package query
 
-This image queries Fedora 44, RPM Fusion Free, and RPM Fusion Nonfree package
-metadata without changing the host.
+This image queries Fedora 44, RPM Fusion Free, RPM Fusion Nonfree, and Terra
+package metadata without changing the host.
 
 ~~~sh
 just package-search ripgrep
