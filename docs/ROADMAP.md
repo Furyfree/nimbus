@@ -321,7 +321,12 @@ ownership boundaries.
 
 Extend the provider model from packages to services, system files, groups,
 system Flatpaks, repositories, triggers, greeter, portals, and the
-hyprland-noctalia system integration.
+hyprland-noctalia system integration. Deliver the narrow reverse-content
+workflow:
+
+~~~text
+nimbus files accept /etc/PATH
+~~~
 
 ### Context and decisions
 
@@ -329,6 +334,15 @@ Generic system file changes use sources below system/root/etc with targets
 derived below /etc, full diffs, and the narrow atomic file-install action. They
 refuse target-path symlinks, non-regular targets, and ownership that is foreign
 or unknown. Triggers are fixed argv and run at most once per apply.
+
+For a deliberate live edit, `files accept` works only on one selected generic
+system file whose receipt proves Nimbus ownership. It shows the reverse diff
+and exact checkout destination, requires approval, acquires the normal
+operation lock, rechecks all inputs, and atomically updates source content as
+the normal user. It never invokes sudo, changes the live target, captures
+target metadata, writes a receipt, or performs Git operations. The user then
+runs validate, plan, and apply so the matching target is verified and adopted
+under the new definition identity.
 
 The desktop component installs a separate system-owned Hyprland recovery
 session under /usr. It never writes a seed configuration into the user's home.
@@ -341,11 +355,21 @@ Service, greeter, portal, and compositor changes can prevent login. The recovery
 session and removal path must be proven before the normal session is managed.
 Report .rpmnew and .rpmsave files without modifying them.
 
+Reverse capture can accidentally preserve a bad manual edit or secret. Limit it
+to proven-owned, non-symlinked, user-readable files, show the entire reverse
+diff and source destination, repeat the no-secrets warning, and leave a normal
+recoverable Git working-tree change. Refusal or interruption before the atomic
+source replacement leaves both checkout and system unchanged.
+
 ### Validation and exit criteria
 
 Use focused provider fixtures and a clean Fedora graphical VM. Verify login,
 portal behavior, system-file restoration, component removal, and recovery
-session independence from Chezmoi.
+session independence from Chezmoi. Test accepted content drift, cancellation,
+changed-input refusal, atomic source replacement, subsequent adoption receipt,
+and rejection of foreign, unknown, unselected, unreadable, symlinked,
+non-regular, multiple, and non-`/etc` targets. Prove that accept uses no sudo,
+does not modify the live target or metadata, and leaves Git untouched.
 
 ## 7. Updates, constraints, and recovery points
 

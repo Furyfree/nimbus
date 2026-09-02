@@ -62,17 +62,23 @@ drill, not only a successful backup or snapshot command.
 
 ## Sources of truth
 
-- `SPEC.md` owns accepted product behavior, safety boundaries, and invariants.
-- `DECISIONS.md` records rationale and unresolved questions.
-- `ROADMAP.md` owns implementation order, phase gates, risks, recovery, and exit
-  criteria.
-- `TASKS.md` owns the current checklist, evidence, blockers, and residual risk.
+- `docs/SPEC.md` owns accepted product behavior, safety boundaries, and
+  invariants.
+- `docs/DECISIONS.md` records rationale and unresolved questions.
+- `docs/ROADMAP.md` owns implementation order, phase gates, risks, recovery,
+  and exit criteria.
+- `docs/TASKS.md` owns the current checklist, evidence, blockers, and residual
+  risk.
+- `docs/INSTALLATION.md` is the Fedora base-install operator guide.
 - `README.md` is the short user-facing entry point.
-- `history/` contains superseded evidence, not active requirements.
+- The removed `history/` tree contains superseded evidence, not active
+  requirements. Its last complete snapshot is commit
+  `c0bb8a4660732e6e9556297da2c15ba0f286ee98`.
 
 Do not duplicate the product contract in this file. When shared behavior
-changes, update `SPEC.md`, `ROADMAP.md`, and `TASKS.md` together while keeping
-their responsibilities distinct. Preserve useful historical material, but
+changes, update `docs/SPEC.md`, `docs/ROADMAP.md`, and `docs/TASKS.md` together
+while keeping their responsibilities distinct. Inspect removed historical
+material from the named commit without restoring it to the active tree, and
 revalidate it against the active documents before reuse.
 
 ## Protect the workstation and user

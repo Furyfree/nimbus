@@ -488,6 +488,28 @@ a symlink, whose type is not a regular file, or whose ownership belongs to
 another provider or cannot be established. Taking over such a target requires
 an explicit typed migration with its own preflight and recovery.
 
+For an intentional live edit to an already managed generic system file, the
+user may run `nimbus files accept /etc/PATH` to propose the reverse flow from
+the observed target into its existing source below `system/root/etc`. The
+command accepts exactly one absolute `/etc` target that is already selected as
+a generic system-file resource and whose current successful receipt proves
+Nimbus ownership. The target and every path component must pass the normal
+non-symlink and regular-file checks, and the normal user must be able to read
+the file without sudo. Foreign, unknown, unselected, unreadable, or non-`/etc`
+targets are refused.
+
+The command shows the reverse content diff and exact checkout source, reminds
+the user that system-file sources cannot contain secrets, and requires explicit
+approval. It then takes the normal operation lock, rechecks the checkout,
+target, ownership receipt, and proposed definition digest, and atomically
+updates only the source content. It preserves the source file's executable
+state and never changes the resource's declared target owner, group, mode,
+triggers, removal, or recovery metadata. It invokes no sudo, changes no live
+system file, writes no receipt, and performs no Git operation. The resulting
+checkout change remains uncommitted. The user runs validation and the normal
+plan and apply flow afterward; apply verifies and adopts the now-matching live
+file under the new definition identity before recording a receipt.
+
 The generic provider never targets `/usr`, `/boot`, `/var`, `/run`, `/tmp`,
 `/home`, `/root`, `/proc`, `/sys`, `/dev`, or any other root. Files below
 `/usr` are delivered by a native package or by a separately specified typed
@@ -877,6 +899,7 @@ nimbus postinstall
 nimbus packages install [QUERY]
 nimbus packages remove [QUERY]
 nimbus packages installed [QUERY]
+nimbus files accept /etc/PATH
 nimbus managed
 nimbus unmanaged
 nimbus why RESOURCE
@@ -932,6 +955,15 @@ remaining drift. The remove picker does not offer unmanaged packages; eligible
 unmanaged removal remains part of `apply --prune`. In a non-interactive context,
 a package command that still requires selection or approval fails rather than
 guessing.
+
+`nimbus files accept /etc/PATH` is the narrow reverse workflow for an
+intentional edit to an already Nimbus-owned generic system file. It shows the
+live-to-checkout diff and exact `system/root/etc` destination, requires
+approval, writes only the source content, and leaves the Git change for the
+user. It is not a general drift sync, does not accept multiple files, does not
+capture ownership or mode, and never changes or adopts foreign system state.
+Accidental drift continues to be repaired in the forward direction through
+`nimbus apply`.
 
 `nimbus doctor` performs read-only health checks for the capabilities available
 in the installed engine. Each failure already includes its observation, impact,

@@ -39,15 +39,18 @@ Nimbus machine manifests and align the handoff contract.
 
 ## Project documents
 
-- [SPEC.md](SPEC.md) defines the complete accepted system contract.
-- [DECISIONS.md](DECISIONS.md) records decision rationale and unresolved
+- [SPEC.md](docs/SPEC.md) defines the complete accepted system contract.
+- [DECISIONS.md](docs/DECISIONS.md) records decision rationale and unresolved
   questions.
-- [ROADMAP.md](ROADMAP.md) defines implementation phases and their order.
-- [TASKS.md](TASKS.md) tracks the current phase and its evidence.
+- [ROADMAP.md](docs/ROADMAP.md) defines implementation phases and their order.
+- [TASKS.md](docs/TASKS.md) tracks the current phase and its evidence.
 - [AGENTS.md](AGENTS.md) defines durable repository working rules.
+- [INSTALLATION.md](docs/INSTALLATION.md) is the concise Fedora 44 base-install
+  operator guide.
 
-Superseded designs and research records live under history/ and are not active
-contracts.
+Superseded designs and research records were removed from the active tree. Their
+last complete snapshot is commit
+`c0bb8a4660732e6e9556297da2c15ba0f286ee98`; they are not active contracts.
 
 ## Development
 
