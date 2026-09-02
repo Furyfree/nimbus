@@ -45,6 +45,7 @@ direct Chezmoi commands.
 - [DECISIONS.md](docs/DECISIONS.md) records decision rationale and unresolved
   questions.
 - [SECURITY.md](docs/SECURITY.md) is the workstation security policy.
+- [PACKAGES.md](docs/PACKAGES.md) lists what Nimbus installs, by application.
 - [ROADMAP.md](docs/ROADMAP.md) defines implementation phases and their order.
 - [TASKS.md](docs/TASKS.md) tracks the current phase and its evidence.
 - [AGENTS.md](AGENTS.md) defines durable repository working rules.

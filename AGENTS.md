@@ -95,6 +95,8 @@ drill, not only a successful backup or snapshot command.
 - `docs/TASKS.md` owns the current checklist, evidence, blockers, and residual
   risk.
 - `docs/INSTALLATION.md` is the Fedora base-install operator guide.
+- `docs/PACKAGES.md` lists what Nimbus installs, by application; it feeds the
+  definitions and shrinks as they land.
 - `README.md` is the short user-facing entry point.
 - The removed `history/` tree contains superseded evidence, not active
   requirements. Its last complete snapshot is commit
