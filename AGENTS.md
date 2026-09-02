@@ -13,6 +13,29 @@ Nimbus is deliberately not a general-purpose configuration framework. Build
 the owner's workstation well before considering abstractions for hypothetical
 users, distributions, or providers.
 
+## A small glossary
+
+- **checkout** is the selected clone of this repository that the installed
+  engine reads definitions from, normally `~/.local/share/nimbus`.
+- **selector** is `~/.config/nimbus/config.toml`: checkout path, machine ID,
+  and approved origin. It holds no desired state.
+- **machine manifest** is `machines/<id>.toml`: the profiles, components, and
+  extra packages one workstation selects.
+- **profile** is a user-facing system bundle that selects components. The
+  dotfiles repository reuses the same profile IDs for user configuration.
+- **component** is a reusable capability that owns resources and may require
+  other components.
+- **catalog entry** describes a package with a non-default lifecycle. Bare
+  names are Fedora packages and never need one.
+- **desired, observed, applied** are the three states: checkout definitions,
+  live system inspection, and receipts under `/var/lib/nimbus`.
+- **plan** is the complete reviewed set of operations. A mutation absent from
+  it is a bug.
+- **receipt** records one verified operation. A failed operation never gets a
+  successful receipt.
+- **recovery point** is a Snapper snapshot pair plus Nimbus boot archives and
+  manifest. It is same-disk state, not a backup.
+
 ## What matters
 
 ### 1. Simple, explicit systems
@@ -83,6 +106,25 @@ while keeping their responsibilities distinct. Inspect removed historical
 material from the named commit without restoring it to the active tree, and
 revalidate it against the active documents before reuse.
 
+## Neighbouring repositories
+
+- `~/git/dotfiles` is the Chezmoi source state. It owns everything below
+  `$HOME` except the selector, works without Nimbus on Linux, macOS, and
+  Windows, and gates only Nimbus-calling targets on `managed_by_nimbus`. Its
+  `PROFILES.md` owns the handoff prompt keys. Do not add a machine manifest,
+  package list, or component graph there.
+- `~/git/docs` is history and earlier Nimbus designs, not a source of truth.
+- `~/git/niriland` is a reference configuration. Never import it wholesale.
+
+## Research tools
+
+`just package-search QUERY` runs `dnf5 search` in a throwaway container with
+Fedora 44, RPM Fusion, and Terra enabled; `docker run --rm
+nimbus-fedora-packages repoquery ...` answers anything else. Nothing touches the
+host. Results are evidence for a decision, never desired state; accepted
+packages go into profiles, components, or a manifest, and only exceptional
+lifecycles into `catalog/`.
+
 ## Protect the workstation and user
 
 - Do not run bootstrap, installation, apply, package mutation, privileged
@@ -96,6 +138,9 @@ revalidate it against the active documents before reuse.
   controls to make a task pass.
 - Do not edit live agent configuration, agent homes, authentication, or runtime
   state unless the user explicitly asks for that exact system-level change.
+- This checkout lives on the owner's workstation. Tests, validation, and
+  fixtures never read or create `~/.config/nimbus` or `/var/lib/nimbus`; they
+  use temporary directories and explicit checkout and machine inputs.
 - Run destructive system tests only in disposable Fedora virtual machines.
 
 ## Make controlled changes
@@ -113,7 +158,9 @@ revalidate it against the active documents before reuse.
   assertions that merely mirror the code.
 - Remove only orphans created by the current change. Leave unrelated cleanup
   for its own bounded task.
-- Keep code, comments, and Markdown plain, direct, and proportional.
+- Keep code, comments, and Markdown plain, direct, and proportional. Markdown
+  wraps at 80 columns, uses ASCII punctuation and `~~~` fences, and passes the
+  markdownlint run inside `just check`.
 
 ## Verify honestly
 
