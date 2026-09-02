@@ -1,34 +1,61 @@
 # Nimbus
 
-Nimbus is a Linux workstation installer and system manager.
+Nimbus is a personal, opinionated Fedora workstation installer and system
+manager written in Go.
 
-It owns packages, repositories, services, hardware integration, boot policy,
-system configuration, and the explicit bootstrap of a Chezmoi dotfiles
-repository. Chezmoi owns selected user configuration and remains usable
-without Nimbus.
+It turns an installed Fedora system into the workstation defined by this
+repository, detects drift in the resources it owns, shows a complete plan, and
+applies only reviewed operations. Chezmoi remains the separate owner of user
+configuration below the home directory.
 
-The first target is post-install Fedora setup. A bootable Fedora image is later
-work and must reuse the same profiles and operations.
+The first target is Fedora 44 on x86_64. Nimbus does not initially install the
+operating system, repartition disks, or configure full-disk encryption.
 
-Nimbus is currently in the planning and repository-foundation stage. No install
-or system-management commands are implemented yet.
+Nimbus is currently in the planning and repository-foundation stage. No system
+management commands are implemented.
+
+## Repository model
+
+This repository owns both the Go engine and the personal system definitions:
+
+~~~text
+machines/       selected workstation compositions
+profiles/       user-facing system bundles
+components/     reusable system capabilities
+catalog/        package definitions with non-default lifecycle
+system/         Nimbus-owned system files and migrations
+cmd/, internal/ Go implementation
+~~~
+
+An installed Nimbus engine reads definitions from an explicitly selected
+checkout of this repository. Receipts identify both the engine version and the
+exact definition commit and tree digest.
+
+Under the accepted model, the separate dotfiles repository contains Chezmoi
+source state only. Nimbus may perform the explicit first Chezmoi initialization,
+but normal diff, apply, edit, and update operations remain direct Chezmoi
+commands. A follow-up change in that repository still needs to remove its old
+Nimbus machine manifests and align the handoff contract.
 
 ## Project documents
 
-- [SPEC.md](SPEC.md): accepted scope and boundaries
-- [CLI.md](CLI.md): commands and fresh-install and reinstall flows
-- [ROADMAP.md](ROADMAP.md): implementation order
-- [TASKS.md](TASKS.md): current work
-- [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md): decisions not yet accepted
-- [AGENTS.md](AGENTS.md): repository working rules
+- [SPEC.md](SPEC.md) defines the complete accepted system contract.
+- [DECISIONS.md](DECISIONS.md) records decision rationale and unresolved
+  questions.
+- [ROADMAP.md](ROADMAP.md) defines implementation phases and their order.
+- [TASKS.md](TASKS.md) tracks the current phase and its evidence.
+- [AGENTS.md](AGENTS.md) defines durable repository working rules.
 
-## Fedora package queries
+Superseded designs and research records live under history/ and are not active
+contracts.
 
-Search Fedora 44 and RPM Fusion packages without changing the host:
+## Development
 
-```sh
-just package-search ripgrep
-```
+The local gate is:
 
-See [tools/package-query/README.md](tools/package-query/README.md) for direct
-DNF5 queries.
+~~~sh
+just check
+~~~
+
+Today it runs git diff --check. It will also run formatting, vetting, and tests
+after Go code exists.
