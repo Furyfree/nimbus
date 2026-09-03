@@ -616,8 +616,9 @@ the digest changed before execution.
 
 Planning never invokes sudo, accesses the network, writes files, or changes
 Nimbus state. DNF transactions are previewed from the local metadata cache,
-so plan and apply read the same package lists. `plan --refresh` runs
-`dnf5 makecache` first as the one explicit network step. Upgrade
+so plan and apply read the same package lists. `nimbus refresh` is the one
+explicit network step among the read-only commands: it runs `dnf5 makecache`
+as the user and changes nothing but that cache. Upgrade
 information uses locally available native metadata and reports when its
 freshness or availability is insufficient. A plan with a blocked operation,
 such as a package whose repository is not enabled yet, is incomplete and
@@ -1236,7 +1237,8 @@ nimbus
 nimbus init
 nimbus validate
 nimbus status
-nimbus plan
+nimbus plan [--prune]
+nimbus refresh
 nimbus apply [--prune]
 nimbus upgrade
 nimbus postinstall
@@ -1277,7 +1279,8 @@ error with its source location, and performs no system inspection. It accepts a
 checkout override but no machine override because validation is checkout-wide.
 
 `nimbus status` is the concise desired, observed, and last-applied overview.
-`nimbus plan` is its complete non-mutating explanation. `nimbus managed` lists
+`nimbus plan` is its complete non-mutating explanation, and `nimbus refresh`
+refreshes the DNF metadata cache both read. `nimbus managed` lists
 resources Nimbus owns or has explicitly adopted; `nimbus unmanaged` lists only
 supported resources Nimbus can identify but does not own, not arbitrary user
 data. `nimbus why RESOURCE` reports every desired, dependency, adoption, and

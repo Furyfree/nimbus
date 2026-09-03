@@ -95,3 +95,19 @@ func TestMachineOverridesWithoutSelector(t *testing.T) {
 		t.Fatalf("unknown machine: %d %q", code, errOut)
 	}
 }
+
+func TestRefreshRunsMakecacheOnly(t *testing.T) {
+	src := fixtureSource(t, "")
+	src.Commands[facts.Key("dnf5", "makecache")] = []byte("Metadata cache created.\n")
+	withSource(t, src)
+	if code, out, _ := run(t, "refresh"); code != ExitOK || !strings.Contains(out, "dnf5 makecache") {
+		t.Fatalf("refresh: %d %q", code, out)
+	}
+	src.Failures[facts.Key("dnf5", "makecache")] = "no network"
+	if code, _, errOut := run(t, "refresh"); code != ExitFailure || !strings.Contains(errOut, "no network") {
+		t.Fatalf("failed refresh: %d %q", code, errOut)
+	}
+	if code, _, errOut := run(t, "plan", "--refresh"); code != ExitUsage || !strings.Contains(errOut, "refresh") {
+		t.Fatalf("plan must not accept --refresh: %d %q", code, errOut)
+	}
+}

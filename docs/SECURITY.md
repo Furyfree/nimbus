@@ -171,7 +171,7 @@ Rules:
 - Nimbus itself makes no network calls except through DNF, Flatpak, digest-
   pinned container image pulls, the user-scope maker channels named above,
   the one clone of the approved origin by `install.sh`, the explicit
-  `plan --refresh` metadata step, and the one explicit Chezmoi
+  `nimbus refresh` metadata step, and the one explicit Chezmoi
   initialization.
 
 ## Privilege

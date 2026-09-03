@@ -620,7 +620,7 @@ func (b *builder) updates() Updates {
 		return Updates{Available: []Upgrade{}, Unavailable: perr.Error()}
 	}
 	if len(ups) == 0 && err != nil && !strings.Contains(string(out), "Repositories loaded") {
-		return Updates{Available: []Upgrade{}, Unavailable: "update information unavailable: " + err.Error() + "; run dnf5 makecache or nimbus plan --refresh"}
+		return Updates{Available: []Upgrade{}, Unavailable: "update information unavailable: " + err.Error() + "; run nimbus refresh"}
 	}
 	if ups == nil {
 		ups = []Upgrade{}
