@@ -20,66 +20,74 @@ attackers with root on the running system.
 
 ## Software sources
 
-Every executable on the system has exactly one provider. Prefer the maker's own
-channel over a repackage, and a signed repository over a script. In order:
+Every executable on the system has exactly one provider. The order of
+preference is fixed and the same for every package:
 
-| Tier | Source | Scope | How it enters |
-| --- | --- | --- | --- |
-| 1 | Fedora repositories | system | bare package name |
-| 2 | Maker repository, COPR, or Flatpak | system | catalog entry; key pinned |
-| 3 | Maker's installer script | user | manual task; never a resource |
-| 4 | RPM Fusion, Terra, community builds | system | catalog entry; key pinned |
-| 5 | Pinned external artifact | system | catalog entry; URL and SHA-256 |
-| 6 | Container image | system | digest pinned in the component |
+1. Fedora repositories, written as a bare package name.
+2. The maker's own channel: a signed repository or COPR at system scope, or
+   an installer script, Cargo crate, or Mise runtime at user scope.
+3. Flathub, for a GUI application that needs no host integration.
+4. Terra, RPM Fusion, or a community COPR, when nothing above offers the
+   package.
+5. A COPR the owner builds, when nothing offers the package at all: GitHub
+   Desktop, WoWUp, and the Nimbus engine itself.
 
-Tier 4 covers community Flathub builds and third-party COPRs as well.
+Container images pinned by digest are the one remaining case; the Windows
+guest is the only one. Every repository, including the owner's COPRs and the
+Flathub remote, is declared in `nimbus.toml` with its signing key pinned, and
+every package reference names its repository as a prefix. `--nogpgcheck`
+never appears in a plan.
 
 Rules:
 
-- Pick the highest acceptable tier the maker supports. 1Password comes from
-  AgileBits' repository, not the Terra repackage. Mise is the narrow exception:
-  its maker recommends the optimized `mise.run` binary over system packages,
-  and the installer writes only `~/.local/bin/mise`, so it remains user scope.
-- Tier 3 exists for maker scripts whose complete mutation boundary is below the
-  user's home. Zed installs to `~/.local/zed.app`; Mise installs to
-  `~/.local/bin/mise`. Such tools are user scope: the user runs the script, the
-  tool owns its updates, Chezmoi owns its configuration, and Nimbus lists it as
-  a typed manual task with a presence check. Nimbus and root never run a
-  maker's script, and the script never touches the system layer. Nimbus's own
-  `install.sh` is the one script run as bootstrap, trusted once from the
-  approved `main` branch and never used for updates.
-- A tier 3 tool that gains a maker repository or Flatpak moves up. A tier 4
-  package that the maker adopts moves up the same way.
-- A repository is enabled only through a catalog entry whose release package
-  or signing key is pinned. `--nogpgcheck` never appears in a plan.
-- Flatpaks are system scope and come from Flathub only. Per-application
-  permission overrides are user configuration and belong to Chezmoi.
-- Runtimes and tools installed through Mise, Cargo, npm, pipx, or Go run as the
-  user and are the user's responsibility. Nimbus reports missing runtimes and
-  never elevates for them.
-- Nix comes from Fedora's `nix` package, tier 1, with `nix-daemon.service`
-  as a system resource. The upstream multi-user installer is not accepted
-  while its documented Linux prerequisite is disabled SELinux. Chezmoi owns
-  `~/.config/nix`.
-- Tailscale comes from its maker-owned signed Fedora repository. Nimbus models
-  the repository, package, and service directly. The official `install.sh`
-  reaches the system layer through sudo and is therefore not a tier 3 manual
-  task; its Fedora result is available through the maker's documented direct
-  repository instructions without executing a mutable root script.
-- VM Curator has no Fedora or Terra package. The user installs it with
-  `cargo install vm-curator`, user scope like every Cargo tool. Nimbus owns its
-  `qemu-system-x86`, `qemu-img`, and `swtpm` dependencies as Fedora packages;
-  `qemu-system-x86` supplies the graphical display backends, OVMF, and `passt`.
-  Nimbus also installs `virt-viewer` when SPICE display and clipboard
-  integration is selected. Guest disks live below `~/vm-space` on the `home`
-  subvolume, outside Nimbus. How the Rust toolchain itself is installed is not
-  decided yet.
+- The earlier source wins where two carry the same name. Fedora provides
+  Chezmoi, Noctalia, Just, Tailscale, and Nix; RPM Fusion provides Steam. A
+  later repository is declared with a lower DNF priority so it cannot shadow
+  an earlier one, and planning refuses a package that DNF would take from a
+  repository other than the one its prefix names.
+- Maker repositories in use: Docker, 1Password, Brave for `brave-origin`,
+  VSCodium, and OpenAI's ChatGPT repository. The ChatGPT RPM's own
+  post-install script would add that repository; Nimbus declares it directly
+  and installs `chatgpt` from it so DNF owns the updates.
+- User-scope maker channels are the Mise, Zed, and Herdr installer scripts,
+  `cargo install`, and `mise install`. Nimbus runs them as the normal user,
+  never as root, as steps of the reviewed plan. A maker's script is fetched
+  from its documented URL and cannot be pinned to a version, so the plan
+  shows the URL and the digest of the fetched script. Mise installs Rust, so
+  Cargo steps follow the Mise runtime step. The maker owns later updates:
+  Mise's `auto_update = true`, Zed's own updater, and Topgrade for Herdr,
+  Cargo, and Mise runtimes.
+- Cargo counts as the maker's channel, so Sheldon, VM Curator, Typst,
+  Tinymist, Caligula, `cargo-update`, and Yazi's `resvg` helper stay on
+  Cargo although Terra packages some of them. Topgrade is the one deliberate
+  exception: Nimbus installs Terra's `topgrade` so the tool that drives the
+  user-scope update phase is not replaced by that phase.
+- Flatpaks are system scope and come from Flathub only: Spotify and Obsidian.
+  ProtonPlus, Heroic, Vesktop, gpu-screen-recorder, and Prism Launcher stay
+  native RPMs from Terra because they integrate with Steam, Wine, Noctalia,
+  or system Java. Per-application permission overrides are user
+  configuration and belong to Chezmoi.
+- Nix comes from Fedora's `nix` and `nix-daemon` packages with
+  `nix-daemon.service` as a system resource. The upstream multi-user
+  installer is not accepted while its documented Linux prerequisite is
+  disabled SELinux. Chezmoi owns `~/.config/nix`.
+- Tailscale comes from Fedora, which carries the current release. Its
+  official `install.sh` reaches the system layer through sudo and is not
+  used.
+- Starship comes from Terra because its maker script installs to
+  `/usr/local/bin` with sudo and has no self-update.
+- VM Curator is a Cargo crate that drives QEMU directly without libvirt.
+  Nimbus owns `qemu-system-x86`, `qemu-img`, `swtpm`, and `virt-viewer` as
+  Fedora packages; `qemu-system-x86` supplies the display backends, OVMF, and
+  `passt`, and `virt-viewer` gives SPICE clipboard sharing with a guest.
+  Guest disks live below `~/vm-space` on the `home` subvolume, outside
+  Nimbus.
 - AppImages and manually downloaded binaries are not managed and not trusted.
 - Container images are pinned by digest and never run privileged. The Windows
   guest needs `/dev/kvm`, `/dev/net/tun`, and `NET_ADMIN`, nothing more.
-- Docker comes from Docker's own Fedora repository, tier 2, as a catalog
-  entry pinning the signing key `060A 61C5 1B55 8A7F 742B 77AA C52F EB6B 621E
-  9F35`. The `docker` component, selected by `development` and required by
+- Docker comes from Docker's own Fedora repository, declared in `nimbus.toml`
+  with the signing key `060A 61C5 1B55 8A7F 742B 77AA C52F EB6B 621E 9F35`.
+  The `docker` component, selected by `development` and required by
   `windows-vm`, installs `docker-ce`, `docker-ce-cli`, `containerd.io`,
   `docker-buildx-plugin`, and `docker-compose-plugin`, enables
   `docker.service`, sets `"selinux-enabled": true` in `/etc/docker/daemon.json`
@@ -146,7 +154,8 @@ Rules:
 - `sshd` is not enabled unless a component declares it. When enabled, password
   authentication is off and keys come from the 1Password agent.
 - Nimbus itself makes no network calls except through DNF, Flatpak, digest-
-  pinned container image pulls, and the one explicit Chezmoi initialization.
+  pinned container image pulls, the user-scope maker channels named above,
+  and the one explicit Chezmoi initialization.
 
 ## Privilege
 
@@ -176,22 +185,24 @@ Rules:
 
 ## Updates
 
-- System-layer updates from every tier go through `nimbus upgrade` or direct
-  DNF and Flatpak; nothing in the system layer updates unattended.
+- System-layer updates from every source go through `nimbus upgrade` or
+  direct DNF and Flatpak; nothing in the system layer updates unattended.
 - `nimbus upgrade` is the primary entry point. Nimbus plans and applies exact
   DNF and Flatpak transactions itself, surrounded by its recovery point. It
-  then offers a separately approved Topgrade phase restricted to declared
-  user-scope managers. Topgrade's system, Flatpak, firmware, Nix, Chezmoi, Git
-  repository, and self-update steps stay disabled so it cannot bypass the
-  system plan or update source checkouts.
+  then offers a separately approved Topgrade phase for the user-scope
+  managers. Topgrade reads the user's own Chezmoi-owned configuration, and
+  Nimbus passes `--disable` for the system, Flatpak, firmware, Nix, Chezmoi,
+  Git-repository, and self-update steps on the command line so that phase
+  cannot bypass the system plan or update source checkouts. Direct `topgrade`
+  runs are the user's own, like direct DNF.
 - Topgrade dry-run shows commands, not the downstream package versions selected
   by each manager. The plan therefore labels the user phase as command-level
   review, never as an exact or recoverable transaction. The root and Flatpak
   snapshots do not cover home-directory tools.
-- Tier 3 user-scope tools may update themselves on the maker's schedule. Mise's
+- User-scope tools may update themselves on the maker's schedule. Mise's
   accepted global setting is `auto_update = true`; it replaces only the
-  user-owned Mise binary. This is accepted because it cannot reach the system
-  layer.
+  user-owned Mise binary. Zed updates itself the same way. This is accepted
+  because neither can reach the system layer.
 - Firmware updates go through `fwupd` as a reviewed manual task.
 - Fedora release upgrades are Fedora's native workflow, not Nimbus's.
 - The Nimbus engine updates through DNF like any other package.

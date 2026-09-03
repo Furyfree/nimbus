@@ -43,17 +43,18 @@ This phase freezes the smallest schema needed by later inspection and planning:
   compatibility metadata
 - the local selector at ~/.config/nimbus/config.toml, including the approved
   normalized checkout origin
-- machines, profiles, components, and exceptional catalog entries
+- machines, profiles, components, and the repositories declared in
+  nimbus.toml
 - component requirements and conflicts
 - packages, exclusions, exact version constraints, and only the resource or
   later-capability declarations retained after Q-013
 - source locations and selection provenance
 
 Q-002 through Q-005 resolve the foundational behavior. Q-013, Q-014, and Q-016
-gate the concrete schema boundary, catalog and repository representation, and
-the real definition inputs. Resolve them in SPEC.md and fixtures before
-freezing Go types or resolver behavior; they do not reopen the overall
-architecture or command surface.
+were resolved on 2026-09-03: explicit `common`, ordered profiles with every
+other list canonical, repositories declared once in nimbus.toml and named by
+prefix, and PACKAGES.md as the list of what Nimbus installs. The fixtures must
+exercise those rules before Go types are frozen.
 
 Definitions are read from the selected checkout. Live definitions are not
 embedded in the engine. `validate` accepts an explicit checkout override and
@@ -65,12 +66,13 @@ repository identity; a missing or different origin is an error. The comparison
 does not invoke Git or access the network.
 
 Machine manifests live under machines/ in this repository. A required manifest
-ID matches its filename. Profiles select components and never import profiles.
-Components may require components. A bare Fedora package name resolves to the
-default DNF lifecycle; catalog entries describe only exceptional behavior.
+ID matches its filename. Profiles list packages, select components, and never
+import profiles. Components may require components. A bare Fedora package name
+resolves to the default DNF lifecycle; any other prefix names a repository
+declared in nimbus.toml.
 
 The canonical SHA-256 definition digest covers `nimbus.toml` and every regular
-file below `machines/`, `profiles/`, `components/`, `catalog/`, and `system/`.
+file below `machines/`, `profiles/`, `components/`, and `system/`.
 It hashes byte-sorted relative paths, exact contents, and mode normalized to
 `100644` or `100755`; unrelated checkout paths and other permission bits are
 excluded. A symlinked checkout root is resolved before use. Symlinks, special
@@ -108,7 +110,7 @@ the code and definition change. It must not create ~/.config/nimbus or
 - valid and invalid graph fixtures
 - cycle, duplicate, missing reference, conflict, exclusion, and unknown-field
   cases
-- package-reference parsing, catalog non-shadowing, canonical identity,
+- package-reference parsing, undeclared-prefix rejection, canonical identity,
   lifecycle conflict, and constraint-attachment cases
 - equivalent, missing, invalid, and mismatched selector-origin cases using only
   local Git configuration
@@ -203,9 +205,9 @@ explicitly installed supported packages and labels desired, managed, unmanaged,
 dependency, exclusion, provenance, update, and prune state. Structured output
 returns the same data without requiring an interactive picker.
 
-The first catalog entries use low-risk official Fedora packages. RPM Fusion,
-Terra, and COPR enter only after repository trust, pinned release-package or
-key identity, and removal can be represented.
+The first planned packages are low-risk official Fedora packages. Declared
+repositories enter planning only after their pinned key or release-package
+identity, priority, and removal can be represented.
 
 ### Risks and recovery
 
@@ -288,14 +290,13 @@ handles Chezmoi. Chezmoi is an ordinary Nimbus-managed system package installed
 by the reviewed first apply. The engine remains directly DNF-owned and checkout
 updates remain direct user Git operations; Nimbus has no self-update path.
 
-Q-006 and Q-007 are resolved. For the development profile, Nimbus first
-presents the official Mise installer and `mise settings set auto_update true`
-as a user-run manual task and verifies the user-owned binary. Chezmoi then owns
-an onchange-after action that runs `mise install` as the normal user after its
-rendered Mise configuration changes. Nimbus installs selected system
-dependencies, while `MISE_SYSTEM_DEPS=warn` prevents the action from taking
-over privileged dependency installation. Nimbus only reports missing runtimes
-and the direct repair command.
+Q-006 and Q-007 are resolved. For the development profile, apply runs the
+official Mise installer and `mise settings set auto_update true` as the normal
+user before the handoff and verifies the user-owned binary. After Chezmoi has
+written the Mise configuration, apply runs `mise install` under
+`MISE_SYSTEM_DEPS=warn` and the declared `cargo install` steps, again as the
+user. Nimbus installs selected system dependencies itself and reinstalls a
+missing runtime or Cargo tool through the same steps on the next apply.
 
 nimbus init writes only the local selector and a reviewed new machine manifest
 when requested. For a new machine it inspects DMI and PCI facts, proposes the
@@ -309,11 +310,13 @@ not cross it.
 
 Normal chezmoi diff, apply, edit, and update stay direct. Nimbus performs no
 silent Git operation. The handoff runs once; later profile changes print the
-`chezmoi init` command and doctor reports a stale Chezmoi selection. The
-dotfiles repository adopted this handoff on 2026-09-02 and holds no machine
-manifest. Q-015 gates the exact refresh command and its preservation of the
-independent 1Password choice. This phase verifies the initial and refresh flags
-against the real template before exit.
+refresh command and doctor reports a stale Chezmoi selection. The dotfiles
+repository adopted the profile handoff on 2026-09-02 and holds no machine
+manifest. Q-015 resolved the refresh as `chezmoi init --prompt` with every
+value supplied, including the current 1Password answer. Before this phase
+exits, the dotfiles template must declare `Machine` and `ManagedByNimbus` and
+store the profile list without validating it, and both the initial and
+refresh flags are verified against the real template in isolated homes.
 
 ### Risks and recovery
 
@@ -321,10 +324,9 @@ Never replace an unrelated checkout or remote. Require a controlling terminal,
 attach only the checked-out child script to `/dev/tty`, and stop on an invalid
 existing target. A failed installation leaves native DNF state and the checkout
 independently recoverable. A failed initialization leaves the system usable and
-reports direct Git and Chezmoi recovery. A failed Mise action remains pending
-in Chezmoi; a runtime deleted without a configuration change is recovered with
-the reported direct Mise command. Removing Nimbus must leave Chezmoi and Mise
-usable.
+reports direct Git and Chezmoi recovery. A failed user-scope step leaves the
+plan drifted and is retried by the next apply; nothing below home has a
+recovery point. Removing Nimbus must leave Chezmoi and Mise usable.
 
 ### Validation and exit criteria
 
@@ -334,8 +336,8 @@ wrong-origin, non-repository, engine-schema mismatch, rerun, missing-dotfiles,
 and interrupted cases in disposable homes and a Fedora VM. Test known,
 ambiguous, and unknown DMI and PCI facts without letting resolution inspect
 hardware. Test development profile gating, Mise presence and user ownership,
-action ordering, checksum-triggered reruns, unchanged configuration, failure
-retry, the script-excluded dry-run flow, and a manually deleted runtime. Exit
+step ordering around the handoff, refusal to run any user-scope step as root,
+failure retry, and a manually deleted runtime or Cargo tool. Exit
 when the one-liner reaches init safely, direct Chezmoi use works both with and
 without Nimbus, and the Mise handoff preserves all three ownership boundaries.
 
@@ -437,13 +439,12 @@ before freezing the implementation, and record the results in TASKS.md:
 Upgrade may refresh native metadata, shows its own exact reviewed system plan,
 never prunes, and does not silently apply unrelated desired-state drift. It
 blocks with a direction to run `nimbus apply` when that drift is a prerequisite.
-After system verification it offers a separately approved Topgrade phase with
-only declared user-manager steps enabled. Its fixed configuration disables
-system, Flatpak, firmware, Nix, Chezmoi, Git repository, and Topgrade
-self-update steps. The
-plan labels this as command-level review because Topgrade dry-run does not
-resolve downstream versions, and reports that the home subvolume is outside
-the recovery point.
+After system verification it offers a separately approved Topgrade phase that
+reads the user's Chezmoi-owned configuration with the system, Flatpak,
+firmware, Nix, Chezmoi, Git repository, and self-update steps disabled through
+`--disable` on the command line. The plan labels this as command-level review
+because Topgrade dry-run does not resolve downstream versions, and reports
+that the home subvolume is outside the recovery point.
 Q-008 permanently delegates Fedora release upgrades to the native DNF5
 system-upgrade workflow. Nimbus has no target-release option or release-upgrade
 transaction. Doctor reports installed-release compatibility, mutations refuse
@@ -470,7 +471,7 @@ manual restoration in disposable VMs. Cover topology mismatch, nested
 subvolume exclusion, conditional Flatpak and boot capture, partial recovery
 creation and cleanup, protected failed operations, retention cleanup, delayed
 Btrfs deletion, the 20 GiB refusal, checksums, and preservation of home and
-guest data. Exercise Topgrade step allowlisting, command preview, refusal of
+guest data. Exercise the Topgrade `--disable` list, command preview, refusal of
 sudo and system managers, partial user-step failure, and the explicit lack of
 home rollback. Prove that `nimbus upgrade` remains
 within the installed release, exposes no target-release path, and never invokes

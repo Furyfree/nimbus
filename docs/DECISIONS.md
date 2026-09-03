@@ -83,6 +83,10 @@ exceptions.
 The package-query container produces research evidence. Its results do not
 automatically become catalog entries or desired state.
 
+Superseded 2026-09-03 by D-016. There is no catalog. A package reference
+names its repository as a prefix, and the repository is declared once in
+`nimbus.toml`.
+
 #### D-006: Superseded evidence remains available through Git history
 
 The legacy `history/` tree was removed from the active checkout after the
@@ -123,11 +127,11 @@ sparse instead of carrying an ad hoc package list.
 PrismLauncher is not in the Fedora or RPM Fusion repositories. The
 package-query container, now including Terra, shows `prismlauncher-11.0.3` in
 Terra 44 recommending Fedora's `java-25-openjdk`. It enters as
-`catalog:prismlauncher` with a Terra repository entry whose release package or
-signing key is pinned. Rejected: the Flathub Flatpak, kept as the fallback if
-Terra trust cannot be represented, because the owner prefers native RPMs with
-system Java; and a PrismLauncher COPR, because Terra already carries the
-package with a maintained signing key.
+`terra:prismlauncher`, written under D-016 against the Terra repository
+declared in `nimbus.toml` with its signing key pinned. Rejected: the Flathub
+Flatpak, kept as the fallback if Terra trust cannot be represented, because
+the owner prefers native RPMs with system Java; and a PrismLauncher COPR,
+because Terra already carries the package with a maintained signing key.
 
 Amended 2026-09-02 after the coherence pass. `virtualization` joins the
 vocabulary for the owner's Linux and other guests: Fedora's QEMU/KVM host
@@ -170,6 +174,10 @@ those documented Fedora operations directly instead of executing a mutable
 root script. The requested upstream Nix multi-user installer is also rejected
 for now because its own Linux prerequisites say SELinux must be disabled;
 Fedora's `nix` package remains compatible with the accepted enforcing policy.
+
+Superseded 2026-09-03 by D-015 and D-017. The six tiers are replaced by one
+fixed order, Tailscale comes from Fedora 44, which carries it, and Nimbus
+itself runs the user-scope maker scripts as the user.
 
 Amended 2026-09-02 after the owner's privilege and encryption calls. The owner
 joins the `docker` group as a declared group-membership resource; the policy
@@ -219,6 +227,9 @@ approved Topgrade run restricted to declared user managers such as Mise and
 Cargo. System, Flatpak, firmware, Nix, Chezmoi, Git repository, and Topgrade
 self-update steps are disabled in the Nimbus-owned Topgrade configuration.
 
+Amended 2026-09-03 by D-018. Chezmoi owns the Topgrade configuration; Nimbus
+installs Topgrade and disables those steps on the command line instead.
+
 Topgrade dry-run prints the commands it would invoke but does not resolve their
 downstream versions. The user phase is therefore explicitly command-level and
 not represented as an exact Nimbus transaction. Root and Flatpak snapshots do
@@ -230,7 +241,9 @@ mutations absent from Nimbus's plan.
 
 Decided 2026-09-03 from Fedora 44 package-query evidence. Hyprland,
 `hyprland-guiutils`, and `xdg-desktop-portal-hyprland` come from the
-`lionheartp/Hyprland` COPR. Noctalia Greeter uses Terra's stable
+`lionheartp/Hyprland` COPR, the fork Hyprland's own documentation recommends
+now that `solopasha/hyprland` is unmaintained; Fedora 44 and Terra carry no
+Hyprland package. Noctalia Greeter uses Terra's stable
 `noctalia-greeter` package rather than the COPR's continuously rebuilt
 `noctalia-greeter-git`; this keeps the session's greeter on a release lifecycle
 while retaining the selected Hyprland source.
@@ -256,6 +269,80 @@ WoWUp remains desired but unavailable from the accepted Fedora 44 sources. It
 may enter through a separately reviewed Nimbus-owned COPR package when that
 package exists; its upstream AppImage remains rejected by the standing policy.
 
+Amended 2026-09-03 by D-015. Topgrade moves to Terra as the one exception to
+the Cargo rule, `librepods` moves to Terra, which now carries it, and Fedora's
+lazygit package is `golang-github-jesseduffield-lazygit`; nothing provides
+the bare name.
+
+#### D-015: One fixed source order replaces the tiers
+
+Decided 2026-09-03. The owner found the tier table inconsistent from package
+to package. SECURITY.md now states one order applied to every package: Fedora;
+the maker's own channel, whether repository, COPR, installer script, Cargo
+crate, or Mise runtime; Flathub for GUI applications without host
+integration; Terra, RPM Fusion, or a community COPR when nothing earlier
+offers the package; and a COPR the owner builds when nothing offers it at all,
+which is GitHub Desktop, WoWUp, and the Nimbus engine. Where two sources
+carry a name, the earlier one wins and a DNF priority stops the later one from
+shadowing it.
+
+Package decisions taken under that order the same day: Tailscale from Fedora
+44, which carries 1.98; ChatGPT Desktop from OpenAI's DNF repository, which
+the downloaded RPM's post-install script registers with key
+`3BFA 0E4A E8B8 CC16 A2D9 BA68 4A3B 4A56 6C46 60E4`; Brave Origin as
+`brave-origin` from Brave's repository, verified present; VSCodium from its
+maker's RPM repository; Signal from Terra, because neither the Flathub nor the
+Terra build is the maker's; `librepods` from Terra; ProtonPlus, Heroic,
+Vesktop, gpu-screen-recorder, and Prism Launcher as Terra RPMs rather than
+their makers' Flatpaks, because they integrate with Steam, Wine, Noctalia, or
+system Java; Rust through Mise; `virt-viewer` always, because VM Curator
+offers SPICE clipboard sharing through it. Rejected: applying the tier table
+as written, which would have moved five applications to Flathub.
+
+#### D-016: Repositories are declared once and named by prefix
+
+Decided 2026-09-03. `nimbus.toml` declares every repository other than Fedora
+with its kind, location, pinned key, and DNF priority. A package reference
+uses the repository ID as its prefix: `terra:ghostty`,
+`rpmfusion-nonfree:steam`, `docker:docker-ce`, `flatpak:com.spotify.Client`.
+Bare names stay Fedora. A repository is desired while any selected package
+names it and is removed when none does. A component may list `removes` so a
+swap such as RPM Fusion's `ffmpeg` over `ffmpeg-free` is typed data. The
+`catalog/` directory and the `catalog:` form are removed.
+
+Profiles list packages directly; a component exists only for a bundle two
+profiles share or a capability that owns services or files. Rejected: one
+catalog file per non-Fedora package, because it repeated every package name
+in a second place and made Docker's one repository and five packages
+ambiguous.
+
+#### D-017: Nimbus runs the user-scope installs as the user
+
+Decided 2026-09-03. Nimbus runs the Mise, Zed, and Herdr installer scripts,
+`cargo install`, and `mise install` as the normal user, without sudo, as
+reviewed plan steps. Mise is installed before the Chezmoi handoff; runtimes
+and Cargo tools follow it because they depend on the Chezmoi-written Mise
+configuration. Chezmoi keeps the configuration files and the makers keep
+their own updates. This replaces the rule that Nimbus never runs a maker's
+script and the Q-007 Chezmoi onchange action.
+
+The cost is accepted: a maker's script cannot be pinned, so the plan shows its
+URL and the digest of the fetched script rather than a version. Nothing below
+home has a recovery point, which the no-backup decision already accepts.
+Rejected: typed manual tasks the user runs by hand, because the owner wants
+one installer that finishes the machine.
+
+#### D-018: Topgrade is Nimbus-installed with a Chezmoi-owned configuration
+
+Decided 2026-09-03. Nimbus installs Terra's `topgrade`. The configuration is
+a user file and belongs to Chezmoi, where the `herdr update` custom command
+also lives. `nimbus upgrade` keeps its Topgrade phase and may refresh
+metadata around it, but enforces the exclusion on the command line with
+`--disable` for the system, Flatpak, firmware, Nix, Chezmoi, Git-repository,
+and self-update steps. Rejected: a second Nimbus-owned configuration, because
+two files would drift; dropping the phase, because the owner wants one update
+command.
+
 ### Resolved questions
 
 #### Q-001: Package reference grammar and catalog precedence (resolved)
@@ -272,6 +359,10 @@ selection paths merge provenance only when their technical lifecycle agrees;
 otherwise validation fails. Constraint keys use canonical provider-qualified
 identities and attach after selection resolution. SPEC.md owns the normative
 grammar.
+
+Amended 2026-09-03 by D-016. The `catalog:` form is gone. Any prefix other
+than `dnf` and `flatpak` is a repository ID declared in `nimbus.toml`, and an
+undeclared prefix is an error.
 
 #### Q-002: Selector trust and checkout origin (resolved)
 
@@ -501,6 +592,10 @@ is deleted without a configuration change, the onchange action does not rerun.
 Nimbus reports the missing runtime and the direct Mise command but never runs
 the repair itself. SPEC.md owns the normative handoff.
 
+Amended 2026-09-03 by D-017. Nimbus runs the Mise installer as the user
+before the handoff and `mise install` after it; the Chezmoi onchange action
+is dropped and a missing runtime is reinstalled by the next apply.
+
 #### Q-008: Fedora release upgrades (resolved)
 
 Resolved 2026-09-02.
@@ -713,12 +808,9 @@ needs `coredumpctl` from systemd, AI Usage needs the still-unsourced
 listed with the plugin. Q-016 keeps the inventory's purpose and its remaining
 service-activation entries.
 
-### Open questions
+Amended 2026-09-03 by D-015: Topgrade leaves Cargo for Terra.
 
-A focused pre-implementation review on 2026-09-03 found four contract gaps.
-They do not reopen the overall ownership or phase architecture.
-
-#### Q-013: Phase 1 schema boundary and canonical ordering
+#### Q-013: Phase 1 schema boundary and canonical ordering (resolved)
 
 D-002 requires the public definition contract to precede frozen Go types, but
 SPEC.md currently gives concrete TOML only for the selector and machine
@@ -740,11 +832,17 @@ The same decision must settle:
 
 The narrow candidate is to require `common` explicitly, preserve declared
 profile order for the Chezmoi handoff, canonicalize technical identities and
-their deterministic output, and defer unused later-phase fields. Resolve this
-question in SPEC.md and schema fixtures before freezing Go types or resolver
-behavior. It blocks the Phase 1 schema, not the accepted architecture.
+their deterministic output, and defer unused later-phase fields.
 
-#### Q-014: Catalog entries and repository trust ownership
+Resolved 2026-09-03 as the narrow candidate. Every manifest lists `common`
+and validation reports its absence. The manifest `profiles` list keeps author
+order; every other list is sorted by canonical ID and a duplicate is an error.
+Files carry only `id`, `packages`, `components`, `requires`, `conflicts`,
+`removes`, and system-file sources; later-phase fields wait for a real
+definition and fixture. Rejected: injecting `common`, because the manifest
+should say what the machine is.
+
+#### Q-014: Catalog entries and repository trust ownership (resolved)
 
 The package contract says that one catalog entry resolves to one
 provider-native package identity, while a third-party repository also enters
@@ -756,10 +854,13 @@ catalog package entries, how a release-package digest or signing-key
 fingerprint is encoded, and how one component selects and owns the repository
 exactly once without duplicating lifecycle ownership. The answer must retain
 the exception-only catalog, explicit trust pin, deterministic resolution, and
-safe repository removal rules. This question blocks the initial catalog types
-and real third-party package definitions.
+safe repository removal rules.
 
-#### Q-015: Exact Chezmoi profile-refresh handoff
+Resolved 2026-09-03 by D-016: repositories are declared once in `nimbus.toml`
+and package references name them by prefix. Docker is one declaration and
+five `docker:` references. Flathub is the declared `flatpak` repository.
+
+#### Q-015: Exact Chezmoi profile-refresh handoff (resolved)
 
 The initial three-value handoff is valid, but the later printed refresh command
 is incomplete. The dotfiles template uses `prompt*Once`, so a supplied
@@ -771,11 +872,22 @@ Define one exact user-run refresh command or mechanism that updates `machine`,
 `managed_by_nimbus`, and the ordered profile IDs without editing Chezmoi
 internal state. It must preserve the independent 1Password choice and be
 verified in isolated homes for fresh initialization, adoption of an existing
-standalone checkout, profile addition, and profile removal. This does not block
-the Phase 1 resolver; it gates the Phase 5 handoff and the later profile-change
-message.
+standalone checkout, profile addition, and profile removal.
 
-#### Q-016: Package inventory purpose and ownership notation
+Resolved 2026-09-03. The refresh is `chezmoi init --prompt`, which forces the
+`prompt*Once` functions to prompt while the flags supply `Machine`,
+`ManagedByNimbus`, `Profiles`, and the current 1Password answer read through
+`chezmoi data`. The dotfiles template today declares only `onePasswordSsh`
+and `Profiles` and fails on any profile outside its four choices. It gains
+the two keys and stops validating the list: only `hyprland-noctalia` and the
+Nimbus-calling entries are gated, every other Linux config deploys
+unconditionally, and macOS and Windows keep their platform profiles. TASKS.md
+carries that task and Phase 5 verifies both flows in isolated homes.
+Rejected: keeping a fixed choice list in the template, because every new
+Nimbus profile would break the handoff; and shrinking the handoff to
+`Profiles`, because the `managed_by_nimbus` gate exists for real targets.
+
+#### Q-016: Package inventory purpose and ownership notation (resolved)
 
 PACKAGES.md says it lists what Nimbus installs, but it also contains user-owned
 maker-script and Cargo tools plus Mise-owned runtimes. Its source markers no
@@ -790,17 +902,27 @@ Decide whether the file becomes a complete workstation software inventory with
 an explicit owner, provider, source tier, and lifecycle for each entry, or is
 restricted to Nimbus-owned installation targets. The complete-inventory form
 is the preferred candidate because it preserves useful owner intent while
-making the boundary machine-readable by a human. Reconcile every accepted
-source and service before using the inventory to create real definitions.
+making the boundary machine-readable by a human.
+
+Resolved 2026-09-03. PACKAGES.md lists what Nimbus installs, and under D-017
+that includes the user-scope steps Nimbus runs as the user, so every entry is
+Nimbus-owned and no owner marker is needed. The Noctalia plugin phases and the
+reference to the docs repository are dropped; enabling a plugin is user
+state. The specific conflicts the question named had already been removed by
+Q-017.
+
+### Open questions
+
+None on 2026-09-03.
 
 ### Consequences for the next documentation pass
 
-Q-001 through Q-012 and Q-017 are resolved and D-007 is closed. Q-013, Q-014,
-and Q-016 now gate the Phase 1 schema and real definition fixtures; Q-015
-gates the Phase 5 Chezmoi handoff. The active documents are consolidated below `docs/`,
-and legacy history is retained only in the named Git snapshot. One cleanup
-remains: `files accept` is described in SPEC.md twice and repeated here, in
-ROADMAP.md, and in TASKS.md, and the selector and digest paragraphs repeat in
-ROADMAP.md Phase 1. When SPEC.md is next restructured, keep one full
+Every question through Q-017 is resolved and D-007 is closed. The only work
+outside this repository is the dotfiles template change from Q-015, which
+gates the Phase 5 Chezmoi handoff. The active documents are consolidated below
+`docs/`, and legacy history is retained only in the named Git snapshot. One
+cleanup remains: `files accept` is described in SPEC.md twice and repeated
+here, in ROADMAP.md, and in TASKS.md, and the selector and digest paragraphs
+repeat in ROADMAP.md Phase 1. When SPEC.md is next restructured, keep one full
 description per behavior and reduce the others to a sentence and a link. The
 CI workflow arrives with go.mod per TASKS.md.

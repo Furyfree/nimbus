@@ -19,11 +19,10 @@ management commands are implemented.
 This repository owns both the Go engine and the personal system definitions:
 
 ~~~text
-nimbus.toml     definition schema and engine compatibility metadata
+nimbus.toml     definition schema, engine compatibility, and repositories
 machines/       selected workstation compositions
 profiles/       user-facing system bundles
 components/     reusable system capabilities
-catalog/        package definitions with non-default lifecycle
 system/         Nimbus-owned system files and migrations
 cmd/, internal/ Go implementation
 install.sh      remote entry point; bootstrap is the checkout-owned handoff

@@ -21,12 +21,14 @@ users, distributions, or providers.
   and approved origin. It holds no desired state.
 - **machine manifest** is `machines/<id>.toml`: the profiles, components, and
   extra packages one workstation selects.
-- **profile** is a user-facing system bundle that selects components. The
-  dotfiles repository reuses the same profile IDs for user configuration.
-- **component** is a reusable capability that owns resources and may require
-  other components.
-- **catalog entry** describes a package with a non-default lifecycle. Bare
-  names are Fedora packages and never need one.
+- **profile** is a user-facing system bundle that lists packages and selects
+  components. The dotfiles repository reuses the same profile IDs for user
+  configuration.
+- **component** is a reusable capability that owns resources, is shared by
+  profiles, and may require other components.
+- **repository** is an entry in `nimbus.toml`: a package source other than
+  Fedora with its pinned key. Its ID is the prefix a package reference uses;
+  bare names are Fedora packages.
 - **desired, observed, applied** are the three states: checkout definitions,
   live system inspection, and receipts under `/var/lib/nimbus`.
 - **plan** is the complete reviewed set of operations. A mutation absent from
@@ -124,8 +126,8 @@ revalidate it against the active documents before reuse.
 Fedora 44, RPM Fusion, and Terra enabled; `docker run --rm
 nimbus-fedora-packages repoquery ...` answers anything else. Nothing touches the
 host. Results are evidence for a decision, never desired state; accepted
-packages go into profiles, components, or a manifest, and only exceptional
-lifecycles into `catalog/`.
+packages go into profiles, components, or a manifest, prefixed with their
+declared repository when it is not Fedora.
 
 ## Protect the workstation and user
 

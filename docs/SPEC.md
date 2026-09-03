@@ -44,7 +44,6 @@ nimbus/
   machines/
   profiles/
   components/
-  catalog/
   system/
     root/
     migrations/
@@ -58,21 +57,22 @@ nimbus/
 - Machine manifests select intended workstation compositions.
 - Profiles are user-facing system bundles.
 - Components describe reusable capabilities and own resources.
-- Catalog entries describe packages with non-default lifecycle.
+- nimbus.toml declares the schema, supported Fedora releases, minimum engine
+  version, and every repository other than Fedora with its pinned key.
 - system/root/etc mirrors Nimbus-owned system-file targets below /etc.
 - Migrations represent controlled transitions that cannot be expressed as
   steady-state resources.
 
 An installed engine reads live definitions from an explicitly selected Nimbus
 checkout. nimbus.toml declares the definition schema, supported Fedora
-releases, and minimum compatible engine version. The engine rejects unsupported
-schemas and invalid compatibility metadata.
+releases, minimum compatible engine version, and the repositories. The engine
+rejects unsupported schemas and invalid compatibility metadata.
 
 The canonical definition boundary is `nimbus.toml` plus every regular file
-recursively below `machines/`, `profiles/`, `components/`, `catalog/`, and
-`system/`. The complete boundary participates even when one machine selects
-only part of it. Engine code, Git metadata, documentation, history, development
-tooling, directories themselves, and every other checkout path are excluded.
+recursively below `machines/`, `profiles/`, `components/`, and `system/`. The
+complete boundary participates even when one machine selects only part of it.
+Engine code, Git metadata, documentation, history, development tooling,
+directories themselves, and every other checkout path are excluded.
 
 The definition digest is SHA-256 over an unambiguously framed sequence of
 entries sorted bytewise by slash-separated checkout-relative path. The input
@@ -145,6 +145,45 @@ that rewrites the selector; Nimbus never changes the remote. Commit,
 working-tree, and definition changes do not alter this repository trust and
 remain identified separately in plans and receipts.
 
+The checkout root file declares compatibility and repositories:
+
+~~~toml
+schema = 1
+
+[compatibility]
+fedora = ["44"]
+min_engine = "0.1.0"
+
+[repositories.terra]
+kind = "dnf"
+baseurl = "https://repos.fyralabs.com/terra44"
+key = "AE09 157A 4DE8 8B49 7EA1 D5D3 00CD AB43 DE22 6D6F"
+priority = 100
+
+[repositories.docker]
+kind = "dnf"
+baseurl = "https://download.docker.com/linux/fedora/$releasever/$basearch"
+key = "060A 61C5 1B55 8A7F 742B 77AA C52F EB6B 621E 9F35"
+
+[repositories.hyprland-copr]
+kind = "copr"
+project = "lionheartp/Hyprland"
+key = "<fingerprint>"
+
+[repositories.flathub]
+kind = "flatpak"
+url = "https://dl.flathub.org/repo/flathub.flatpakrepo"
+key = "<fingerprint>"
+~~~
+
+A repository ID is the prefix that package references use. `dnf` and
+`flatpak` are reserved: `dnf` is Fedora and `flatpak` is the single declared
+`flatpak` repository. A `dnf` repository may instead name a `release_package`
+URL with its `sha256` when the maker distributes a release RPM, as RPM Fusion
+does. `priority` is the DNF repository priority; a later source in the
+[SECURITY.md](SECURITY.md) order is declared with a higher number than
+Fedora's default so it cannot shadow an earlier one.
+
 A machine manifest has a stable ID:
 
 ~~~toml
@@ -165,7 +204,7 @@ components = [
 
 packages = [
   "ripgrep",
-  "flatpak:org.signal.Signal",
+  "flatpak:com.spotify.Client",
 ]
 
 package_exclusions = []
@@ -177,12 +216,18 @@ package_exclusions = []
 repo = "https://github.com/Furyfree/dotfiles.git"
 ~~~
 
-The manifest ID must match its filename. Static validation and resolution never
-inspect hardware or silently augment the manifest. During creation of a new
-machine, `nimbus init` may inspect DMI identity and PCI devices, propose the
-matching hardware components, and include them in the reviewed manifest diff.
-The accepted component IDs are then ordinary explicit desired state; later
-resolution never re-detects or silently changes them.
+The manifest ID must match its filename. Every manifest lists `common`
+itself; the resolver never injects it, and validation reports a manifest that
+omits it. The `profiles` list keeps the author's order because the Chezmoi
+handoff receives it. Every other resolved list is sorted by canonical ID so
+output is stable, and a duplicate entry in any list is an error.
+
+Static validation and resolution never inspect hardware or silently augment
+the manifest. During creation of a new machine, `nimbus init` may inspect DMI
+identity and PCI devices, propose the matching hardware components, and
+include them in the reviewed manifest diff. The accepted component IDs are
+then ordinary explicit desired state; later resolution never re-detects or
+silently changes them.
 
 The initial profile vocabulary is:
 
@@ -194,7 +239,7 @@ The initial profile vocabulary is:
   Cargo; guest disks live in the user's home and are not Nimbus resources
 - `gaming`: the complete gaming stack for the desktop
 - `laptop-gaming`: light gaming for the laptop, currently PrismLauncher from
-  the Terra repository as `catalog:prismlauncher` with Fedora's
+  the Terra repository as `terra:prismlauncher` with Fedora's
   `java-25-openjdk` and small helpers such as `gamemode`; a machine selects
   `gaming` or `laptop-gaming`, and the two share components rather than
   repeating packages
@@ -206,10 +251,19 @@ rather than a bare component so the Chezmoi handoff can see it. It is not
 named `windows` because the dotfiles repository derives a `windows` platform
 profile from the operating system.
 
-Profiles select components and never import other profiles. Components may
-require other components and contribute packages, repositories, services,
-system files, groups, triggers, warnings, manual tasks, runtime commands,
-verification, removal policy, and recovery classification.
+A profile lists packages directly and selects components. It never imports
+another profile. A component exists only for a bundle that two profiles share,
+such as Docker, or for a capability that owns more than packages, such as the
+NVIDIA driver or the Hyprland session. Components may require other
+components and contribute packages, package removals, services, system files,
+groups, triggers, warnings, manual tasks, runtime commands, verification,
+removal policy, and recovery classification.
+
+Profile and component files carry only the fields the current definitions
+use: `id`, `packages`, `components`, `requires`, `conflicts`, `removes`, and
+system-file sources. Services, groups, triggers, warnings, manual tasks,
+runtime command groups, and recovery metadata are added to the schema when a
+real definition and fixture exercise them.
 
 Machine manifests may select optional components and add ad hoc packages.
 Profile and component definitions remain the source of reusable intent;
@@ -230,7 +284,7 @@ Resolution is deterministic:
 ~~~text
 machine
   -> profiles
-  -> profile components
+  -> profile packages and components
   -> explicit components
   -> component dependencies
   -> resources
@@ -253,7 +307,9 @@ changes the selection.
 Validation rejects:
 
 - unsupported schemas or engine compatibility
-- duplicate machine, profile, component, resource, or catalog IDs
+- a manifest that omits `common`
+- duplicate machine, profile, component, resource, or repository IDs
+- a package prefix that names no declared repository
 - unknown references and dependency cycles
 - conflicting components or desired resource states
 - duplicate lifecycle ownership
@@ -281,56 +337,51 @@ lifecycle:
 
 Package references use a closed, versioned grammar. Values have no leading or
 trailing whitespace. A reference without a colon is a Fedora package name and
-canonicalizes to `dnf:<name>`. The accepted qualified forms are:
+canonicalizes to `dnf:<name>`. The qualified form is `<repository>:<name>`,
+split at the first colon:
 
-- `dnf:<name>` for the same default DNF lifecycle
-- `flatpak:<app-id>` for the default system-scoped Flatpak lifecycle
-- `catalog:<id>` for an explicitly selected exceptional catalog entry
+- `dnf:<name>` is the same default Fedora lifecycle
+- `flatpak:<app-id>` is a system-scoped Flatpak from the declared Flathub
+  remote
+- any other prefix is a repository ID declared in `nimbus.toml`, such as
+  `terra:ghostty`, `rpmfusion-nonfree:steam`, `docker:docker-ce`, or
+  `hyprland-copr:hyprland`, and uses the DNF lifecycle from that repository
 
-The parser splits a qualified reference at its first colon. An empty value,
-empty suffix, unknown prefix, or invalid provider-native identifier is rejected.
-Provider prefixes are lowercase and reserved by the schema.
+An empty value, empty suffix, undeclared prefix, or invalid provider-native
+identifier is rejected. Prefixes are lowercase and reserved by the schema.
 
-A catalog ID is never resolved implicitly and never shadows a bare Fedora
-package name. A catalog entry resolves to one provider-native canonical package
-identity while retaining its catalog ID and every selection path as provenance.
-References that resolve to the same canonical identity merge provenance when
-their technical lifecycle agrees; incompatible lifecycles are duplicate
-ownership and fail validation.
+The prefix is the package's declared source. Canonical identity is the
+provider-qualified native package target; references that resolve to the same
+canonical identity merge provenance when their prefix agrees, and two prefixes
+for one name are duplicate ownership and fail validation. A repository becomes
+a desired resource when any selected package names it, is owned once however
+many packages use it, and is removed only when no selected package names it.
+Nimbus never enables a repository or installs its release package with
+signature checking disabled; the plan shows the pinned key or digest.
 
-A catalog entry exists only for exceptional behavior such as:
+Planning refuses a package that DNF would install from a repository other
+than the one its prefix names. A component may list `removes`, packages that
+must leave when it is applied; the plan renders that as a native swap, such
+as RPM Fusion's `ffmpeg` replacing Fedora's `ffmpeg-free`. Package-specific
+behavior belongs in typed definition data, never package-name conditionals in
+Go.
 
-- a required third-party repository such as RPM Fusion, Terra, or a COPR
-- a provider other than DNF
-- a coordinated update group
-- special verification or removal
-- a pinned external artifact
-- a package-specific warning
-
-The catalog is an exception list, not a registry of every Fedora package.
-Package-specific behavior belongs in catalog data, never package-name
-conditionals in Go.
-
-A third-party repository enters through a catalog entry that pins its release
-package by digest or its signing key by fingerprint. Nimbus never enables a
-repository or installs its release package with signature checking disabled
-unless that pinned digest is verified first, and the plan shows the pin.
-
-One provider owns an installed executable lifecycle. Nimbus may manage
-system-scoped Flatpaks. User-scoped runtimes and tools declared in
-~/.config/mise/config.toml remain owned by Mise; Chezmoi owns that file.
-Nimbus reports missing Mise and runtimes but does not provide Mise, Cargo, uv,
-npm, pipx, or Go user-scope installation providers. Mise itself is installed
-by the user through the maker's installer under [SECURITY.md](SECURITY.md)
-tier 3.
+One provider owns an installed executable lifecycle. Nimbus manages
+system-scoped Flatpaks from Flathub. User-scope tools follow the
+[SECURITY.md](SECURITY.md) source order: Nimbus runs a maker's installer
+script, `cargo install`, or `mise install` as the normal user, without sudo,
+as a reviewed plan step. Runtimes declared in `~/.config/mise/config.toml`
+are installed by Mise after Chezmoi has written that file; Chezmoi owns the
+file, Mise owns the runtimes, and Nimbus plans the `mise install` step and
+reports runtimes that are missing.
 
 A package constraint is accepted only when the native provider can enforce it
 during normal native updates. Unsupported comparison syntax is rejected rather
 than represented as an advisory-only constraint. Constraint keys use the
 canonical provider-qualified package identity, such as `dnf:hyprland`, rather
-than a bare name or catalog ID. A constraint attaches after all selection paths
-have been resolved and therefore applies to that canonical package regardless
-of which profile, component, machine entry, or catalog reference selected it.
+than a bare name. A constraint attaches after all selection paths have been
+resolved and therefore applies to that canonical package regardless of which
+profile, component, or machine entry selected it.
 
 Compatibility-sensitive packages may form a coordinated update group. The
 desktop-session group covers the selected Hyprland, Noctalia, greeter, portal,
@@ -342,9 +393,10 @@ be proven against the selected Fedora sources before it is encoded.
 A resource is one stable unit of desired system state. Resource families
 include:
 
-- DNF and COPR repositories
+- DNF and COPR repositories and the Flathub remote
 - RPM packages
 - system Flatpaks
+- user-scope tools installed through a maker's script, Cargo, or Mise
 - systemd system units
 - system files
 - system groups and user group memberships
@@ -364,9 +416,10 @@ Each resource has:
 - recovery classification
 - logout or reboot requirements
 
-Profiles do not define technical lifecycle. Components or explicit machine
-entries select resources; catalog data and the typed provider define how each
-resource is inspected, applied, verified, updated, and removed. Provenance
+Profiles do not define technical lifecycle. Profiles, components, or explicit
+machine entries select resources; the typed provider and the repository
+declaration define how each resource is inspected, applied, verified,
+updated, and removed. Provenance
 records every profile, component, or explicit machine path that selected it.
 
 ## Ownership
@@ -382,6 +435,8 @@ Nimbus owns:
 - inspection, plans, apply, verification, removal, state, and receipts
 - installation of system tools including Git, Chezmoi, Docker, Nix, and
   1Password
+- installation of user-scope tools through the maker's script, Cargo, and
+  Mise, run as the user
 - the explicit first Chezmoi initialization
 - the Windows guest data root and its protected credentials file
 - typed manual workflows and Nimbus runtime commands
@@ -402,11 +457,9 @@ reimplementing them.
 
 Credentials, tokens, private keys, application databases, histories, caches,
 documents, containers and virtual machines other than the Windows guest, and
-undeclared local system configuration remain unmanaged. Tools the user installs
-below `~/.local`
-through their maker's installer, such as Zed, belong to the user under
-[SECURITY.md](SECURITY.md) tier 3; Nimbus tracks them only as manual tasks and
-Chezmoi owns their configuration.
+undeclared local system configuration remain unmanaged. A user-scope tool such
+as Zed or Mise is installed by Nimbus as the user, updates itself on the
+maker's schedule, and has its configuration owned by Chezmoi.
 
 ## Desired, observed, and applied state
 
@@ -674,42 +727,25 @@ selected by profile and never implies Nimbus. Hardware facts and secrets do not
 cross the handoff. The handoff keys are documented in the dotfiles repository's
 `PROFILES.md`.
 
-When the development profile is selected, Nimbus first presents a user-scope
-manual task that runs `curl https://mise.run | sh`, verifies
-`~/.local/bin/mise`, and sets `mise settings set auto_update true`. The user,
-not Nimbus or root, runs both commands. Chezmoi initialization waits until Mise
-is present so its runtime action cannot fail merely because the prerequisite is
-missing.
-
-The Chezmoi source includes a
-`run_onchange_after_install-mise-runtimes.sh.tmpl` action. It runs as the normal
-user after the rendered `~/.config/mise/config.toml` has been applied. Its
-rendered content includes a checksum of that rendered configuration, so
-Chezmoi presents it in the normal diff and reruns it only when the effective
-Mise configuration changes. The action executes:
+When the development profile is selected, apply installs Mise before the
+handoff by running the maker's `curl https://mise.run | sh` installer as the
+normal user, verifies `~/.local/bin/mise`, and runs
+`mise settings set auto_update true`. Chezmoi initialization then writes
+`~/.config/mise/config.toml`. After the handoff, apply runs the user-scope
+steps that depend on it:
 
 ~~~sh
 MISE_SYSTEM_DEPS=warn mise -C "$HOME" install
+cargo install <crate>
 ~~~
 
-It never invokes sudo. `MISE_SYSTEM_DEPS=warn` keeps system dependency handling
-non-privileged: the user owns the Mise binary, Nimbus owns selected system
-dependencies, Chezmoi owns the file and action, and Mise owns runtime
-installation. Chezmoi records the onchange action only after successful
-execution under its normal script lifecycle.
-
-A stricter user-controlled review uses:
-
-~~~sh
-chezmoi apply --exclude=scripts
-MISE_SYSTEM_DEPS=warn mise -C "$HOME" install --dry-run
-chezmoi apply --include=scripts
-~~~
-
-Deleting an installed runtime without changing the Mise configuration does not
-retrigger the onchange action. Nimbus inspection reports the missing runtime
-and directs the user to run the same `mise install` command; Nimbus does not
-invoke the repair or a normal Chezmoi apply.
+Each step runs as the normal user without sudo and appears in the reviewed
+plan. `MISE_SYSTEM_DEPS=warn` keeps Mise from taking over system-package
+installation: Nimbus owns selected system dependencies, Chezmoi owns the
+configuration file, and Mise owns runtime installation. When a runtime or a
+Cargo tool is later missing, status and plan report it and apply reinstalls
+it through the same command. The dotfiles repository carries no Mise install
+script.
 
 Nimbus never runs chezmoi apply or chezmoi update. After initialization it
 prints the direct commands needed to inspect and apply user configuration.
@@ -717,10 +753,28 @@ Removing Nimbus leaves the dotfiles checkout and Chezmoi lifecycle usable.
 
 The handoff runs once. When the selected profiles change later, the
 `profiles add` and `profiles remove` commands end by printing the direct
-`chezmoi init` command carrying the new `Profiles` value, and `nimbus doctor`
-reports a mismatch between the manifest profiles and Chezmoi's stored
-selection using Chezmoi's read-only data output. Nimbus never reruns the
-initialization itself.
+refresh command, and `nimbus doctor` reports a mismatch between the manifest
+profiles and Chezmoi's stored selection using Chezmoi's read-only data
+output. Nimbus never reruns the initialization itself. The template uses
+`prompt*Once` functions, which keep a stored answer, so the refresh forces
+them to prompt again and supplies every value, including the current
+1Password answer read beforehand through `chezmoi data`:
+
+~~~sh
+chezmoi init --prompt \
+  --promptString Machine=<machine id> \
+  --promptBool ManagedByNimbus=true \
+  --promptBool 'Enable 1Password SSH integration=<current>' \
+  --promptMultichoice 'Profiles=<id>/<id>/...'
+~~~
+
+The dotfiles template declares the three Nimbus keys and stores the profile
+list as sent, without checking it against a fixed set, so a new Nimbus profile
+never breaks the handoff. On Linux it deploys every user configuration
+unconditionally except the Hyprland and Noctalia files, gated on
+`hyprland-noctalia`, and the entries that call Nimbus, gated on
+`managed_by_nimbus`. macOS and Windows use their platform profiles and deploy
+only what applies to them.
 
 ## Desktop and recovery session
 
@@ -740,9 +794,7 @@ directory.
 
 Components may contribute typed manual tasks for work requiring human
 interaction, such as signing in to 1Password, enrolling an NVIDIA MOK,
-enrolling a fingerprint, completing a Windows guest, installing a user-scope
-tool through its maker's installer as [SECURITY.md](SECURITY.md) tier 3
-allows, or rebooting.
+enrolling a fingerprint, completing a Windows guest, or rebooting.
 
 A task has a stable owner, prerequisites, status check, instructions or a typed
 action, verification, completion state, recovery, and reboot or logout
@@ -909,14 +961,15 @@ prerequisite for a safe update. The command operates only within the currently
 installed Fedora release and has no target-release flag.
 
 After the verified system phase, the command offers a separate Topgrade phase
-for declared user-owned update managers. Nimbus supplies a fixed configuration
-that disables system, Flatpak, firmware, Nix, Chezmoi, Git repository, and
-Topgrade self-update steps. The reviewed plan identifies every enabled
-Topgrade step and its command, and Topgrade runs as the normal user without
-sudo. The phase is command-level review: Topgrade dry-run does not resolve the
-exact downstream
-versions selected by Mise, Cargo, npm, uv, and similar managers, so Nimbus does
-not describe those mutations as exact, managed, or recoverable transactions.
+for the user-scope update managers. Topgrade reads the user's own
+Chezmoi-owned configuration; Nimbus installs the Topgrade package and passes
+`--disable` for the system, Flatpak, firmware, Nix, Chezmoi, Git-repository,
+and self-update steps on the command line. The reviewed plan identifies every
+remaining Topgrade step and its command, and Topgrade runs as the normal user
+without sudo. The phase is command-level review: Topgrade dry-run does not
+resolve the exact downstream versions selected by Mise, Cargo, npm, uv, and
+similar managers, so Nimbus does not describe those mutations as exact,
+managed, or recoverable transactions.
 
 The recovery point's pre snapshot is created before the system mutation and
 its post snapshot after the complete upgrade workflow succeeds. It covers the
@@ -1216,7 +1269,8 @@ Nimbus is not:
 - a general Ansible, Terraform, or configuration-management replacement
 - a generic third-party provider or plugin platform
 - a package manager, package store, or dependency solver
-- a user-scope development-runtime manager
+- a replacement for Mise, Cargo, or Chezmoi; Nimbus runs them, it does not
+  reimplement them
 - a background reconciliation daemon
 - a secret manager
 - a generic virtual-machine or remote-host manager

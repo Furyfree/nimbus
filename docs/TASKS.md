@@ -3,32 +3,34 @@
 ## Current phase: Configuration resolver
 
 Plan: [Configuration resolver](ROADMAP.md#1-configuration-resolver).
-Open Phase 1 gates: Q-013, Q-014, and Q-016. Q-015 gates the later Phase 5
-Chezmoi handoff.
+No Phase 1 gate is open. Q-015 is resolved but needs a dotfiles template
+change before the Phase 5 Chezmoi handoff.
 
 ### Foundation and entry points
 
-- [ ] Resolve Q-013 in SPEC.md and concrete schema fixtures before freezing Go
-  types or resolver behavior.
-- [ ] Resolve Q-014 with one non-duplicated repository and trust-pin model for
-  catalog-backed packages.
-- [ ] Resolve Q-016 and reconcile package owners, providers, sources, and
-  service activation before deriving real definitions from PACKAGES.md.
+- [x] Resolve Q-013: explicit `common`, ordered profiles, canonical lists,
+  and only the fields current definitions use.
+- [x] Resolve Q-014: repositories declared once in nimbus.toml and named by
+  package prefix; the catalog directory is gone.
+- [x] Resolve Q-016: PACKAGES.md lists what Nimbus installs, including the
+  user-scope steps Nimbus runs as the user.
 - [x] Resolve Q-017: fix the six PACKAGES.md source conflicts and accept or
   reject each listed omission.
+- [x] Replace the source tiers with the fixed five-step order in SECURITY.md
+  and reconcile PACKAGES.md with it (D-015).
 - [ ] Create the Go module and the Cobra command tree.
 - [ ] Implement nimbus validate with an explicit checkout override and nimbus
   version without selector, checkout, or system dependencies.
 - [ ] Keep machine resolution internal and expose no future or mutating command
   stubs in root help.
 - [ ] Add nimbus.toml with the first definition schema, supported Fedora
-  releases, and minimum-engine compatibility metadata.
+  releases, minimum-engine compatibility metadata, and the declared
+  repositories with pinned keys.
 
 ### Configuration model
 
 - [ ] Define strict versioned types for the local selector, machine, profile,
-  component, catalog exception, and only the resource or later-capability
-  declarations retained by Q-013.
+  component, repository declaration, and only the fields retained by Q-013.
 - [ ] Represent generic system files only through sources below
   `system/root/etc`, with their absolute `/etc` targets derived rather than
   independently configurable.
@@ -40,25 +42,30 @@ Chezmoi handoff.
   hyprland-noctalia, virtualization, and windows-vm profiles and only the
   components needed to exercise their real graph.
 - [ ] Add representative package references that exercise bare and explicit DNF,
-  direct system Flatpak, and explicit exceptional catalog paths without
-  implementing package operations.
+  system Flatpak, declared-repository prefixes, and a component `removes`
+  entry without implementing package operations.
 
 ### Loading, validation, and resolution
 
 - [ ] Load definitions only from the selected Nimbus checkout.
 - [ ] Calculate the versioned SHA-256 definition digest from `nimbus.toml` and
-  every regular file below the five definition directories using byte-sorted
+  every regular file below the four definition directories using byte-sorted
   relative paths, exact contents, and `100644` or `100755` mode.
 - [ ] Resolve a symlinked checkout root, then reject internal symlinks, special
   files, path escape, unsupported schemas, unknown fields, duplicate IDs,
   missing references, component cycles, conflicts, invalid package references,
   invalid exclusions, and duplicate lifecycle ownership.
-- [ ] Test catalog non-shadowing, canonical package deduplication, lifecycle
-  conflicts, and constraint attachment to canonical provider identities.
+- [ ] Test undeclared-prefix rejection, missing `common`, canonical package
+  deduplication, prefix conflicts, and constraint attachment to canonical
+  provider identities.
 - [ ] Resolve profiles, explicit components, component requirements, packages,
   and every declaration retained by Q-013 deterministically.
 - [ ] Preserve ordered profile IDs and selection provenance in the resolved
   model for the later Chezmoi handoff and why command.
+- [ ] Dotfiles repository, before Phase 5: add `Machine` and
+  `ManagedByNimbus` prompts to `.chezmoi.toml.tmpl`, drop the profile-choice
+  validation so the list is stored as sent, deploy every Linux config except
+  Hyprland and Noctalia unconditionally, and update PROFILES.md.
 
 ### Output and evidence
 
@@ -85,7 +92,17 @@ Chezmoi handoff.
 
 - The 2026-09-03 pre-implementation review identified the concrete schema,
   repository trust representation, and package inventory as unresolved Phase 1
-  inputs. It identified the Chezmoi refresh command as a separate Phase 5 gate.
+  inputs. The same day D-015 through D-018 resolved them: a fixed source
+  order, repositories in nimbus.toml with prefix references, Nimbus running
+  the user-scope installs as the user, and Topgrade with a Chezmoi-owned
+  configuration. Fedora 44 package-query evidence confirmed Tailscale,
+  Noctalia, and `golang-github-jesseduffield-lazygit` in Fedora, Hyprland in
+  no accepted repository, and `librepods` in Terra; the ChatGPT RPM was
+  inspected and registers OpenAI's DNF repository, and Brave's repository
+  carries `brave-origin`.
+- The dotfiles template currently prompts only for `onePasswordSsh` and
+  `Profiles` and fails on any profile outside its four choices, so the
+  three-value handoff cannot succeed until the template task above is done.
 - The 2026-09-02 documentation reconciliation establishes one architecture and
   one active document hierarchy.
 - Q-002 establishes the selector as a regular Nimbus-owned local file that
@@ -105,9 +122,9 @@ Chezmoi handoff.
 - Q-006 selects the raw `install.sh` one-liner, a minimal Git/bootstrap handoff,
   a versioned checkout script with `/dev/tty`, direct DNF engine ownership, and
   user-owned checkout updates.
-- Q-007 assigns the development-profile Mise action to Chezmoi, keeps runtime
-  installation with Mise under `MISE_SYSTEM_DEPS=warn`, and limits Nimbus to
-  system dependencies plus missing-runtime reporting.
+- Q-007, as amended by D-017, has Nimbus run the Mise installer before the
+  handoff and `mise install` under `MISE_SYSTEM_DEPS=warn` plus the Cargo
+  steps after it, all as the normal user.
 - Q-008 permanently delegates Fedora release upgrades to native DNF5 tooling,
   keeps `nimbus upgrade` within one release, and limits Nimbus to compatibility
   reporting plus post-upgrade drift inspection.
@@ -117,15 +134,15 @@ Chezmoi handoff.
 - D-012 keeps hardware out of profiles and static resolution. A later
   `nimbus init` inspection proposes explicit components from DMI and PCI facts;
   the Phase 1 desktop and laptop fixtures select those components directly.
-- D-013 keeps exact system updates in Nimbus and restricts Topgrade to a
-  separately approved user-manager phase. Current Topgrade dry-run evidence
-  shows command invocations rather than resolved downstream versions, and the
-  recovery topology excludes those home-directory mutations.
+- D-013, as amended by D-018, keeps exact system updates in Nimbus and runs
+  Topgrade with the user's Chezmoi-owned configuration and a command-line
+  `--disable` list. Topgrade dry-run shows command invocations rather than
+  resolved downstream versions, and the recovery topology excludes those
+  home-directory mutations.
 - Current upstream installation evidence accepts Mise's recommended user-scope
-  installer and self-update setting. Tailscale remains a directly modelled
-  maker RPM repository because its script reaches the system layer. Nix remains
-  Fedora-owned because the upstream multi-user installer documents disabled
-  SELinux as a Linux prerequisite.
+  installer and self-update setting. Tailscale comes from Fedora 44, which
+  carries it. Nix remains Fedora-owned because the upstream multi-user
+  installer documents disabled SELinux as a Linux prerequisite.
 - D-014 records the verified Fedora 44 sources for Hyprland, the stable
   Noctalia greeter, Yazi, gaming helpers, WireGuard, FreeRDP, Typst, Tinymist,
   and Go tooling. WoWUp and Yazi SVG preview remain blocked on accepted package
@@ -144,11 +161,14 @@ Chezmoi handoff.
 
 ## Blockers and residual risk
 
-- Q-013 blocks freezing the Phase 1 definition types and ordering semantics.
-- Q-014 blocks the catalog and third-party repository schema.
-- Q-016 blocks deriving real definitions from PACKAGES.md.
-- Q-015 does not block the resolver; it blocks acceptance of the later Chezmoi
-  refresh handoff.
+- The dotfiles template change for Q-015 is outside this repository and
+  blocks only the Phase 5 handoff.
+- Signing-key fingerprints for Terra, RPM Fusion, Brave, VSCodium, the
+  Hyprland COPR, Flathub, and the owner's COPRs must be recorded in
+  nimbus.toml from the makers' published keys before those repositories are
+  used; Docker's and OpenAI's are already recorded.
+- A maker's installer script cannot be pinned; the plan shows its URL and
+  fetched digest only.
 - Exact DNF5 constraint and desktop-session update behavior remains deliberately
   outside this phase.
 - Exact hardware probes belong to Phase 5 and Topgrade orchestration belongs to
