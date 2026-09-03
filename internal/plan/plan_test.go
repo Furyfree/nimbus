@@ -361,7 +361,7 @@ func TestUpdatesUnavailableIsReportedNotGuessed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Updates.Unavailable == "" || !strings.Contains(p.Updates.Unavailable, "makecache") {
+	if p.Updates.Unavailable == "" || !strings.Contains(p.Updates.Unavailable, "nimbus refresh") {
 		t.Fatalf("updates = %+v", p.Updates)
 	}
 	f.Packages = facts.Section[[]facts.Package]{Error: "dnf5 broken"}

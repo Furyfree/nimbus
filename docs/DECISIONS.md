@@ -396,15 +396,15 @@ Chezmoi scripts; Q-005 stands.
 
 #### D-020: Planning reads the cache, apply replays the plan
 
-Decided 2026-09-03 before Phase 3. `plan` previews every DNF transaction
-from the local metadata cache with `dnf5 --assumeno --cacheonly`, so plan
-and apply read the same package lists and apply can refuse a changed
-transaction; `plan --refresh` runs `dnf5 makecache` as the one opt-in
-network step, and `upgrade` refreshes by design. DNF5's `--store` downloads
-packages while recording the transaction, so it is the Phase 4 apply
-mechanism, download then `dnf5 replay`, not a preview. Rejected: planning
-online by default, because two consecutive resolutions could then disagree
-through no fault of the owner.
+Decided 2026-09-03 before Phase 3. `plan` previews every DNF transaction from
+the local metadata cache with `dnf5 --assumeno --cacheonly`, so plan and apply
+read the same package lists and apply can refuse a changed transaction; `nimbus
+refresh` runs `dnf5 makecache` as the one opt-in network step, its own command
+so planning paths stay free of network access, and `upgrade` refreshes by
+design. DNF5's `--store` downloads packages while recording the transaction, so
+it is the Phase 4 apply mechanism, download then `dnf5 replay`, not a preview.
+Rejected: planning online by default, because two consecutive resolutions could
+then disagree through no fault of the owner.
 
 Repositories Nimbus enables from a `baseurl` live in
 `/etc/yum.repos.d/nimbus-<id>.repo`, so ownership is visible by name; a

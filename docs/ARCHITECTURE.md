@@ -116,8 +116,9 @@ installed, which apply would adopt.
 ## Rules the code keeps
 
 - **Read-only.** Nothing writes a file, invokes sudo, or opens a network
-  connection, except `plan --refresh`, which runs `dnf5 makecache` visibly
-  before planning. `definitions` and `selector` run no command at all;
+  connection, except `nimbus refresh`, which runs `dnf5 makecache` and is
+  its own command so plan stays pure. `definitions` and `selector` run no
+  command at all;
   `facts` and `plan` run native read-only commands only through `Source`,
   so a test can see every one of them. Tests run the loader against a
   read-only tree to prove the first part.

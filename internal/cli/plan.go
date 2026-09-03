@@ -13,29 +13,23 @@ import (
 
 func newPlan(opts *options) *cobra.Command {
 	var flags machineFlags
-	var refresh, prune bool
+	var prune bool
 	cmd := &cobra.Command{
 		Use:   "plan",
 		Short: "Show the complete plan for the selected machine without changing anything",
 		Long: `Plan compares the desired configuration with the installed system and shows
 every operation apply would run, plus the known update information. With
 --prune it also shows the unmanaged packages apply --prune would remove. It
-writes nothing and runs no mutating command. DNF previews come from the local
-metadata cache; --refresh runs dnf5 makecache first, the one network step,
-before planning.`,
+writes nothing, uses no network, and runs no mutating command. DNF previews
+come from the local metadata cache; run nimbus refresh first when it is
+stale.`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := loadSelected(flags)
 			if err != nil {
 				return err
 			}
-			src := newSource()
-			if refresh {
-				if _, err := src.Run("dnf5", "makecache"); err != nil {
-					return fmt.Errorf("refresh metadata: %w", err)
-				}
-			}
-			p, err := buildPlan(s, src)
+			p, err := buildPlan(s, newSource())
 			if err != nil {
 				return err
 			}
@@ -57,7 +51,6 @@ before planning.`,
 		},
 	}
 	addMachineFlags(&flags, cmd.Flags())
-	cmd.Flags().BoolVar(&refresh, "refresh", false, "run dnf5 makecache before planning")
 	cmd.Flags().BoolVar(&prune, "prune", false, "also show the unmanaged packages apply --prune would remove")
 	return cmd
 }

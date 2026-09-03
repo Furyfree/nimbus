@@ -73,5 +73,5 @@ The delivered commands are `validate`, `doctor`, `plan`, `status`, `managed`,
 and `version`. All of them are read-only: `validate` checks the definitions,
 `doctor` inspects the host, and `plan` shows every operation apply would run
 without running any, with `--prune` adding what `apply --prune` would remove.
-The one exception is `plan --refresh`, which runs `dnf5 makecache` to refresh
-DNF's metadata cache before planning. Nothing mutates the managed system yet.
+`refresh` runs `dnf5 makecache` so plan reads current package lists; it is
+the one network step. Nothing mutates the managed system yet.

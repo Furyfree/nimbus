@@ -20,7 +20,7 @@ func TestRootHelpListsOnlyDeliveredCommands(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("exit %d", code)
 	}
-	for _, want := range []string{"doctor", "plan", "status", "validate", "version"} {
+	for _, want := range []string{"doctor", "plan", "refresh", "status", "validate", "version"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help lacks %s:\n%s", want, out)
 		}

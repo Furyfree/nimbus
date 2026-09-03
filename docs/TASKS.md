@@ -14,9 +14,10 @@ the first VM run is deferred to Phase 4.
 - [x] Parse the DNF5 `--assumeno` preview table and `check-upgrade` output
   from fixtures recorded in the research container; reject an unknown
   section rather than accept a new DNF behavior silently.
-- [x] Plan from the local metadata cache only; `plan --refresh` runs
-  `dnf5 makecache` first as the one opt-in network step, and missing cache
-  is reported with that command rather than guessed.
+- [x] Plan from the local metadata cache only; `nimbus refresh` runs
+  `dnf5 makecache` as its own command, the one network step among the
+  read-only commands, and a missing cache is reported with that command
+  rather than guessed.
 - [x] Recognize declared repositories on the host: `nimbus-<id>` for the
   files Nimbus writes, the maker's own IDs for release packages, the COPR
   ID DNF creates, and the Flatpak remote by name; a foreign file that
@@ -197,8 +198,8 @@ the first VM run is deferred to Phase 4.
   fresh host gets a complete plan, removal dedup, repository and remote
   verification, adoption source checks, a digest bound to the definition
   digest), and the eighth, `plan --refresh` as network access inside a
-  planning path, awaits the owner's call between keeping the flag and a
-  separate `nimbus refresh` command.
+  planning path, in the fourth: the flag is gone and `nimbus refresh` is
+  its own command.
 - Q-018 asks whether the base should be read live from DNF history or the
   installed comps groups instead of listed; it is decided after the Phase 4 VM
   run. Until then the `fedora-base` component declares what the installer
@@ -240,8 +241,8 @@ the first VM run is deferred to Phase 4.
 
 Complete the phase only when every checkbox passes, evidence is recorded, the
 plan explains every selected package without executing a mutating command,
-and no planner writes, invokes sudo, or uses the network except the explicit
-`plan --refresh` metadata step.
+and no planner writes, invokes sudo, or uses the network; `nimbus refresh`
+is the separate metadata step.
 
 Stop after the completed planner and request separate authorization before
 starting controlled apply.
