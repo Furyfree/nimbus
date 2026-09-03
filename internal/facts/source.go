@@ -30,7 +30,9 @@ type Source interface {
 // ExecSource reads the live system.
 type ExecSource struct{}
 
-// Run executes name with args under a C locale so output is stable.
+// Run executes name with args under a C locale so output is stable. On a
+// non-zero exit the captured stdout is still returned with the error, since
+// tools such as systemctl report state that way.
 func (ExecSource) Run(name string, args ...string) ([]byte, error) {
 	cmd := exec.Command(name, args...)
 	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
@@ -42,7 +44,7 @@ func (ExecSource) Run(name string, args ...string) ([]byte, error) {
 		if msg == "" {
 			msg = err.Error()
 		}
-		return nil, fmt.Errorf("%s %s: %s", name, strings.Join(args, " "), msg)
+		return stdout.Bytes(), fmt.Errorf("%s %s: %s", name, strings.Join(args, " "), msg)
 	}
 	return stdout.Bytes(), nil
 }
@@ -85,11 +87,12 @@ func Key(name string, args ...string) string {
 	return strings.Join(append([]string{name}, args...), " ")
 }
 
-// Run replays a recorded command.
+// Run replays a recorded command. A recorded failure returns any recorded
+// output as well, matching ExecSource.
 func (f *FakeSource) Run(name string, args ...string) ([]byte, error) {
 	key := Key(name, args...)
 	if msg, ok := f.Failures[key]; ok {
-		return nil, errors.New(msg)
+		return f.Commands[key], errors.New(msg)
 	}
 	out, ok := f.Commands[key]
 	if !ok {

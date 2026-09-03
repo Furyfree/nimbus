@@ -68,7 +68,9 @@ func runDoctor(cmd *cobra.Command, opts *options, override string) error {
 			}
 		}
 	}
-	if root != "" {
+	if root == "" {
+		cfg.DefinitionsError = "no checkout selected"
+	} else {
 		c, err := definitions.Load(root)
 		var errs definitions.ErrorList
 		if err != nil && !errors.As(err, &errs) {

@@ -111,3 +111,12 @@ func TestCheckoutOverrideSkipsSelector(t *testing.T) {
 		t.Fatalf("selector = %+v", c)
 	}
 }
+
+func TestUnsetGPGCheckIsUnknown(t *testing.T) {
+	f, cfg := healthy(), healthyConfig()
+	f.Repositories.Value = append(f.Repositories.Value, facts.Repository{ID: "vendor", Enabled: true})
+	c := status(Run(f, cfg), "repository-signatures")
+	if c.Status != Unknown || !strings.Contains(c.Observation, "vendor") || c.Remediation == "" {
+		t.Fatalf("unset gpgcheck = %+v", c)
+	}
+}

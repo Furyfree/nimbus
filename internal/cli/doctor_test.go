@@ -120,3 +120,16 @@ func TestDoctorWithBrokenCheckoutStillRunsHostChecks(t *testing.T) {
 		t.Fatalf("output:\n%s", out)
 	}
 }
+
+func TestDoctorWithoutSelectorFailsDefinitions(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	src := fixtureSource(t, "")
+	withSource(t, src)
+	code, out, _ := run(t, "doctor")
+	if code != ExitFailure {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+	if !strings.Contains(out, "fail    selector:") || !strings.Contains(out, "fail    definitions: no checkout selected") {
+		t.Fatalf("output:\n%s", out)
+	}
+}

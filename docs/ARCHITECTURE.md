@@ -88,9 +88,11 @@ is unknown. Doctor treats unknown as a separate state from failure.
 
 ## Rules the code keeps
 
-- **Read-only.** Nothing in these packages runs a command, opens a network
-  connection, or writes a file. Tests run the loader against a read-only
-  tree to prove it.
+- **Read-only.** Nothing writes a file, invokes sudo, or opens a network
+  connection. `definitions` and `selector` run no command at all; `facts`
+  runs native read-only commands only through `Source`, so a test can see
+  every one of them. Tests run the loader against a read-only tree to prove
+  the first part.
 - **Errors are collected, not thrown.** `definitions.ErrorList` carries every
   problem with its checkout-relative path so `validate` reports all of them
   at once. Structural load errors are reported first; semantic checks run on
