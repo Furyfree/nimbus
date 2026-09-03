@@ -16,6 +16,12 @@ test:
 validate:
     go run ./cmd/nimbus validate --checkout .
 
+# Build a static binary that runs on any x86_64 Linux, such as the test VM.
+# -s -w drops the symbol table and DWARF debug data; panics still print
+# their stack traces.
+build:
+    CGO_ENABLED=0 go build -ldflags='-s -w' -o nimbus ./cmd/nimbus
+
 package-search query:
     docker build --platform linux/amd64 -t nimbus-fedora-packages tools/package-query
     docker run --rm nimbus-fedora-packages search --all {{quote(query)}}
