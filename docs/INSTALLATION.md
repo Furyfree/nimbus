@@ -68,18 +68,20 @@ before starting installation.
 Create these Btrfs subvolumes without `@` prefixes:
 
 - `root` -> `/`: included in every supported recovery point.
-- `home` -> `/home`: excluded; user data needs its own backup.
+- `home` -> `/home`: excluded; user files are synchronized or stored
+  externally.
 - `snapshots` -> `/.snapshots`: stores recovery points and is excluded.
 - `log` -> `/var/log`: excluded so failure logs survive restoration.
 - `cache` -> `/var/cache`: excluded because it is regeneratable.
 - `swapfile` -> `/var/swap`: excluded and reserved for later hibernation work.
 - `flatpak` -> `/var/lib/flatpak`: snapshotted only when system Flatpaks
   change.
-- `windows` -> `/var/lib/nimbus/windows`: excluded; the Windows guest disk
-  needs VM-aware backup.
-- `docker` -> `/var/lib/docker`: excluded; container data needs its own backup.
-- `containerd` -> `/var/lib/containerd`: excluded; container data needs its own
-  backup.
+- `windows` -> `/var/lib/nimbus/windows`: excluded; the Windows guest may be
+  lost and recreated.
+- `docker` -> `/var/lib/docker`: excluded; container data may be lost and
+  recreated.
+- `containerd` -> `/var/lib/containerd`: excluded; container data may be lost
+  and recreated.
 
 Do not create a separate `/var` subvolume. Ordinary `/var` state, including
 Nimbus state in `/var/lib/nimbus`, must remain in `root`; only its `windows`
@@ -128,5 +130,6 @@ installs the Nimbus engine through the approved COPR, and enters the reviewed
 Nimbus initialization flow. Nimbus and Chezmoi then install the system and user
 configuration through their separate plans.
 
-Btrfs recovery points stay on the same disk and are not backups. Home, VM disks,
-and container data require independent backup.
+Btrfs recovery points stay on the same disk and are not backups. Nimbus
+provides no backup; home, guest, and container data are excluded and may be
+lost and recreated from external sources.

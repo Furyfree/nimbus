@@ -20,5 +20,5 @@ docker run --rm nimbus-fedora-packages provides /usr/bin/rg
 ~~~
 
 Each query uses a temporary container. Results are research input. Accepted
-packages become bare names in profiles, components, or the machine manifest;
-only exceptional lifecycles enter `catalog/`.
+packages become bare names in profiles, components, or the machine manifest,
+or `<repository>:<name>` references when the source is not Fedora.
