@@ -105,11 +105,12 @@ func platform(f *facts.Facts, cfg Config) Check {
 func selector(f *facts.Facts, cfg Config) Check {
 	c := Check{ID: "selector"}
 	switch {
+	case cfg.CheckoutOverride && !f.Checkout.Known():
+		c.Status, c.Observation = Fail, "--checkout override in use; "+f.Checkout.Error
+		c.Impact = "the override skips selector approval only; a checkout whose origin and commit cannot be read is not inspectable"
+		c.Remediation = "point --checkout at a Git clone of the Nimbus repository"
 	case cfg.CheckoutOverride:
-		c.Status, c.Observation = Pass, "--checkout override in use; the selector was not consulted"
-		if f.Checkout.Known() {
-			c.Observation += "; " + describeCheckout(f.Checkout.Value)
-		}
+		c.Status, c.Observation = Pass, "--checkout override in use; the selector was not consulted; "+describeCheckout(f.Checkout.Value)
 	case cfg.SelectorError != "":
 		c.Status, c.Observation = Fail, cfg.SelectorError
 		c.Impact = "no machine is selected, so nothing can be resolved or applied"
@@ -201,10 +202,13 @@ func repositorySignatures(f *facts.Facts) Check {
 		}
 		enabled++
 		switch r.GPGCheck {
+		case "1":
 		case "0":
 			unchecked = append(unchecked, r.ID)
 		case "":
 			unset = append(unset, r.ID)
+		default:
+			unset = append(unset, r.ID+" (gpgcheck="+r.GPGCheck+")")
 		}
 	}
 	if len(unchecked) > 0 {

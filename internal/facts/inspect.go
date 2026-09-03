@@ -2,6 +2,7 @@ package facts
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -174,11 +175,18 @@ func firewalld(src Source) (string, error) {
 	return state, nil
 }
 
+// GitArgs prefixes every Git invocation. --no-optional-locks stops status
+// from refreshing and rewriting the index, so inspection never mutates the
+// checkout.
+func GitArgs(root string, args ...string) []string {
+	return append([]string{"--no-optional-locks", "-C", root}, args...)
+}
+
 func checkout(src Source, root string) (Checkout, error) {
 	if root == "" {
 		return Checkout{}, errors.New("no checkout selected")
 	}
-	origin, err := selector.CheckoutOrigin(root)
+	origin, err := checkoutOrigin(src, root)
 	if err != nil {
 		return Checkout{}, err
 	}
@@ -186,13 +194,62 @@ func checkout(src Source, root string) (Checkout, error) {
 	if err != nil {
 		return Checkout{}, err
 	}
-	commit, err := src.Run("git", "-C", root, "rev-parse", "HEAD")
+	commit, err := src.Run("git", GitArgs(root, "rev-parse", "HEAD")...)
 	if err != nil {
 		return Checkout{}, err
 	}
-	status, err := src.Run("git", "-C", root, "status", "--porcelain")
+	status, err := src.Run("git", GitArgs(root, "status", "--porcelain")...)
 	if err != nil {
 		return Checkout{}, err
 	}
 	return Checkout{Root: root, Origin: normalized, Commit: strings.TrimSpace(string(commit)), Dirty: strings.TrimSpace(string(status)) != ""}, nil
+}
+
+// checkoutOrigin reads remote.origin.url through the source, following a
+// worktree pointer and its commondir the way selector.CheckoutOrigin does.
+func checkoutOrigin(src Source, root string) (string, error) {
+	gitPath := filepath.Join(root, ".git")
+	gitDir := gitPath
+	data, err := src.ReadFile(gitPath)
+	switch {
+	case err == nil:
+		line := strings.TrimSpace(string(data))
+		if !strings.HasPrefix(line, "gitdir: ") {
+			return "", fmt.Errorf("%s is not a worktree pointer", gitPath)
+		}
+		gitDir = strings.TrimPrefix(line, "gitdir: ")
+		if !filepath.IsAbs(gitDir) {
+			gitDir = filepath.Join(root, gitDir)
+		}
+	case IsDirectoryError(err):
+	case errors.Is(err, os.ErrNotExist):
+		return "", fmt.Errorf("%s is not a Git checkout", root)
+	default:
+		return "", err
+	}
+	configPath := filepath.Join(gitDir, "config")
+	common, err := src.ReadFile(filepath.Join(gitDir, "commondir"))
+	switch {
+	case err == nil:
+		dir := strings.TrimSpace(string(common))
+		if dir == "" {
+			return "", fmt.Errorf("%s: commondir is empty", gitDir)
+		}
+		if !filepath.IsAbs(dir) {
+			dir = filepath.Join(gitDir, dir)
+		}
+		configPath = filepath.Join(dir, "config")
+	case errors.Is(err, os.ErrNotExist):
+	default:
+		return "", fmt.Errorf("read %s: %w", filepath.Join(gitDir, "commondir"), err)
+	}
+	config, err := src.ReadFile(configPath)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", configPath, err)
+	}
+	origin, err := selector.ParseOriginURL(config)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", configPath, err)
+	}
+	return origin, nil
 }

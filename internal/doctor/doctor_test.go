@@ -120,3 +120,21 @@ func TestUnsetGPGCheckIsUnknown(t *testing.T) {
 		t.Fatalf("unset gpgcheck = %+v", c)
 	}
 }
+
+func TestOverrideStillNeedsAReadableCheckout(t *testing.T) {
+	f, cfg := healthy(), Config{SupportedReleases: []string{"44"}, CheckoutOverride: true}
+	f.Checkout = facts.Section[facts.Checkout]{Error: "/tmp/x is not a Git checkout"}
+	c := status(Run(f, cfg), "selector")
+	if c.Status != Fail || !strings.Contains(c.Observation, "not a Git checkout") || c.Remediation == "" {
+		t.Fatalf("override with unknown checkout = %+v", c)
+	}
+}
+
+func TestUnrecognizedGPGCheckIsUnknown(t *testing.T) {
+	f, cfg := healthy(), healthyConfig()
+	f.Repositories.Value = append(f.Repositories.Value, facts.Repository{ID: "vendor", Enabled: true, GPGCheck: "maybe"})
+	c := status(Run(f, cfg), "repository-signatures")
+	if c.Status != Unknown || !strings.Contains(c.Observation, "vendor (gpgcheck=maybe)") {
+		t.Fatalf("unrecognized gpgcheck = %+v", c)
+	}
+}

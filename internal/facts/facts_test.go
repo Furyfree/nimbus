@@ -1,6 +1,8 @@
 package facts
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -174,5 +176,51 @@ func TestFakeFailureKeepsRecordedOutput(t *testing.T) {
 	f := Inspect(src, "")
 	if f.Firewalld.Value != "inactive" || !f.Firewalld.Known() {
 		t.Fatalf("firewalld = %+v", f.Firewalld)
+	}
+}
+
+func TestCheckoutReadsOnlyThroughSource(t *testing.T) {
+	src := fedora44(t)
+	root := gitCheckout(t, src, false)
+	// Nothing was written below root; the .git directory exists only in the
+	// fixture, so a read outside the source would fail.
+	if entries, _ := os.ReadDir(root); len(entries) != 0 {
+		t.Fatalf("test wrote into %s", root)
+	}
+	f := Inspect(src, root)
+	if !f.Checkout.Known() || f.Checkout.Value.Origin != "github.com/furyfree-org/nimbus" {
+		t.Fatalf("checkout = %+v", f.Checkout)
+	}
+	for _, key := range []string{Key("git", GitArgs(root, "rev-parse", "HEAD")...), Key("git", GitArgs(root, "status", "--porcelain")...)} {
+		if !strings.HasPrefix(key, "git --no-optional-locks ") {
+			t.Fatalf("git invoked without --no-optional-locks: %s", key)
+		}
+	}
+	plain := t.TempDir()
+	if f := Inspect(src, plain); f.Checkout.Known() || !strings.Contains(f.Checkout.Error, "not a Git checkout") {
+		t.Fatalf("non-repository = %+v", f.Checkout)
+	}
+}
+
+func TestCheckoutFollowsWorktreePointer(t *testing.T) {
+	src := fedora44(t)
+	main := t.TempDir()
+	wt := t.TempDir()
+	wtDir := filepath.Join(main, ".git", "worktrees", "wt")
+	src.Files[filepath.Join(wt, ".git")] = []byte("gitdir: " + wtDir + "\n")
+	src.Files[filepath.Join(wtDir, "commondir")] = []byte("../..\n")
+	src.Files[filepath.Join(main, ".git", "config")] = []byte("[remote \"origin\"]\n\turl = https://github.com/furyfree-org/nimbus\n")
+	src.Commands[Key("git", GitArgs(wt, "rev-parse", "HEAD")...)] = []byte("abc\n")
+	src.Commands[Key("git", GitArgs(wt, "status", "--porcelain")...)] = []byte("")
+	f := Inspect(src, wt)
+	if !f.Checkout.Known() || f.Checkout.Value.Origin != "github.com/furyfree-org/nimbus" {
+		t.Fatalf("worktree checkout = %+v", f.Checkout)
+	}
+}
+
+func TestExecSourceReportsDirectories(t *testing.T) {
+	_, err := (ExecSource{}).ReadFile(t.TempDir())
+	if !IsDirectoryError(err) {
+		t.Fatalf("directory read = %v", err)
 	}
 }
