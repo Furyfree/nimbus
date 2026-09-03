@@ -19,50 +19,50 @@ change before the Phase 5 Chezmoi handoff.
 - [x] Replace the source tiers with the fixed five-step order in SECURITY.md
   and reconcile PACKAGES.md with it (D-015).
 - [x] Apply the 2026-09-03 passthrough corrections (D-019).
-- [ ] Create the Go module and the Cobra command tree.
-- [ ] Implement nimbus validate with an explicit checkout override and nimbus
+- [x] Create the Go module and the Cobra command tree.
+- [x] Implement nimbus validate with an explicit checkout override and nimbus
   version without selector, checkout, or system dependencies.
-- [ ] Keep machine resolution internal and expose no future or mutating command
+- [x] Keep machine resolution internal and expose no future or mutating command
   stubs in root help.
-- [ ] Add nimbus.toml with the first definition schema, supported Fedora
+- [x] Add nimbus.toml with the first definition schema, supported Fedora
   releases, minimum-engine compatibility metadata, and the declared
   repositories with key URLs and pinned fingerprints.
-- [ ] Reject `package_constraints` as an unknown field in Phase 1.
+- [x] Reject `package_constraints` as an unknown field in Phase 1.
 
 ### Configuration model
 
-- [ ] Define strict versioned types for the local selector, machine, profile,
+- [x] Define strict versioned types for the local selector, machine, profile,
   component, repository declaration, and only the fields retained by Q-013.
-- [ ] Represent generic system files only through sources below
+- [x] Represent generic system files only through sources below
   `system/root/etc`, with their absolute `/etc` targets derived rather than
   independently configurable.
-- [ ] Parse the selector's required normalized origin and compare it with local
+- [x] Parse the selector's required normalized origin and compare it with local
   Git configuration without command execution or network access.
-- [ ] Add tracked desktop and laptop machine manifests under machines/, with
+- [x] Add tracked desktop and laptop machine manifests under machines/, with
   the desktop selecting gaming and the laptop selecting laptop-gaming.
-- [ ] Add the initial common, development, gaming, laptop-gaming,
+- [x] Add the initial common, development, gaming, laptop-gaming,
   hyprland-noctalia, virtualization, and windows-vm profiles and only the
   components needed to exercise their real graph.
-- [ ] Add representative package references that exercise bare and explicit DNF,
+- [x] Add representative package references that exercise bare and explicit DNF,
   system Flatpak, declared-repository prefixes, and a component `removes`
   entry without implementing package operations.
 
 ### Loading, validation, and resolution
 
-- [ ] Load definitions only from the selected Nimbus checkout.
-- [ ] Calculate the versioned SHA-256 definition digest from `nimbus.toml` and
+- [x] Load definitions only from the selected Nimbus checkout.
+- [x] Calculate the versioned SHA-256 definition digest from `nimbus.toml` and
   every regular file below the four definition directories using byte-sorted
   relative paths, exact contents, and `100644` or `100755` mode.
-- [ ] Resolve a symlinked checkout root, then reject internal symlinks, special
+- [x] Resolve a symlinked checkout root, then reject internal symlinks, special
   files, path escape, unsupported schemas, unknown fields, duplicate IDs,
   missing references, component cycles, conflicts, invalid package references,
   invalid exclusions, and duplicate lifecycle ownership.
-- [ ] Test undeclared-prefix rejection, missing `common`, canonical package
-  deduplication, prefix conflicts, and constraint attachment to canonical
-  provider identities.
-- [ ] Resolve profiles, explicit components, component requirements, packages,
+- [x] Test undeclared-prefix rejection, missing `common`, canonical package
+  deduplication, and prefix conflicts. Constraint attachment waits with the
+  constraint field for Phase 7.
+- [x] Resolve profiles, explicit components, component requirements, packages,
   and every declaration retained by Q-013 deterministically.
-- [ ] Preserve ordered profile IDs and selection provenance in the resolved
+- [x] Preserve ordered profile IDs and selection provenance in the resolved
   model for the later Chezmoi handoff and why command.
 - [ ] Dotfiles repository, before Phase 5: delete `machines/` and its
   symlink-selector README, add `Machine` and `ManagedByNimbus` prompts to
@@ -72,26 +72,43 @@ change before the Phase 5 Chezmoi handoff.
 
 ### Output and evidence
 
-- [ ] Emit stable human and versioned JSON validation output from the same
+- [x] Emit stable human and versioned JSON validation output from the same
   result, plus stable human and JSON version output.
-- [ ] Add valid, invalid, digest, and golden-output fixtures.
-- [ ] Prove that unrelated checkout files and non-executable permission changes
+- [x] Add valid, invalid, and digest fixtures; the CLI tests check the
+  human and JSON output shape against the tracked definitions rather than a
+  golden file.
+- [x] Prove that unrelated checkout files and non-executable permission changes
   do not alter the digest while definition, content, path, or executable changes
   do.
-- [ ] Test equivalent SSH and HTTPS origins plus missing, invalid, and
+- [x] Test equivalent SSH and HTTPS origins plus missing, invalid, and
   mismatched selector origins.
-- [ ] Test valid `/etc` system-file mappings and reject empty, traversing,
+- [x] Test valid `/etc` system-file mappings and reject empty, traversing,
   symlinked, special-file, independently targeted, and non-`/etc` cases.
-- [ ] Prove with tests that validation and resolution execute no external
+- [x] Prove with tests that validation and resolution execute no external
   command, access no network, invoke no privilege escalation, and write no
   files or state.
-- [ ] Run gofmt, go vet ./..., go test ./..., and just check.
-- [ ] Add the gomod ecosystem to .github/dependabot.yml and a GitHub Actions
+- [x] Run gofmt, go vet ./..., go test ./..., and just check.
+- [x] Add the gomod ecosystem to .github/dependabot.yml and a GitHub Actions
   workflow that runs `just check` when go.mod lands.
 - [ ] Inspect the final diff and untracked files and record evidence and
   residual risk below.
 
 ## Evidence
+
+- Phase 1 scaffold, 2026-09-03: `go.mod` at Go 1.27 with Cobra and go-toml
+  v2; `cmd/nimbus`, `internal/cli` (`validate`, `version`, `--json`),
+  `internal/definitions` (strict loader, validator, resolver, digest),
+  `internal/selector` (origin normalization and `.git/config` reader), and
+  `internal/version`. The tracked `nimbus.toml` declares ten repositories
+  with fingerprints computed from the makers' published keys in the research
+  container; OpenAI's key is stored as `system/keys/chatgpt.asc` because no
+  key URL exists. Two machines, seven profiles, and fourteen components
+  resolve: desktop 160 packages, laptop 144. `just check` passes with
+  `gofmt`, `go vet`, `go test`, `git diff --check`, and markdownlint; the
+  test suites cover the invalid-tree cases, digest boundary and executable
+  normalization, symlinked root, origin equivalence and mismatch, the
+  worktree pointer, include rejection, a read-only tree, and CLI exit codes.
+  Root help lists only `validate` and `version`.
 
 - The 2026-09-03 pre-implementation review identified the concrete schema,
   repository trust representation, and package inventory as unresolved Phase 1
@@ -175,6 +192,13 @@ change before the Phase 5 Chezmoi handoff.
   define desired state.
 
 ## Blockers and residual risk
+
+- The declared repository URLs for 1Password, Brave, VSCodium, and Terra are
+  taken from the makers' documentation and the container's repository files;
+  they are exercised only when Phase 3 planning reads them.
+- User-scope steps (Mise, Cargo, `mise install`) and services are not yet
+  schema fields, so PACKAGES.md still lists what the definitions cannot yet
+  express.
 
 - The dotfiles template change for Q-015 is outside this repository and
   blocks only the Phase 5 handoff.

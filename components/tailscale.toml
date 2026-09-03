@@ -1,0 +1,9 @@
+# Tailscale from Fedora. tailscaled.service arrives with the service
+# resource type.
+schema = 1
+id = "tailscale"
+
+requires = []
+conflicts = []
+packages = ["tailscale"]
+removes = []

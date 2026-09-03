@@ -1,0 +1,13 @@
+# QEMU/KVM host packages for guests the user manages through VM Curator,
+# which is a user-scope Cargo tool. Guest disks live below ~/vm-space.
+schema = 1
+id = "virtualization"
+
+packages = [
+  "qemu-system-x86",
+  "qemu-img",
+  "swtpm",
+  "virt-viewer",
+]
+
+components = []

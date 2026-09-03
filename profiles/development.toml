@@ -1,0 +1,21 @@
+# Developer tooling, Docker, Nix, and the system dependencies Mise needs.
+# Mise, its runtimes, and the Cargo tools are user-scope steps that later
+# schema fields will declare; see docs/PACKAGES.md.
+schema = 1
+id = "development"
+
+packages = [
+  "gcc",
+  "gcc-c++",
+  "clang",
+  "cmake",
+  "ninja-build",
+  "vscodium:codium",
+  "terra:t3code",
+  "chatgpt:chatgpt",
+]
+
+components = [
+  "docker",
+  "nix",
+]

@@ -1,0 +1,12 @@
+# The complete gaming stack for the desktop.
+schema = 1
+id = "gaming"
+
+packages = [
+  "gamemode",
+]
+
+components = [
+  "steam-stack",
+  "prism-launcher",
+]

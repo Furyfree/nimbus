@@ -11,8 +11,8 @@ configuration below the home directory.
 The first target is Fedora 44 on x86_64. Nimbus does not initially install the
 operating system, repartition disks, or configure full-disk encryption.
 
-Nimbus is currently in the planning and repository-foundation stage. No system
-management commands are implemented.
+Nimbus is at Phase 1 of its roadmap: the read-only configuration resolver.
+No system management commands are implemented.
 
 ## Repository model
 
@@ -63,5 +63,10 @@ The local gate is:
 just check
 ~~~
 
-Today it runs `git diff --check` and markdownlint. It will also run
-formatting, vetting, and tests after Go code exists.
+It runs `gofmt`, `go vet`, `go test`, `git diff --check`, and markdownlint.
+`just validate` runs `nimbus validate` against this checkout.
+
+Only `nimbus validate` and `nimbus version` exist so far. The engine reads
+the definitions in this checkout, validates them, resolves both tracked
+machines, and hashes the definition tree; it inspects nothing and writes
+nothing.

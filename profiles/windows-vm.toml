@@ -1,0 +1,10 @@
+# The one Windows guest. A profile rather than a bare component so the
+# Chezmoi handoff can see it.
+schema = 1
+id = "windows-vm"
+
+packages = []
+
+components = [
+  "windows-vm",
+]

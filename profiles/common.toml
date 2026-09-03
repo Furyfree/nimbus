@@ -1,0 +1,58 @@
+# The base every machine needs: CLI tools, shell, networking, compression,
+# and the system helpers Nimbus itself relies on.
+schema = 1
+id = "common"
+
+packages = [
+  # Version control and Nimbus prerequisites
+  "git",
+  "git-lfs",
+  "gh",
+  "chezmoi",
+  "flatpak",
+  "dnf5-plugins",
+  "policycoreutils-python-utils",
+  "fwupd",
+  "bash-completion",
+  # Shell
+  "zsh",
+  "terra:starship",
+  "eza",
+  "fzf",
+  "fd-find",
+  "bat",
+  "fastfetch",
+  "wl-clipboard",
+  "zoxide",
+  "ripgrep",
+  "tokei",
+  "btop",
+  "tealdeer",
+  "yq",
+  "duf",
+  # Editors and file management
+  "neovim",
+  "terra:yazi",
+  "file",
+  "jq",
+  "poppler-utils",
+  "ImageMagick",
+  "golang-github-jesseduffield-lazygit",
+  "just",
+  "terra:topgrade",
+  "ShellCheck",
+  "gitleaks",
+  # Compression
+  "zip",
+  "unzip",
+  "7zip",
+  "rpmfusion-nonfree:unrar",
+  # Networking
+  "NetworkManager-openconnect",
+  "wireguard-tools",
+]
+
+components = [
+  "snapper",
+  "tailscale",
+]

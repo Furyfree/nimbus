@@ -1,0 +1,13 @@
+# AMD integrated graphics. The freeworld VA driver replaces Fedora's.
+schema = 1
+id = "amd-graphics"
+
+requires = []
+conflicts = []
+packages = [
+  "mesa-dri-drivers",
+  "mesa-vulkan-drivers",
+  "amd-gpu-firmware",
+  "rpmfusion-free:mesa-va-drivers-freeworld",
+]
+removes = ["mesa-va-drivers"]

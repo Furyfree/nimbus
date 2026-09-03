@@ -1,0 +1,16 @@
+# NVIDIA driver from RPM Fusion with Secure Boot module signing support.
+# MOK enrollment is a manual task that arrives with the task model.
+schema = 1
+id = "nvidia"
+
+requires = []
+conflicts = []
+packages = [
+  "rpmfusion-nonfree:akmod-nvidia",
+  "rpmfusion-nonfree:xorg-x11-drv-nvidia-cuda",
+  "rpmfusion-nonfree:xorg-x11-drv-nvidia-libs.i686",
+  "libva-nvidia-driver",
+  "akmods",
+  "mokutil",
+]
+removes = []

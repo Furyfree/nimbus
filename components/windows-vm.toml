@@ -1,0 +1,9 @@
+# The Windows guest on Docker with KVM. The container image, Compose
+# definition, and data root arrive with the runtime-command phase.
+schema = 1
+id = "windows-vm"
+
+requires = ["docker"]
+conflicts = []
+packages = ["freerdp"]
+removes = []

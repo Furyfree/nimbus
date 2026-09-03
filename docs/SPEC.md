@@ -187,8 +187,10 @@ A repository ID is the prefix that package references use. `dnf` and
 `flatpak` are reserved: `dnf` is Fedora and `flatpak` is the single declared
 `flatpak` repository. `key_url` is where DNF fetches the signing key and
 `key` is the fingerprint that key must have; a key with another fingerprint
-fails the operation. A COPR derives its key URL from the project, and a
-Flatpak remote carries its key inside the `.flatpakrepo` file. A `dnf`
+fails the operation. A maker that publishes no key URL, such as OpenAI, has
+its key stored in the checkout instead as `key_file`, a path below
+`system/`. A COPR derives its key URL from the project, and a Flatpak remote
+carries its key inside the `.flatpakrepo` file. A `dnf`
 repository may instead name a `release_package` URL with its `sha256` when
 the maker distributes a release RPM, as RPM Fusion does. `priority` is the
 DNF repository priority; a later source in the [SECURITY.md](SECURITY.md)
