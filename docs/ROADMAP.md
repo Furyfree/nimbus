@@ -45,12 +45,15 @@ This phase freezes the smallest schema needed by later inspection and planning:
   normalized checkout origin
 - machines, profiles, components, and exceptional catalog entries
 - component requirements and conflicts
-- packages, exclusions, exact version constraints, resources, warnings, manual
-  task declarations, and runtime command declarations
+- packages, exclusions, exact version constraints, and only the resource or
+  later-capability declarations retained after Q-013
 - source locations and selection provenance
 
-Q-002 through Q-005 are resolved. The configuration schema and initial command
-surface have no remaining decision gate.
+Q-002 through Q-005 resolve the foundational behavior. Q-013, Q-014, and Q-016
+gate the concrete schema boundary, catalog and repository representation, and
+the real definition inputs. Resolve them in SPEC.md and fixtures before
+freezing Go types or resolver behavior; they do not reopen the overall
+architecture or command surface.
 
 Definitions are read from the selected checkout. Live definitions are not
 embedded in the engine. `validate` accepts an explicit checkout override and
@@ -75,10 +78,11 @@ files, and path escape inside the definition boundary are rejected. Commit and
 dirty-worktree metadata are added when local Git inspection is introduced; the
 definition digest already identifies the exact Phase 1 input.
 
-Phase 1 may model facts-dependent variants and warnings but never evaluates
-them. It performs no hardware or operating-system inspection, executes no
-external commands, accesses no network, invokes no privilege escalation, and
-writes no state.
+Q-013 decides which facts-dependent variants, warnings, manual tasks, and
+runtime commands belong in the initial schema. Phase 1 never evaluates any
+retained facts-dependent declaration. It performs no hardware or
+operating-system inspection, executes no external commands, accesses no
+network, invokes no privilege escalation, and writes no state.
 
 Only exact package constraints are accepted initially. Additional comparison
 syntax waits until the DNF5 mechanism is proven in a disposable Fedora
@@ -296,7 +300,9 @@ Normal chezmoi diff, apply, edit, and update stay direct. Nimbus performs no
 silent Git operation. The handoff runs once; later profile changes print the
 `chezmoi init` command and doctor reports a stale Chezmoi selection. The
 dotfiles repository adopted this handoff on 2026-09-02 and holds no machine
-manifest; this phase verifies the flags against its real template before exit.
+manifest. Q-015 gates the exact refresh command and its preservation of the
+independent 1Password choice. This phase verifies the initial and refresh flags
+against the real template before exit.
 
 ### Risks and recovery
 

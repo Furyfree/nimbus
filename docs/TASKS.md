@@ -3,10 +3,17 @@
 ## Current phase: Configuration resolver
 
 Plan: [Configuration resolver](ROADMAP.md#1-configuration-resolver).
-Open gates: none.
+Open Phase 1 gates: Q-013, Q-014, and Q-016. Q-015 gates the later Phase 5
+Chezmoi handoff.
 
 ### Foundation and entry points
 
+- [ ] Resolve Q-013 in SPEC.md and concrete schema fixtures before freezing Go
+  types or resolver behavior.
+- [ ] Resolve Q-014 with one non-duplicated repository and trust-pin model for
+  catalog-backed packages.
+- [ ] Resolve Q-016 and reconcile package owners, providers, sources, and
+  service activation before deriving real definitions from PACKAGES.md.
 - [ ] Create the Go module and the Cobra command tree.
 - [ ] Implement nimbus validate with an explicit checkout override and nimbus
   version without selector, checkout, or system dependencies.
@@ -18,8 +25,8 @@ Open gates: none.
 ### Configuration model
 
 - [ ] Define strict versioned types for the local selector, machine, profile,
-  component, resource declaration, catalog exception, manual task, and runtime
-  command metadata.
+  component, catalog exception, and only the resource or later-capability
+  declarations retained by Q-013.
 - [ ] Represent generic system files only through sources below
   `system/root/etc`, with their absolute `/etc` targets derived rather than
   independently configurable.
@@ -47,7 +54,7 @@ Open gates: none.
 - [ ] Test catalog non-shadowing, canonical package deduplication, lifecycle
   conflicts, and constraint attachment to canonical provider identities.
 - [ ] Resolve profiles, explicit components, component requirements, packages,
-  resources, manual tasks, and runtime command groups deterministically.
+  and every declaration retained by Q-013 deterministically.
 - [ ] Preserve ordered profile IDs and selection provenance in the resolved
   model for the later Chezmoi handoff and why command.
 
@@ -74,6 +81,9 @@ Open gates: none.
 
 ## Evidence
 
+- The 2026-09-03 pre-implementation review identified the concrete schema,
+  repository trust representation, and package inventory as unresolved Phase 1
+  inputs. It identified the Chezmoi refresh command as a separate Phase 5 gate.
 - The 2026-09-02 documentation reconciliation establishes one architecture and
   one active document hierarchy.
 - Q-002 establishes the selector as a regular Nimbus-owned local file that
@@ -114,7 +124,11 @@ Open gates: none.
 
 ## Blockers and residual risk
 
-- No unresolved decision blocks the configuration-resolver implementation.
+- Q-013 blocks freezing the Phase 1 definition types and ordering semantics.
+- Q-014 blocks the catalog and third-party repository schema.
+- Q-016 blocks deriving real definitions from PACKAGES.md.
+- Q-015 does not block the resolver; it blocks acceptance of the later Chezmoi
+  refresh handoff.
 - Exact DNF5 constraint and desktop-session update behavior remains deliberately
   outside this phase.
 
