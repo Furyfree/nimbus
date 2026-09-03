@@ -298,8 +298,7 @@ on every entry. An unknown field anywhere is an error.
 
 The initial profile vocabulary is:
 
-- `common`: the base every machine needs, including the `fedora-base`
-  component that declares what the Fedora installer leaves behind
+- `common`: the base every machine needs
 - `development`: developer tooling, Docker, Nix, and the system dependencies
   Mise needs
 - `virtualization`: QEMU/KVM host packages for Linux and other guests the
@@ -555,10 +554,13 @@ becomes desired merely because it exists. Applied state records only verified
 Nimbus operations and never replaces current inspection.
 
 Nimbus state and receipts below /var/lib/nimbus are versioned, contain no
-secrets, and are written atomically through a narrow operation-scoped
-privileged action. The Windows guest data root mounted at
-`/var/lib/nimbus/windows` is a separate subvolume holding guest data, not
-Nimbus state. A receipt records at least:
+secrets, are readable by the normal user, and are written atomically through a
+narrow operation-scoped privileged action that accepts only a stage bound to
+the approved plan digest. The first apply also records the baseline: the
+packages installed before Nimbus took over, which are never prune candidates
+and are listed by `unmanaged --all` as pre-existing. The Windows guest data
+root mounted at `/var/lib/nimbus/windows` is a separate subvolume holding guest
+data, not Nimbus state. A receipt records at least:
 
 - state and engine versions
 - definition origin, commit, dirty state, and digest
@@ -630,8 +632,13 @@ desired. It leaves unrelated unmanaged resources unchanged and does not upgrade
 an already-satisfied resource merely because a newer version exists.
 
 `nimbus apply` re-resolves desired state, re-inspects the system, shows the
-complete plan, and requires explicit approval. Immediately before execution it
-repeats the relevant checks and refuses a changed digest or native transaction.
+complete plan, and requires explicit approval: an interactive answer or the
+exact plan digest passed with `--approve`. Immediately before execution it
+repeats the relevant checks and refuses a changed digest or native
+transaction. A DNF transaction is downloaded and stored first, compared with
+the reviewed preview, and then replayed, so exactly the reviewed packages
+are what runs. Operations that waited for a repository enabled in the same
+run are planned again after a metadata refresh and need their own approval.
 `nimbus apply --prune` uses the same process with prune candidates promoted into
 a visibly separate expanded plan. An unmanaged resource is eligible only when
 the native provider proves explicit installation, non-protected status,
@@ -1239,7 +1246,7 @@ nimbus validate
 nimbus status
 nimbus plan [--prune]
 nimbus refresh
-nimbus apply [--prune]
+nimbus apply [--prune] [--approve DIGEST]
 nimbus upgrade
 nimbus postinstall
 nimbus packages install [QUERY]
@@ -1253,7 +1260,7 @@ nimbus components add [ID...]
 nimbus components remove [ID...]
 nimbus files accept /etc/PATH
 nimbus managed
-nimbus unmanaged
+nimbus unmanaged [--all]
 nimbus why RESOURCE
 nimbus windows setup
 nimbus windows status
@@ -1297,9 +1304,11 @@ apply lifecycle:
   refuses technical dependencies, protected packages, foreign ownership, and
   unknown removal lifecycles.
 - `packages installed [QUERY]` is read-only and browses explicitly installed
-  supported packages. It labels each package as desired, managed, unmanaged,
-  excluded, or required and shows its selection provenance and known update or
-  prune status.
+  supported packages. It labels each package as managed (a receipt exists),
+  adopt (desired and installed from an acceptable source), blocked (desired
+  but installed from a source the plan refuses), pre-existing (in the
+  baseline), unmanaged (installed by hand since), or dependency, and shows
+  its selection provenance.
 
 Install and remove show the proposed manifest diff and complete system plan,
 then require approval before writing the manifest atomically and applying it.

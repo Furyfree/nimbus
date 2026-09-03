@@ -419,7 +419,74 @@ release package tracks mirror moves that a hand-written file would miss;
 and `--nogpgcheck` for the release RPM, because the policy forbids it and
 extraction costs two read-only steps.
 
+#### D-021: Apply executes exactly the reviewed plan
+
+Decided 2026-09-03 before Phase 4. Approval is an interactive prompt or the
+exact plan digest passed with `--approve`, so a script can approve only a
+plan someone has seen. Apply takes the lock after approval, re-plans, and
+refuses a changed digest. A DNF install runs as `dnf5 install --store` and
+`dnf5 replay` with the stored transaction compared with the reviewed
+preview in between, so the bytes that run are the ones reviewed. Every
+repository is enabled through DNF's own configuration commands: `addrepo`
+for the Nimbus-owned file and `setopt` for a priority override, never by
+editing a maker's file. Receipts are written per operation through the one
+privileged record action, root-owned and world-readable, with the baseline
+recorded on the first apply. Pending operations that waited for a
+repository enabled in the same run are planned again after a metadata
+refresh and approved again; `--approve` covers the first round only.
+Rejected: a general privileged helper, because the two narrow actions
+suffice; and a single approval for every round, because the later
+transactions were not visible at the first approval.
+
 ### Resolved questions
+
+#### Q-018: Should the Fedora base be extracted live instead of listed? (resolved)
+
+Opened 2026-09-03 after Phase 3. `components/fedora-base.toml` lists the 132
+packages the installer leaves behind so that none of them is a prune
+candidate. The list is generated from Fedora's comps groups plus a
+hand-verified Anaconda set, must be regenerated per Fedora release, and can
+only be completed from the real prune output of the first VM run. The owner
+asks whether Nimbus should instead read the base set from the live system
+and always keep it out of the prune check, so the repository does not carry
+a list of every base package.
+
+Candidates, to be judged against real data from the Phase 4 VM run:
+
+- Read DNF history: the installer's transaction is the first one, and its
+  package set is the base by definition. Cheapest if DNF5 exposes it
+  reliably and Anaconda's transaction is identifiable.
+- Read the installed comps groups: `dnf5 group list --installed` plus
+  `group info` gives the same set the current list is generated from, but
+  live and per release, and misses the Anaconda-only packages the same way.
+- Keep the generated list, accepting the per-release regeneration.
+
+What a live rule changes: the base stops being desired state, so `why` no
+longer explains `bash`, apply neither adopts nor removes base packages, and
+prune eligibility becomes a policy on observed facts rather than a
+comparison with definitions. That is different from the D-012 hardware
+case, where observation was rejected as desired state, because a prune
+exclusion never installs anything.
+
+Direction chosen 2026-09-03, implemented and resolved in Phase 4. Every
+installed package falls into one of three buckets: managed, with a receipt
+because Nimbus installed or adopted it; pre-existing, recorded as a baseline
+at the first `nimbus init` and never a prune candidate, which on a fresh
+machine is exactly the Fedora base; and unmanaged-added-later, installed by
+hand after Nimbus took over, which are the prune candidates. `unmanaged`
+lists the third bucket by default and `--all` adds the baseline with a
+`pre-existing` marker. After a Fedora release upgrade, renamed base packages
+appear once in the third bucket and an explicit accept command folds them
+into the baseline after review. `fedora-base` is deleted when the baseline
+exists. Rejected: reading DNF history or comps live, because both depend on
+what the installer recorded and the comps route needs metadata at plan
+time.
+
+Resolved 2026-09-03 in Phase 4. The baseline is recorded with the first
+receipt of the first apply, since `init` arrives in Phase 5; `fedora-base`
+is deleted; `unmanaged --all` shows the pre-existing bucket. The accept
+command for renamed packages after a Fedora release upgrade arrives with
+`upgrade` in Phase 7.
 
 #### Q-001: Package reference grammar and catalog precedence (resolved)
 
@@ -1012,52 +1079,11 @@ Q-017.
 
 ### Open questions
 
-#### Q-018: Should the Fedora base be extracted live instead of listed?
-
-Opened 2026-09-03 after Phase 3. `components/fedora-base.toml` lists the 132
-packages the installer leaves behind so that none of them is a prune
-candidate. The list is generated from Fedora's comps groups plus a
-hand-verified Anaconda set, must be regenerated per Fedora release, and can
-only be completed from the real prune output of the first VM run. The owner
-asks whether Nimbus should instead read the base set from the live system
-and always keep it out of the prune check, so the repository does not carry
-a list of every base package.
-
-Candidates, to be judged against real data from the Phase 4 VM run:
-
-- Read DNF history: the installer's transaction is the first one, and its
-  package set is the base by definition. Cheapest if DNF5 exposes it
-  reliably and Anaconda's transaction is identifiable.
-- Read the installed comps groups: `dnf5 group list --installed` plus
-  `group info` gives the same set the current list is generated from, but
-  live and per release, and misses the Anaconda-only packages the same way.
-- Keep the generated list, accepting the per-release regeneration.
-
-What a live rule changes: the base stops being desired state, so `why` no
-longer explains `bash`, apply neither adopts nor removes base packages, and
-prune eligibility becomes a policy on observed facts rather than a
-comparison with definitions. That is different from the D-012 hardware
-case, where observation was rejected as desired state, because a prune
-exclusion never installs anything.
-
-Direction chosen 2026-09-03, implemented and resolved in Phase 4. Every
-installed package falls into one of three buckets: managed, with a receipt
-because Nimbus installed or adopted it; pre-existing, recorded as a baseline
-at the first `nimbus init` and never a prune candidate, which on a fresh
-machine is exactly the Fedora base; and unmanaged-added-later, installed by
-hand after Nimbus took over, which are the prune candidates. `unmanaged`
-lists the third bucket by default and `--all` adds the baseline with a
-`pre-existing` marker. After a Fedora release upgrade, renamed base packages
-appear once in the third bucket and an explicit accept command folds them
-into the baseline after review. `fedora-base` is deleted when the baseline
-exists. Rejected: reading DNF history or comps live, because both depend on
-what the installer recorded and the comps route needs metadata at plan
-time.
+None on 2026-09-03.
 
 ### Consequences for the next documentation pass
 
-Every question through Q-017 is resolved and D-007 is closed. Q-018 stays
-open until the Phase 4 VM run supplies the data to decide it. The only work
+Every question through Q-018 is resolved and D-007 is closed. The only work
 outside this repository is the dotfiles template change from Q-015, which
 gates the Phase 5 Chezmoi handoff. The active documents are consolidated below
 `docs/`, and legacy history is retained only in the named Git snapshot. One

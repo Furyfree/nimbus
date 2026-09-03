@@ -1,71 +1,71 @@
 # Nimbus tasks
 
-## Current phase: Planning and DNF
+## Current phase: Controlled DNF apply and receipts
 
-Plan: [Planning and DNF](ROADMAP.md#3-planning-and-dnf). Phases 1 and 2 are
-merged. No gate is open; the dotfiles template task below gates Phase 5, and
-the first VM run is deferred to Phase 4.
+Plan: [Controlled DNF apply and receipts](ROADMAP.md#4-controlled-dnf-apply-and-receipts).
+Phases 1 to 3 are merged. The first disposable-VM run belongs to this phase
+and is the owner's; its steps are in the evidence below.
 
-### Planner
+### State
 
-- [x] Add `internal/plan` with typed operations (repository, package,
-  Flatpak remote, Flatpak) carrying action, risk class, selection paths,
-  exact steps, and the parsed DNF transaction.
-- [x] Parse the DNF5 `--assumeno` preview table and `check-upgrade` output
-  from fixtures recorded in the research container; reject an unknown
-  section rather than accept a new DNF behavior silently.
-- [x] Plan from the local metadata cache only; `nimbus refresh` runs
-  `dnf5 makecache` as its own command, the one network step among the
-  read-only commands, and a missing cache is reported with that command
-  rather than guessed.
-- [x] Recognize declared repositories on the host: `nimbus-<id>` for the
-  files Nimbus writes, the maker's own IDs for release packages, the COPR
-  ID DNF creates, and the Flatpak remote by name; a foreign file that
-  already provides a repository blocks rather than duplicates it.
-- [x] Render the exact enabling steps per kind: key fetched and fingerprint
-  checked before import, `nimbus-<id>.repo` written by Nimbus, a release
-  RPM verified by SHA-256 with its key extracted through `rpm2archive` and
-  imported before installation, a COPR enabled through DNF and its key
-  checked afterwards.
-- [x] Adopt installed desired packages when their recorded source matches
-  the prefix, install the rest through one DNF transaction, plan declared
-  removals the install transaction does not already erase as a separate
-  transaction, and hold packages whose repository this plan enables as
-  pending operations that name the repository operation.
-- [x] Refuse a transaction that goes beyond the definitions: an undeclared
-  install, an undeclared removal, a package from the wrong repository, or a
-  smuggled upgrade.
-- [x] Show update information as its own section and prune candidates only
-  with `--prune`; hash the machine, definition digest, and apply section
-  into the plan digest.
-- [x] Verify a declared repository is present from the Nimbus-owned file with
-  signature checking, the declared location, and priority; repair drift in
-  our own file, block a foreign one; match a Flatpak remote by URL as well
-  as name; refuse adoption from the wrong repository or remote.
-- [x] Add the `fedora-base` component, generated from Fedora's `core` and
-  `standard` comps groups plus the packages Anaconda installs outside comps,
-  and select it from `common` so the base is never a prune candidate.
+- [x] Add `internal/state`: `/var/lib/nimbus` with a schema file, receipts
+  per resource, a journal, and the baseline of packages that existed before
+  Nimbus first applied anything. The normal user reads it; only the hidden
+  `nimbus internal record` action, run through sudo, writes it, and only a
+  stage bound to the approved plan digest with verified receipts.
+- [x] Record the baseline with the first receipt of the first apply; a later
+  record never replaces it.
+
+### Executor
+
+- [x] Add `internal/apply`: the kernel operation lock under
+  `$XDG_RUNTIME_DIR/nimbus/operation.lock`, mode 0700 and 0600, content
+  diagnostic only.
+- [x] Enable repositories natively: key downloaded or read from the
+  checkout, fingerprint checked with `gpg` before any privileged command,
+  `install` and `rpm --import`, then `dnf5 config-manager addrepo` for
+  Nimbus-owned repositories; a release RPM verified by SHA-256 with its key
+  extracted through `rpm2archive`; `dnf5 copr enable`; priorities through
+  `dnf5 config-manager setopt`, which writes a DNF override instead of the
+  maker's file; a Flatpak remote added from the verified `.flatpakrepo`.
+- [x] Install packages with `dnf5 install --store` then `dnf5 replay`, after
+  comparing the stored transaction with the reviewed preview; a difference
+  stops before replay and cleans the stage.
+- [x] Verify every operation by re-inspecting the host; a failed
+  verification gets no receipt and stops the run; earlier receipts stay.
+- [x] Owned removal of packages with a receipt that the definitions no
+  longer select; `apply --prune` removes the third-bucket candidates.
 
 ### Commands
 
-- [x] `nimbus plan` and `nimbus status` with `--checkout`, `--machine`, and
-  `--json`; `plan --prune` adds the prune section; an incomplete plan exits
-  1.
-- [x] `nimbus managed`, `nimbus unmanaged`, `nimbus why RESOURCE`,
-  `nimbus profiles list`, `nimbus components list`, and
-  `nimbus packages installed [QUERY]` as non-interactive lists; the picker
-  arrives with Phase 4.
+- [x] `nimbus apply [--prune] [--approve DIGEST]`: shows the plan, requires
+  approval by prompt or exact digest, takes the lock, re-plans, refuses a
+  changed digest, runs, and plans again for operations that waited for a
+  repository enabled in the same run.
+- [x] `packages install [QUERY]`, `packages remove [QUERY]`,
+  `profiles add|remove [ID...]`, `components add|remove [ID...]`: edit the
+  manifest in memory, show the diff and plan, require approval, write the
+  manifest atomically, apply, and leave the Git change to the user. Without
+  IDs the Bubble Tea picker opens; it needs a terminal.
+- [x] `unmanaged --all` adds the pre-existing bucket with its marker;
+  `managed` distinguishes receipts from adoptable packages.
+- [x] Delete `components/fedora-base.toml`; the baseline replaces it and
+  resolves Q-018.
 
 ### Validation
 
-- [x] Parser tests against the recorded previews, including protected
-  packages, no match, nothing to do, and an unknown section.
-- [x] Planner tests against the tracked desktop machine and the Fedora 44
-  host fixture: repository detection, adoption, the blocked Docker packages,
-  the four refusals, dependency acceptance, removals and an undeclared extra
-  removal, digest stability, and unavailable update information.
-- [x] CLI tests for plan, status, the views, why, and the selection lists.
+- [x] State tests: atomic writes, refusal of unbound or unverified stages,
+  baseline immutability, schema rejection.
+- [x] Executor tests with a scripted host whose state changes as commands
+  run: the full happy path with receipts and baseline, stop at the first
+  failure with earlier receipts kept, key mismatch before any privileged
+  command, verification failure without a receipt, incomplete plan refused,
+  owned removal retiring its receipt.
+- [x] CLI tests: approval and digest refusal, incomplete plan, stop at the
+  first failed operation with the lock held, manifest rendering and diff,
+  the selection flows without approval, the picker hook.
 - [x] Run `just check`.
+- [ ] First disposable-VM run, owner's action: see the evidence section.
 
 ### Outside this repository
 
@@ -76,6 +76,25 @@ the first VM run is deferred to Phase 4.
   unconditionally, and update PROFILES.md.
 
 ## Evidence
+
+- Phase 4 apply, 2026-09-03: `internal/state`, `internal/apply`, the hidden
+  `internal record` action, `nimbus apply`, the selection commands, and the
+  picker. Probed in the research container: `dnf5 config-manager addrepo
+  --id=... --set=...` writes exactly the repository file Nimbus wants, and
+  `dnf5 config-manager setopt <repo>.priority=100` writes
+  `/etc/dnf/repos.override.d/99-config_manager.repo` instead of touching the
+  maker's file, so no Nimbus-owned file-writing action is needed for
+  repositories. Facts now read the override directory so effective values
+  are compared.
+- VM run, to be done by the owner on the Fedora 44 VM from INSTALLATION.md:
+  build the engine on the host with `go build -o nimbus ./cmd/nimbus`, copy
+  the binary and a clone of this repository into the VM, then in the VM run
+  `./nimbus doctor --checkout <clone> --machine laptop`,
+  `./nimbus plan --checkout <clone> --machine laptop`, and
+  `./nimbus apply --checkout <clone> --machine laptop`; compare doctor and
+  plan output with the fixtures, check `/var/lib/nimbus` after apply, run
+  `plan` again and expect nothing to run, then `unmanaged --all` to see the
+  baseline. Record the outcome here.
 
 - Phase 3 planner, 2026-09-03: `internal/plan` with `nimbus plan`, `status`,
   `managed`, `unmanaged`, `why`, `profiles list`, `components list`, and
@@ -193,6 +212,15 @@ the first VM run is deferred to Phase 4.
 
 ## Blockers and residual risk
 
+- Apply has not run on a real Fedora yet; the VM run above is the first.
+  The scripted tests prove the control flow, not DNF's behavior.
+- A round with pending operations refreshes the user metadata cache with
+  `dnf5 makecache`; root's cache is refreshed by the `--store` download
+  itself. The two caches can differ for a moment, which surfaces as a
+  refused digest, never a silent change.
+- The picker is untested interactively; its model logic is small and the
+  commands accept explicit IDs without it.
+
 - The hosted Codex review of pull request 7 found eight problems on
   2026-09-03; seven are fixed in the third commit (pending operations so a
   fresh host gets a complete plan, removal dedup, repository and remote
@@ -200,14 +228,6 @@ the first VM run is deferred to Phase 4.
   digest), and the eighth, `plan --refresh` as network access inside a
   planning path, in the fourth: the flag is gone and `nimbus refresh` is
   its own command.
-- Q-018 asks whether the base should be read live from DNF history or the
-  installed comps groups instead of listed; it is decided after the Phase 4 VM
-  run. Until then the `fedora-base` component declares what the installer
-  leaves behind, so the base is desired rather than a prune candidate. Its
-  comps half is generated evidence; its Anaconda half (kernel, firmware,
-  bootloader, release packages) is the known set and is completed from the
-  real prune output in the first VM run. Prune stays informational until Phase
-  4 adds protected-package and dependency eligibility.
 - A non-root `plan` reads DNF's metadata through the system cache when it is
   fresh and otherwise its user cache; apply runs DNF as root and re-resolves,
   so a difference surfaces as a refused digest rather than a silent change.
@@ -239,10 +259,10 @@ the first VM run is deferred to Phase 4.
 
 ## Completion rule
 
-Complete the phase only when every checkbox passes, evidence is recorded, the
-plan explains every selected package without executing a mutating command,
-and no planner writes, invokes sudo, or uses the network; `nimbus refresh`
-is the separate metadata step.
+Complete the phase only when every checkbox passes, evidence is recorded, a
+representative DNF component and the selection commands complete and reverse
+safely in the disposable VM, and every mutation runs through the reviewed
+plan with a receipt.
 
-Stop after the completed planner and request separate authorization before
-starting controlled apply.
+Stop after the VM run is recorded and request separate authorization before
+starting bootstrap and initialization.
