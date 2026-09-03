@@ -89,6 +89,9 @@ drill, not only a successful backup or snapshot command.
 
 - `docs/SPEC.md` owns accepted product behavior, safety boundaries, and
   invariants.
+- `docs/ARCHITECTURE.md` explains the code layout, package boundaries, and
+  the flow of a command; update it when a package is added or a boundary
+  moves.
 - `docs/DECISIONS.md` records rationale and unresolved questions.
 - `docs/SECURITY.md` owns the workstation security policy: software sources,
   encryption, Secure Boot, SELinux, firewall, privilege, and secrets.

@@ -41,6 +41,8 @@ direct Chezmoi commands.
 ## Project documents
 
 - [SPEC.md](docs/SPEC.md) defines the complete accepted system contract.
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md) explains how the code is
+  organized and how a command flows through it.
 - [DECISIONS.md](docs/DECISIONS.md) records decision rationale and unresolved
   questions.
 - [SECURITY.md](docs/SECURITY.md) is the workstation security policy.
