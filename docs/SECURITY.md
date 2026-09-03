@@ -36,16 +36,18 @@ Tier 4 covers community Flathub builds and third-party COPRs as well.
 
 Rules:
 
-- Pick the highest tier the maker offers. Mise has the maker-owned COPR
-  `jdxcode/mise`, so Nimbus installs it from there and DNF updates it. 1Password
-  comes from AgileBits' repository, not the Terra repackage.
-- Tier 3 exists because some makers ship only a script. Zed installs to
-  `~/.local/zed.app` and updates itself. Such tools are user scope: the user
-  runs the script, the tool owns its updates, Chezmoi owns its configuration,
-  and Nimbus lists it as a typed manual task with a presence check. Nimbus and
-  root never run a maker's script, and the script never touches the system
-  layer. Nimbus's own `install.sh` is the one script run as bootstrap, trusted
-  once from the approved `main` branch and never used for updates.
+- Pick the highest acceptable tier the maker supports. 1Password comes from
+  AgileBits' repository, not the Terra repackage. Mise is the narrow exception:
+  its maker recommends the optimized `mise.run` binary over system packages,
+  and the installer writes only `~/.local/bin/mise`, so it remains user scope.
+- Tier 3 exists for maker scripts whose complete mutation boundary is below the
+  user's home. Zed installs to `~/.local/zed.app`; Mise installs to
+  `~/.local/bin/mise`. Such tools are user scope: the user runs the script, the
+  tool owns its updates, Chezmoi owns its configuration, and Nimbus lists it as
+  a typed manual task with a presence check. Nimbus and root never run a
+  maker's script, and the script never touches the system layer. Nimbus's own
+  `install.sh` is the one script run as bootstrap, trusted once from the
+  approved `main` branch and never used for updates.
 - A tier 3 tool that gains a maker repository or Flatpak moves up. A tier 4
   package that the maker adopts moves up the same way.
 - A repository is enabled only through a catalog entry whose release package
@@ -56,12 +58,20 @@ Rules:
   user and are the user's responsibility. Nimbus reports missing runtimes and
   never elevates for them.
 - Nix comes from Fedora's `nix` package, tier 1, with `nix-daemon.service`
-  as a system resource. The Nix installer scripts are not used because Fedora
-  ships the package. Chezmoi owns `~/.config/nix`.
+  as a system resource. The upstream multi-user installer is not accepted
+  while its documented Linux prerequisite is disabled SELinux. Chezmoi owns
+  `~/.config/nix`.
+- Tailscale comes from its maker-owned signed Fedora repository. Nimbus models
+  the repository, package, and service directly. The official `install.sh`
+  reaches the system layer through sudo and is therefore not a tier 3 manual
+  task; its Fedora result is available through the maker's documented direct
+  repository instructions without executing a mutable root script.
 - VM Curator has no Fedora or Terra package. The user installs it with
   `cargo install vm-curator`, user scope like every Cargo tool. Nimbus owns its
-  QEMU, OVMF, swtpm, virt-viewer, passt, and dnsmasq dependencies as Fedora
-  packages, and its guest disks live below `~/vm-space` on the `home`
+  `qemu-system-x86`, `qemu-img`, and `swtpm` dependencies as Fedora packages;
+  `qemu-system-x86` supplies the graphical display backends, OVMF, and `passt`.
+  Nimbus also installs `virt-viewer` when SPICE display and clipboard
+  integration is selected. Guest disks live below `~/vm-space` on the `home`
   subvolume, outside Nimbus. How the Rust toolchain itself is installed is not
   decided yet.
 - AppImages and manually downloaded binaries are not managed and not trusted.
@@ -100,7 +110,10 @@ Rules:
 - Nimbus inspects LUKS2 and never creates, converts, resizes, or re-encrypts a
   live volume.
 - Snapper recovery points live on the same encrypted disk and are not backups.
-  `/home`, guest disks, and container data need an off-disk backup.
+  Nimbus provides no backup facility. The workstation holds no canonical-only
+  data: user files are synchronized or stored externally, and local guest and
+  container data may be lost and recreated. Complete disk loss is therefore an
+  accepted rebuild and resynchronization event, not a Nimbus restore path.
 
 ## Secure Boot
 
@@ -165,8 +178,20 @@ Rules:
 
 - System-layer updates from every tier go through `nimbus upgrade` or direct
   DNF and Flatpak; nothing in the system layer updates unattended.
-- Tier 3 user-scope tools update themselves on the maker's schedule. That is
-  accepted because they cannot reach the system layer.
+- `nimbus upgrade` is the primary entry point. Nimbus plans and applies exact
+  DNF and Flatpak transactions itself, surrounded by its recovery point. It
+  then offers a separately approved Topgrade phase restricted to declared
+  user-scope managers. Topgrade's system, Flatpak, firmware, Nix, Chezmoi, Git
+  repository, and self-update steps stay disabled so it cannot bypass the
+  system plan or update source checkouts.
+- Topgrade dry-run shows commands, not the downstream package versions selected
+  by each manager. The plan therefore labels the user phase as command-level
+  review, never as an exact or recoverable transaction. The root and Flatpak
+  snapshots do not cover home-directory tools.
+- Tier 3 user-scope tools may update themselves on the maker's schedule. Mise's
+  accepted global setting is `auto_update = true`; it replaces only the
+  user-owned Mise binary. This is accepted because it cannot reach the system
+  layer.
 - Firmware updates go through `fwupd` as a reviewed manual task.
 - Fedora release upgrades are Fedora's native workflow, not Nimbus's.
 - The Nimbus engine updates through DNF like any other package.

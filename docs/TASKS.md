@@ -14,6 +14,8 @@ Chezmoi handoff.
   catalog-backed packages.
 - [ ] Resolve Q-016 and reconcile package owners, providers, sources, and
   service activation before deriving real definitions from PACKAGES.md.
+- [x] Resolve Q-017: fix the six PACKAGES.md source conflicts and accept or
+  reject each listed omission.
 - [ ] Create the Go module and the Cobra command tree.
 - [ ] Implement nimbus validate with an explicit checkout override and nimbus
   version without selector, checkout, or system dependencies.
@@ -112,9 +114,27 @@ Chezmoi handoff.
 - Q-009 fixes the supported recovery topology, three-point retention, 20 GiB
   low-space refusal, manual restore drill, and user runtime operation lock. On
   2026-09-02 the snapshot mechanism became Snapper; the requirements stand.
+- D-012 keeps hardware out of profiles and static resolution. A later
+  `nimbus init` inspection proposes explicit components from DMI and PCI facts;
+  the Phase 1 desktop and laptop fixtures select those components directly.
+- D-013 keeps exact system updates in Nimbus and restricts Topgrade to a
+  separately approved user-manager phase. Current Topgrade dry-run evidence
+  shows command invocations rather than resolved downstream versions, and the
+  recovery topology excludes those home-directory mutations.
+- Current upstream installation evidence accepts Mise's recommended user-scope
+  installer and self-update setting. Tailscale remains a directly modelled
+  maker RPM repository because its script reaches the system layer. Nix remains
+  Fedora-owned because the upstream multi-user installer documents disabled
+  SELinux as a Linux prerequisite.
+- D-014 records the verified Fedora 44 sources for Hyprland, the stable
+  Noctalia greeter, Yazi, gaming helpers, WireGuard, FreeRDP, Typst, Tinymist,
+  and Go tooling. WoWUp and Yazi SVG preview remain blocked on accepted package
+  sources rather than introducing AppImages or untracked binaries.
 - Q-010 defined one Windows guest with a fixed data root, preservation
   boundary, and purge lifecycle. On 2026-09-02 the backend became the
-  `dockurr/windows` container below `/var/lib/nimbus/windows/`.
+  `dockurr/windows` container below `/var/lib/nimbus/windows/`. Nimbus provides
+  no backup for the excluded guest disk; loss and reconstruction from external
+  sources is accepted.
 - On 2026-09-02 the Chezmoi handoff gained `managed_by_nimbus`, the `windows-vm`
   profile joined the vocabulary, and the dotfiles repository was reconciled to
   the handoff (D-007), removing its machine manifests and symlink selector.
@@ -131,6 +151,8 @@ Chezmoi handoff.
   refresh handoff.
 - Exact DNF5 constraint and desktop-session update behavior remains deliberately
   outside this phase.
+- Exact hardware probes belong to Phase 5 and Topgrade orchestration belongs to
+  Phase 7; neither may leak system inspection or mutation into Phase 1.
 
 ## Completion rule
 

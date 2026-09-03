@@ -136,10 +136,10 @@ disks below `~/vm-space`, so no subvolume returns and guests stay outside
 Nimbus. VM Curator is installed by the user with `cargo install`, user scope,
 because neither Fedora nor Terra packages it and the owner already uses Cargo
 for tools such as `just`; the maker's release RPM as a pinned artifact was
-rejected as a manual pin for a fast-moving tool. Nix is Fedora's `nix`
-package, tier 1, so the Nix
-installer scripts are not needed. The Windows guest stays the one VM Nimbus
-owns.
+rejected as a manual pin for a fast-moving tool. Nix remains Fedora's `nix`
+package, tier 1. The requested upstream multi-user installer is incompatible
+with the accepted security policy while its own Linux instructions require
+SELinux to be disabled. The Windows guest stays the one VM Nimbus owns.
 
 #### D-010: SECURITY.md owns the workstation security policy
 
@@ -152,17 +152,24 @@ Fedora rather than ufw; the `docker` group is not granted because it is
 root-equivalent. Rejected: keeping the policy as bullets inside SPEC.md,
 because it was already too thin to guide the Terra and Windows decisions.
 
-Amended 2026-09-02 after the owner's ranking. Sources are ranked by who
-publishes them, not by format: Fedora, then the maker's own repository, COPR,
-or Flatpak, then the maker's installer script as a user-scope manual task, then
-community repackages such as RPM Fusion, Terra, and third-party COPR, then
-pinned artifacts. The owner wanted maker channels for their prompt updates;
-verifying the installers showed they write below `~/.local`, so they are user
-scope by construction and Nimbus never runs them. Mise therefore comes from the
-maker-owned COPR `jdxcode/mise` and Zed from its installer. Rejected: refusing
-maker scripts outright, because Zed offers nothing else and the script cannot
-reach the system layer; and letting Nimbus run them as root, because they are
-unsigned and would be a mutation outside the plan.
+Amended 2026-09-03 after checking the makers' current instructions. Sources are
+ranked by who publishes them and by mutation scope: Fedora, then the maker's own
+repository, COPR, or Flatpak, then a maker installer whose complete mutation
+boundary is user scope, then community repackages such as RPM Fusion, Terra,
+and third-party COPR, then pinned artifacts. Mise joins Zed as a user-owned
+maker install because Mise recommends its optimized `mise.run` binary on Linux
+and it writes to `~/.local/bin`; its self-update cannot mutate the system layer.
+Herdr joins them on 2026-09-03: its script installs only to `~/.local/bin`
+without sudo, and its `herdr update` command runs from the Topgrade
+configuration in Chezmoi. Rejected: letting Nimbus or root run any of the
+scripts.
+
+Tailscale is not the same exception. Its official script invokes sudo, adds the
+maker repository, installs an RPM, and enables a system service. Nimbus models
+those documented Fedora operations directly instead of executing a mutable
+root script. The requested upstream Nix multi-user installer is also rejected
+for now because its own Linux prerequisites say SELinux must be disabled;
+Fedora's `nix` package remains compatible with the accepted enforcing policy.
 
 Amended 2026-09-02 after the owner's privilege and encryption calls. The owner
 joins the `docker` group as a declared group-membership resource; the policy
@@ -186,6 +193,68 @@ owner prefers the channel that every Docker document and tutorial assumes and
 has lagged Fedora less often than the reverse. Both `moby-engine` and
 `podman-docker` are conflicts of the component. The Fedora packages remain the
 documented fallback if Docker's repository is ever late for a Fedora release.
+
+#### D-012: Hardware is detected once and recorded as components
+
+Decided 2026-09-03. Hardware is not a user-facing profile. During new-machine
+initialization, Nimbus detects DMI identity and PCI devices, proposes the known
+hardware components, and writes the accepted IDs into the reviewed machine
+manifest. All later resolution remains configuration-only. The first exact
+targets are the MSI Z690 desktop with Intel integrated graphics and NVIDIA RTX
+3080, and the HP EliteBook X G1a with AMD integrated graphics. The desktop
+component selects `ddcutil`; the laptop component selects `brightnessctl`.
+Unknown or ambiguous facts open the component picker instead of guessing.
+
+Rejected: runtime package selection from hardware on every apply, because it
+would make desired state depend on observations and could silently change after
+a device or firmware update; and hardware profiles, because hardware is a
+technical component rather than user intent shared with Chezmoi.
+
+#### D-013: Topgrade aggregates only the user-owned upgrade phase
+
+Decided 2026-09-03. `nimbus upgrade` is the primary workstation update entry
+point. Nimbus retains exact DNF and Flatpak planning and surrounds the workflow
+with its recovery point. After system verification it offers a separately
+approved Topgrade run restricted to declared user managers such as Mise and
+Cargo. System, Flatpak, firmware, Nix, Chezmoi, Git repository, and Topgrade
+self-update steps are disabled in the Nimbus-owned Topgrade configuration.
+
+Topgrade dry-run prints the commands it would invoke but does not resolve their
+downstream versions. The user phase is therefore explicitly command-level and
+not represented as an exact Nimbus transaction. Root and Flatpak snapshots do
+not cover tools below home. Rejected: making unrestricted Topgrade the system
+updater, because that would bypass the reviewed system transaction and allow
+mutations absent from Nimbus's plan.
+
+#### D-014: Package-source refinements follow the selected lifecycles
+
+Decided 2026-09-03 from Fedora 44 package-query evidence. Hyprland,
+`hyprland-guiutils`, and `xdg-desktop-portal-hyprland` come from the
+`lionheartp/Hyprland` COPR. Noctalia Greeter uses Terra's stable
+`noctalia-greeter` package rather than the COPR's continuously rebuilt
+`noctalia-greeter-git`; this keeps the session's greeter on a release lifecycle
+while retaining the selected Hyprland source.
+
+Terra supplies `yazi`, `umu-launcher`, and `topgrade`. Fedora supplies
+`gamescope`, `mangohud`, `goverlay`, `gamemode`, `protontricks`, `winetricks`,
+`wireguard-tools`, and `freerdp`. Yazi's required `file` and its selected
+preview helpers are Fedora packages. Typst uses the `typst-cli` crate and
+Tinymist the `tinymist` crate under the existing user-owned Cargo lifecycle.
+`gopls` and `golangci-lint` remain Mise-owned.
+
+Amended 2026-09-03 after the Q-017 inventory review. Tools the owner updates
+through `cargo-update` stay on Cargo even when Terra packages them: Topgrade,
+Sheldon, and Yazi's `resvg` preview helper. Fedora still wins over Cargo, so
+Just moves to Fedora's `just`. Tailscale and Nix with `nix-daemon` come from
+Fedora rather than their maker scripts, which D-010 rejects; Starship comes
+from Terra because its script installs to `/usr/local/bin` with sudo and has
+no self-update; `unrar` comes from RPM Fusion because Fedora's package is the
+`unrar-free` wrapper. Where Fedora and Terra both carry a package, Noctalia
+and Chezmoi, Fedora is the provider and Terra must not shadow it.
+
+WoWUp remains desired but unavailable from the accepted Fedora 44 sources. It
+may enter through a separately reviewed Nimbus-owned COPR package when that
+package exists; its upstream AppImage remains rejected by the standing policy.
 
 ### Resolved questions
 
@@ -404,7 +473,13 @@ compatibility metadata stays and is verified before any operation.
 
 Resolved 2026-09-02.
 
-Chezmoi owns a development-profile-gated
+Amended 2026-09-03. Before Chezmoi initialization, the development profile
+presents the official `curl https://mise.run | sh` installer and
+`mise settings set auto_update true` as a user-run manual task. Nimbus verifies
+the resulting user-owned binary but never runs the installer or installs Mise
+as a system resource.
+
+Chezmoi then owns a development-profile-gated
 `run_onchange_after_install-mise-runtimes.sh.tmpl` action. It runs as the normal
 user after `~/.config/mise/config.toml` is applied and includes the rendered
 configuration's checksum in its own rendered content. Chezmoi therefore shows
@@ -416,9 +491,9 @@ MISE_SYSTEM_DEPS=warn mise -C "$HOME" install
 ~~~
 
 The warning policy prevents Mise from taking over privileged system-package
-installation. Nimbus installs Mise and the selected system dependencies;
-Chezmoi manages the configuration and action; Mise installs the declared
-user-scope runtimes.
+installation. The user owns the Mise binary, Nimbus installs the selected
+system dependencies, Chezmoi manages the configuration and action, and Mise
+installs the declared user-scope runtimes.
 
 Users who want a separate runtime preview can apply files without scripts, run
 the same Mise operation with `--dry-run`, and then apply scripts. If a runtime
@@ -503,6 +578,12 @@ renamed `windows` and mounted at `/var/lib/nimbus/windows` per Q-010. Recovery
 stays disabled until the Snapper fit check in ROADMAP.md Phase 7 and the manual
 restore drill both pass.
 
+Amended 2026-09-03. Nimbus provides no backup facility. The workstation holds
+no canonical-only data: user files are synchronized or stored externally, and
+local guest and container data may be lost. Complete disk loss is an accepted
+rebuild and resynchronization event. Recovery points remain same-disk rollback
+for reviewed system mutations and are never described as backups.
+
 #### Q-010: Windows backend and guest-data location (resolved)
 
 Resolved 2026-09-02.
@@ -553,6 +634,11 @@ because a user asking for Windows should not need to know the profile name.
 The rule that runtime commands never install a component now exempts `setup`
 alone, and only through the reviewed plan.
 
+Amended 2026-09-03. Nimbus does not back up the excluded Windows guest disk.
+Its loss is accepted because canonical files live outside the workstation; the
+guest may be recreated from desired state and those external sources. This
+supersedes the earlier requirement for a separate VM-aware backup.
+
 #### Q-011: Chezmoi handoff values and Nimbus-aware gating (resolved)
 
 Resolved 2026-09-02.
@@ -600,6 +686,32 @@ small files and double the command surface; the machine `packages` list plus
 `packages install` already covers one-off additions, and a package wanted on
 several machines is moved into a profile by editing that file. Revisit if the
 number of profiles grows.
+
+#### Q-017: Package inventory drift from the accepted sources (resolved)
+
+A review of PACKAGES.md on 2026-09-03 against SECURITY.md, D-009, D-010,
+D-014, and Fedora 44 package-query evidence found six entries that
+contradicted an accepted source, four entries available from two accepted
+repositories, and packages the Standard base does not provide. Resolved the
+same day:
+
+- Tailscale, Nix with `nix-daemon`, and Just move to Fedora; Starship moves to
+  Terra; Topgrade and `resvg` stay on Cargo under the amended D-014 rule.
+- Noctalia and Chezmoi come from Fedora, Steam from RPM Fusion, and `unrar`
+  from RPM Fusion because Fedora's `unrar` is the `unrar-free` wrapper.
+- Accepted additions: `mesa-va-drivers-freeworld`, `intel-media-driver`,
+  `playerctl`, `pipewire-pulse`, `pipewire-alsa`, `gvfs` with MTP and SMB,
+  `ShellCheck`, `gitleaks`, `yq`, `duf`, `sane-airscan`, `simple-scan`,
+  Herdr under D-010, and Sheldon on Cargo.
+- Rejected: `pavucontrol` and `wtype`, because Noctalia covers them; `tmux`,
+  because Herdr is the agent runtime; `google-noto-fonts-all`, because it
+  installs every Noto script rather than the extra weights the owner meant.
+
+The Noctalia plugin manifests confirm the listed dependencies. Crashes also
+needs `coredumpctl` from systemd, AI Usage needs the still-unsourced
+`ai-usagebar` binary, and Screen Recorder needs `gpu-screen-recorder`, now
+listed with the plugin. Q-016 keeps the inventory's purpose and its remaining
+service-activation entries.
 
 ### Open questions
 
@@ -671,6 +783,8 @@ longer agree with SECURITY.md in places: Mise still names its installer rather
 than the accepted maker COPR, Docker service activation includes
 `docker.socket` beyond the accepted `docker.service`, and
 `snapper-cleanup.timer` conflicts with Nimbus-only snapshot retirement.
+Fedora's `nix-daemon` package adds `nix-daemon.service` as a third service
+activation to reconcile.
 
 Decide whether the file becomes a complete workstation software inventory with
 an explicit owner, provider, source tier, and lifecycle for each entry, or is
@@ -681,9 +795,9 @@ source and service before using the inventory to create real definitions.
 
 ### Consequences for the next documentation pass
 
-Q-001 through Q-012 are resolved and D-007 is closed. Q-013, Q-014, and Q-016
-now gate the Phase 1 schema and real definition fixtures; Q-015 gates the
-Phase 5 Chezmoi handoff. The active documents are consolidated below `docs/`,
+Q-001 through Q-012 and Q-017 are resolved and D-007 is closed. Q-013, Q-014,
+and Q-016 now gate the Phase 1 schema and real definition fixtures; Q-015
+gates the Phase 5 Chezmoi handoff. The active documents are consolidated below `docs/`,
 and legacy history is retained only in the named Git snapshot. One cleanup
 remains: `files accept` is described in SPEC.md twice and repeated here, in
 ROADMAP.md, and in TASKS.md, and the selector and digest paragraphs repeat in

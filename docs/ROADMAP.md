@@ -84,6 +84,10 @@ retained facts-dependent declaration. It performs no hardware or
 operating-system inspection, executes no external commands, accesses no
 network, invokes no privilege escalation, and writes no state.
 
+The tracked desktop and laptop fixtures select explicit hardware components.
+They do not run the later `nimbus init` detector. This keeps Phase 1 resolution
+static while exercising the component shape that initialization will record.
+
 Only exact package constraints are accepted initially. Additional comparison
 syntax waits until the DNF5 mechanism is proven in a disposable Fedora
 environment.
@@ -284,17 +288,24 @@ handles Chezmoi. Chezmoi is an ordinary Nimbus-managed system package installed
 by the reviewed first apply. The engine remains directly DNF-owned and checkout
 updates remain direct user Git operations; Nimbus has no self-update path.
 
-Q-006 and Q-007 are resolved. For the development profile, Chezmoi owns an
-onchange-after action that runs `mise install` as the normal user after its
-rendered Mise configuration changes. Nimbus installs Mise and selected system
+Q-006 and Q-007 are resolved. For the development profile, Nimbus first
+presents the official Mise installer and `mise settings set auto_update true`
+as a user-run manual task and verifies the user-owned binary. Chezmoi then owns
+an onchange-after action that runs `mise install` as the normal user after its
+rendered Mise configuration changes. Nimbus installs selected system
 dependencies, while `MISE_SYSTEM_DEPS=warn` prevents the action from taking
 over privileged dependency installation. Nimbus only reports missing runtimes
 and the direct repair command.
 
 nimbus init writes only the local selector and a reviewed new machine manifest
-when requested. Existing tracked manifests are loaded unchanged. The handoff
-passes `machine`, `managed_by_nimbus`, and the ordered profile IDs through the
-Chezmoi prompt flags specified in SPEC.md.
+when requested. For a new machine it inspects DMI and PCI facts, proposes the
+known hardware components, and writes only the accepted IDs into that manifest.
+Existing tracked manifests are loaded unchanged. The first detector fixtures
+cover the MSI Z690 desktop with Intel and NVIDIA graphics and the HP EliteBook X
+G1a with AMD graphics, including the `ddcutil` and `brightnessctl` split. The
+handoff passes `machine`, `managed_by_nimbus`, and the ordered profile IDs
+through the Chezmoi prompt flags specified in SPEC.md; hardware components do
+not cross it.
 
 Normal chezmoi diff, apply, edit, and update stay direct. Nimbus performs no
 silent Git operation. The handoff runs once; later profile changes print the
@@ -320,12 +331,13 @@ usable.
 Test piped installation, missing controlling terminal, missing Git and COPR
 support, new checkout, accepted symlinked checkout, existing compatible, dirty,
 wrong-origin, non-repository, engine-schema mismatch, rerun, missing-dotfiles,
-and interrupted cases in disposable homes and a Fedora VM. Test development
-profile gating, action ordering, checksum-triggered reruns, unchanged
-configuration, failure retry, the script-excluded dry-run flow, and a manually
-deleted runtime. Exit when the one-liner reaches init safely, direct Chezmoi use
-works both with and without Nimbus, and the Mise handoff preserves all three
-ownership boundaries.
+and interrupted cases in disposable homes and a Fedora VM. Test known,
+ambiguous, and unknown DMI and PCI facts without letting resolution inspect
+hardware. Test development profile gating, Mise presence and user ownership,
+action ordering, checksum-triggered reruns, unchanged configuration, failure
+retry, the script-excluded dry-run flow, and a manually deleted runtime. Exit
+when the one-liner reaches init safely, direct Chezmoi use works both with and
+without Nimbus, and the Mise handoff preserves all three ownership boundaries.
 
 ## 6. System resources and desktop recovery
 
@@ -422,9 +434,16 @@ before freezing the implementation, and record the results in TASKS.md:
   Snapper's own cleanup limits
 - confirmation that no excluded subvolume nests below `root`
 
-Upgrade may refresh native metadata, shows its own exact reviewed plan, never
-prunes, and does not silently apply unrelated desired-state drift. It blocks
-with a direction to run `nimbus apply` when that drift is a prerequisite.
+Upgrade may refresh native metadata, shows its own exact reviewed system plan,
+never prunes, and does not silently apply unrelated desired-state drift. It
+blocks with a direction to run `nimbus apply` when that drift is a prerequisite.
+After system verification it offers a separately approved Topgrade phase with
+only declared user-manager steps enabled. Its fixed configuration disables
+system, Flatpak, firmware, Nix, Chezmoi, Git repository, and Topgrade
+self-update steps. The
+plan labels this as command-level review because Topgrade dry-run does not
+resolve downstream versions, and reports that the home subvolume is outside
+the recovery point.
 Q-008 permanently delegates Fedora release upgrades to the native DNF5
 system-upgrade workflow. Nimbus has no target-release option or release-upgrade
 transaction. Doctor reports installed-release compatibility, mutations refuse
@@ -451,7 +470,9 @@ manual restoration in disposable VMs. Cover topology mismatch, nested
 subvolume exclusion, conditional Flatpak and boot capture, partial recovery
 creation and cleanup, protected failed operations, retention cleanup, delayed
 Btrfs deletion, the 20 GiB refusal, checksums, and preservation of home and
-guest data. Prove that `nimbus upgrade` remains
+guest data. Exercise Topgrade step allowlisting, command preview, refusal of
+sudo and system managers, partial user-step failure, and the explicit lack of
+home rollback. Prove that `nimbus upgrade` remains
 within the installed release, exposes no target-release path, and never invokes
 DNF5 system-upgrade. Verify that unsupported releases preserve version,
 validation, and doctor diagnostics while blocking mutation, and that supported
@@ -491,9 +512,9 @@ stops the guest afterwards unless `--keep-alive` is set. Removal stops and
 removes the container but preserves the data root. Purge rejects a
 running, symlinked, foreign, or escaped target, names the exact directory, and
 requires a second confirmation. The Compose definition is reproducible; the
-guest disk requires separate VM-aware backup and is not part of Nimbus
-recovery. Phase 8 also decides how FreeRDP receives the password without
-exposing it in process arguments.
+guest disk is not part of Nimbus recovery and may be lost and recreated from
+external sources. Phase 8 also decides how FreeRDP receives the password
+without exposing it in process arguments.
 
 Launch helpers safely resolve the XDG browser, translate supported private-mode
 flags, use an explicit Chromium-family webapp fallback, accept only HTTP(S)

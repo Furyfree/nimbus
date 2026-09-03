@@ -177,8 +177,12 @@ package_exclusions = []
 repo = "https://github.com/Furyfree/dotfiles.git"
 ~~~
 
-The manifest ID must match its filename. Hardware inspection never edits or
-silently augments the manifest.
+The manifest ID must match its filename. Static validation and resolution never
+inspect hardware or silently augment the manifest. During creation of a new
+machine, `nimbus init` may inspect DMI identity and PCI devices, propose the
+matching hardware components, and include them in the reviewed manifest diff.
+The accepted component IDs are then ordinary explicit desired state; later
+resolution never re-detects or silently changes them.
 
 The initial profile vocabulary is:
 
@@ -210,6 +214,14 @@ verification, removal policy, and recovery classification.
 Machine manifests may select optional components and add ad hoc packages.
 Profile and component definitions remain the source of reusable intent;
 machine-specific differences stay sparse.
+
+Hardware is represented by components, not profiles. The first two recognized
+targets are the MSI Z690 desktop with Intel integrated graphics and NVIDIA RTX
+3080, and the HP EliteBook X G1a with AMD integrated graphics. Detection uses
+the machine's DMI product or board identity plus relevant PCI vendor and device
+IDs. The desktop display component selects `ddcutil`; the laptop display and
+power component selects `brightnessctl`. An unknown or ambiguous device yields
+a warning and a component picker, never a guessed selection.
 
 ## Resolution
 
@@ -307,8 +319,10 @@ unless that pinned digest is verified first, and the plan shows the pin.
 One provider owns an installed executable lifecycle. Nimbus may manage
 system-scoped Flatpaks. User-scoped runtimes and tools declared in
 ~/.config/mise/config.toml remain owned by Mise; Chezmoi owns that file.
-Nimbus may install Mise and report missing runtimes but does not provide Mise,
-Cargo, uv, npm, pipx, or Go user-scope installation providers.
+Nimbus reports missing Mise and runtimes but does not provide Mise, Cargo, uv,
+npm, pipx, or Go user-scope installation providers. Mise itself is installed
+by the user through the maker's installer under [SECURITY.md](SECURITY.md)
+tier 3.
 
 A package constraint is accepted only when the native provider can enforce it
 during normal native updates. Unsupported comparison syntax is rejected rather
@@ -366,7 +380,7 @@ Nimbus owns:
 - graphical-session, greeter, portal, and recovery-session integration
 - hardware, kernel, boot, update, and recovery policy it declares
 - inspection, plans, apply, verification, removal, state, and receipts
-- installation of system tools including Git, Chezmoi, Mise, Docker, Nix, and
+- installation of system tools including Git, Chezmoi, Docker, Nix, and
   1Password
 - the explicit first Chezmoi initialization
 - the Windows guest data root and its protected credentials file
@@ -609,12 +623,14 @@ nimbus init:
 
 1. validates the engine and checkout compatibility
 2. lists tracked machine manifests and selects one
-3. writes ~/.config/nimbus/config.toml
-4. resolves and inspects the selected system
-5. shows the complete system plan
-6. applies only after approval
-7. initializes Chezmoi when selected and available
-8. reports direct Chezmoi and remaining manual steps
+3. for a new machine, proposes hardware components from DMI and PCI facts and
+   includes the accepted selection in the reviewed manifest
+4. writes ~/.config/nimbus/config.toml and any reviewed new manifest
+5. resolves and inspects the selected system
+6. shows the complete system plan
+7. applies only after approval
+8. initializes Chezmoi when selected and its prerequisites are available
+9. reports direct Chezmoi and remaining manual steps
 
 Fresh installation and reinstallation use the same tracked machine manifest.
 Creating a new machine writes a reviewed manifest to the Nimbus checkout and
@@ -658,7 +674,14 @@ selected by profile and never implies Nimbus. Hardware facts and secrets do not
 cross the handoff. The handoff keys are documented in the dotfiles repository's
 `PROFILES.md`.
 
-When the development profile is selected, the Chezmoi source includes a
+When the development profile is selected, Nimbus first presents a user-scope
+manual task that runs `curl https://mise.run | sh`, verifies
+`~/.local/bin/mise`, and sets `mise settings set auto_update true`. The user,
+not Nimbus or root, runs both commands. Chezmoi initialization waits until Mise
+is present so its runtime action cannot fail merely because the prerequisite is
+missing.
+
+The Chezmoi source includes a
 `run_onchange_after_install-mise-runtimes.sh.tmpl` action. It runs as the normal
 user after the rendered `~/.config/mise/config.toml` has been applied. Its
 rendered content includes a checksum of that rendered configuration, so
@@ -670,10 +693,10 @@ MISE_SYSTEM_DEPS=warn mise -C "$HOME" install
 ~~~
 
 It never invokes sudo. `MISE_SYSTEM_DEPS=warn` keeps system dependency handling
-non-privileged: Nimbus owns installation of Mise and selected system packages,
-Chezmoi owns the file and action, and Mise owns runtime installation. Chezmoi
-records the onchange action only after successful execution under its normal
-script lifecycle.
+non-privileged: the user owns the Mise binary, Nimbus owns selected system
+dependencies, Chezmoi owns the file and action, and Mise owns runtime
+installation. Chezmoi records the onchange action only after successful
+execution under its normal script lifecycle.
 
 A stricter user-controlled review uses:
 
@@ -816,7 +839,8 @@ resolved path below the fixed root, proof that Nimbus owns the data, and a
 second confirmation. It deletes only that data, including
 the credentials file. The container and Compose definition can be recreated
 from desired state, but the guest disk is excluded from Nimbus recovery points
-and requires a separate VM-aware backup. Purge has no Nimbus rollback.
+and may be lost and recreated from external sources. Purge has no Nimbus
+rollback.
 
 ### Desktop launch helpers
 
@@ -875,14 +899,30 @@ managed packages, repository state, enforceable constraints, coordinated update
 groups, recovery requirements, and post-update verification. Nimbus does not
 silently update itself, its checkout, dotfiles, or system packages.
 
-`nimbus upgrade` is the explicit workflow for normal updates of desired,
-Nimbus-managed resources. It may refresh native repository metadata, then shows
-the exact update transaction, verification, recovery, and reboot or logout
-requirements before approval. It never prunes. It does not silently reconcile
-unrelated desired-state drift and blocks with a direction to run `nimbus apply`
-first when that drift is a prerequisite for a safe update. The command operates
-only within the currently installed Fedora release and has no target-release
-flag.
+`nimbus upgrade` is the primary entry point for normal workstation updates. Its
+first phase updates desired Nimbus-managed resources. It may refresh native
+repository metadata, then shows the exact DNF and Flatpak transaction,
+verification, recovery, and reboot or logout requirements before approval. It
+never prunes. It does not silently reconcile unrelated desired-state drift and
+blocks with a direction to run `nimbus apply` first when that drift is a
+prerequisite for a safe update. The command operates only within the currently
+installed Fedora release and has no target-release flag.
+
+After the verified system phase, the command offers a separate Topgrade phase
+for declared user-owned update managers. Nimbus supplies a fixed configuration
+that disables system, Flatpak, firmware, Nix, Chezmoi, Git repository, and
+Topgrade self-update steps. The reviewed plan identifies every enabled
+Topgrade step and its command, and Topgrade runs as the normal user without
+sudo. The phase is command-level review: Topgrade dry-run does not resolve the
+exact downstream
+versions selected by Mise, Cargo, npm, uv, and similar managers, so Nimbus does
+not describe those mutations as exact, managed, or recoverable transactions.
+
+The recovery point's pre snapshot is created before the system mutation and
+its post snapshot after the complete upgrade workflow succeeds. It covers the
+root and system Flatpak subvolumes only. User tools below the home subvolume are
+outside that recovery boundary; a failed Topgrade step is repaired through its
+own manager or by reconstructing the declared user environment.
 
 Fedora release upgrades are permanently owned by Fedora's native DNF5
 system-upgrade workflow and the user. Nimbus never invokes or wraps that
@@ -964,8 +1004,10 @@ Snapper as one proven-owned unit before any mutation; failed cleanup blocks the
 operation and preserves it for inspection. The `root` snapshot includes Nimbus
 state below `/var/lib/nimbus`, while `home`, `log`, `cache`, `swapfile`,
 `windows`, `docker`, and `containerd` are separate subvolumes and are excluded.
-Home and guest or container data require their own backup lifecycles. A
-recovery point is local same-disk state and is never described as a backup.
+Nimbus provides no backup lifecycle. The workstation holds no canonical-only
+data: user files are synchronized or stored externally, and local guest and
+container data may be lost and recreated. A recovery point is local same-disk
+state and is never described as a backup.
 
 Nimbus retains the newest three complete recovery points. A point tied to an
 unresolved failed operation is marked important in Snapper userdata, is
