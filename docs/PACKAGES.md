@@ -70,9 +70,6 @@ order. This list feeds the definitions and shrinks as they land.
 
 ## Extra
 
-- Fedora base (`DNF/Fedora`: the `core` and `standard` comps groups plus the
-  kernel, firmware, bootloader, and release packages Anaconda installs;
-  generated into `components/fedora-base.toml`)
 - Printer support
   - CUPS, Avahi, and Ghostscript (`DNF/Fedora: cups avahi ghostscript`)
   - Epson ESC/P-R (`epson-inkjet-printer-escpr`; packaging pending)

@@ -10,24 +10,39 @@ import (
 
 	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/plan"
+	"github.com/Furyfree/nimbus/internal/state"
 )
 
+func flatpakRemote(root definitions.Root) string {
+	for id, r := range root.Repositories {
+		if r.Kind == "flatpak" {
+			return id
+		}
+	}
+	return ""
+}
+
 // Ownership views are provider-independent read-only lists over the same
-// resolver and facts the plan uses. Until receipts exist, "managed" means
-// desired and installed, which apply would adopt.
+// resolver, facts, and applied state the plan uses. Every package is in one
+// state: managed (a receipt exists), adopt (desired and installed from an
+// acceptable source, no receipt yet), blocked (desired and installed from
+// another source, which plan refuses to adopt), desired (not installed),
+// pre-existing (in the baseline recorded when Nimbus took over), unmanaged
+// (installed by hand since), or dependency.
 
 type packageView struct {
 	Canonical  string   `json:"canonical"`
 	Name       string   `json:"name"`
-	State      string   `json:"state"` // desired, managed, unmanaged, dependency, excluded
+	State      string   `json:"state"`
 	Installed  string   `json:"installed,omitempty"`
 	Repository string   `json:"repository,omitempty"`
 	Reason     string   `json:"reason,omitempty"`
 	Paths      []string `json:"paths,omitempty"`
 }
 
-// packageViews joins desired packages with installed ones.
-func packageViews(s *selected, f *facts.Facts) []packageView {
+// packageViews joins desired packages with installed ones and receipts.
+func packageViews(s *selected, f *facts.Facts, applied *state.Applied) []packageView {
 	installed := map[string]facts.Package{}
 	if f.Packages.Known() {
 		for _, p := range f.Packages.Value {
@@ -39,16 +54,30 @@ func packageViews(s *selected, f *facts.Facts) []packageView {
 	for _, p := range s.Resolved.Packages {
 		desired[p.Name] = true
 		v := packageView{Canonical: p.Canonical, Name: p.Name, State: "desired", Paths: p.Paths}
+		id := "package:" + p.Canonical
+		remote := flatpakRemote(s.Checkout.Definitions())
 		if p.Prefix == definitions.PrefixFlatpak {
+			id = "flatpak:" + p.Name
 			if f.Flatpak.Known() {
 				for _, app := range f.Flatpak.Value.Apps {
 					if app.ID == p.Name {
-						v.State, v.Installed, v.Repository = "managed", app.Version, app.Origin
+						v.Installed, v.Repository = app.Version, app.Origin
+						v.State = "adopt"
+						if app.Origin != remote {
+							v.State = "blocked"
+						}
 					}
 				}
 			}
 		} else if inst, ok := installed[p.Name]; ok {
-			v.State, v.Installed, v.Repository, v.Reason = "managed", inst.EVR(), inst.FromRepo, inst.Reason
+			v.Installed, v.Repository, v.Reason = inst.EVR(), inst.FromRepo, inst.Reason
+			v.State = "adopt"
+			if plan.AdoptionProblem(s.Checkout.Definitions(), p.Prefix, inst.FromRepo) != "" {
+				v.State = "blocked"
+			}
+		}
+		if _, ok := applied.Receipts[id]; ok && v.Installed != "" {
+			v.State = "managed"
 		}
 		views = append(views, v)
 	}
@@ -56,11 +85,27 @@ func packageViews(s *selected, f *facts.Facts) []packageView {
 		if desired[p.Name] {
 			continue
 		}
-		state := "dependency"
-		if p.Reason == "user" {
-			state = "unmanaged"
+		st := "dependency"
+		switch {
+		case applied.InBaseline(p.Name):
+			st = "pre-existing"
+		case p.Reason != "user":
+		default:
+			st = "unmanaged"
 		}
-		views = append(views, packageView{Canonical: "dnf:" + p.Name, Name: p.Name, State: state, Installed: p.EVR(), Repository: p.FromRepo, Reason: p.Reason})
+		views = append(views, packageView{Canonical: "dnf:" + p.Name, Name: p.Name, State: st, Installed: p.EVR(), Repository: p.FromRepo, Reason: p.Reason})
+	}
+	if f.Flatpak.Known() {
+		for _, app := range f.Flatpak.Value.Apps {
+			if desired[app.ID] {
+				continue
+			}
+			st := "unmanaged"
+			if _, ok := applied.Receipts["flatpak:"+app.ID]; ok {
+				st = "managed"
+			}
+			views = append(views, packageView{Canonical: "flatpak:" + app.ID, Name: app.ID, State: st, Installed: app.Version, Repository: app.Origin})
+		}
 	}
 	sort.Slice(views, func(i, j int) bool { return views[i].Canonical < views[j].Canonical })
 	return views
@@ -97,8 +142,9 @@ func filterViews(views []packageView, keep func(packageView) bool) []packageView
 	return out
 }
 
-func newListCommand(opts *options, use, short string, keep func(query string, v packageView) bool, maxArgs int) *cobra.Command {
+func newListCommand(opts *options, use, short string, keep func(query string, all bool, v packageView) bool, maxArgs int, allFlag string) *cobra.Command {
 	var flags machineFlags
+	var all bool
 	cmd := &cobra.Command{
 		Use:   use,
 		Short: short,
@@ -117,11 +163,15 @@ func newListCommand(opts *options, use, short string, keep func(query string, v 
 			if !f.Packages.Known() {
 				return fmt.Errorf("installed packages are unknown: %s", f.Packages.Error)
 			}
+			applied, err := state.Read(stateRoot)
+			if err != nil {
+				return err
+			}
 			query := ""
 			if len(args) > 0 {
 				query = args[0]
 			}
-			views := filterViews(packageViews(s, f), func(v packageView) bool { return keep(query, v) })
+			views := filterViews(packageViews(s, f, applied), func(v packageView) bool { return keep(query, all, v) })
 			if opts.json {
 				return writeJSON(cmd.OutOrStdout(), views, nil)
 			}
@@ -130,24 +180,30 @@ func newListCommand(opts *options, use, short string, keep func(query string, v 
 		},
 	}
 	addMachineFlags(&flags, cmd.Flags())
+	if allFlag != "" {
+		cmd.Flags().BoolVar(&all, "all", false, allFlag)
+	}
 	return cmd
 }
 
 func newManaged(opts *options) *cobra.Command {
-	return newListCommand(opts, "managed", "List resources Nimbus owns or would adopt",
-		func(_ string, v packageView) bool { return v.State == "managed" }, 0)
+	return newListCommand(opts, "managed", "List packages Nimbus owns through a receipt or would adopt",
+		func(_ string, _ bool, v packageView) bool { return v.State == "managed" || v.State == "adopt" }, 0, "")
 }
 
 func newUnmanaged(opts *options) *cobra.Command {
-	return newListCommand(opts, "unmanaged", "List installed packages Nimbus can identify but does not own",
-		func(_ string, v packageView) bool { return v.State == "unmanaged" }, 0)
+	return newListCommand(opts, "unmanaged", "List packages installed by hand since Nimbus took over",
+		func(_ string, all bool, v packageView) bool {
+			return v.State == "unmanaged" || (all && v.State == "pre-existing")
+		}, 0,
+		"also list the pre-existing packages recorded when Nimbus took over")
 }
 
 func newPackagesInstalled(opts *options) *cobra.Command {
 	list := newListCommand(opts, "installed [QUERY]", "Browse explicitly installed packages with their desired and managed state",
-		func(query string, v packageView) bool {
+		func(query string, _ bool, v packageView) bool {
 			return v.Installed != "" && v.State != "dependency" && strings.Contains(v.Name, query)
-		}, 1)
+		}, 1, "")
 	packages := &cobra.Command{Use: "packages", Short: "Package views over the selected machine", Args: noArgs, RunE: func(cmd *cobra.Command, args []string) error { return cmd.Help() }}
 	packages.AddCommand(list)
 	return packages
@@ -259,55 +315,4 @@ func newSelectionList(opts *options, use, short string, list func(*selected) []s
 	parent := &cobra.Command{Use: use, Short: short, Args: noArgs, RunE: func(cmd *cobra.Command, args []string) error { return cmd.Help() }}
 	parent.AddCommand(cmd)
 	return parent
-}
-
-func newProfiles(opts *options) *cobra.Command {
-	return newSelectionList(opts, "profiles", "List every profile and whether the selected machine uses it", func(s *selected) []selectionView {
-		selected := map[string]bool{}
-		for _, p := range s.Resolved.Profiles {
-			selected[p] = true
-		}
-		var views []selectionView
-		for _, id := range sortedIDs(len(s.Checkout.Profiles), func() []string {
-			ids := make([]string, 0, len(s.Checkout.Profiles))
-			for id := range s.Checkout.Profiles {
-				ids = append(ids, id)
-			}
-			return ids
-		}) {
-			v := selectionView{ID: id, Selected: selected[id]}
-			if v.Selected {
-				v.Paths = []string{"machine"}
-			}
-			views = append(views, v)
-		}
-		return views
-	})
-}
-
-func newComponents(opts *options) *cobra.Command {
-	return newSelectionList(opts, "components", "List every component and how the selected machine selects it", func(s *selected) []selectionView {
-		paths := map[string][]string{}
-		for _, c := range s.Resolved.Components {
-			paths[c.ID] = c.Paths
-		}
-		var views []selectionView
-		for _, id := range sortedIDs(len(s.Checkout.Components), func() []string {
-			ids := make([]string, 0, len(s.Checkout.Components))
-			for id := range s.Checkout.Components {
-				ids = append(ids, id)
-			}
-			return ids
-		}) {
-			p, ok := paths[id]
-			views = append(views, selectionView{ID: id, Selected: ok, Paths: p})
-		}
-		return views
-	})
-}
-
-func sortedIDs(_ int, collect func() []string) []string {
-	ids := collect()
-	sort.Strings(ids)
-	return ids
 }

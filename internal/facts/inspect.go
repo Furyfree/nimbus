@@ -14,6 +14,7 @@ import (
 const (
 	OSReleasePath  = "/etc/os-release"
 	RepoDir        = "/etc/yum.repos.d"
+	RepoOverride   = "/etc/dnf/repos.override.d"
 	SecureBootPath = "/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"
 	SELinuxPath    = "/sys/fs/selinux/enforce"
 )
@@ -93,6 +94,34 @@ func repositories(src Source) ([]Repository, error) {
 			return nil, err
 		}
 		repos = append(repos, parseRepoFile(name, data)...)
+	}
+	// dnf5 config-manager setopt writes overrides here; they win over the
+	// repository file, so the effective values are what matter.
+	overrides, err := src.ReadDir(RepoOverride)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	for _, name := range overrides {
+		if !strings.HasSuffix(name, ".repo") {
+			continue
+		}
+		data, err := src.ReadFile(filepath.Join(RepoOverride, name))
+		if err != nil {
+			return nil, err
+		}
+		for _, o := range parseRepoFile(name, data) {
+			for i := range repos {
+				if repos[i].ID == o.ID {
+					if o.Priority != "" {
+						repos[i].Priority = o.Priority
+					}
+					if o.GPGCheck != "" {
+						repos[i].GPGCheck = o.GPGCheck
+					}
+					repos[i].Overrides = append(repos[i].Overrides, name)
+				}
+			}
+		}
 	}
 	return repos, nil
 }

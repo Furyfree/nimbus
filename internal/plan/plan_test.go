@@ -10,6 +10,7 @@ import (
 
 	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/state"
 )
 
 // repository loads and resolves the tracked desktop machine.
@@ -87,8 +88,16 @@ func previewText(rows []TxPackage) []byte {
 func installArgs(p *Plan) []string {
 	for _, op := range p.Operations {
 		if op.ID == "packages:install" {
+			args := []string{"--assumeno", "--cacheonly"}
 			argv := op.Steps[0].Argv[2:] // drop dnf5 -y
-			return append([]string{"--assumeno", "--cacheonly"}, argv...)
+			for i := 0; i < len(argv); i++ {
+				if argv[i] == "--store" {
+					i++ // the stage path is apply's, not the preview's
+					continue
+				}
+				args = append(args, argv[i])
+			}
+			return args
 		}
 	}
 	return nil
@@ -196,8 +205,8 @@ func TestPlanOnFreshFedora(t *testing.T) {
 	if inst.Blocked != "" || inst.Transaction == nil || !contains(inst.Steps[0].Argv, "--allowerasing") || !strings.Contains(inst.Summary, "packages through one DNF transaction") {
 		t.Fatalf("install = %+v", inst)
 	}
-	if !strings.HasPrefix(strings.Join(inst.Steps[0].Argv, " "), "dnf5 -y install --allowerasing ") {
-		t.Fatalf("argv = %v", inst.Steps[0].Argv)
+	if !strings.HasPrefix(strings.Join(inst.Steps[0].Argv, " "), "dnf5 -y install --store "+StageRoot+"/packages-install --allowerasing ") || strings.Join(inst.Steps[1].Argv, " ") != "dnf5 -y replay "+StageRoot+"/packages-install" {
+		t.Fatalf("argv = %v", inst.Steps)
 	}
 	if op := find(p, "flatpak:com.spotify.Client"); op == nil || op.After != "flatpak-remote:flathub" || op.Blocked != "" {
 		t.Fatalf("spotify = %+v", op)
@@ -218,9 +227,10 @@ func TestPlanOnFreshFedora(t *testing.T) {
 	for _, pr := range p.Prune {
 		names[pr.Name] = true
 	}
-	// A desired package is never a candidate, and the Fedora base is desired
-	// through fedora-base; a user-installed package nothing selects is.
-	if names["dnf5-plugins"] || names["bash"] || names["bzip2"] || !names["gzip"] {
+	// Before the first apply there is no baseline, so every user-installed
+	// package nothing selects is a candidate, base packages included; the
+	// baseline recorded by the first apply moves them to pre-existing.
+	if names["dnf5-plugins"] || !names["bash"] || !names["bzip2"] || !names["gzip"] {
 		t.Fatalf("prune = %+v", p.Prune)
 	}
 	// Repositories and remotes come before every package operation.
@@ -479,5 +489,73 @@ func TestAdoptionRefusesTheWrongSource(t *testing.T) {
 	}
 	if op := find(p, "package:dnf:dnf5-plugins"); op == nil || op.Blocked != "" {
 		t.Fatalf("a build-hash source must adopt: %+v", op)
+	}
+}
+
+func applied(receipts ...string) *state.Applied {
+	a := &state.Applied{Present: true, Receipts: map[string]state.Receipt{}}
+	for _, r := range receipts {
+		provider := "dnf"
+		if strings.HasPrefix(r, "flatpak:") {
+			provider = "flatpak"
+		}
+		a.Receipts[r] = state.Receipt{Schema: state.Schema, Resource: r, Provider: provider, Operation: "install", Verified: true}
+	}
+	return a
+}
+
+func TestAppliedStateShapesThePlan(t *testing.T) {
+	c, r := repository(t)
+	src, f := host(t)
+	withoutTerraFile(f)
+	a := applied("package:dnf:dnf5-plugins", "package:dnf:no-longer-wanted")
+	// Everything on the fixture host existed before Nimbus took over.
+	var baseline []string
+	for _, p := range f.Packages.Value {
+		baseline = append(baseline, p.Name)
+	}
+	sort.Strings(baseline)
+	a.Baseline = &state.Baseline{Schema: state.Schema, Packages: baseline}
+	f.Packages.Value = append(f.Packages.Value,
+		facts.Package{Name: "no-longer-wanted", Version: "1", Release: "1", Arch: "x86_64", FromRepo: "fedora", Reason: "user"},
+		facts.Package{Name: "hand-installed", Version: "1", Release: "1", Arch: "x86_64", FromRepo: "fedora", Reason: "user"},
+	)
+	key := facts.Key("dnf5", "--assumeno", "--cacheonly", "remove", "no-longer-wanted")
+	src.Commands[key] = previewText([]TxPackage{{Name: "no-longer-wanted", Arch: "x86_64", EVR: "0:1-1", Repository: "@System", Section: "removing"}})
+	src.Failures[key] = "exit status 1"
+	in := Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Applied: a, Source: src}
+	p := answerInstall(t, src, in, nil)
+
+	if op := find(p, "package:dnf:dnf5-plugins"); op == nil || op.Action != ActionKeep {
+		t.Fatalf("managed package = %+v", op)
+	}
+	owned := find(p, "packages:remove-owned")
+	if owned == nil || owned.Blocked != "" || strings.Join(owned.Steps[0].Argv, " ") != "dnf5 -y remove no-longer-wanted" || !contains(owned.Paths, "package:dnf:no-longer-wanted") {
+		t.Fatalf("owned removal = %+v", owned)
+	}
+	names := map[string]bool{}
+	for _, pr := range p.Prune {
+		names[pr.Name] = true
+	}
+	if names["gzip"] || names["no-longer-wanted"] || !names["hand-installed"] {
+		t.Fatalf("prune buckets wrong: %+v", p.Prune)
+	}
+	if find(p, "packages:prune") != nil {
+		t.Fatal("prune transaction planned without Prune")
+	}
+
+	pruneKey := facts.Key("dnf5", "--assumeno", "--cacheonly", "remove", "hand-installed")
+	src.Commands[pruneKey] = previewText([]TxPackage{{Name: "hand-installed", Arch: "x86_64", EVR: "0:1-1", Repository: "@System", Section: "removing"}})
+	src.Failures[pruneKey] = "exit status 1"
+	in.Prune = true
+	p, err := Build(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op := find(p, "packages:prune"); op == nil || op.Action != ActionPrune || op.Blocked != "" || !contains(op.Paths, "unmanaged:hand-installed") {
+		t.Fatalf("prune transaction = %+v", op)
+	}
+	if find(p, "packages:remove-owned") == nil {
+		t.Fatal("owned removal lost with Prune")
 	}
 }

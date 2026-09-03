@@ -61,6 +61,9 @@ type Repository struct {
 	Priority string `json:"priority"`
 	BaseURL  string `json:"baseurl,omitempty"`
 	Metalink string `json:"metalink,omitempty"`
+	// Overrides lists the files below /etc/dnf/repos.override.d that
+	// changed this repository's effective values.
+	Overrides []string `json:"overrides,omitempty"`
 }
 
 // Flatpak is the system installation's remotes and applications.

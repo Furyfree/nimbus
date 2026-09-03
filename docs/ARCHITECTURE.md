@@ -14,6 +14,8 @@ internal/definitions/  desired configuration: load, validate, resolve, hash
 internal/facts/        observed system: read-only inspection behind a Source
 internal/doctor/       health checks over facts, each with its remediation
 internal/plan/         desired versus observed: operations, digest, previews
+internal/state/        applied state: receipts, baseline, journal, record action
+internal/apply/        executes an approved plan: lock, native steps, receipts
 internal/selector/     the local selector and the checkout origin check
 internal/version/      engine build identity and supported schema numbers
 
@@ -29,8 +31,10 @@ tools/package-query/   throwaway Fedora container for package research
 ~~~
 
 Everything under `internal/` is private to this module. Dependencies point
-one way: `cli` uses `definitions`, `facts`, `doctor`, `plan`, `selector`,
-and `version`; `doctor` uses `facts`; `plan` uses `definitions` and `facts`;
+one way: `cli` uses `definitions`, `facts`, `doctor`, `plan`, `apply`,
+`state`, `selector`, and `version`; `doctor` uses `facts`; `plan` uses
+`definitions`, `facts`, and `state`; `apply` uses `plan`, `facts`, and
+`state`;
 `facts` uses `selector` for the origin read; `definitions` uses `version`
 for the engine check; nothing imports `cli`, and `facts` never imports
 `definitions`, so observed state cannot leak into desired state.
@@ -113,6 +117,28 @@ information are informational and volatile.
 resolver and facts. Until receipts exist, "managed" means desired and
 installed, which apply would adopt.
 
+## The flow of `nimbus apply`
+
+~~~text
+plan (with receipts and baseline)  -> shown, approval by prompt or digest
+apply.Acquire                      -> the kernel lock under the runtime dir
+plan again                         -> digest must equal the approved one
+apply.Run                          -> per operation: native steps through
+                                      Source, verification by re-inspection,
+                                      receipts through `internal record`
+pending operations                 -> refresh metadata, plan and approve again
+~~~
+
+The executor never runs a shell. Privileged commands are the exact argv
+the plan showed, prefixed with `sudo`. Keys are verified with `gpg` before
+any privileged command touches them. A DNF install is `dnf5 install
+--store`, a comparison of the stored transaction with the reviewed preview,
+then `dnf5 replay`. Receipts go through the hidden `nimbus internal record`
+action, which validates the stage against the approved digest and writes
+atomically below `/var/lib/nimbus`; it is the one privileged action of this
+phase. The selection commands edit a manifest in memory, validate and plan
+it, show the diff and plan, and only then write the file and apply.
+
 ## Rules the code keeps
 
 - **Read-only.** Nothing writes a file, invokes sudo, or opens a network
@@ -148,8 +174,8 @@ the engine version and output schema number.
 
 ## Where later phases attach
 
-- Phase 4 adds apply, the operation lock, receipts under `/var/lib/nimbus`,
-  and the interactive pickers built on the Charm libraries.
+- Phase 5 adds bootstrap, `init`, the hardware detector, and the Chezmoi
+  handoff.
 
 Each arrives as its own package with its own tests, and `cli` stays a thin
 layer over them.

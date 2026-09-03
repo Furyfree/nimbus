@@ -29,7 +29,7 @@ stale.`,
 			if err != nil {
 				return err
 			}
-			p, err := buildPlan(s, newSource())
+			p, _, err := planWithState(s, newSource(), prune)
 			if err != nil {
 				return err
 			}
@@ -56,8 +56,8 @@ stale.`,
 }
 
 func buildPlan(s *selected, src facts.Source) (*plan.Plan, error) {
-	f := facts.Inspect(src, s.Root)
-	return plan.Build(plan.Inputs{Resolved: s.Resolved, Root: s.Checkout.Definitions(), Definitions: s.Checkout.Digest(), Facts: f, Source: src})
+	p, _, err := planWithState(s, src, false)
+	return p, err
 }
 
 func renderPlan(p *plan.Plan, prune bool) []byte {

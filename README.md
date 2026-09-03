@@ -11,8 +11,7 @@ configuration below the home directory.
 The first target is Fedora 44 on x86_64. Nimbus does not initially install the
 operating system, repartition disks, or configure full-disk encryption.
 
-Nimbus is at Phase 3 of its roadmap: read-only planning. No command changes
-the system yet.
+Nimbus is at Phase 4 of its roadmap: controlled apply with receipts.
 
 ## Repository model
 
@@ -68,10 +67,13 @@ just check
 It runs `gofmt`, `go vet`, `go test`, `git diff --check`, and markdownlint.
 `just validate` runs `nimbus validate` against this checkout.
 
-The delivered commands are `validate`, `doctor`, `plan`, `status`, `managed`,
-`unmanaged`, `why`, `profiles list`, `components list`, `packages installed`,
-and `version`. All of them are read-only: `validate` checks the definitions,
-`doctor` inspects the host, and `plan` shows every operation apply would run
-without running any, with `--prune` adding what `apply --prune` would remove.
-`refresh` runs `dnf5 makecache` so plan reads current package lists; it is
-the one network step. Nothing mutates the managed system yet.
+The delivered commands are `validate`, `doctor`, `plan`, `status`, `apply`,
+`managed`, `unmanaged`, `why`, the `profiles`, `components`, and `packages`
+groups, `refresh`, and `version`. All but `apply` are read-only: `validate`
+checks the definitions, `doctor` inspects the host, and `plan` shows every
+operation apply would run without running any, with `--prune` adding what
+`apply --prune` would remove. `refresh` runs `dnf5 makecache` so plan reads
+current package lists. `apply` is the one command that changes the system: it
+runs the reviewed plan after explicit approval, verifies every operation, and
+records receipts under `/var/lib/nimbus`. It has not run on a real Fedora yet;
+the first VM run is recorded in TASKS.md.

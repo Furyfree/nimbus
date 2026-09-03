@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/Furyfree/nimbus/internal/state"
 )
 
 func TestOwnershipViews(t *testing.T) {
@@ -12,15 +14,15 @@ func TestOwnershipViews(t *testing.T) {
 	base := []string{"--checkout", root, "--machine", "desktop"}
 
 	code, out, _ := run(t, append([]string{"managed"}, base...)...)
-	if code != ExitOK || !strings.Contains(out, "managed    dnf:dnf5-plugins 5.") || strings.Contains(out, "unmanaged") {
-		t.Fatalf("managed: %d\n%s", code, out)
+	if code != ExitOK || !strings.Contains(out, "adopt      dnf:dnf5-plugins 5.") || strings.Contains(out, "unmanaged") {
+		t.Fatalf("managed before any apply lists adoptable packages: %d\n%s", code, out)
 	}
 	code, out, _ = run(t, append([]string{"unmanaged"}, base...)...)
-	if code != ExitOK || !strings.Contains(out, "unmanaged  dnf:gzip 1.14-2.fc44") || strings.Contains(out, "dnf5-plugins") || strings.Contains(out, "dnf:bash") {
+	if code != ExitOK || !strings.Contains(out, "unmanaged  dnf:gzip 1.14-2.fc44") || strings.Contains(out, "dnf5-plugins") || !strings.Contains(out, "unmanaged  dnf:bash") {
 		t.Fatalf("unmanaged: %d\n%s", code, out)
 	}
 	code, out, _ = run(t, append([]string{"packages", "installed", "z"}, base...)...)
-	if code != ExitOK || !strings.Contains(out, "managed    dnf:bzip2") || !strings.Contains(out, "unmanaged  dnf:gzip ") || strings.Contains(out, "bash") {
+	if code != ExitOK || !strings.Contains(out, "unmanaged  dnf:bzip2") || !strings.Contains(out, "unmanaged  dnf:gzip ") || strings.Contains(out, "bash") {
 		t.Fatalf("packages installed z: %d\n%s", code, out)
 	}
 	code, out, _ = run(t, append([]string{"packages", "installed", "--json"}, base...)...)
@@ -68,5 +70,29 @@ func TestWhyAndSelectionLists(t *testing.T) {
 	code, out, _ = run(t, append([]string{"components", "list"}, base...)...)
 	if code != ExitOK || !strings.Contains(out, "* docker  <- component:windows-vm, profile:development") || !strings.Contains(out, "  laptop-power") {
 		t.Fatalf("components list: %d\n%s", code, out)
+	}
+}
+
+func TestViewsReadReceiptsAndBaseline(t *testing.T) {
+	root := repoRoot(t)
+	withSource(t, fixtureSource(t, root))
+	saved := stateRoot
+	stateRoot = t.TempDir()
+	t.Cleanup(func() { stateRoot = saved })
+	st := &state.Stage{Schema: state.Schema, PlanDigest: "sha256:p",
+		Baseline: &state.Baseline{Packages: []string{"gzip"}},
+		Receipts: []state.Receipt{{Schema: state.Schema, Resource: "package:dnf:dnf5-plugins", Provider: "dnf", Operation: "adopt", PlanDigest: "sha256:p", Verified: true}}}
+	if err := state.Record(stateRoot, "sha256:p", st); err != nil {
+		t.Fatal(err)
+	}
+	base := []string{"--checkout", root, "--machine", "desktop"}
+	if _, out, _ := run(t, append([]string{"managed"}, base...)...); !strings.Contains(out, "managed    dnf:dnf5-plugins") {
+		t.Fatalf("receipt not reflected:\n%s", out)
+	}
+	if _, out, _ := run(t, append([]string{"unmanaged"}, base...)...); strings.Contains(out, "gzip") {
+		t.Fatalf("baseline package listed without --all:\n%s", out)
+	}
+	if _, out, _ := run(t, append([]string{"unmanaged", "--all"}, base...)...); !strings.Contains(out, "pre-existing dnf:gzip") {
+		t.Fatalf("--all lacks the pre-existing marker:\n%s", out)
 	}
 }
