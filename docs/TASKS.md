@@ -1,48 +1,62 @@
 # Nimbus tasks
 
-## Current phase: Fedora system facts
+## Current phase: Planning and DNF
 
-Plan: [Fedora system facts](ROADMAP.md#2-fedora-system-facts). Phase 1 is
+Plan: [Planning and DNF](ROADMAP.md#3-planning-and-dnf). Phases 1 and 2 are
 merged. No gate is open; the dotfiles template task below gates Phase 5, and
 the first VM run is deferred to Phase 4.
 
-### Inspector
+### Planner
 
-- [x] Add `internal/facts` with a `Source` that abstracts every command,
-  file, directory, and PATH read, an `ExecSource` for the host, and a
-  `FakeSource` that fails on anything not recorded.
-- [x] Record Fedora 44 output in the research container as fixtures:
-  os-release, the DNF5 installed-package query, and every repository file.
-- [x] Collect only the facts later phases need: platform, installed RPMs
-  with source repository and install reason, repository files, Flatpak
-  remotes and apps, Secure Boot, SELinux, firewalld, checkout origin,
-  commit, and dirty state, and required-command presence.
-- [x] Report a fact that cannot be established as unknown with its reason;
-  never substitute a default.
-- [x] Keep parsing separate from policy: parsers in `facts`, checks in
-  `doctor`.
+- [x] Add `internal/plan` with typed operations (repository, package,
+  Flatpak remote, Flatpak) carrying action, risk class, selection paths,
+  exact steps, and the parsed DNF transaction.
+- [x] Parse the DNF5 `--assumeno` preview table and `check-upgrade` output
+  from fixtures recorded in the research container; reject an unknown
+  section rather than accept a new DNF behavior silently.
+- [x] Plan from the local metadata cache only; `plan --refresh` runs
+  `dnf5 makecache` first as the one opt-in network step, and missing cache
+  is reported with that command rather than guessed.
+- [x] Recognize declared repositories on the host: `nimbus-<id>` for the
+  files Nimbus writes, the maker's own IDs for release packages, the COPR
+  ID DNF creates, and the Flatpak remote by name; a foreign file that
+  already provides a repository blocks rather than duplicates it.
+- [x] Render the exact enabling steps per kind: key fetched and fingerprint
+  checked before import, `nimbus-<id>.repo` written by Nimbus, a release
+  RPM verified by SHA-256 with its key extracted through `rpm2archive` and
+  imported before installation, a COPR enabled through DNF and its key
+  checked afterwards.
+- [x] Adopt installed desired packages, install the rest through one DNF
+  transaction, plan declared removals as a separate transaction, and hold
+  packages whose repository is not enabled yet as blocked operations.
+- [x] Refuse a transaction that goes beyond the definitions: an undeclared
+  install, an undeclared removal, a package from the wrong repository, or a
+  smuggled upgrade.
+- [x] List prune candidates and update information as separate informational
+  sections; hash only the apply section into the plan digest.
+- [x] Add the `fedora-base` component, generated from Fedora's `core` and
+  `standard` comps groups plus the packages Anaconda installs outside comps,
+  and select it from `common` so the base is never a prune candidate.
 
-### Doctor
+### Commands
 
-- [x] Add `nimbus doctor` with `--checkout` and `--json`: platform and
-  supported release, selector and origin, definitions, required commands,
-  package database, repository signature checking, Secure Boot, SELinux,
-  and firewalld.
-- [x] Explain every failure with observation, impact, and remediation; no
-  explain mode; exit 1 on any failure and 0 when only unknowns remain.
-- [x] Never repair, invoke sudo, or use the network.
+- [x] `nimbus plan` and `nimbus status` with `--checkout`, `--machine`, and
+  `--json`; an incomplete plan exits 1.
+- [x] `nimbus managed`, `nimbus unmanaged`, `nimbus why RESOURCE`,
+  `nimbus profiles list`, `nimbus components list`, and
+  `nimbus packages installed [QUERY]` as non-interactive lists; the picker
+  arrives with Phase 4.
 
 ### Validation
 
-- [x] Fake-runner tests for every fact family, the unknown paths, and the
-  malformed-output rejections.
-- [x] Doctor tests for the healthy host, every failure, unknowns, and the
-  override.
-- [x] CLI tests for doctor against the repository checkout in human and
-  JSON form and with a broken checkout.
+- [x] Parser tests against the recorded previews, including protected
+  packages, no match, nothing to do, and an unknown section.
+- [x] Planner tests against the tracked desktop machine and the Fedora 44
+  host fixture: repository detection, adoption, the blocked Docker packages,
+  the four refusals, dependency acceptance, removals and an undeclared extra
+  removal, digest stability, and unavailable update information.
+- [x] CLI tests for plan, status, the views, why, and the selection lists.
 - [x] Run `just check`.
-- Deferred to the start of Phase 4: the first disposable Fedora 44 VM run
-  compares doctor and plan output with the fixtures before any apply.
 
 ### Outside this repository
 
@@ -53,6 +67,17 @@ the first VM run is deferred to Phase 4.
   unconditionally, and update PROFILES.md.
 
 ## Evidence
+
+- Phase 3 planner, 2026-09-03: `internal/plan` with `nimbus plan`, `status`,
+  `managed`, `unmanaged`, `why`, `profiles list`, `components list`, and
+  `packages installed`. DNF5's `--store` was probed and found to download
+  packages as well as record the transaction, so it is the Phase 4 apply
+  mechanism (download, then `dnf5 replay`), not a preview; plan parses the
+  `--assumeno` table from the cache. RPM Fusion's release RPM is signed by
+  the key it ships and no public key URL exists, so the plan extracts the key
+  from the SHA-256-verified RPM with `rpm2archive` and `tar`, both in base
+  Fedora. Terra stays a `baseurl` repository because its own installer uses
+  that URL.
 
 - Phase 2 inspector, 2026-09-03: `internal/facts` and `internal/doctor` with
   `nimbus doctor`. Fixtures were recorded from the Fedora 44 research
@@ -159,6 +184,16 @@ the first VM run is deferred to Phase 4.
 
 ## Blockers and residual risk
 
+- The `fedora-base` component declares what the installer leaves behind, so
+  the base is desired rather than a prune candidate. Its comps half is
+  generated evidence; its Anaconda half (kernel, firmware, bootloader,
+  release packages) is the known set and is completed from the real prune
+  output in the first VM run. Prune stays informational until Phase 4 adds
+  protected-package and dependency eligibility.
+- A non-root `plan` reads DNF's metadata through the system cache when it is
+  fresh and otherwise its user cache; apply runs DNF as root and re-resolves,
+  so a difference surfaces as a refused digest rather than a silent change.
+
 - The declared repository URLs for 1Password, Brave, VSCodium, and Terra are
   taken from the makers' documentation and the container's repository files;
   they are exercised only when Phase 3 planning reads them.
@@ -186,9 +221,10 @@ the first VM run is deferred to Phase 4.
 
 ## Completion rule
 
-Complete the phase only when every checkbox passes, evidence is recorded, root
-help exposes only doctor, validate, and version, every host read goes through
-`facts.Source`, and no inspector writes, invokes sudo, or uses the network.
+Complete the phase only when every checkbox passes, evidence is recorded, the
+plan explains every selected package without executing a mutating command,
+and no planner writes, invokes sudo, or uses the network except the explicit
+`plan --refresh` metadata step.
 
-Stop after the completed inspector and request separate authorization before
-starting planning.
+Stop after the completed planner and request separate authorization before
+starting controlled apply.
