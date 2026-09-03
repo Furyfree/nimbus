@@ -29,8 +29,8 @@ func fixtureSource(t *testing.T, root string) *facts.FakeSource {
 			facts.Key("flatpak", "remotes", "--system", "--columns=name,url"):                         []byte(""),
 			facts.Key("flatpak", "list", "--system", "--app", "--columns=application,version,origin"): []byte(""),
 			facts.Key("systemctl", "is-active", "firewalld"):                                          []byte("active\n"),
-			facts.Key("git", "-C", root, "rev-parse", "HEAD"):                                         []byte("abc123\n"),
-			facts.Key("git", "-C", root, "status", "--porcelain"):                                     []byte(""),
+			facts.Key("git", facts.GitArgs(root, "rev-parse", "HEAD")...):                             []byte("abc123\n"),
+			facts.Key("git", facts.GitArgs(root, "status", "--porcelain")...):                         []byte(""),
 		},
 		Failures: map[string]string{},
 		Files: map[string][]byte{
@@ -42,6 +42,10 @@ func fixtureSource(t *testing.T, root string) *facts.FakeSource {
 		Paths: map[string]string{},
 	}
 	src.Files[filepath.Join(facts.RepoDir, "fedora.repo")] = read(filepath.Join("yum.repos.d", "fedora.repo"))
+	if root != "" {
+		src.Dirs[filepath.Join(root, ".git")] = []string{"config"}
+		src.Files[filepath.Join(root, ".git", "config")] = []byte("[remote \"origin\"]\n\turl = https://github.com/Furyfree/nimbus.git\n")
+	}
 	for _, name := range facts.RequiredCommands {
 		src.Paths[name] = "/usr/bin/" + name
 	}
@@ -111,12 +115,15 @@ func TestDoctorFailsWithExitOneAndExplains(t *testing.T) {
 func TestDoctorWithBrokenCheckoutStillRunsHostChecks(t *testing.T) {
 	broken := t.TempDir()
 	src := fixtureSource(t, broken)
+	// A directory that is neither definitions nor a Git clone.
+	delete(src.Dirs, filepath.Join(broken, ".git"))
+	delete(src.Files, filepath.Join(broken, ".git", "config"))
 	withSource(t, src)
 	code, out, _ := run(t, "doctor", "--checkout", broken)
 	if code != ExitFailure {
 		t.Fatalf("exit %d", code)
 	}
-	if !strings.Contains(out, "fail    definitions:") || !strings.Contains(out, "unknown platform:") || !strings.Contains(out, "pass    selinux") {
+	if !strings.Contains(out, "fail    definitions:") || !strings.Contains(out, "fail    selector: --checkout override in use;") || !strings.Contains(out, "unknown platform:") || !strings.Contains(out, "pass    selinux") {
 		t.Fatalf("output:\n%s", out)
 	}
 }

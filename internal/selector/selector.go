@@ -189,14 +189,16 @@ func CheckoutOrigin(root string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", configPath, err)
 	}
-	origin, err := parseOriginURL(data)
+	origin, err := ParseOriginURL(data)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", configPath, err)
 	}
 	return origin, nil
 }
 
-func parseOriginURL(data []byte) (string, error) {
+// ParseOriginURL extracts remote.origin.url from Git configuration text.
+// Include directives are rejected so the value is always what the file says.
+func ParseOriginURL(data []byte) (string, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	section := ""
 	origin := ""

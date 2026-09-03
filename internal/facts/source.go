@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"syscall"
 )
 
 // Source is every read the inspector performs. The real source runs
@@ -82,6 +83,16 @@ type FakeSource struct {
 // ErrNotRecorded marks a read the fixture does not cover.
 var ErrNotRecorded = errors.New("not recorded in the fixture")
 
+// ErrIsDirectory is returned by FakeSource.ReadFile for a recorded
+// directory, matching the EISDIR the real filesystem reports.
+var ErrIsDirectory = errors.New("is a directory")
+
+// IsDirectoryError reports whether a ReadFile error means the path is a
+// directory, from either source.
+func IsDirectoryError(err error) bool {
+	return errors.Is(err, ErrIsDirectory) || errors.Is(err, syscall.EISDIR)
+}
+
 // Key builds the command key used by FakeSource.
 func Key(name string, args ...string) string {
 	return strings.Join(append([]string{name}, args...), " ")
@@ -101,13 +112,15 @@ func (f *FakeSource) Run(name string, args ...string) ([]byte, error) {
 	return out, nil
 }
 
-// ReadFile replays a recorded file.
+// ReadFile replays a recorded file. A recorded directory reads as EISDIR.
 func (f *FakeSource) ReadFile(path string) ([]byte, error) {
-	data, ok := f.Files[path]
-	if !ok {
-		return nil, fmt.Errorf("%s: %w", path, os.ErrNotExist)
+	if data, ok := f.Files[path]; ok {
+		return data, nil
 	}
-	return data, nil
+	if _, ok := f.Dirs[path]; ok {
+		return nil, fmt.Errorf("%s: %w", path, ErrIsDirectory)
+	}
+	return nil, fmt.Errorf("%s: %w", path, os.ErrNotExist)
 }
 
 // ReadDir replays a recorded directory listing.

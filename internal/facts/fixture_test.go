@@ -48,23 +48,19 @@ func fedora44(t *testing.T) *FakeSource {
 	return src
 }
 
-// gitCheckout builds a directory that looks like a clone of origin and
-// records the git commands the inspector runs against it.
+// gitCheckout records a clone of origin in the source: a .git directory
+// with its config, and the Git commands the inspector runs against it.
 func gitCheckout(t *testing.T, src *FakeSource, dirty bool) string {
 	t.Helper()
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	config := "[remote \"origin\"]\n\turl = git@github.com:furyfree-org/nimbus.git\n"
-	if err := os.WriteFile(filepath.Join(root, ".git", "config"), []byte(config), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	src.Commands[Key("git", "-C", root, "rev-parse", "HEAD")] = []byte("0123456789abcdef0123456789abcdef01234567\n")
+	gitDir := filepath.Join(root, ".git")
+	src.Dirs[gitDir] = []string{"config"}
+	src.Files[filepath.Join(gitDir, "config")] = []byte("[remote \"origin\"]\n\turl = git@github.com:furyfree-org/nimbus.git\n")
+	src.Commands[Key("git", GitArgs(root, "rev-parse", "HEAD")...)] = []byte("0123456789abcdef0123456789abcdef01234567\n")
 	status := ""
 	if dirty {
 		status = " M docs/SPEC.md\n"
 	}
-	src.Commands[Key("git", "-C", root, "status", "--porcelain")] = []byte(status)
+	src.Commands[Key("git", GitArgs(root, "status", "--porcelain")...)] = []byte(status)
 	return root
 }
