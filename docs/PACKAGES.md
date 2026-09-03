@@ -1,188 +1,267 @@
 # Packages
 
-What Nimbus installs on top of a minimal Fedora, by application name. What
-Fedora's Standard install already provides is left out. Brackets mark the
-install method only when it is not a Fedora package: Mise, a maker's script,
-Cargo, or the Hyprland COPR.
+Applications and explicit support packages for the workstation. The install
+source or command is shown in parentheses.
 
 ## Session
 
-- Hyprland - Wayland compositor [Hyprland COPR]
-- hyprland-guiutils - Hyprland's dialogs; Hyprland warns at start without it
-  [Hyprland COPR]
-- xdg-desktop-portal-hyprland - screen sharing portal for Hyprland
-  [Hyprland COPR]
-- xdg-desktop-portal-gtk - file picker and settings portal
-- Noctalia - shell: bar, launcher, control center, notifications, lock
-  screen, idle, wallpaper, clipboard history, polkit agent, OSD
-- Noctalia Greeter - greetd greeter matching Noctalia [Hyprland COPR]
-- greetd - login manager
-- Xwayland - X11 apps, Steam among them
-- qt6-qtwayland and qt5-qtwayland - Qt apps on Wayland
-- qt6ct - Qt theming
-- xdg-utils - xdg-open and default applications
-- xdg-user-dirs - standard home folders
-- wl-clipboard - wl-copy and wl-paste
-- gnome-keyring - secret service, recommended by Noctalia
-- ddcutil - external monitor brightness, recommended by Noctalia
-- gpu-screen-recorder - screen recording, recommended by Noctalia and used by
-  its Screen Recorder plugin
-- accountsservice - user accounts over D-Bus, read by Noctalia and the greeter
-- udiskie and udisks2 - removable drives, also used by the Udiskie plugin
+- Hyprland (`DNF/COPR: lionheartp/Hyprland`)
+- Noctalia (`DNF/Fedora`)
+- Noctalia Greeter (`DNF/Terra: noctalia-greeter`)
+- Session dependencies
+  - `hyprland-guiutils`, `xdg-desktop-portal-hyprland`
+    (`DNF/COPR: lionheartp/Hyprland`)
+  - `greetd`, `xdg-desktop-portal-gtk`, `xorg-x11-server-Xwayland`
+    (`DNF/Fedora`)
+  - `qt6-qtwayland`, `qt5-qtwayland` (`DNF/Fedora`)
+  - `xdg-utils`, `xdg-user-dirs`, `gnome-keyring` (`DNF/Fedora`)
+  - `accountsservice`, `udiskie`, `udisks2` (`DNF/Fedora`)
+  - `playerctl`, `pipewire-pulse`, `pipewire-alsa` (`DNF/Fedora`)
 
-## Noctalia plugin dependencies
+## GUI Apps
 
-Declared by the plugins selected in the docs repository's plugin plan.
-Plugins whose dependencies are already listed elsewhere: Keybind Cheatsheet
-and Hypr-Screen-Mirror (hyprctl), Zed Provider (zed), GitHub Pull Requests
-(gh), Tailnet (tailscale), Mini Docker (docker), File Search (fzf).
+- Nautilus and Sushi (`DNF/Fedora: nautilus sushi`)
+  - Phone and network shares (`DNF/Fedora: gvfs gvfs-mtp gvfs-smb`)
+- Zed (`curl -f https://zed.dev/install.sh | sh`)
+- Spotify (`Flatpak/Flathub: com.spotify.Client`)
+- T3 Code (`DNF/Terra: t3code`)
+- ChatGPT Desktop (official OpenAI RPM)
 
-- grim and slurp - screenshot and region selection, for OCR
-- Tesseract with English data - OCR engine
-- qrencode - QR Code Encoder
-- sqlite - the sqlite3 CLI, for Zed Provider
-- jq and libnotify - Crashes
-- socat - Hypr-Screen-Mirror
-- ai-usagebar collector - AI Usage; source not decided
-- librepods, patched fork - AirPods, phase 4, packaged by Nimbus later
+  ~~~sh
+  curl -fL -o ~/Downloads/chatgpt.x86_64.rpm \
+    https://persistent.oaistatic.com/codex-app-prod/linux/rpm/latest/chatgpt.x86_64.rpm
+  sudo dnf install -y ~/Downloads/chatgpt.x86_64.rpm
+  ~~~
 
-## Desktop
+- GitHub Desktop (own COPR, pending)
+  - Terra alternative: `desktop-plus-bin`, which is the Desktop Plus fork
+  - `github-copilot-installer` installs GitHub Copilot, not GitHub Desktop
+- Vesktop (`DNF/Terra: vesktop`)
+- VSCodium (`DNF/Terra: codium`)
+- 1Password and 1Password CLI (`DNF/1Password RPM repository`)
+- Obsidian (`Flatpak/Flathub: md.obsidian.Obsidian`)
+- Signal (`DNF/Terra: signal-desktop`)
+- Brave Origin (`DNF/Brave RPM repository: brave-browser`)
+- Zathura (`DNF/Fedora: zathura`)
+- Ghostty (`DNF/Terra: ghostty`)
+- OBS Studio (`DNF/Fedora: obs-studio`)
+- Pinta (`DNF/Fedora: pinta`)
+- GIMP, optional component (`DNF/Fedora: gimp`)
+- Loupe (`DNF/Fedora: loupe`)
+- Celluloid and mpv (`DNF/Fedora: celluloid mpv`)
+- LibreOffice (`DNF/Fedora: libreoffice`)
+- Flatpak (`DNF/Fedora: flatpak`)
+- Flathub system remote
 
-- Ghostty - terminal
-- Nautilus - file manager
-- Loupe - image viewer
-- Zathura - PDF viewer
-- Brave Origin - browser
-- Bibata - cursor theme
-- Papirus - icon theme
-- JetBrains Mono, JetBrains Mono Nerd, Inter, Terminus, Noto Emoji - fonts
-- Noto Sans - fallback font
+  ~~~sh
+  sudo flatpak remote-add --if-not-exists --system flathub \
+    https://dl.flathub.org/repo/flathub.flatpakrepo
+  ~~~
 
-## Hardware
-
-- PipeWire and WirePlumber - audio and screen capture
-- BlueZ - Bluetooth
-- power-profiles-daemon and upower - power profiles and battery, used by
-  Noctalia
-- fwupd - firmware updates
-- fprintd - fingerprint reader, used by Noctalia for unlock (laptop)
-- NVIDIA driver - akmod-nvidia, CUDA libs, libva-nvidia-driver (desktop)
-- akmods and mokutil - build and sign the NVIDIA module under Secure Boot
-- CUPS and Epson escpr, escpr2 - printing
-- Avahi - mDNS
-- ffmpeg and GStreamer freeworld - media codecs
-
-## Network
-
-- NetworkManager-openconnect - OpenConnect VPN plugin
-- WireGuard tools - WireGuard
-- Tailscale - private network
-
-## System
-
-- Flatpak with the Flathub remote
-- Flatseal - Flatpak permission GUI
-- dnf5-plugins - copr and config-manager commands
-- Snapper - Btrfs snapshots
-- policycoreutils-python-utils - semanage
-
-## Communication and media
-
-- Signal - messaging
-- Vesktop - Discord client
-- Spotify - music streaming
-- mpv - video player
-- OBS Studio - screen recording and streaming
-- Pinta - simple image editing
-
-## Productivity
-
-- 1Password and 1Password CLI - passwords and SSH agent
-- Obsidian - notes
-- Typst and Tinymist - typesetting and its language server
-
-## Shell and CLI
-
-- Zsh - shell
-- Starship - prompt
-- Sheldon - Zsh plugin manager
-- zoxide - smarter cd
-- fzf - fuzzy finder
-- btop - system monitor
-- fastfetch - system summary
-- tldr - short command examples
-- fd - find replacement
-- ripgrep - grep replacement
-- bat - cat with highlighting
-- eza - ls replacement
-- tokei - code statistics
-- 7zip, zip, unzip, unrar - archives
-- topgrade - update everything
-- just - command runner [Cargo]
-- watchexec - run commands on file change [Cargo]
-- cargo-update - update Cargo tools [Cargo]
-
-## Development
-
-- Git, Git LFS, and GitHub CLI - version control and GitHub
-- Neovim - terminal editor
-- Zed - primary editor [zed.dev installer]
-- VSCodium - secondary editor
-- lazygit and lazydocker - Git and Docker TUIs
-- Docker, Compose, and Buildx with container-selinux - containers
-- Mise - runtime and tool manager [mise installer]
-- Python via uv, .NET, Go, Java Corretto, Node.js, Rust - runtimes [Mise]
-- C and C++ toolchain - gcc, clang, cmake, ninja
-- Nix - package manager for dev shells
-- markdownlint-cli - Markdown lint [Mise, npm]
-- gopls - Go language server [Mise, go]
-- Codex, Claude Code, Grok - CLI coding agents [Mise, npm]
-- OpenCode - CLI coding agent [Mise, npm]
-- Pi - CLI coding agent [Mise, npm]
-- T3 Code - graphical control plane over the agents
+- GNOME Disks (`DNF/Fedora: gnome-disk-utility`)
+- Flatseal (`DNF/Fedora: flatseal`)
 
 ## Gaming
 
-- Steam - game store and launcher
-- Lutris - launcher for other stores and Wine games
-- Heroic - Epic and GOG launcher
-- Prism Launcher - Minecraft
-- Java runtime - for Prism Launcher
-- WoWUp - WoW addon manager
-- Wine, Winetricks, Protontricks - Windows games outside Steam
-- umu-launcher - Proton for Lutris and Heroic
-- ProtonUp-Qt - install Proton-GE and Wine-GE builds
-- gamescope - micro-compositor for games
-- MangoHud and GOverlay - performance overlay and its settings GUI
-- gamemode - performance mode while a game runs
-- 32-bit NVIDIA libraries - for Steam on the desktop
+- Proton-GE, managed through ProtonPlus (`DNF/Terra: protonplus`)
+- Steam (`DNF/RPM Fusion Nonfree: steam`)
+- Lutris (`DNF/Fedora: lutris`)
+- Heroic Games Launcher (`DNF/Terra: heroic-games-launcher`)
+- Wine (`DNF/Fedora: wine`)
+- Prism Launcher (`DNF/Terra: prismlauncher`)
+- WoWUp (own COPR, pending)
+- umu-launcher (`DNF/Terra: umu-launcher`)
+- Winetricks and Protontricks (`DNF/Fedora: winetricks protontricks`)
+- Gamescope (`DNF/Fedora: gamescope`)
+- MangoHud (`DNF/Fedora: mangohud`)
+- GOverlay (`DNF/Fedora: goverlay`)
+- GameMode (`DNF/Fedora: gamemode`)
+
+## Extra
+
+- Printer support
+  - CUPS, Avahi, and Ghostscript (`DNF/Fedora: cups avahi ghostscript`)
+  - Epson ESC/P-R (`epson-inkjet-printer-escpr`; packaging pending)
+  - Epson ESC/P-R 2 (`epson-inkjet-printer-escpr2`; packaging pending)
+  - Scanner over eSCL (`DNF/Fedora: sane-airscan simple-scan`)
+- Hardware support (automatic component selection)
+  - Intel and AMD graphics and firmware (`DNF/Fedora`)
+  - NVIDIA driver (`DNF/RPM Fusion Nonfree: akmod-nvidia`)
+  - NVIDIA CUDA and 64-bit libraries
+    (`DNF/RPM Fusion Nonfree: xorg-x11-drv-nvidia-cuda`)
+  - NVIDIA 32-bit libraries
+    (`DNF/RPM Fusion Nonfree: xorg-x11-drv-nvidia-libs.i686`)
+  - NVIDIA VA-API (`DNF/Fedora: libva-nvidia-driver`)
+  - AMD video decoding (`DNF/RPM Fusion Free: mesa-va-drivers-freeworld`)
+  - Intel video decoding (`DNF/RPM Fusion Nonfree: intel-media-driver`)
+  - Secure Boot module support (`DNF/Fedora: akmods mokutil`)
+  - Laptop brightness (`DNF/Fedora: brightnessctl`)
+  - Desktop monitor brightness (`DNF/Fedora: ddcutil`)
+  - Fingerprint reader (`DNF/Fedora: fprintd`)
+  - Power and battery
+    (`DNF/Fedora: power-profiles-daemon upower`)
+  - Audio and Bluetooth (`DNF/Fedora: pipewire wireplumber bluez`)
+  - Firmware updates (`DNF/Fedora: fwupd`)
+- Media codecs
+  (`DNF/RPM Fusion Free: ffmpeg gstreamer1-plugins-bad-freeworld`)
+- Snapper (`DNF/Fedora: snapper`)
+- NetworkManager OpenConnect (`DNF/Fedora: NetworkManager-openconnect`)
+- WireGuard (`DNF/Fedora: wireguard-tools`)
+- Tailscale (`DNF/Fedora: tailscale`)
+- Compression
+  - `zip`, `unzip`, `7zip` (`DNF/Fedora`)
+  - `unrar` (`DNF/RPM Fusion Nonfree`; Fedora's `unrar` is `unrar-free`)
+- Nimbus system helpers
+  (`DNF/Fedora: dnf5-plugins policycoreutils-python-utils`)
+
+## Theming
+
+- Papirus Icon Theme (`DNF/Fedora: papirus-icon-theme`)
+- Bibata Cursor Theme (`DNF/Terra: bibata-cursor-theme`)
+- Qt and GTK theming (`DNF/Fedora: qt6ct`; configuration through Chezmoi)
+- Fonts
+  - JetBrains Mono (`DNF/Fedora: jetbrains-mono-fonts-all`)
+  - JetBrains Mono Nerd Font (`DNF/Terra: jetbrainsmono-nerd-fonts`)
+  - Inter (`DNF/Fedora: rsms-inter-fonts`)
+  - Terminus (`DNF/Fedora: terminus-fonts`)
+  - Noto Sans (`DNF/Fedora: google-noto-sans-fonts`)
+  - Noto Emoji (`DNF/Fedora: google-noto-color-emoji-fonts`)
+  - Noto CJK (`DNF/Fedora: google-noto-sans-cjk-fonts`)
+
+## CLI
+
+- Mise (`curl https://mise.run | sh`)
+  - Auto-update (`mise settings set auto_update true`)
+  - Agentic and AI tools
+    - Codex (`Mise/npm`)
+    - Claude Code (`Mise/npm`)
+    - OpenCode (`Mise/npm`)
+    - Pi (`Mise/npm`)
+    - Grok (`Mise/npm`)
+  - Programming languages and tools
+    - Go (`Mise`)
+    - .NET (`Mise`)
+    - uv (`Mise`)
+    - Python (`Mise`)
+    - Java Corretto (`Mise`)
+    - Node.js (`Mise`)
+    - Rust (`Mise`, using rustup underneath)
+    - markdownlint-cli (`Mise/npm`)
+    - gopls (`Mise/Go`)
+    - golangci-lint (`Mise/Go`)
+- Cargo tools
+  - Caligula (`cargo install caligula`)
+  - Typst (`cargo install typst-cli`)
+  - Tinymist (`cargo install tinymist`)
+  - cargo-update (`cargo install cargo-update`)
+- Just (`DNF/Fedora: just`)
+- Topgrade (`cargo install topgrade`)
+- Herdr (`curl -fsSL https://herdr.dev/install.sh | sh`; `herdr update` runs
+  from the Topgrade configuration in Chezmoi)
+- ShellCheck and gitleaks (`DNF/Fedora: ShellCheck gitleaks`)
+- Neovim (`DNF/Fedora: neovim`)
+- Chezmoi (`DNF/Fedora: chezmoi`)
+- Bash completion (`DNF/Fedora: bash-completion`)
+- C and C++ toolchain
+  (`DNF/Fedora: gcc gcc-c++ clang cmake ninja-build`)
+- Docker and Compose (`DNF/Docker RPM repository: docker-ce docker-ce-cli
+  containerd.io docker-buildx-plugin docker-compose-plugin`)
+- Git (`DNF/Fedora: git`)
+- Git LFS (`DNF/Fedora: git-lfs`)
+- GitHub CLI (`DNF/Fedora: gh`)
+- lazydocker
+  (`Mise/Go: go install github.com/jesseduffield/lazydocker@latest`)
+- lazygit (`DNF/Fedora: lazygit`)
+- Yazi (`DNF/Terra: yazi`)
+  - Required: `file` (`DNF/Fedora`)
+  - Preview support: `ffmpeg`, `7zip`, `jq`, `poppler-utils`,
+    `ImageMagick` (`DNF/Fedora` or RPM Fusion as listed elsewhere)
+  - Search and navigation: `fd-find`, `ripgrep`, `fzf`, `zoxide`
+    (`DNF/Fedora`)
+  - Clipboard: `wl-clipboard` (`DNF/Fedora`)
+  - SVG preview (`cargo install resvg`)
+- Nix (`DNF/Fedora: nix nix-daemon`; enables `nix-daemon.service`)
+
+## Shell
+
+- Zsh (`DNF/Fedora: zsh`)
+- Starship (`DNF/Terra: starship`)
+- Sheldon (`cargo install sheldon`)
+- eza (`DNF/Fedora: eza`)
+- fzf (`DNF/Fedora: fzf`)
+- fd (`DNF/Fedora: fd-find`)
+- bat (`DNF/Fedora: bat`)
+- fastfetch (`DNF/Fedora: fastfetch`)
+- wl-clipboard (`DNF/Fedora: wl-clipboard`)
+- zoxide (`DNF/Fedora: zoxide`)
+- ripgrep (`DNF/Fedora: ripgrep`)
+- tokei (`DNF/Fedora: tokei`)
+- btop (`DNF/Fedora: btop`)
+- tldr (`DNF/Fedora: tealdeer`)
+- yq (`DNF/Fedora: yq`)
+- duf (`DNF/Fedora: duf`; `df` alias through Chezmoi)
 
 ## Virtualization
 
-- VM Curator - QEMU/KVM VM manager for Linux guests [Cargo]
-- QEMU, OVMF, swtpm, virt-viewer - what VM Curator drives
-- Windows guest - dockurr/windows container with FreeRDP
+- VM Curator (`cargo install vm-curator`)
+- QEMU and TPM support
+  (`DNF/Fedora: qemu-system-x86 qemu-img swtpm virt-viewer`)
+- Windows container (`Docker: dockurr/windows`, pinned by digest)
+- FreeRDP (`DNF/Fedora: freerdp`)
 
-## Services Nimbus enables
+## Noctalia plugins
 
-- docker.service and docker.socket
-- greetd.service
-- power-profiles-daemon.service
-- bluetooth.service
-- cups.service
-- avahi-daemon.service
-- nix-daemon.service
-- tailscaled.service
-- snapper-cleanup.timer
-- fstrim.timer
-- sshd.service stays disabled
+Enable with `noctalia msg plugins enable <id>` from the built-in `official`
+and `community` sources. Phases follow `~/git/docs/plugins.md`.
 
-## Maybe
+### Official Noctalia Plugins
 
-- KDE Connect - phone integration, tried before the Phone Connect plugin
-- thermald - Intel thermals (laptop)
-- pipewire-codec-aptx - Bluetooth audio codecs
-- simple-scan - scanning
-- nm-connection-editor - connection editor GUI
-- GNOME Disks - disk and USB tool
-- a backup tool - Restic, Borg, or Pika Backup
+- Notes (`noctalia msg plugins enable noctalia/notes`), phase 1
+- Timer (`noctalia msg plugins enable noctalia/timer`), phase 1
+- Translator (`noctalia msg plugins enable noctalia/translator`), phase 1
+- Wallhaven (`noctalia msg plugins enable noctalia/wallhaven`), phase 1
+- Screen Recorder (`DNF/Terra: gpu-screen-recorder`;
+  `noctalia msg plugins enable noctalia/screen_recorder`), phase 3
+
+### Community Plugins
+
+- Keybind Cheatsheet
+  (`noctalia msg plugins enable kenn/keybind-cheatsheet`), phase 1
+- File Search (`noctalia msg plugins enable nightwatch75/file-search`),
+  phase 1
+- OCR (`DNF/Fedora: grim slurp tesseract tesseract-langpack-eng`;
+  `noctalia msg plugins enable fel/ocr`), phase 1
+- QR Code (`DNF/Fedora: qrencode`;
+  `noctalia msg plugins enable yocraft/qrcode`), phase 1
+- Zed Provider (`DNF/Fedora: sqlite`;
+  `noctalia msg plugins enable cleboost/zed-provider`), phase 1
+- AI Usage (collector source pending;
+  `noctalia msg plugins enable felipeartur/ai-usagebar`), phase 2
+- GitHub Pull Requests
+  (`noctalia msg plugins enable raycursive/github-prs`), phase 2
+- SSH Launcher (`noctalia msg plugins enable cleboost/ssh-launcher`), phase 2
+- Portctl (`noctalia msg plugins enable rxtsel/portctl`), phase 2
+- Crashes (`DNF/Fedora: jq libnotify`;
+  `noctalia msg plugins enable umedbazarov/crashes`), phase 2
+- Tailnet (`noctalia msg plugins enable rylos/tailnet`), phase 3
+- Udiskie Manager (`noctalia msg plugins enable aristides/udiskie`), phase 3
+- Lid Guard (`noctalia msg plugins enable 8bury/lid-guard`), phase 3
+- Hypr-Screen-Mirror (`DNF/Fedora: socat`;
+  `noctalia msg plugins enable profidev/hypr-screen-mirror`), phase 3
+- Mini Docker (`noctalia msg plugins enable 8bury/mini-docker`), phase 3
+- AirPods (`librepods`, future own package;
+  `noctalia msg plugins enable harveywuk/airpods`), phase 4
+- Home Assistant (`noctalia msg plugins enable pozzoo/hassio`), blocked
+  - Do not enable until the long-lived access token is proven to be stored
+    through an acceptable secret provider rather than plaintext Noctalia
+    state. Keep using the Home Assistant app or web UI until then.
+
+## Webapps
+
+- [Claude](https://claude.ai/) (`browser webapp`)
+- [Messenger](https://www.facebook.com/messages) (`browser webapp`)
+- [Grok](https://grok.com/) (`browser webapp`)
+- [Fastmail](https://app.fastmail.com/) (`browser webapp`)
+- [Google Maps](https://www.google.com/maps) (`browser webapp`)
+- [Outlook](https://outlook.cloud.microsoft/mail/) (`browser webapp`)
+- [Teams](https://teams.cloud.microsoft/) (`browser webapp`)
