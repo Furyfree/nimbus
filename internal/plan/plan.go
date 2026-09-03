@@ -32,7 +32,8 @@ const (
 	ActionAdopt   = "adopt"
 	ActionKeep    = "keep" // managed and unchanged; a receipt already exists
 	ActionRemove  = "remove"
-	ActionPrune   = "prune" // removal of an unmanaged package, only with --prune
+	ActionRetire  = "retire" // the package is already gone; only its receipt is retired
+	ActionPrune   = "prune"  // removal of an unmanaged package, only with --prune
 
 	RiskLow    = "low"    // adds something; reversible by removal
 	RiskMedium = "medium" // removes or changes trust; reviewed with more care
@@ -311,16 +312,27 @@ func KeyPath(id string) string { return "/etc/pki/rpm-gpg/RPM-GPG-KEY-nimbus-" +
 
 // PrioritySteps renders dnf5 config-manager setopt for every host ID of a
 // repository, which writes an override file instead of touching the
-// maker's repository file.
+// maker's repository file. Signature checking is set in the same override,
+// so a repair of a maker-owned repository restores it as well.
 func PrioritySteps(id string, r definitions.Repository) []Step {
-	if r.Priority == nil {
-		return nil
-	}
 	var opts []string
 	for _, host := range DNFRepoIDs(id, r) {
-		opts = append(opts, fmt.Sprintf("%s.priority=%d", host, *r.Priority))
+		opts = append(opts, host+".gpgcheck=1")
+		if r.Priority != nil {
+			opts = append(opts, fmt.Sprintf("%s.priority=%d", host, *r.Priority))
+		}
 	}
-	return []Step{{Description: "set the repository priority through a DNF override", Argv: append([]string{"dnf5", "config-manager", "setopt"}, opts...), Privileged: true}}
+	return []Step{{Description: "set signature checking and priority through a DNF override", Argv: append([]string{"dnf5", "config-manager", "setopt"}, opts...), Privileged: true}}
+}
+
+// CheckRepository decides whether the host provides a declared DNF or COPR
+// repository as declared. Apply uses it to verify an enable or repair.
+func CheckRepository(root definitions.Root, id string, repos []facts.Repository) (ready bool, repair string, blocked string) {
+	b := &builder{in: Inputs{Root: root}, repos: map[string][]facts.Repository{}}
+	for _, r := range repos {
+		b.repos[r.ID] = append(b.repos[r.ID], r)
+	}
+	return b.inspectRepo(id, root.Repositories[id])
 }
 
 // AddRepoStep renders the native command that writes nimbus-<id>.repo.
@@ -660,7 +672,11 @@ func (b *builder) ownedRemovals() []Operation {
 		case "dnf":
 			name := PackageName(id)
 			if _, ok := b.installed[name]; !ok {
-				continue // already gone; the receipt is retired by apply
+				// Already gone: only the receipt is retired, so a later
+				// hand installation is not mistaken for Nimbus's.
+				ops = append(ops, Operation{ID: id, Kind: KindPackage, Action: ActionRetire, Risk: RiskLow,
+					Summary: fmt.Sprintf("retire the receipt of %s, which is no longer installed or selected", name), Paths: []string{"receipt"}})
+				continue
 			}
 			dnf = append(dnf, Operation{ID: id, Kind: KindPackage, Action: ActionRemove, Risk: RiskMedium,
 				Summary: fmt.Sprintf("remove %s, no longer selected (installed by Nimbus as %s)", name, r.Operation), Paths: []string{"receipt"}})

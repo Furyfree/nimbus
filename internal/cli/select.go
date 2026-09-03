@@ -6,9 +6,11 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/Furyfree/nimbus/internal/apply"
 	"github.com/Furyfree/nimbus/internal/definitions"
 )
 
@@ -310,16 +312,30 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 	}
 
 	// Validate and plan the edited manifest in memory before touching it.
-	s.Checkout.Machines[s.Resolved.Machine] = &edited
-	defer func() { s.Checkout.Machines[s.Resolved.Machine] = original }()
-	if errs := definitions.Validate(s.Checkout); len(errs) > 0 {
+	// The trial checkout also carries the edited bytes so its definition
+	// digest, and therefore the plan digest, is the one the written
+	// manifest will produce.
+	trialCheckout := *s.Checkout
+	trialCheckout.Machines = map[string]*definitions.Machine{}
+	for id, m := range s.Checkout.Machines {
+		trialCheckout.Machines[id] = m
+	}
+	trialCheckout.Machines[s.Resolved.Machine] = &edited
+	trialCheckout.Entries = append([]definitions.Entry(nil), s.Checkout.Entries...)
+	rel := "machines/" + s.Resolved.Machine + ".toml"
+	for i := range trialCheckout.Entries {
+		if trialCheckout.Entries[i].Path == rel {
+			trialCheckout.Entries[i].Content = append(after, '\n')
+		}
+	}
+	if errs := definitions.Validate(&trialCheckout); len(errs) > 0 {
 		return fmt.Errorf("the edited manifest is invalid: %s", errs[0])
 	}
-	r, rerrs := definitions.Resolve(s.Checkout, s.Resolved.Machine)
+	r, rerrs := definitions.Resolve(&trialCheckout, s.Resolved.Machine)
 	if len(rerrs) > 0 {
 		return fmt.Errorf("the edited manifest does not resolve: %s", rerrs[0])
 	}
-	trial := &selected{Root: s.Root, Checkout: s.Checkout, Resolved: r}
+	trial := &selected{Root: s.Root, Checkout: &trialCheckout, Resolved: r}
 	src := newSource()
 	p, _, err := planWithState(trial, src, false)
 	if err != nil {
@@ -339,14 +355,32 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 			return errors.New("not approved; the manifest is unchanged")
 		}
 	}
+	// The lock covers the manifest write and the apply that follows, so a
+	// concurrent edit cannot slip in between.
+	lockPath, err := apply.LockPath()
+	if err != nil {
+		return err
+	}
+	lock, err := apply.Acquire(lockPath, apply.LockInfo{Command: edit.cmdName, Operation: p.Digest, PID: os.Getpid(), Started: time.Now().UTC()})
+	if err != nil {
+		return err
+	}
+	current, err := os.ReadFile(path)
+	if err != nil || string(current) != string(before) {
+		lock.Release()
+		return errors.New("the manifest changed while the plan was being reviewed; run the command again")
+	}
 	if err := writeManifest(path, after); err != nil {
+		lock.Release()
 		return err
 	}
 	fmt.Fprintf(out, "wrote %s; the Git change is yours to commit\n", path)
 	if nothingToRun(p) {
+		lock.Release()
 		return nil
 	}
-	return runApply(cmd, opts, flags, false, p.Digest)
+	flags.machine = s.Resolved.Machine
+	return runApplyWith(cmd, opts, flags, false, p.Digest, lock)
 }
 
 func listProfiles(s *selected) []selectionView {

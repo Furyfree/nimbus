@@ -173,6 +173,8 @@ func (ex *executor) execute(op plan.Operation) (receipts []state.Receipt, remove
 		return ex.flatpakInstall(op)
 	case op.Kind == plan.KindFlatpak && op.Action == plan.ActionRemove:
 		return ex.flatpakRemove(op)
+	case op.Kind == plan.KindPackage && op.Action == plan.ActionRetire:
+		return nil, []string{op.ID}, nil
 	case op.Kind == plan.KindPackage && op.Action == plan.ActionAdopt:
 		name := op.ID[strings.LastIndexByte(op.ID, ':')+1:]
 		inst, ok := ex.seen[name]
@@ -248,16 +250,18 @@ func (ex *executor) repository(op plan.Operation) ([]state.Receipt, []string, er
 	if !f.Repositories.Known() {
 		return nil, nil, errors.New("verification: repositories are unknown: " + f.Repositories.Error)
 	}
-	found := false
-	for _, have := range f.Repositories.Value {
-		if have.Enabled && contains(plan.DNFRepoIDs(id, r), have.ID) {
-			found = true
+	ready, repair, blocked := plan.CheckRepository(ex.opts.Root, id, f.Repositories.Value)
+	if !ready {
+		reason := repair
+		if blocked != "" {
+			reason = blocked
 		}
+		if reason == "" {
+			reason = "not enabled"
+		}
+		return nil, nil, fmt.Errorf("verification: repository %s is not as declared after the operation: %s", id, reason)
 	}
-	if !found {
-		return nil, nil, fmt.Errorf("verification: repository %s is not enabled after the operation", id)
-	}
-	return []state.Receipt{ex.receipt(op, "repository", "absent", "enabled with key "+definitions.NormalizeFingerprint(r.Key), "repository file present and enabled")}, nil, nil
+	return []state.Receipt{ex.receipt(op, "repository", "absent", "enabled with key "+definitions.NormalizeFingerprint(r.Key), "repository present, enabled, signature checking on, priority as declared")}, nil, nil
 }
 
 func (ex *executor) enableBaseURL(id string, r definitions.Repository, op plan.Operation) error {
@@ -465,30 +469,29 @@ func (ex *executor) installTransaction(op plan.Operation) ([]state.Receipt, []st
 	return receipts, nil, nil
 }
 
-// compareStored checks that the stored transaction is the reviewed one:
-// the same names with the same actions, so nothing changed between the
-// preview and the download.
+// compareStored checks that the stored transaction is exactly the reviewed
+// one: the same complete RPM identities (name, epoch:version-release, arch)
+// with the same actions, counted, so a changed build, a different
+// architecture, or a duplicated multilib entry is caught before replay.
 func compareStored(preview *plan.Transaction, stored storedTransaction) error {
-	want := map[string]string{}
+	want := map[string]int{}
 	for _, row := range preview.Packages {
-		want[row.Name] = actionOf(row.Section)
+		want[identity(row.Name, row.EVR, row.Arch, actionOf(row.Section))]++
 	}
-	got := map[string]string{}
+	got := map[string]int{}
 	for _, rpm := range stored.RPMs {
-		name := nevraName(rpm.NEVRA)
-		got[name] = strings.ToLower(rpm.Action)
+		name, evr, arch := splitNEVRA(rpm.NEVRA)
+		got[identity(name, evr, arch, strings.ToLower(rpm.Action))]++
 	}
 	var diffs []string
-	for name, action := range want {
-		if g, ok := got[name]; !ok {
-			diffs = append(diffs, name+" missing from the stored transaction")
-		} else if g != action {
-			diffs = append(diffs, fmt.Sprintf("%s would be %s, reviewed as %s", name, g, action))
+	for id, n := range want {
+		if g := got[id]; g != n {
+			diffs = append(diffs, fmt.Sprintf("reviewed %s x%d, stored x%d", id, n, g))
 		}
 	}
-	for name := range got {
-		if _, ok := want[name]; !ok {
-			diffs = append(diffs, name+" appeared in the stored transaction without review")
+	for id, n := range got {
+		if _, ok := want[id]; !ok {
+			diffs = append(diffs, fmt.Sprintf("%s x%d appeared in the stored transaction without review", id, n))
 		}
 	}
 	if len(diffs) > 0 {
@@ -496,6 +499,29 @@ func compareStored(preview *plan.Transaction, stored storedTransaction) error {
 		return errors.New("the downloaded transaction differs from the reviewed plan: " + strings.Join(diffs, "; "))
 	}
 	return nil
+}
+
+// identity renders one comparable RPM identity. A zero epoch is dropped,
+// since DNF's NEVRA omits it while the preview prints it.
+func identity(name, evr, arch, action string) string {
+	return action + " " + name + "-" + strings.TrimPrefix(evr, "0:") + "." + arch
+}
+
+// splitNEVRA separates name, epoch:version-release, and arch. Version and
+// release never contain a dash, so the last two dashes delimit them.
+func splitNEVRA(nevra string) (name, evr, arch string) {
+	s := nevra
+	if i := strings.LastIndexByte(s, '.'); i > 0 {
+		arch, s = s[i+1:], s[:i]
+	}
+	if i := strings.LastIndexByte(s, '-'); i > 0 {
+		release := s[i+1:]
+		s = s[:i]
+		if j := strings.LastIndexByte(s, '-'); j > 0 {
+			return s[:j], s[j+1:] + "-" + release, arch
+		}
+	}
+	return s, "", arch
 }
 
 func actionOf(section string) string {
@@ -516,16 +542,8 @@ func actionOf(section string) string {
 
 // nevraName strips ".arch" and "-version-release" from a NEVRA.
 func nevraName(nevra string) string {
-	s := nevra
-	if i := strings.LastIndexByte(s, '.'); i > 0 {
-		s = s[:i]
-	}
-	for range 2 {
-		if i := strings.LastIndexByte(s, '-'); i > 0 {
-			s = s[:i]
-		}
-	}
-	return s
+	name, _, _ := splitNEVRA(nevra)
+	return name
 }
 
 func pathsFor(p *plan.Plan, id string) []string {

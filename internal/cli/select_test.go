@@ -166,3 +166,38 @@ func TestPackagesInstallNeedsAQueryAndUsesTheCache(t *testing.T) {
 		t.Fatalf("diff lacks the new reference:\n%s", out)
 	}
 }
+
+func TestSelectionEditDigestSurvivesTheManifestWrite(t *testing.T) {
+	applyEnv(t)
+	root := editableCheckout(t)
+	src := fixtureSource(t, root)
+	withoutTerra(src)
+	answerLaptopInstall(t, src, root)
+	withSource(t, src)
+	saved := approver
+	var seen string
+	approver = func(_ io.Reader, _ io.Writer, digest string) bool { seen = digest; return false }
+	t.Cleanup(func() { approver = saved })
+	run(t, "components", "add", "docker", "--checkout", root, "--machine", "laptop")
+	if seen == "" {
+		t.Fatal("no digest offered for approval")
+	}
+	// Approving that exact digest must carry through the manifest write and
+	// the reload; the run then stops at the first operation, which needs the
+	// network, and that proves the digests matched.
+	code, out, errOut := run(t, "components", "add", "docker", "--checkout", root, "--machine", "laptop", "--approve", seen)
+	if strings.Contains(errOut, "does not match") {
+		t.Fatalf("digest changed across the manifest write: %q\n%s", errOut, out)
+	}
+	if code != ExitFailure || !strings.Contains(out, "wrote ") || !strings.Contains(out, "apply stopped at repository:brave") {
+		t.Fatalf("edit flow: %d %q\n%s", code, errOut, out)
+	}
+	data, _ := os.ReadFile(manifestPath(root, "laptop"))
+	if !strings.Contains(string(data), "\"docker\",") {
+		t.Fatal("manifest not written")
+	}
+	lock, _ := os.ReadFile(filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), "nimbus", "operation.lock"))
+	if !strings.Contains(string(lock), `"command":"components add"`) {
+		t.Fatalf("lock was not taken by the edit: %q", lock)
+	}
+}

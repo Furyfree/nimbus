@@ -104,7 +104,18 @@ type applyResult struct {
 }
 
 func runApply(cmd *cobra.Command, opts *options, flags machineFlags, prune bool, approve string) error {
+	return runApplyWith(cmd, opts, flags, prune, approve, nil)
+}
+
+// runApplyWith runs apply; a lock already held by the caller (the selection
+// commands hold it across the manifest write) is reused and released here.
+func runApplyWith(cmd *cobra.Command, opts *options, flags machineFlags, prune bool, approve string, held *apply.Lock) error {
 	out := cmd.OutOrStdout()
+	defer func() {
+		if held != nil {
+			held.Release()
+		}
+	}()
 	s, err := loadSelected(flags)
 	if err != nil {
 		return err
@@ -149,10 +160,14 @@ func runApply(cmd *cobra.Command, opts *options, flags machineFlags, prune bool,
 		if err != nil {
 			return err
 		}
-		lock, err := apply.Acquire(lockPath, apply.LockInfo{Command: "apply", Operation: p.Digest, PID: os.Getpid(), Started: time.Now().UTC()})
-		if err != nil {
-			return err
+		lock := held
+		if lock == nil {
+			lock, err = apply.Acquire(lockPath, apply.LockInfo{Command: "apply", Operation: p.Digest, PID: os.Getpid(), Started: time.Now().UTC()})
+			if err != nil {
+				return err
+			}
 		}
+		held = nil
 		// Re-resolve and re-inspect under the lock; the approved digest must
 		// still describe the system.
 		fresh, _, err := planWithState(s, src, prune)
@@ -195,7 +210,13 @@ func runApply(cmd *cobra.Command, opts *options, flags machineFlags, prune bool,
 		approve = ""
 	}
 	if opts.json {
-		return writeJSON(out, result, nil)
+		if err := writeJSON(out, result, nil); err != nil {
+			return err
+		}
+		if result.Error != "" {
+			return reported{}
+		}
+		return nil
 	}
 	if result.Error != "" {
 		fmt.Fprintf(out, "apply stopped at %s: %s\n", result.Failed, result.Error)

@@ -27,6 +27,8 @@ type scripted struct {
 	fail      map[string]string // command prefix -> error
 	stored    string            // transaction.json content
 	fpr       string            // fingerprint gpg reports
+	// privilegedNoop makes every sudo command succeed without effect.
+	privilegedNoop bool
 }
 
 func newScripted() *scripted {
@@ -80,6 +82,9 @@ func (s *scripted) Run(name string, args ...string) ([]byte, error) {
 }
 
 func (s *scripted) privileged(argv []string) ([]byte, error) {
+	if s.privilegedNoop {
+		return nil, nil
+	}
 	switch {
 	case argv[0] == "dnf5" && argv[1] == "-y" && argv[2] == "install" && argv[3] == "--store":
 		s.Files[filepath.Join(argv[4], "transaction.json")] = []byte(s.stored)
@@ -97,8 +102,14 @@ func (s *scripted) privileged(argv []string) ([]byte, error) {
 		s.installed = kept
 	case argv[0] == "dnf5" && argv[1] == "config-manager" && argv[2] == "addrepo":
 		s.repoIDs = append(s.repoIDs, strings.TrimPrefix(argv[3], "--id="))
+		file := "[nimbus-terra]\nenabled=1\n"
+		for _, a := range argv[4:] {
+			if strings.HasPrefix(a, "--set=") {
+				file += strings.TrimPrefix(a, "--set=") + "\n"
+			}
+		}
 		s.Dirs[facts.RepoDir] = []string{"nimbus-terra.repo"}
-		s.Files[filepath.Join(facts.RepoDir, "nimbus-terra.repo")] = []byte("[nimbus-terra]\nenabled=1\ngpgcheck=1\npriority=100\n")
+		s.Files[filepath.Join(facts.RepoDir, "nimbus-terra.repo")] = []byte(file)
 	case argv[0] == "flatpak" && argv[1] == "remote-add":
 		s.remotes = append(s.remotes, argv[5])
 	case argv[0] == "flatpak" && argv[1] == "install":
@@ -226,7 +237,7 @@ func TestRunStopsAtTheFirstFailureAndKeepsEarlierReceipts(t *testing.T) {
 	src.stored = `{"rpms":[{"nevra":"ripgrep-15.2.0-1.fc44.x86_64","action":"Install"},{"nevra":"surprise-1-1.fc44.x86_64","action":"Install"}],"version":"1.0"}`
 	root := t.TempDir()
 	r := Run(samplePlan(t), options(t, src, root))
-	if r.Failed != "packages:install" || !strings.Contains(r.Error, "surprise appeared in the stored transaction without review") {
+	if r.Failed != "packages:install" || !strings.Contains(r.Error, "surprise-1-1.fc44.x86_64 x1 appeared in the stored transaction without review") {
 		t.Fatalf("result = %+v", r)
 	}
 	if src.ran("sudo dnf5 -y replay") || !src.ran("sudo rm -rf") {
@@ -314,11 +325,99 @@ func TestNevraAndActionHelpers(t *testing.T) {
 	if actionOf("installing weak dependencies") != "install" || actionOf("removing unused dependencies") != "remove" || actionOf("upgrading") != "upgrade" {
 		t.Fatal("action mapping")
 	}
-	tx := &plan.Transaction{Packages: []plan.TxPackage{{Name: "a", Section: "installing"}, {Name: "old", Section: "removing"}}}
+	tx := &plan.Transaction{Packages: []plan.TxPackage{{Name: "a", EVR: "0:1-1.fc44", Arch: "x86_64", Section: "installing"}, {Name: "old", EVR: "0:1-1.fc44", Arch: "x86_64", Section: "removing"}}}
 	if err := compareStored(tx, storedTransaction{RPMs: []struct {
 		NEVRA  string `json:"nevra"`
 		Action string `json:"action"`
 	}{{NEVRA: "a-1-1.fc44.x86_64", Action: "Install"}, {NEVRA: "old-1-1.fc44.x86_64", Action: "Remove"}}}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestStoredTransactionMustMatchCompleteIdentities(t *testing.T) {
+	tx := &plan.Transaction{Packages: []plan.TxPackage{
+		{Name: "ripgrep", Arch: "x86_64", EVR: "0:15.2.0-1.fc44", Section: "installing"},
+		{Name: "glibc", Arch: "x86_64", EVR: "0:2.43-8.fc44", Section: "installing dependencies"},
+		{Name: "glibc", Arch: "i686", EVR: "0:2.43-8.fc44", Section: "installing dependencies"},
+		{Name: "nvidia", Arch: "x86_64", EVR: "3:610.57.04-1.fc44", Section: "installing"},
+	}}
+	stored := func(nevras ...string) storedTransaction {
+		var st storedTransaction
+		for _, n := range nevras {
+			st.RPMs = append(st.RPMs, struct {
+				NEVRA  string `json:"nevra"`
+				Action string `json:"action"`
+			}{NEVRA: n, Action: "Install"})
+		}
+		return st
+	}
+	good := stored("ripgrep-15.2.0-1.fc44.x86_64", "glibc-2.43-8.fc44.x86_64", "glibc-2.43-8.fc44.i686", "nvidia-3:610.57.04-1.fc44.x86_64")
+	if err := compareStored(tx, good); err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]storedTransaction{
+		"newer build":        stored("ripgrep-15.2.1-1.fc44.x86_64", "glibc-2.43-8.fc44.x86_64", "glibc-2.43-8.fc44.i686", "nvidia-3:610.57.04-1.fc44.x86_64"),
+		"other arch":         stored("ripgrep-15.2.0-1.fc44.aarch64", "glibc-2.43-8.fc44.x86_64", "glibc-2.43-8.fc44.i686", "nvidia-3:610.57.04-1.fc44.x86_64"),
+		"multilib collapsed": stored("ripgrep-15.2.0-1.fc44.x86_64", "glibc-2.43-8.fc44.x86_64", "nvidia-3:610.57.04-1.fc44.x86_64"),
+		"epoch dropped":      stored("ripgrep-15.2.0-1.fc44.x86_64", "glibc-2.43-8.fc44.x86_64", "glibc-2.43-8.fc44.i686", "nvidia-610.57.04-1.fc44.x86_64"),
+	}
+	for name, st := range cases {
+		if err := compareStored(tx, st); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	if n, evr, arch := splitNEVRA("xorg-x11-drv-nvidia-libs-3:610.57.04-1.fc44.i686"); n != "xorg-x11-drv-nvidia-libs" || evr != "3:610.57.04-1.fc44" || arch != "i686" {
+		t.Fatalf("splitNEVRA = %q %q %q", n, evr, arch)
+	}
+}
+
+func TestRetireRemovesOnlyTheReceipt(t *testing.T) {
+	src := newScripted()
+	root := t.TempDir()
+	opts := options(t, src, root)
+	opts.FirstApply = false
+	if err := state.Record(root, "sha256:earlier", &state.Stage{Schema: state.Schema, PlanDigest: "sha256:earlier", Receipts: []state.Receipt{{Schema: state.Schema, Resource: "package:dnf:gone", Provider: "dnf", Operation: "install", PlanDigest: "sha256:earlier", Verified: true}}}); err != nil {
+		t.Fatal(err)
+	}
+	p := &plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:retire", Operations: []plan.Operation{
+		{ID: "package:dnf:gone", Kind: plan.KindPackage, Action: plan.ActionRetire, Summary: "retire gone"},
+	}}
+	r := Run(p, opts)
+	if r.Error != "" || src.ran("sudo ") {
+		t.Fatalf("retire ran a command or failed: %+v\n%s", r, strings.Join(src.log, "\n"))
+	}
+	a, _ := state.Read(root)
+	if _, ok := a.Receipts["package:dnf:gone"]; ok {
+		t.Fatal("receipt not retired")
+	}
+}
+
+func TestRepositoryRepairIsVerifiedAsDeclared(t *testing.T) {
+	src := newScripted()
+	root := t.TempDir()
+	opts := options(t, src, root)
+	// The scripted addrepo honours every --set, so the enabled repository
+	// verifies as declared; drop the priority from what it writes and the
+	// verification must fail.
+	p := &plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:repo", Operations: []plan.Operation{
+		{ID: "repository:terra", Kind: plan.KindRepository, Action: plan.ActionEnable, Summary: "enable terra"},
+	}}
+	if r := Run(p, opts); r.Error != "" {
+		t.Fatalf("enable failed: %+v", r)
+	}
+	src2 := newScripted()
+	src2.Files = map[string][]byte{}
+	opts2 := options(t, src2, t.TempDir())
+	src2.fail["sudo dnf5 config-manager addrepo"] = ""
+	delete(src2.fail, "sudo dnf5 config-manager addrepo")
+	// Pre-write a file with gpgcheck off that addrepo will not replace.
+	src2.Dirs[facts.RepoDir] = []string{"nimbus-terra.repo"}
+	src2.Files[filepath.Join(facts.RepoDir, "nimbus-terra.repo")] = []byte("[nimbus-terra]\nenabled=1\ngpgcheck=0\nbaseurl=https://repos.fyralabs.com/terra44\npriority=100\n")
+	p2 := &plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:repo2", Operations: []plan.Operation{
+		{ID: "repository:terra", Kind: plan.KindRepository, Action: plan.ActionRepair, Summary: "repair terra"},
+	}}
+	src2.privilegedNoop = true
+	if r := Run(p2, opts2); r.Error == "" || !strings.Contains(r.Error, "gpgcheck") {
+		t.Fatalf("repair that left gpgcheck off was verified: %+v", r)
 	}
 }

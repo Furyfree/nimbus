@@ -559,3 +559,36 @@ func TestAppliedStateShapesThePlan(t *testing.T) {
 		t.Fatal("owned removal lost with Prune")
 	}
 }
+
+func TestReceiptOfAnAbsentPackageIsRetired(t *testing.T) {
+	c, r := repository(t)
+	src, f := host(t)
+	withoutTerraFile(f)
+	a := applied("package:dnf:vanished")
+	p, err := Build(Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Applied: a, Source: src})
+	if err != nil {
+		t.Fatal(err)
+	}
+	op := find(p, "package:dnf:vanished")
+	if op == nil || op.Action != ActionRetire || len(op.Steps) != 0 || op.Blocked != "" {
+		t.Fatalf("retire = %+v", op)
+	}
+	if find(p, "packages:remove-owned") != nil {
+		t.Fatal("an absent package must not be removed")
+	}
+}
+
+func TestRepairRestoresSignatureChecking(t *testing.T) {
+	c := repositoryOnly(t)
+	steps := PrioritySteps("rpmfusion-free", c.Definitions().Repositories["rpmfusion-free"])
+	argv := strings.Join(steps[0].Argv, " ")
+	if !strings.Contains(argv, "rpmfusion-free.gpgcheck=1") || !strings.Contains(argv, "rpmfusion-free.priority=100") || !strings.Contains(argv, "rpmfusion-free-updates.gpgcheck=1") {
+		t.Fatalf("repair argv = %s", argv)
+	}
+}
+
+func repositoryOnly(t *testing.T) *definitions.Checkout {
+	t.Helper()
+	c, _ := repository(t)
+	return c
+}
