@@ -138,3 +138,34 @@ func TestOriginKeyIsCaseInsensitive(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRemoteSubsectionIsCaseSensitive(t *testing.T) {
+	sel := &Selector{Schema: 1, Checkout: "x", Machine: "m", Origin: "github.com/furyfree-org/nimbus"}
+	cased := strings.Replace(originConfig, `[remote "origin"]`, `[remote "Origin"]`, 1)
+	if err := Verify(sel, gitCheckout(t, cased)); err == nil || !strings.Contains(err.Error(), "not set") {
+		t.Fatalf("differently cased remote accepted: %v", err)
+	}
+	upperSection := strings.Replace(originConfig, `[remote "origin"]`, `[Remote "origin"]`, 1)
+	if err := Verify(sel, gitCheckout(t, upperSection)); err != nil {
+		t.Fatalf("section name must be case-insensitive: %v", err)
+	}
+}
+
+func TestUnreadableCommondirFails(t *testing.T) {
+	main := gitCheckout(t, originConfig)
+	wtDir := filepath.Join(main, ".git", "worktrees", "wt")
+	if err := os.MkdirAll(filepath.Join(wtDir, "commondir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtDir, "config"), []byte(originConfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wt := t.TempDir()
+	if err := os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: "+wtDir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sel := &Selector{Schema: 1, Checkout: wt, Machine: "m", Origin: "github.com/furyfree-org/nimbus"}
+	if err := Verify(sel, wt); err == nil || !strings.Contains(err.Error(), "commondir") {
+		t.Fatalf("directory commondir fell back to the worktree config: %v", err)
+	}
+}
