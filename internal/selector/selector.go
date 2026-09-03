@@ -169,12 +169,21 @@ func CheckoutOrigin(root string) (string, error) {
 		}
 	}
 	configPath := filepath.Join(gitDir, "config")
-	if common, err := os.ReadFile(filepath.Join(gitDir, "commondir")); err == nil {
+	common, err := os.ReadFile(filepath.Join(gitDir, "commondir"))
+	switch {
+	case err == nil:
 		dir := strings.TrimSpace(string(common))
+		if dir == "" {
+			return "", fmt.Errorf("%s: commondir is empty", gitDir)
+		}
 		if !filepath.IsAbs(dir) {
 			dir = filepath.Join(gitDir, dir)
 		}
 		configPath = filepath.Join(dir, "config")
+	case errors.Is(err, fs.ErrNotExist):
+		// Not a linked worktree; the configuration lives beside it.
+	default:
+		return "", fmt.Errorf("read %s: %w", filepath.Join(gitDir, "commondir"), err)
 	}
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -197,13 +206,13 @@ func parseOriginURL(data []byte) (string, error) {
 			continue
 		}
 		if line[0] == '[' {
-			section = strings.ToLower(line)
-			if strings.HasPrefix(section, "[include]") || strings.HasPrefix(section, "[includeif") {
+			section = sectionKey(line)
+			if section == "include" || strings.HasPrefix(section, "includeif") {
 				return "", fmt.Errorf("include directives are not supported; set remote.origin.url directly")
 			}
 			continue
 		}
-		if section != `[remote "origin"]` {
+		if section != `remote "origin"` {
 			continue
 		}
 		key, value, ok := strings.Cut(line, "=")
@@ -222,6 +231,18 @@ func parseOriginURL(data []byte) (string, error) {
 		return "", fmt.Errorf("remote.origin.url is not set")
 	}
 	return origin, nil
+}
+
+// sectionKey normalizes a Git config section header. Section names are
+// case-insensitive; a quoted subsection such as a remote name is not.
+func sectionKey(header string) string {
+	inner := strings.TrimSuffix(strings.TrimPrefix(header, "["), "]")
+	name, sub, quoted := strings.Cut(inner, " ")
+	name = strings.ToLower(strings.TrimSpace(name))
+	if !quoted {
+		return name
+	}
+	return name + " " + strings.TrimSpace(sub)
 }
 
 // Verify checks that the checkout's origin matches the selector.
