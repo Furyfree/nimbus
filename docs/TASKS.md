@@ -1,99 +1,65 @@
 # Nimbus tasks
 
-## Current phase: Configuration resolver
+## Current phase: Fedora system facts
 
-Plan: [Configuration resolver](ROADMAP.md#1-configuration-resolver).
-No Phase 1 gate is open. Q-015 is resolved but needs a dotfiles template
-change before the Phase 5 Chezmoi handoff.
+Plan: [Fedora system facts](ROADMAP.md#2-fedora-system-facts). Phase 1 is
+merged. No gate is open; the dotfiles template task below gates Phase 5, and
+the first VM run is deferred to Phase 4.
 
-### Foundation and entry points
+### Inspector
 
-- [x] Resolve Q-013: explicit `common`, ordered profiles, canonical lists,
-  and only the fields current definitions use.
-- [x] Resolve Q-014: repositories declared once in nimbus.toml and named by
-  package prefix; the catalog directory is gone.
-- [x] Resolve Q-016: PACKAGES.md lists what Nimbus installs, including the
-  user-scope steps Nimbus runs as the user.
-- [x] Resolve Q-017: fix the six PACKAGES.md source conflicts and accept or
-  reject each listed omission.
-- [x] Replace the source tiers with the fixed five-step order in SECURITY.md
-  and reconcile PACKAGES.md with it (D-015).
-- [x] Apply the 2026-09-03 passthrough corrections (D-019).
-- [x] Create the Go module and the Cobra command tree.
-- [x] Implement nimbus validate with an explicit checkout override and nimbus
-  version without selector, checkout, or system dependencies.
-- [x] Keep machine resolution internal and expose no future or mutating command
-  stubs in root help.
-- [x] Add nimbus.toml with the first definition schema, supported Fedora
-  releases, minimum-engine compatibility metadata, and the declared
-  repositories with key URLs and pinned fingerprints.
-- [x] Reject `package_constraints` as an unknown field in Phase 1.
+- [x] Add `internal/facts` with a `Source` that abstracts every command,
+  file, directory, and PATH read, an `ExecSource` for the host, and a
+  `FakeSource` that fails on anything not recorded.
+- [x] Record Fedora 44 output in the research container as fixtures:
+  os-release, the DNF5 installed-package query, and every repository file.
+- [x] Collect only the facts later phases need: platform, installed RPMs
+  with source repository and install reason, repository files, Flatpak
+  remotes and apps, Secure Boot, SELinux, firewalld, checkout origin,
+  commit, and dirty state, and required-command presence.
+- [x] Report a fact that cannot be established as unknown with its reason;
+  never substitute a default.
+- [x] Keep parsing separate from policy: parsers in `facts`, checks in
+  `doctor`.
 
-### Configuration model
+### Doctor
 
-- [x] Define strict versioned types for the local selector, machine, profile,
-  component, repository declaration, and only the fields retained by Q-013.
-- [x] Represent generic system files only through sources below
-  `system/root/etc`, with their absolute `/etc` targets derived rather than
-  independently configurable.
-- [x] Parse the selector's required normalized origin and compare it with local
-  Git configuration without command execution or network access.
-- [x] Add tracked desktop and laptop machine manifests under machines/, with
-  the desktop selecting gaming and the laptop selecting laptop-gaming.
-- [x] Add the initial common, development, gaming, laptop-gaming,
-  hyprland-noctalia, virtualization, and windows-vm profiles and only the
-  components needed to exercise their real graph.
-- [x] Add representative package references that exercise bare and explicit DNF,
-  system Flatpak, declared-repository prefixes, and a component `removes`
-  entry without implementing package operations.
+- [x] Add `nimbus doctor` with `--checkout` and `--json`: platform and
+  supported release, selector and origin, definitions, required commands,
+  package database, repository signature checking, Secure Boot, SELinux,
+  and firewalld.
+- [x] Explain every failure with observation, impact, and remediation; no
+  explain mode; exit 1 on any failure and 0 when only unknowns remain.
+- [x] Never repair, invoke sudo, or use the network.
 
-### Loading, validation, and resolution
+### Validation
 
-- [x] Load definitions only from the selected Nimbus checkout.
-- [x] Calculate the versioned SHA-256 definition digest from `nimbus.toml` and
-  every regular file below the four definition directories using byte-sorted
-  relative paths, exact contents, and `100644` or `100755` mode.
-- [x] Resolve a symlinked checkout root, then reject internal symlinks, special
-  files, path escape, unsupported schemas, unknown fields, duplicate IDs,
-  missing references, component cycles, conflicts, invalid package references,
-  invalid exclusions, and duplicate lifecycle ownership.
-- [x] Test undeclared-prefix rejection, missing `common`, canonical package
-  deduplication, and prefix conflicts. Constraint attachment waits with the
-  constraint field for Phase 7.
-- [x] Resolve profiles, explicit components, component requirements, packages,
-  and every declaration retained by Q-013 deterministically.
-- [x] Preserve ordered profile IDs and selection provenance in the resolved
-  model for the later Chezmoi handoff and why command.
+- [x] Fake-runner tests for every fact family, the unknown paths, and the
+  malformed-output rejections.
+- [x] Doctor tests for the healthy host, every failure, unknowns, and the
+  override.
+- [x] CLI tests for doctor against the repository checkout in human and
+  JSON form and with a broken checkout.
+- [x] Run `just check`.
+- Deferred to the start of Phase 4: the first disposable Fedora 44 VM run
+  compares doctor and plan output with the fixtures before any apply.
+
+### Outside this repository
+
 - [ ] Dotfiles repository, before Phase 5: delete `machines/` and its
   symlink-selector README, add `Machine` and `ManagedByNimbus` prompts to
   `.chezmoi.toml.tmpl`, drop the profile-choice validation so the list is
   stored as sent, deploy every Linux config except Hyprland and Noctalia
   unconditionally, and update PROFILES.md.
 
-### Output and evidence
-
-- [x] Emit stable human and versioned JSON validation output from the same
-  result, plus stable human and JSON version output.
-- [x] Add valid, invalid, and digest fixtures; the CLI tests check the
-  human and JSON output shape against the tracked definitions rather than a
-  golden file.
-- [x] Prove that unrelated checkout files and non-executable permission changes
-  do not alter the digest while definition, content, path, or executable changes
-  do.
-- [x] Test equivalent SSH and HTTPS origins plus missing, invalid, and
-  mismatched selector origins.
-- [x] Test valid `/etc` system-file mappings and reject empty, traversing,
-  symlinked, special-file, independently targeted, and non-`/etc` cases.
-- [x] Prove with tests that validation and resolution execute no external
-  command, access no network, invoke no privilege escalation, and write no
-  files or state.
-- [x] Run gofmt, go vet ./..., go test ./..., and just check.
-- [x] Add the gomod ecosystem to .github/dependabot.yml and a GitHub Actions
-  workflow that runs `just check` when go.mod lands.
-- [ ] Inspect the final diff and untracked files and record evidence and
-  residual risk below.
-
 ## Evidence
+
+- Phase 2 inspector, 2026-09-03: `internal/facts` and `internal/doctor` with
+  `nimbus doctor`. Fixtures were recorded from the Fedora 44 research
+  container; DNF5 prints `\t` in a query format literally, so the query uses
+  `|` separators, and a container's `from_repo` is a build hash rather than
+  a repository ID. Doctor runs nine checks. Tests run only against recorded
+  output; nothing in the suites reads the host.
 
 - Phase 1 scaffold, 2026-09-03: `go.mod` at Go 1.27 with Cobra and go-toml
   v2; `cmd/nimbus`, `internal/cli` (`validate`, `version`, `--json`),

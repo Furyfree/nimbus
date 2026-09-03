@@ -20,7 +20,7 @@ func TestRootHelpListsOnlyDeliveredCommands(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("exit %d", code)
 	}
-	for _, want := range []string{"validate", "version"} {
+	for _, want := range []string{"doctor", "validate", "version"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help lacks %s:\n%s", want, out)
 		}
@@ -30,7 +30,7 @@ func TestRootHelpListsOnlyDeliveredCommands(t *testing.T) {
 		t.Fatalf("help lacks an Available Commands section:\n%s", out)
 	}
 	commands, _, _ = strings.Cut(commands, "\n\n")
-	for _, stub := range []string{"help", "completion", "apply", "plan", "status", "doctor"} {
+	for _, stub := range []string{"help", "completion", "apply", "plan", "status", "init"} {
 		if strings.Contains(commands, "  "+stub+" ") {
 			t.Errorf("help exposes %s:\n%s", stub, out)
 		}
