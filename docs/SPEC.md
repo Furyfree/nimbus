@@ -585,15 +585,34 @@ A plan contains:
 
 - resolved intent and relevant observed facts
 - install, change, adopt, repair, and owned-removal operations
-- unchanged, blocked, manual, and unmanaged resources
+- unchanged, blocked, pending, manual, and unmanaged resources
 - exact privileged commands and system-file diffs
 - verification, triggers, recovery, warnings, and reboot requirements
-- optional prune candidates kept separate from normal apply
 - known normal-update candidates kept separate from normal apply
 
-The canonical plan excludes volatile display data. Nimbus hashes it when shown
-for approval and refuses apply if configuration, definitions, facts, native
-transactions, or the digest changed before execution.
+`plan` shows exactly what `apply` would run. `plan --prune` adds a visibly
+separate section with the unmanaged packages `apply --prune` would remove;
+without the flag that section is absent. A pending operation waits for an
+earlier operation in the same plan, such as a package whose repository the
+plan enables; apply runs the earlier operation and re-plans so the exact
+transaction is reviewed before it runs. A blocked operation is a problem
+the owner must resolve, and it makes the plan incomplete.
+
+Adoption is not automatic. A desired package already installed from a
+repository other than the one its prefix names, or a Flatpak from another
+remote, is blocked with the reason rather than taken over. A package whose
+recorded source is the installer or unknown is adopted, since that is how a
+fresh Fedora records its base. A declared repository counts as present only
+when the host provides it from the file Nimbus owns, with signature checking
+on and the declared location and priority; drift in a Nimbus-owned file is a
+repair operation, a foreign file blocks.
+
+The canonical plan excludes volatile display data. Its digest covers the
+machine, the definition digest, and the operations with their exact steps
+and native transactions; the checkout origin, commit, and dirty state are
+reported beside it. Nimbus hashes the plan when shown for approval and
+refuses apply if configuration, definitions, facts, native transactions, or
+the digest changed before execution.
 
 Planning never invokes sudo, accesses the network, writes files, or changes
 Nimbus state. DNF transactions are previewed from the local metadata cache,

@@ -113,6 +113,10 @@ func parseRepoFile(file string, data []byte) []Repository {
 			current.GPGKey = value
 		case "priority":
 			current.Priority = value
+		case "baseurl":
+			current.BaseURL = value
+		case "metalink":
+			current.Metalink = value
 		}
 	}
 	return repos

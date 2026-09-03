@@ -31,13 +31,19 @@ func TestPlanRendersSectionsAndReportsIncomplete(t *testing.T) {
 	if code != ExitFailure {
 		t.Fatalf("an incomplete plan must exit 1, got %d\n%s%s", code, out, errOut)
 	}
-	for _, want := range []string{"plan for laptop", "apply:", "enable repository docker", "nimbus-docker.repo", "blocked: dnf5 preview failed", "prune candidates (", "updates (apply never installs these", "incomplete:", "sha256:"} {
+	for _, want := range []string{"plan for laptop", "definitions sha256:", "apply:", "enable repository docker", "nimbus-docker.repo", "blocked: dnf5 preview failed", "[pending] install docker-ce", "after repository:docker", "updates (apply never installs these", "incomplete:", "sha256:"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("plan output lacks %q:\n%s", want, out)
 		}
 	}
 	if strings.Contains(out, "sudo dnf5 -y install --allowerasing") {
 		t.Fatal("no installable transaction was recorded, yet argv rendered as runnable")
+	}
+	if strings.Contains(out, "prune (") {
+		t.Fatal("prune section shown without --prune")
+	}
+	if _, out, _ := run(t, "plan", "--checkout", root, "--machine", "laptop", "--prune"); !strings.Contains(out, "prune (") || !strings.Contains(out, "apply --prune would remove") {
+		t.Fatalf("plan --prune lacks the prune section:\n%s", out)
 	}
 	code, out, _ = run(t, "plan", "--checkout", root, "--machine", "laptop", "--json")
 	if code != ExitFailure {

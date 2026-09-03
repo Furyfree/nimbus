@@ -554,6 +554,12 @@ requires approval for an expanded plan. Normal managed-resource updates use a
 separate `upgrade` command; Fedora release upgrades remain outside it and are
 delegated by Q-008.
 
+Amended 2026-09-03 after Phase 3. `plan` gains `--prune` and mirrors apply
+exactly: plain `plan` shows what `apply` would run, `plan --prune` adds the
+unmanaged packages `apply --prune` would remove. Rejected: always showing
+prune candidates in `plan`, because a plan then listed removals no apply
+would perform.
+
 The package workflow intentionally matches the owner's existing `npi`, `npr`,
 and `npl` habits through `packages install [QUERY]`, `packages remove [QUERY]`,
 and read-only `packages installed [QUERY]`. Install and remove update the
@@ -1032,9 +1038,21 @@ longer explains `bash`, apply neither adopts nor removes base packages, and
 prune eligibility becomes a policy on observed facts rather than a
 comparison with definitions. That is different from the D-012 hardware
 case, where observation was rejected as desired state, because a prune
-exclusion never installs anything. The candidate is the DNF-history rule
-with the comps rule as fallback, decided when the VM run shows whether the
-installer's transaction can be told apart. Until then the list stands.
+exclusion never installs anything.
+
+Direction chosen 2026-09-03, implemented and resolved in Phase 4. Every
+installed package falls into one of three buckets: managed, with a receipt
+because Nimbus installed or adopted it; pre-existing, recorded as a baseline
+at the first `nimbus init` and never a prune candidate, which on a fresh
+machine is exactly the Fedora base; and unmanaged-added-later, installed by
+hand after Nimbus took over, which are the prune candidates. `unmanaged`
+lists the third bucket by default and `--all` adds the baseline with a
+`pre-existing` marker. After a Fedora release upgrade, renamed base packages
+appear once in the third bucket and an explicit accept command folds them
+into the baseline after review. `fedora-base` is deleted when the baseline
+exists. Rejected: reading DNF history or comps live, because both depend on
+what the installer recorded and the comps route needs metadata at plan
+time.
 
 ### Consequences for the next documentation pass
 

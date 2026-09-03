@@ -13,15 +13,16 @@ import (
 
 func newPlan(opts *options) *cobra.Command {
 	var flags machineFlags
-	var refresh bool
+	var refresh, prune bool
 	cmd := &cobra.Command{
 		Use:   "plan",
 		Short: "Show the complete plan for the selected machine without changing anything",
 		Long: `Plan compares the desired configuration with the installed system and shows
-every operation apply would run, the prune candidates, and the known update
-information as separate sections. It writes nothing and runs no mutating
-command. DNF previews come from the local metadata cache; --refresh runs
-dnf5 makecache first, the one network step, before planning.`,
+every operation apply would run, plus the known update information. With
+--prune it also shows the unmanaged packages apply --prune would remove. It
+writes nothing and runs no mutating command. DNF previews come from the local
+metadata cache; --refresh runs dnf5 makecache first, the one network step,
+before planning.`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := loadSelected(flags)
@@ -38,10 +39,13 @@ dnf5 makecache first, the one network step, before planning.`,
 			if err != nil {
 				return err
 			}
+			if !prune {
+				p.Prune = nil
+			}
 			if opts.json {
 				err = writeJSON(cmd.OutOrStdout(), p, nil)
 			} else {
-				_, err = cmd.OutOrStdout().Write(renderPlan(p))
+				_, err = cmd.OutOrStdout().Write(renderPlan(p, prune))
 			}
 			if err != nil {
 				return err
@@ -54,17 +58,27 @@ dnf5 makecache first, the one network step, before planning.`,
 	}
 	addMachineFlags(&flags, cmd.Flags())
 	cmd.Flags().BoolVar(&refresh, "refresh", false, "run dnf5 makecache before planning")
+	cmd.Flags().BoolVar(&prune, "prune", false, "also show the unmanaged packages apply --prune would remove")
 	return cmd
 }
 
 func buildPlan(s *selected, src facts.Source) (*plan.Plan, error) {
 	f := facts.Inspect(src, s.Root)
-	return plan.Build(plan.Inputs{Resolved: s.Resolved, Root: s.Checkout.Definitions(), Facts: f, Source: src})
+	return plan.Build(plan.Inputs{Resolved: s.Resolved, Root: s.Checkout.Definitions(), Definitions: s.Checkout.Digest(), Facts: f, Source: src})
 }
 
-func renderPlan(p *plan.Plan) []byte {
+func renderPlan(p *plan.Plan, prune bool) []byte {
 	var b bytes.Buffer
-	fmt.Fprintf(&b, "plan for %s\n\n", p.Machine)
+	fmt.Fprintf(&b, "plan for %s\n", p.Machine)
+	fmt.Fprintf(&b, "definitions %s\n", p.Definitions)
+	if p.Checkout.Commit != "" {
+		state := "clean"
+		if p.Checkout.Dirty {
+			state = "dirty"
+		}
+		fmt.Fprintf(&b, "checkout %s at %s (%s)\n", p.Checkout.Origin, p.Checkout.Commit, state)
+	}
+	b.WriteString("\n")
 	adopted := 0
 	fmt.Fprintln(&b, "apply:")
 	for _, op := range p.Operations {
@@ -73,8 +87,11 @@ func renderPlan(p *plan.Plan) []byte {
 			continue
 		}
 		status := op.Risk
-		if op.Blocked != "" {
+		switch {
+		case op.Blocked != "":
 			status = "blocked"
+		case op.After != "":
+			status = "pending"
 		}
 		fmt.Fprintf(&b, "  [%s] %s\n", status, op.Summary)
 		if len(op.Paths) > 0 {
@@ -87,6 +104,10 @@ func renderPlan(p *plan.Plan) []byte {
 			// Nothing below a blocked operation is runnable yet, so its
 			// steps and transaction are not shown as if it were.
 			fmt.Fprintf(&b, "        blocked: %s\n", op.Blocked)
+			continue
+		}
+		if op.After != "" {
+			fmt.Fprintf(&b, "        after %s; the exact transaction is shown once that has run\n", op.After)
 			continue
 		}
 		for _, st := range op.Steps {
@@ -117,9 +138,11 @@ func renderPlan(p *plan.Plan) []byte {
 	if adopted > 0 {
 		fmt.Fprintf(&b, "  %d installed packages are adopted unchanged\n", adopted)
 	}
-	fmt.Fprintf(&b, "\nprune candidates (%d, informational until apply --prune):\n", len(p.Prune))
-	for _, pr := range p.Prune {
-		fmt.Fprintf(&b, "  %s-%s (%s)\n", pr.Name, pr.EVR, pr.Repository)
+	if prune {
+		fmt.Fprintf(&b, "\nprune (%d unmanaged packages apply --prune would remove):\n", len(p.Prune))
+		for _, pr := range p.Prune {
+			fmt.Fprintf(&b, "  %s-%s (%s)\n", pr.Name, pr.EVR, pr.Repository)
+		}
 	}
 	fmt.Fprintln(&b, "\nupdates (apply never installs these; use nimbus upgrade):")
 	if p.Updates.Unavailable != "" {
@@ -159,7 +182,7 @@ func newStatus(opts *options) *cobra.Command {
 			}
 			var b bytes.Buffer
 			fmt.Fprintf(&b, "machine %s: %d profiles, %d components, %d desired packages\n", st.Machine, st.Profiles, st.Components, st.Desired)
-			fmt.Fprintf(&b, "adopted %d, to install %d, to remove %d, repositories to enable %d, blocked %d\n", st.Adopted, st.ToInstall, st.ToRemove, st.Repositories, st.Blocked)
+			fmt.Fprintf(&b, "adopted %d, to install %d, to remove %d, repositories to enable %d, pending %d, blocked %d\n", st.Adopted, st.ToInstall, st.ToRemove, st.Repositories, st.Pending, st.Blocked)
 			fmt.Fprintf(&b, "prune candidates %d, updates available %d\n", st.Prune, st.Updates)
 			if st.Complete {
 				fmt.Fprintln(&b, "plan complete; run nimbus plan to review it")
@@ -183,6 +206,7 @@ type statusResult struct {
 	ToInstall    int    `json:"to_install"`
 	ToRemove     int    `json:"to_remove"`
 	Repositories int    `json:"repositories_to_enable"`
+	Pending      int    `json:"pending"`
 	Blocked      int    `json:"blocked"`
 	Prune        int    `json:"prune_candidates"`
 	Updates      int    `json:"updates_available"`
@@ -197,6 +221,8 @@ func summarize(s *selected, p *plan.Plan) statusResult {
 		switch {
 		case op.Blocked != "":
 			st.Blocked++
+		case op.After != "":
+			st.Pending++
 		case op.Action == plan.ActionAdopt:
 			st.Adopted++
 		case op.Action == plan.ActionRemove:
