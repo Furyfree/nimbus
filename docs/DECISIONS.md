@@ -603,14 +603,90 @@ number of profiles grows.
 
 ### Open questions
 
-None.
+A focused pre-implementation review on 2026-09-03 found four contract gaps.
+They do not reopen the overall ownership or phase architecture.
+
+#### Q-013: Phase 1 schema boundary and canonical ordering
+
+D-002 requires the public definition contract to precede frozen Go types, but
+SPEC.md currently gives concrete TOML only for the selector and machine
+manifest. Before implementing the resolver, define the required fields,
+optional fields, nesting, and enum values for `nimbus.toml`, profiles,
+components, and every resource declaration retained in Phase 1.
+
+The same decision must settle:
+
+- whether every machine must explicitly select `common` or the resolver injects
+  it
+- which declared lists preserve author order and which resolved identities are
+  canonicalized
+- how component requirements, conflicts, source locations, and selection
+  provenance are represented
+- whether warnings, manual tasks, runtime command groups, recovery metadata,
+  and other later-phase declarations are omitted until real definitions and
+  fixtures exercise them
+
+The narrow candidate is to require `common` explicitly, preserve declared
+profile order for the Chezmoi handoff, canonicalize technical identities and
+their deterministic output, and defer unused later-phase fields. Resolve this
+question in SPEC.md and schema fixtures before freezing Go types or resolver
+behavior. It blocks the Phase 1 schema, not the accepted architecture.
+
+#### Q-014: Catalog entries and repository trust ownership
+
+The package contract says that one catalog entry resolves to one
+provider-native package identity, while a third-party repository also enters
+through a catalog entry. That is straightforward for one package such as
+PrismLauncher, but ambiguous for Docker's one repository and five packages.
+
+Decide whether repositories are stable first-class resources referenced by
+catalog package entries, how a release-package digest or signing-key
+fingerprint is encoded, and how one component selects and owns the repository
+exactly once without duplicating lifecycle ownership. The answer must retain
+the exception-only catalog, explicit trust pin, deterministic resolution, and
+safe repository removal rules. This question blocks the initial catalog types
+and real third-party package definitions.
+
+#### Q-015: Exact Chezmoi profile-refresh handoff
+
+The initial three-value handoff is valid, but the later printed refresh command
+is incomplete. The dotfiles template uses `prompt*Once`, so a supplied
+`--promptMultichoice` value does not necessarily replace an existing stored
+selection unless initialization is forced to prompt or another supported
+update path is used.
+
+Define one exact user-run refresh command or mechanism that updates `machine`,
+`managed_by_nimbus`, and the ordered profile IDs without editing Chezmoi
+internal state. It must preserve the independent 1Password choice and be
+verified in isolated homes for fresh initialization, adoption of an existing
+standalone checkout, profile addition, and profile removal. This does not block
+the Phase 1 resolver; it gates the Phase 5 handoff and the later profile-change
+message.
+
+#### Q-016: Package inventory purpose and ownership notation
+
+PACKAGES.md says it lists what Nimbus installs, but it also contains user-owned
+maker-script and Cargo tools plus Mise-owned runtimes. Its source markers no
+longer agree with SECURITY.md in places: Mise still names its installer rather
+than the accepted maker COPR, Docker service activation includes
+`docker.socket` beyond the accepted `docker.service`, and
+`snapper-cleanup.timer` conflicts with Nimbus-only snapshot retirement.
+
+Decide whether the file becomes a complete workstation software inventory with
+an explicit owner, provider, source tier, and lifecycle for each entry, or is
+restricted to Nimbus-owned installation targets. The complete-inventory form
+is the preferred candidate because it preserves useful owner intent while
+making the boundary machine-readable by a human. Reconcile every accepted
+source and service before using the inventory to create real definitions.
 
 ### Consequences for the next documentation pass
 
-Q-001 through Q-012 are resolved and D-007 is closed. The active documents are
-consolidated below `docs/`, and legacy history is retained only in the named
-Git snapshot. One cleanup remains: `files accept` is described in SPEC.md
-twice and repeated here, in ROADMAP.md, and in TASKS.md, and the selector and
-digest paragraphs repeat in ROADMAP.md Phase 1. When SPEC.md is next
-restructured, keep one full description per behavior and reduce the others to
-a sentence and a link. The CI workflow arrives with go.mod per TASKS.md.
+Q-001 through Q-012 are resolved and D-007 is closed. Q-013, Q-014, and Q-016
+now gate the Phase 1 schema and real definition fixtures; Q-015 gates the
+Phase 5 Chezmoi handoff. The active documents are consolidated below `docs/`,
+and legacy history is retained only in the named Git snapshot. One cleanup
+remains: `files accept` is described in SPEC.md twice and repeated here, in
+ROADMAP.md, and in TASKS.md, and the selector and digest paragraphs repeat in
+ROADMAP.md Phase 1. When SPEC.md is next restructured, keep one full
+description per behavior and reduce the others to a sentence and a link. The
+CI workflow arrives with go.mod per TASKS.md.
