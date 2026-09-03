@@ -74,11 +74,11 @@ func Load(path string) (*Checkout, error) {
 	}
 	var errs ErrorList
 
-	content, err := readRegular(root, RootFile)
+	content, mode, err := readRegular(root, RootFile)
 	if err != nil {
 		errs.Add(RootFile, "%v", err)
 	} else {
-		c.Entries = append(c.Entries, Entry{Path: RootFile, Mode: 0o100644, Content: content})
+		c.Entries = append(c.Entries, Entry{Path: RootFile, Mode: mode, Content: content})
 		if err := decodeStrict(content, &c.Root_); err != nil {
 			errs.Add(RootFile, "%v", err)
 		}
@@ -165,19 +165,34 @@ func decodeStrict(data []byte, v any) error {
 	return err
 }
 
-func readRegular(root, rel string) ([]byte, error) {
+// entryMode normalizes a file mode to Git's executable state.
+func entryMode(m fs.FileMode) uint32 {
+	if m&0o100 != 0 {
+		return 0o100755
+	}
+	return 0o100644
+}
+
+func readRegular(root, rel string) ([]byte, uint32, error) {
 	full := filepath.Join(root, rel)
 	info, err := os.Lstat(full)
 	if err != nil {
-		return nil, fmt.Errorf("missing")
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, 0, fmt.Errorf("missing")
+		}
+		return nil, 0, err
 	}
 	if info.Mode()&fs.ModeSymlink != 0 {
-		return nil, fmt.Errorf("must not be a symlink")
+		return nil, 0, fmt.Errorf("must not be a symlink")
 	}
 	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("must be a regular file")
+		return nil, 0, fmt.Errorf("must be a regular file")
 	}
-	return os.ReadFile(full)
+	content, err := os.ReadFile(full)
+	if err != nil {
+		return nil, 0, err
+	}
+	return content, entryMode(info.Mode()), nil
 }
 
 func walkBoundary(root, dir string) ([]Entry, ErrorList) {
@@ -186,7 +201,11 @@ func walkBoundary(root, dir string) ([]Entry, ErrorList) {
 	base := filepath.Join(root, dir)
 	info, err := os.Lstat(base)
 	if err != nil {
-		errs.Add(dir, "missing directory")
+		if errors.Is(err, fs.ErrNotExist) {
+			errs.Add(dir, "missing directory")
+		} else {
+			errs.Add(dir, "%v", err)
+		}
 		return nil, errs
 	}
 	if info.Mode()&fs.ModeSymlink != 0 || !info.IsDir() {
@@ -214,15 +233,21 @@ func walkBoundary(root, dir string) ([]Entry, ErrorList) {
 		if err != nil {
 			return err
 		}
+		// The directory entry type can be unknown on some filesystems, so
+		// the authoritative mode is checked again before reading.
+		if fi.Mode()&fs.ModeSymlink != 0 {
+			errs.Add(rel, "symlinks are not allowed inside the definition boundary")
+			return nil
+		}
+		if !fi.Mode().IsRegular() {
+			errs.Add(rel, "special files are not allowed inside the definition boundary")
+			return nil
+		}
 		content, err := os.ReadFile(full)
 		if err != nil {
 			return err
 		}
-		mode := uint32(0o100644)
-		if fi.Mode()&0o100 != 0 {
-			mode = 0o100755
-		}
-		entries = append(entries, Entry{Path: rel, Mode: mode, Content: content})
+		entries = append(entries, Entry{Path: rel, Mode: entryMode(fi.Mode()), Content: content})
 		return nil
 	})
 	if walkErr != nil {

@@ -113,12 +113,10 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 		if !contains(rp.Paths, path) {
 			rp.Paths = append(rp.Paths, path)
 		}
-		if ref.Prefix != PrefixFlatpak {
-			if byName[ref.Name] == nil {
-				byName[ref.Name] = map[string]bool{}
-			}
-			byName[ref.Name][ref.Prefix] = true
+		if byName[ref.Name] == nil {
+			byName[ref.Name] = map[string]bool{}
 		}
+		byName[ref.Name][ref.Prefix] = true
 	}
 	for _, pid := range m.Profiles {
 		if p := c.Profiles[pid]; p != nil {
@@ -143,13 +141,14 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 		}
 	}
 
-	// Exclusions.
-	requiredOnly := map[string]bool{}
-	for cid, paths := range compPaths {
-		requiredOnly[cid] = true
-		for _, p := range paths {
-			if !strings.HasPrefix(p, "component:") {
-				requiredOnly[cid] = false
+	// Exclusions: only a package a selected profile or component installs,
+	// never a package of a component that another selected component
+	// requires, whatever other paths also select it.
+	required := map[string]bool{}
+	for cid := range compPaths {
+		if comp := c.Components[cid]; comp != nil {
+			for _, req := range comp.Requires {
+				required[req] = true
 			}
 		}
 	}
@@ -163,21 +162,29 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 			errs.Add(where, "package_exclusions: %q matches no selected package", raw)
 			continue
 		}
-		direct := false
+		blocked := ""
 		for _, p := range rp.Paths {
-			cid := strings.TrimPrefix(p, "component:")
-			if !strings.HasPrefix(p, "component:") || !requiredOnly[cid] {
-				direct = true
+			if p == "machine" {
+				blocked = "is listed in this manifest's packages; remove it there instead"
+			} else if cid, ok := strings.CutPrefix(p, "component:"); ok && required[cid] {
+				blocked = "belongs to component " + cid + ", which another selected component requires"
 			}
 		}
-		if !direct {
-			errs.Add(where, "package_exclusions: %q is required by a component another component depends on", raw)
+		if blocked != "" {
+			errs.Add(where, "package_exclusions: %q %s", raw, blocked)
 			continue
 		}
 		delete(pkgs, ref.Canonical())
 	}
 
-	// Removes and files.
+	// Removes and files. A removal names a native package, so it conflicts
+	// with the same name selected from any RPM repository.
+	selectedRPM := map[string]string{}
+	for _, rp := range pkgs {
+		if rp.Prefix != PrefixFlatpak {
+			selectedRPM[rp.Name] = rp.Canonical
+		}
+	}
 	removes := map[string]bool{}
 	files := map[string]ResolvedFile{}
 	for _, cid := range sortedKeys(compPaths) {
@@ -186,8 +193,8 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 			continue
 		}
 		for _, name := range comp.Removes {
-			if _, selected := pkgs[PrefixDNF+":"+name]; selected {
-				errs.Add(where, "component %q removes %q, which is also selected", cid, name)
+			if canonical, selected := selectedRPM[name]; selected {
+				errs.Add(where, "component %q removes %q, which is also selected as %s", cid, name, canonical)
 			}
 			removes[name] = true
 		}

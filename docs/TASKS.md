@@ -199,6 +199,11 @@ change before the Phase 5 Chezmoi handoff.
 - User-scope steps (Mise, Cargo, `mise install`) and services are not yet
   schema fields, so PACKAGES.md still lists what the definitions cannot yet
   express.
+- A `key_file` is checked only for its armored public-key form; Phase 3
+  verifies the fingerprint when the key is imported through the command
+  runner.
+- Development engine builds (`0.0.0-dev`) skip the `min_engine` comparison;
+  release builds enforce it.
 
 - The dotfiles template change for Q-015 is outside this repository and
   blocks only the Phase 5 handoff.

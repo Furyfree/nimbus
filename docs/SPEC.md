@@ -171,11 +171,13 @@ kind = "dnf"
 baseurl = "https://download.docker.com/linux/fedora/$releasever/$basearch/stable"
 key_url = "https://download.docker.com/linux/fedora/gpg"
 key = "060A 61C5 1B55 8A7F 742B 77AA C52F EB6B 621E 9F35"
+priority = 100
 
 [repositories.hyprland-copr]
 kind = "copr"
 project = "lionheartp/Hyprland"
 key = "<fingerprint>"
+priority = 100
 
 [repositories.flathub]
 kind = "flatpak"
@@ -193,9 +195,11 @@ its key stored in the checkout instead as `key_file`, a path below
 carries its key inside the `.flatpakrepo` file. A `dnf`
 repository may instead name a `release_package` URL with its `sha256` when
 the maker distributes a release RPM, as RPM Fusion does. `priority` is the
-DNF repository priority; a later source in the [SECURITY.md](SECURITY.md)
-order is declared with a higher number than Fedora's default so it cannot
-shadow an earlier one.
+DNF repository priority and is required on every `dnf` and `copr`
+repository: a number above Fedora's default of 99, so no later source in the
+[SECURITY.md](SECURITY.md) order can shadow Fedora. The stored key file is
+checked for its armored public-key form at validation; its fingerprint is
+verified when the key is imported during planning.
 
 A machine manifest has a stable ID:
 
@@ -221,9 +225,6 @@ packages = [
 ]
 
 package_exclusions = []
-
-[package_constraints]
-"dnf:hyprland" = "=0.56.0"
 
 [dotfiles]
 repo = "https://github.com/Furyfree/dotfiles.git"

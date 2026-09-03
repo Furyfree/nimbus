@@ -4,6 +4,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -21,7 +22,8 @@ const (
 )
 
 type options struct {
-	json bool
+	json        bool
+	showVersion bool
 }
 
 // Envelope is the versioned structure every --json result uses.
@@ -32,6 +34,12 @@ type Envelope struct {
 	Errors       any    `json:"errors,omitempty"`
 }
 
+// EnvelopeError is one structured error in the envelope.
+type EnvelopeError struct {
+	Path    string `json:"path,omitempty"`
+	Message string `json:"message"`
+}
+
 func writeJSON(w io.Writer, data, errs any) error {
 	env := Envelope{Engine: version.Engine, OutputSchema: version.OutputSchema, Data: data, Errors: errs}
 	enc := json.NewEncoder(w)
@@ -39,50 +47,81 @@ func writeJSON(w io.Writer, data, errs any) error {
 	return enc.Encode(env)
 }
 
-// failure carries an exit code out of a command without printing twice.
-type failure struct{ code int }
+// usageError marks invalid invocation: exit 2.
+type usageError struct{ err error }
 
-func (f failure) Error() string { return fmt.Sprintf("exit %d", f.code) }
+func (u usageError) Error() string { return u.err.Error() }
 
-// New builds the command tree.
-func New() *cobra.Command {
+// reported marks a failure whose details were already written: exit 1.
+type reported struct{}
+
+func (reported) Error() string { return "reported" }
+
+func noArgs(cmd *cobra.Command, args []string) error {
+	if err := cobra.NoArgs(cmd, args); err != nil {
+		return usageError{err}
+	}
+	return nil
+}
+
+func newRoot() (*cobra.Command, *options) {
 	opts := &options{}
 	root := &cobra.Command{
 		Use:           "nimbus",
 		Short:         "Personal Fedora workstation installer and system manager",
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		Version:       version.Engine,
+		Args:          noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if opts.showVersion {
+				return renderVersion(cmd.OutOrStdout(), opts.json)
+			}
 			return cmd.Help()
 		},
 	}
-	root.SetVersionTemplate("nimbus {{.Version}}\n")
+	root.PersistentFlags().BoolVar(&opts.json, "json", false, "render the result as versioned JSON")
+	root.Flags().BoolVarP(&opts.showVersion, "version", "v", false, "same as nimbus version")
+	root.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error { return usageError{err} })
 	root.CompletionOptions.DisableDefaultCmd = true
 	// Cobra's template lists the help command even when it is hidden; only
 	// delivered commands may appear in root help.
-	root.SetHelpCommand(&cobra.Command{Use: "help", Hidden: true, RunE: func(cmd *cobra.Command, args []string) error {
+	root.SetHelpCommand(&cobra.Command{Use: "help", Hidden: true, Args: noArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Root().Help()
 	}})
 	root.SetUsageTemplate(strings.Replace(root.UsageTemplate(), `(or .IsAvailableCommand (eq .Name "help"))`, `.IsAvailableCommand`, 1))
-	root.PersistentFlags().BoolVar(&opts.json, "json", false, "render the result as versioned JSON")
 	root.AddCommand(newValidate(opts), newVersion(opts))
+	return root, opts
+}
+
+// New builds the command tree.
+func New() *cobra.Command {
+	root, _ := newRoot()
 	return root
 }
 
-// Execute runs the tree and returns the process exit code.
+// Execute runs the tree and returns the process exit code. Usage errors exit
+// 2; every other failure exits 1 and, with --json, is rendered in the
+// envelope.
 func Execute(args []string, stdout, stderr io.Writer) int {
-	root := New()
+	root, opts := newRoot()
 	root.SetArgs(args)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	err := root.Execute()
-	if err == nil {
+	switch {
+	case err == nil:
 		return ExitOK
+	case errors.As(err, &usageError{}):
+		fmt.Fprintln(stderr, "error:", err)
+		return ExitUsage
+	case errors.Is(err, reported{}):
+		return ExitFailure
 	}
-	if f, ok := err.(failure); ok {
-		return f.code
+	if opts.json {
+		if jerr := writeJSON(stdout, nil, []EnvelopeError{{Message: err.Error()}}); jerr == nil {
+			return ExitFailure
+		}
 	}
 	fmt.Fprintln(stderr, "error:", err)
-	return ExitUsage
+	return ExitFailure
 }

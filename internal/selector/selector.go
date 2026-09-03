@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/url"
 	"os"
@@ -38,9 +39,32 @@ func DefaultPath() (string, error) {
 	return filepath.Join(dir, "nimbus", "config.toml"), nil
 }
 
-// Load reads and checks one selector file.
+// Load reads and checks one selector file. The selector must be a regular
+// file, not a symlink, and the file read is the file that was inspected.
 func Load(path string) (*Selector, error) {
-	data, err := os.ReadFile(path)
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, fmt.Errorf("read selector: %w", err)
+	}
+	if info.Mode()&fs.ModeSymlink != 0 {
+		return nil, fmt.Errorf("selector %s must not be a symlink", path)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("selector %s must be a regular file", path)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("read selector: %w", err)
+	}
+	defer f.Close()
+	opened, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("read selector: %w", err)
+	}
+	if !os.SameFile(info, opened) {
+		return nil, fmt.Errorf("selector %s changed while it was being read", path)
+	}
+	data, err := io.ReadAll(f)
 	if err != nil {
 		return nil, fmt.Errorf("read selector: %w", err)
 	}
@@ -183,13 +207,16 @@ func parseOriginURL(data []byte) (string, error) {
 			continue
 		}
 		key, value, ok := strings.Cut(line, "=")
-		if !ok || strings.TrimSpace(key) != "url" {
+		if !ok || !strings.EqualFold(strings.TrimSpace(key), "url") {
 			continue
 		}
 		if origin != "" {
 			return "", fmt.Errorf("remote.origin.url is set more than once")
 		}
 		origin = strings.TrimSpace(value)
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("unreadable configuration: %w", err)
 	}
 	if origin == "" {
 		return "", fmt.Errorf("remote.origin.url is not set")

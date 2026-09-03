@@ -25,7 +25,10 @@ func TestRootHelpListsOnlyDeliveredCommands(t *testing.T) {
 			t.Errorf("help lacks %s:\n%s", want, out)
 		}
 	}
-	_, commands, _ := strings.Cut(out, "Available Commands:")
+	_, commands, found := strings.Cut(out, "Available Commands:")
+	if !found {
+		t.Fatalf("help lacks an Available Commands section:\n%s", out)
+	}
 	commands, _, _ = strings.Cut(commands, "\n\n")
 	for _, stub := range []string{"help", "completion", "apply", "plan", "status", "doctor"} {
 		if strings.Contains(commands, "  "+stub+" ") {
@@ -92,5 +95,39 @@ func TestValidateReportsErrorsWithExitOne(t *testing.T) {
 	}
 	if code, _, errOut := run(t, "validate", "--bogus"); code != ExitUsage || !strings.Contains(errOut, "bogus") {
 		t.Fatalf("usage error: %d %q", code, errOut)
+	}
+}
+
+func TestUsageAndFailureExitCodes(t *testing.T) {
+	if code, _, errOut := run(t, "nonsense"); code != ExitUsage || !strings.Contains(errOut, "nonsense") {
+		t.Fatalf("unknown argument: %d %q", code, errOut)
+	}
+	if code, _, _ := run(t, "version", "extra"); code != ExitUsage {
+		t.Fatalf("version with an argument exited %d", code)
+	}
+	code, out, _ := run(t, "validate", "--checkout", filepath.Join(t.TempDir(), "absent"), "--json")
+	if code != ExitFailure {
+		t.Fatalf("missing checkout exited %d", code)
+	}
+	var env struct {
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal([]byte(out), &env); err != nil || len(env.Errors) != 1 || !strings.Contains(env.Errors[0].Message, "resolve checkout") {
+		t.Fatalf("json failure envelope: %v %s", err, out)
+	}
+}
+
+func TestVersionFlagMatchesVersionCommand(t *testing.T) {
+	_, a, _ := run(t, "version")
+	_, b, _ := run(t, "--version")
+	if a != b {
+		t.Fatalf("--version differs from version:\n%s\n%s", a, b)
+	}
+	_, a, _ = run(t, "version", "--json")
+	_, b, _ = run(t, "--version", "--json")
+	if a != b {
+		t.Fatalf("--version --json differs from version --json:\n%s\n%s", a, b)
 	}
 }

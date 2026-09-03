@@ -31,7 +31,8 @@ type Repository struct {
 	KeyURL         string `toml:"key_url"`
 	KeyFile        string `toml:"key_file"`
 	Key            string `toml:"key"`
-	Priority       int    `toml:"priority"`
+	// Priority is a pointer so an omitted value is distinguishable from 0.
+	Priority *int `toml:"priority"`
 }
 
 // Machine is machines/<id>.toml.

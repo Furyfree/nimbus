@@ -4,8 +4,15 @@ import (
 	"path"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+
+	"github.com/Furyfree/nimbus/internal/version"
 )
+
+// FedoraPriority is DNF's default repository priority. Every other DNF or
+// COPR repository declares a higher number so it cannot shadow Fedora.
+const FedoraPriority = 99
 
 var (
 	releaseRe     = regexp.MustCompile(`^[0-9]+$`)
@@ -56,13 +63,20 @@ func validateRoot(c *Checkout, errs *ErrorList) {
 	if len(r.Compatibility.Fedora) == 0 {
 		errs.Add(RootFile, "compatibility.fedora must list at least one release")
 	}
+	seenRelease := map[string]bool{}
 	for _, rel := range r.Compatibility.Fedora {
 		if !releaseRe.MatchString(rel) {
 			errs.Add(RootFile, "compatibility.fedora entry %q is not a release number", rel)
 		}
+		if seenRelease[rel] {
+			errs.Add(RootFile, "compatibility.fedora lists %q twice", rel)
+		}
+		seenRelease[rel] = true
 	}
 	if !versionRe.MatchString(r.Compatibility.MinEngine) {
 		errs.Add(RootFile, "compatibility.min_engine %q is not MAJOR.MINOR.PATCH", r.Compatibility.MinEngine)
+	} else if release, ok := releaseVersion(version.Engine); ok && compareVersions(release, r.Compatibility.MinEngine) < 0 {
+		errs.Add(RootFile, "compatibility.min_engine %s is newer than this engine %s", r.Compatibility.MinEngine, version.Engine)
 	}
 	flatpaks := 0
 	for _, id := range sortedKeys(r.Repositories) {
@@ -76,19 +90,26 @@ func validateRoot(c *Checkout, errs *ErrorList) {
 		if !fingerprintRe.MatchString(NormalizeFingerprint(repo.Key)) {
 			errs.Add(RootFile, "%s: key must be a 40-hex-digit fingerprint", where)
 		}
-		if repo.Priority < 0 {
-			errs.Add(RootFile, "%s: priority must not be negative", where)
-		}
 		keySources := 0
 		if repo.KeyURL != "" {
 			keySources++
 		}
 		if repo.KeyFile != "" {
 			keySources++
-			if strings.HasPrefix(repo.KeyFile, "/") || strings.Contains(repo.KeyFile, "..") || path.Clean(repo.KeyFile) != repo.KeyFile {
+			if !cleanRelativePath(repo.KeyFile) {
 				errs.Add(RootFile, "%s: key_file must be a clean path relative to system/", where)
-			} else if _, ok := c.Entry("system/" + repo.KeyFile); !ok {
+			} else if entry, ok := c.Entry("system/" + repo.KeyFile); !ok {
 				errs.Add(RootFile, "%s: key_file system/%s does not exist", where, repo.KeyFile)
+			} else if !strings.HasPrefix(string(entry.Content), "-----BEGIN PGP PUBLIC KEY BLOCK-----") {
+				errs.Add(RootFile, "%s: key_file system/%s is not an armored PGP public key", where, repo.KeyFile)
+			}
+		}
+		if repo.Kind == "dnf" || repo.Kind == "copr" {
+			switch {
+			case repo.Priority == nil:
+				errs.Add(RootFile, "%s: priority is required; use a number above %d so Fedora wins", where, FedoraPriority)
+			case *repo.Priority <= FedoraPriority:
+				errs.Add(RootFile, "%s: priority must be above Fedora's %d", where, FedoraPriority)
 			}
 		}
 		if keySources > 1 {
@@ -115,15 +136,15 @@ func validateRoot(c *Checkout, errs *ErrorList) {
 			if !coprRe.MatchString(repo.Project) {
 				errs.Add(RootFile, "%s: a copr repository needs project = \"owner/project\"", where)
 			}
-			if repo.BaseURL != "" || repo.ReleasePackage != "" || repo.SHA256 != "" || repo.URL != "" || repo.KeyFile != "" {
-				errs.Add(RootFile, "%s: a copr repository takes only project, key, key_url, and priority", where)
+			if repo.BaseURL != "" || repo.ReleasePackage != "" || repo.SHA256 != "" || repo.URL != "" || keySources != 0 {
+				errs.Add(RootFile, "%s: a copr repository takes only project, key, and priority; its key URL derives from the project", where)
 			}
 		case "flatpak":
 			flatpaks++
 			if repo.URL == "" {
 				errs.Add(RootFile, "%s: a flatpak repository needs url", where)
 			}
-			if repo.BaseURL != "" || repo.ReleasePackage != "" || repo.SHA256 != "" || repo.Project != "" || keySources != 0 || repo.Priority != 0 {
+			if repo.BaseURL != "" || repo.ReleasePackage != "" || repo.SHA256 != "" || repo.Project != "" || keySources != 0 || repo.Priority != nil {
 				errs.Add(RootFile, "%s: a flatpak repository takes only url and key", where)
 			}
 		default:
@@ -148,6 +169,7 @@ func (c *Checkout) FlatpakRepository() string {
 func (c *Checkout) validateRefs(where string, raws []string, errs *ErrorList) []Ref {
 	refs := make([]Ref, 0, len(raws))
 	seen := map[string]bool{}
+	prefixByName := map[string]string{}
 	for _, raw := range raws {
 		ref, err := ParseRef(raw)
 		if err != nil {
@@ -172,9 +194,52 @@ func (c *Checkout) validateRefs(where string, raws []string, errs *ErrorList) []
 			errs.Add(where, "duplicate package reference %q", raw)
 		}
 		seen[ref.Canonical()] = true
+		if prev, ok := prefixByName[ref.Name]; ok && prev != ref.Prefix {
+			errs.Add(where, "%q is also listed as %s:%s; one package has one source", raw, prev, ref.Name)
+		}
+		prefixByName[ref.Name] = ref.Prefix
 		refs = append(refs, ref)
 	}
 	return refs
+}
+
+// cleanRelativePath accepts a relative, already-clean path with no ".."
+// segment. Two dots inside a name are fine.
+func cleanRelativePath(p string) bool {
+	if p == "" || strings.HasPrefix(p, "/") || path.Clean(p) != p {
+		return false
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if seg == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+// releaseVersion returns the MAJOR.MINOR.PATCH part of an engine version and
+// whether the engine is a release build. Development builds carry a suffix
+// such as -dev and are exempt from the minimum-engine check.
+func releaseVersion(engine string) (string, bool) {
+	if strings.Contains(engine, "-") || !versionRe.MatchString(engine) {
+		return "", false
+	}
+	return engine, true
+}
+
+func compareVersions(a, b string) int {
+	as, bs := strings.Split(a, "."), strings.Split(b, ".")
+	for i := 0; i < 3; i++ {
+		x, _ := strconv.Atoi(as[i])
+		y, _ := strconv.Atoi(bs[i])
+		if x != y {
+			if x < y {
+				return -1
+			}
+			return 1
+		}
+	}
+	return 0
 }
 
 func validateIDList(where, kind string, ids []string, exists func(string) bool, self string, errs *ErrorList) {
@@ -228,7 +293,7 @@ func validateComponent(c *Checkout, comp *Component, errs *ErrorList) {
 			errs.Add(fw, "source is required")
 		case !strings.HasPrefix(f.Source, "etc/"):
 			errs.Add(fw, "source %q must start with etc/", f.Source)
-		case path.Clean(f.Source) != f.Source || strings.Contains(f.Source, ".."):
+		case !cleanRelativePath(f.Source):
 			errs.Add(fw, "source %q must be a clean relative path", f.Source)
 		default:
 			if _, ok := c.Entry("system/root/" + f.Source); !ok {

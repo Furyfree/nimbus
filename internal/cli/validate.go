@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -24,7 +26,7 @@ func newValidate(opts *options) *cobra.Command {
 		Long: `Validate reads the selected Nimbus checkout, checks every definition, and
 resolves every tracked machine. It inspects configuration only: no system
 inspection, no command execution, no network, and no writes.`,
-		Args: cobra.NoArgs,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := resolveCheckout(checkout)
 			if err != nil {
@@ -37,11 +39,24 @@ inspection, no command execution, no network, and no writes.`,
 	return cmd
 }
 
-// resolveCheckout returns the explicit override or the selector's verified
-// checkout.
+// canonical resolves a checkout path once; every later step uses the result.
+func canonical(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	root, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", fmt.Errorf("resolve checkout %s: %w", path, err)
+	}
+	return root, nil
+}
+
+// resolveCheckout returns the canonical explicit override or the selector's
+// canonical, origin-verified checkout.
 func resolveCheckout(override string) (string, error) {
 	if override != "" {
-		return override, nil
+		return canonical(override)
 	}
 	path, err := selector.DefaultPath()
 	if err != nil {
@@ -51,10 +66,14 @@ func resolveCheckout(override string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%w (use --checkout to validate a checkout directly)", err)
 	}
-	if err := selector.Verify(sel, sel.Checkout); err != nil {
+	root, err := canonical(sel.Checkout)
+	if err != nil {
 		return "", err
 	}
-	return sel.Checkout, nil
+	if err := selector.Verify(sel, root); err != nil {
+		return "", err
+	}
+	return root, nil
 }
 
 func runValidate(cmd *cobra.Command, opts *options, root string) error {
@@ -90,23 +109,27 @@ func runValidate(cmd *cobra.Command, opts *options, root string) error {
 			return err
 		}
 	} else {
-		fmt.Fprintf(out, "checkout: %s\n", result.Checkout)
+		var buf bytes.Buffer
+		fmt.Fprintf(&buf, "checkout: %s\n", result.Checkout)
 		if len(errs) > 0 {
 			for _, e := range errs {
-				fmt.Fprintf(out, "error: %s\n", e)
+				fmt.Fprintf(&buf, "error: %s\n", e)
 			}
-			fmt.Fprintf(out, "%d error(s)\n", len(errs))
+			fmt.Fprintf(&buf, "%d error(s)\n", len(errs))
 		} else {
-			fmt.Fprintf(out, "digest: %s\n", result.Digest)
+			fmt.Fprintf(&buf, "digest: %s\n", result.Digest)
 			for _, r := range result.Machines {
-				fmt.Fprintf(out, "machine %s: %d profiles, %d components, %d packages, %d removals, %d files, %d repositories\n",
+				fmt.Fprintf(&buf, "machine %s: %d profiles, %d components, %d packages, %d removals, %d files, %d repositories\n",
 					r.Machine, len(r.Profiles), len(r.Components), len(r.Packages), len(r.Removes), len(r.Files), len(r.Repositories))
 			}
-			fmt.Fprintln(out, "ok")
+			buf.WriteString("ok\n")
+		}
+		if _, err := out.Write(buf.Bytes()); err != nil {
+			return err
 		}
 	}
 	if len(errs) > 0 {
-		return failure{code: ExitFailure}
+		return reported{}
 	}
 	return nil
 }

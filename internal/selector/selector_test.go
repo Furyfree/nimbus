@@ -115,3 +115,26 @@ func TestVerifyWorktreePointer(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestSelectorMustBeARegularFile(t *testing.T) {
+	good := "schema = 1\ncheckout = \"/tmp/x\"\nmachine = \"desktop\"\norigin = \"github.com/furyfree-org/nimbus\"\n"
+	real := writeSelector(t, good)
+	link := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skip("symlinks unavailable:", err)
+	}
+	if _, err := Load(link); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("symlinked selector accepted: %v", err)
+	}
+	if _, err := Load(t.TempDir()); err == nil {
+		t.Fatal("directory accepted as selector")
+	}
+}
+
+func TestOriginKeyIsCaseInsensitive(t *testing.T) {
+	sel := &Selector{Schema: 1, Checkout: "x", Machine: "m", Origin: "github.com/furyfree-org/nimbus"}
+	upper := strings.Replace(originConfig, "\turl =", "\tURL =", 1)
+	if err := Verify(sel, gitCheckout(t, upper)); err != nil {
+		t.Fatal(err)
+	}
+}
