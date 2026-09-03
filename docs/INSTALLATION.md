@@ -127,8 +127,9 @@ curl -fsSL https://raw.githubusercontent.com/Furyfree/nimbus/main/install.sh | b
 
 That script obtains Git when necessary, clones or validates the Nimbus checkout,
 installs the Nimbus engine through the approved COPR, and enters the reviewed
-Nimbus initialization flow. Nimbus and Chezmoi then install the system and user
-configuration through their separate plans.
+Nimbus initialization flow. Nimbus then installs the system through its
+reviewed plan, initializes Chezmoi, and prints the direct `chezmoi diff` and
+`chezmoi apply` commands for the user configuration.
 
 Btrfs recovery points stay on the same disk and are not backups. Nimbus
 provides no backup; home, guest, and container data are excluded and may be

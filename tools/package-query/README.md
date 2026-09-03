@@ -1,7 +1,9 @@
 # Fedora package query
 
 This image queries Fedora 44, RPM Fusion Free, RPM Fusion Nonfree, and Terra
-package metadata without changing the host.
+package metadata. It changes no host package or repository configuration; it
+leaves a Docker image and build cache that
+`docker image rm nimbus-fedora-packages` removes.
 
 ~~~sh
 just package-search ripgrep

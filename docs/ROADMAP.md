@@ -46,8 +46,8 @@ This phase freezes the smallest schema needed by later inspection and planning:
 - machines, profiles, components, and the repositories declared in
   nimbus.toml
 - component requirements and conflicts
-- packages, exclusions, exact version constraints, and only the resource or
-  later-capability declarations retained after Q-013
+- packages, exclusions, removals, and system-file sources; exact version
+  constraints wait for Phase 7
 - source locations and selection provenance
 
 Q-002 through Q-005 resolve the foundational behavior. Q-013, Q-014, and Q-016
@@ -80,9 +80,8 @@ files, and path escape inside the definition boundary are rejected. Commit and
 dirty-worktree metadata are added when local Git inspection is introduced; the
 definition digest already identifies the exact Phase 1 input.
 
-Q-013 decides which facts-dependent variants, warnings, manual tasks, and
-runtime commands belong in the initial schema. Phase 1 never evaluates any
-retained facts-dependent declaration. It performs no hardware or
+Q-013 keeps facts-dependent variants, warnings, manual tasks, and runtime
+commands out of the initial schema. Phase 1 performs no hardware or
 operating-system inspection, executes no external commands, accesses no
 network, invokes no privilege escalation, and writes no state.
 
@@ -90,9 +89,10 @@ The tracked desktop and laptop fixtures select explicit hardware components.
 They do not run the later `nimbus init` detector. This keeps Phase 1 resolution
 static while exercising the component shape that initialization will record.
 
-Only exact package constraints are accepted initially. Additional comparison
-syntax waits until the DNF5 mechanism is proven in a disposable Fedora
-environment.
+Package constraints are not part of the Phase 1 schema. A manifest that
+carries `package_constraints` is rejected as an unknown field until Phase 7
+proves DNF5 version locking in a disposable Fedora environment and defines
+the accepted grammar.
 
 ### Risks and recovery
 
@@ -255,7 +255,10 @@ only from the lifecycle recorded in the receipt.
 ### Risks and recovery
 
 This is the first mutating phase. Tests run only in disposable Fedora VMs.
-Failed verification never creates a successful receipt. A failed transaction
+Failed verification never creates a successful receipt. DNF may refresh
+metadata between approval and execution; the re-resolution refusal covers
+that, and this phase decides whether download-then-cache-only execution is
+worth adding on top. A failed transaction
 retains the reviewed desired manifest, accurate prior receipts, and native DNF
 history needed for recovery. Status and plan then expose the remaining drift.
 
@@ -290,10 +293,11 @@ handles Chezmoi. Chezmoi is an ordinary Nimbus-managed system package installed
 by the reviewed first apply. The engine remains directly DNF-owned and checkout
 updates remain direct user Git operations; Nimbus has no self-update path.
 
-Q-006 and Q-007 are resolved. For the development profile, apply runs the
-official Mise installer and `mise settings set auto_update true` as the normal
-user before the handoff and verifies the user-owned binary. After Chezmoi has
-written the Mise configuration, apply runs `mise install` under
+Q-006 and Q-007 are resolved. For the development profile, apply downloads
+the official Mise installer, shows its digest, runs it as the normal user
+before the handoff, and verifies the user-owned binary. After Chezmoi has
+written the Mise configuration, which carries `auto_update = true`, apply
+runs `mise install` under
 `MISE_SYSTEM_DEPS=warn` and the declared `cargo install` steps, again as the
 user. Nimbus installs selected system dependencies itself and reinstalls a
 missing runtime or Cargo tool through the same steps on the next apply.
@@ -440,9 +444,10 @@ Upgrade may refresh native metadata, shows its own exact reviewed system plan,
 never prunes, and does not silently apply unrelated desired-state drift. It
 blocks with a direction to run `nimbus apply` when that drift is a prerequisite.
 After system verification it offers a separately approved Topgrade phase that
-reads the user's Chezmoi-owned configuration with the system, Flatpak,
-firmware, Nix, Chezmoi, Git repository, and self-update steps disabled through
-`--disable` on the command line. The plan labels this as command-level review
+reads the user's Chezmoi-owned configuration and runs only the declared
+allowlist through `--only` plus `--no-self-update`, so system, Flatpak,
+firmware, Nix, Chezmoi, and Git repository steps never run from it. The plan
+labels this as command-level review
 because Topgrade dry-run does not resolve downstream versions, and reports
 that the home subvolume is outside the recovery point.
 Q-008 permanently delegates Fedora release upgrades to the native DNF5
@@ -471,9 +476,9 @@ manual restoration in disposable VMs. Cover topology mismatch, nested
 subvolume exclusion, conditional Flatpak and boot capture, partial recovery
 creation and cleanup, protected failed operations, retention cleanup, delayed
 Btrfs deletion, the 20 GiB refusal, checksums, and preservation of home and
-guest data. Exercise the Topgrade `--disable` list, command preview, refusal of
-sudo and system managers, partial user-step failure, and the explicit lack of
-home rollback. Prove that `nimbus upgrade` remains
+guest data. Exercise the Topgrade `--only` allowlist, command preview,
+refusal of sudo and system managers, partial user-step failure, and the
+explicit lack of home rollback. Prove that `nimbus upgrade` remains
 within the installed release, exposes no target-release path, and never invokes
 DNF5 system-upgrade. Verify that unsupported releases preserve version,
 validation, and doctor diagnostics while blocking mutation, and that supported
@@ -515,7 +520,9 @@ running, symlinked, foreign, or escaped target, names the exact directory, and
 requires a second confirmation. The Compose definition is reproducible; the
 guest disk is not part of Nimbus recovery and may be lost and recreated from
 external sources. Phase 8 also decides how FreeRDP receives the password
-without exposing it in process arguments.
+without exposing it in process arguments, and adopts and verifies Dockur's
+own verification of the downloaded Windows installation media before the
+`windows-vm` profile is accepted.
 
 Launch helpers safely resolve the XDG browser, translate supported private-mode
 flags, use an explicit Chromium-family webapp fallback, accept only HTTP(S)
@@ -567,8 +574,10 @@ plan, and present tasks without any behavior the commands lack.
 ## Later
 
 - hibernation and supported boot-resource management
-- LUKS2 inspection and reviewed TPM2 auto-unlock
-- systemd-boot and unified kernel image provisioning
+- LUKS2 inspection and reviewed TPM2 auto-unlock bound to PCR 7
+- locally built unified kernel images through `systemd-ukify`, signed with
+  the machine owner key, with the TPM2 slot rebound to a signed PCR 11
+  policy; after recovery points, with its own restore drill
 - a separate Fedora installer image using the same definitions and operations
 - managed Secure Boot after a complete key and recovery design
 - additional desktop profiles based on real maintained configurations

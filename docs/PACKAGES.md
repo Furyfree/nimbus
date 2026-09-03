@@ -3,7 +3,8 @@
 Everything Nimbus installs, by application. The source is shown in
 parentheses: `DNF/Fedora` is a bare package name, every other DNF source is a
 repository declared in `nimbus.toml`, and `user:` marks a step Nimbus runs as
-the normal user without sudo. [SECURITY.md](SECURITY.md) owns the source
+the normal user without sudo. An installer script is downloaded to a file and
+shown with its digest before it runs. [SECURITY.md](SECURITY.md) owns the source
 order. This list feeds the definitions and shrinks as they land.
 
 ## Session
@@ -25,7 +26,7 @@ order. This list feeds the definitions and shrinks as they land.
 
 - Nautilus and Sushi (`DNF/Fedora: nautilus sushi`)
   - Phone and network shares (`DNF/Fedora: gvfs gvfs-mtp gvfs-smb`)
-- Zed (`user: curl -f https://zed.dev/install.sh | sh`; updates itself)
+- Zed (`user: installer from https://zed.dev/install.sh`; updates itself)
 - Spotify (`Flatpak/Flathub: com.spotify.Client`)
 - T3 Code (`DNF/Terra: t3code`)
 - ChatGPT Desktop (`DNF/OpenAI repository: chatgpt`; the RPM's own script
@@ -33,7 +34,8 @@ order. This list feeds the definitions and shrinks as they land.
 - GitHub Desktop (own COPR, pending)
 - Vesktop (`DNF/Terra: vesktop`)
 - VSCodium (`DNF/VSCodium repository: codium`)
-- 1Password and 1Password CLI (`DNF/1Password repository`)
+- 1Password and 1Password CLI
+  (`DNF/1Password repository: 1password 1password-cli`)
 - Obsidian (`Flatpak/Flathub: md.obsidian.Obsidian`)
 - Signal (`DNF/Terra: signal-desktop`)
 - Brave Origin (`DNF/Brave repository: brave-origin`)
@@ -74,7 +76,8 @@ order. This list feeds the definitions and shrinks as they land.
   - Epson ESC/P-R 2 (`epson-inkjet-printer-escpr2`; packaging pending)
   - Scanner over eSCL (`DNF/Fedora: sane-airscan simple-scan`)
 - Hardware support (components that `nimbus init` records in the manifest)
-  - Intel and AMD graphics and firmware (`DNF/Fedora`)
+  - Intel and AMD graphics and firmware (`DNF/Fedora: mesa-dri-drivers
+    mesa-vulkan-drivers intel-gpu-firmware amd-gpu-firmware`)
   - NVIDIA driver (`DNF/RPM Fusion Nonfree: akmod-nvidia`)
   - NVIDIA CUDA and 64-bit libraries
     (`DNF/RPM Fusion Nonfree: xorg-x11-drv-nvidia-cuda`)
@@ -121,8 +124,8 @@ order. This list feeds the definitions and shrinks as they land.
 
 ## CLI
 
-- Mise (`user: curl https://mise.run | sh`, before the Chezmoi handoff)
-  - Auto-update (`user: mise settings set auto_update true`)
+- Mise (`user: installer from https://mise.run`, before the Chezmoi handoff)
+  - Auto-update (`auto_update = true` in the Chezmoi-managed Mise config)
   - Runtimes (`user: mise install`, after Chezmoi has written
     `~/.config/mise/config.toml`)
     - Codex, Claude Code, OpenCode, Pi, Grok (`Mise/npm`)
@@ -142,7 +145,7 @@ order. This list feeds the definitions and shrinks as they land.
   - VM Curator (`vm-curator`)
 - Just (`DNF/Fedora: just`)
 - Topgrade (`DNF/Terra: topgrade`; configuration through Chezmoi)
-- Herdr (`user: curl -fsSL https://herdr.dev/install.sh | sh`; `herdr update`
+- Herdr (`user: installer from https://herdr.dev/install.sh`; `herdr update`
   runs from the Chezmoi-owned Topgrade configuration)
 - ShellCheck and gitleaks (`DNF/Fedora: ShellCheck gitleaks`)
 - Neovim (`DNF/Fedora: neovim`)

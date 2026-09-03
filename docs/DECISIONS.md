@@ -63,6 +63,16 @@ The rule is absolute for Nimbus operations, whether automatic, prompted, or
 otherwise explicit. Secure Boot key and MOK enrollment may be represented only
 as reviewed manual work with verification and recovery guidance.
 
+Amended 2026-09-03 after the passthrough. The target is a locally built
+unified kernel image signed with the same machine owner key, with the TPM2
+slot rebound to a signed PCR 11 policy, so the kernel and initramfs are
+measured and boot stays hands-free with one login password. Fedora 44 ships
+a signed unified kernel image only for virtual machines, so bare metal builds
+its own with `systemd-ukify`. Until that is delivered and drilled, PCR 7
+unlock stays, described as protection against offline reading and disk
+removal rather than against an attacker who rewrites `/boot`. Rejected: a
+TPM PIN, because the owner wants hands-free unlock.
+
 Amended 2026-09-02. The owner reconsidered running with Secure Boot off and
 kept it on. The deciding fact: the hands-free TPM2 unlock in SECURITY.md binds
 to PCR 7, which is a machine constant when Secure Boot is disabled, so any live
@@ -106,9 +116,15 @@ CLI draft. This does not block the isolated read-only resolver, but bootstrap an
 Chezmoi handoff cannot be accepted until the dotfiles repository uses the same
 ownership and selector model as Nimbus.
 
-Resolved 2026-09-02. The dotfiles repository removed its machine manifests and
-symlink selector, adopted the handoff in Q-011, and now cites `docs/SPEC.md`.
-Phase 5 verifies the prompt flags against its real template before exit.
+Resolved 2026-09-02 for the profile handoff, which the dotfiles repository
+adopted and documented with a citation of `docs/SPEC.md`.
+
+Corrected 2026-09-03 after the passthrough: the dotfiles repository still
+holds `machines/desktop.toml`, `machines/laptop.toml`, and a README that
+describes the old symlink selector at `~/.config/nimbus/machine.toml`, and
+its template lacks the `Machine` and `ManagedByNimbus` keys. Those removals
+and additions are the dotfiles task in TASKS.md, and Phase 5 verifies the
+prompt flags against the real template before exit.
 
 #### D-008: Low-value cleanup is not part of the correction pass
 
@@ -292,12 +308,14 @@ the downloaded RPM's post-install script registers with key
 `3BFA 0E4A E8B8 CC16 A2D9 BA68 4A3B 4A56 6C46 60E4`; Brave Origin as
 `brave-origin` from Brave's repository, verified present; VSCodium from its
 maker's RPM repository; Signal from Terra, because neither the Flathub nor the
-Terra build is the maker's; `librepods` from Terra; ProtonPlus, Heroic,
-Vesktop, gpu-screen-recorder, and Prism Launcher as Terra RPMs rather than
-their makers' Flatpaks, because they integrate with Steam, Wine, Noctalia, or
-system Java; Rust through Mise; `virt-viewer` always, because VM Curator
-offers SPICE clipboard sharing through it. Rejected: applying the tier table
-as written, which would have moved five applications to Flathub.
+Terra build is the maker's and the owner prefers native RPMs where an
+accepted repository has one, Flathub being permitted rather than preferred;
+`librepods` from Terra; ProtonPlus, Heroic, Vesktop, gpu-screen-recorder, and
+Prism Launcher as Terra RPMs rather than their makers' Flatpaks, because they
+integrate with Steam, Wine, Noctalia, or system Java; Rust through Mise;
+`virt-viewer` always, because VM Curator offers SPICE clipboard sharing
+through it. Rejected: applying the tier table as written, which would have
+moved five applications to Flathub.
 
 #### D-016: Repositories are declared once and named by prefix
 
@@ -332,6 +350,14 @@ home has a recovery point, which the no-backup decision already accepts.
 Rejected: typed manual tasks the user runs by hand, because the owner wants
 one installer that finishes the machine.
 
+Amended 2026-09-03 after the passthrough. A pipeline cannot be hashed before
+it runs, so Nimbus downloads the script to a file, shows the digest, and runs
+that file. `mise settings set auto_update true` writes the Chezmoi-owned Mise
+config, so the setting lives in the Chezmoi template and Nimbus never runs
+that command. User-scope steps write no receipt and verify by presence;
+removal is explicit through `cargo uninstall`, `mise implode`, and
+`zed --uninstall`, shown in the plan and never triggered by profile removal.
+
 #### D-018: Topgrade is Nimbus-installed with a Chezmoi-owned configuration
 
 Decided 2026-09-03. Nimbus installs Terra's `topgrade`. The configuration is
@@ -342,6 +368,31 @@ metadata around it, but enforces the exclusion on the command line with
 and self-update steps. Rejected: a second Nimbus-owned configuration, because
 two files would drift; dropping the phase, because the owner wants one update
 command.
+
+Amended 2026-09-03 after the passthrough. Topgrade 17.9 exposes more than
+150 steps, so a `--disable` blocklist would enable any step a later release
+adds. Nimbus passes `--only` with the declared allowlist plus
+`--no-self-update` instead. The root post snapshot closes as soon as the
+system phase is verified, before this phase starts.
+
+#### D-019: Passthrough corrections before code
+
+Decided 2026-09-03 after the three-pass repository review recorded in
+TASKS.md. Beyond the amendments above, the review settled four gaps in the
+Phase 1 contract. Profile and component files now have a written shape with
+examples in SPEC.md, and a `[[files]]` entry carries source, owner, group,
+and mode. A `package_exclusions` entry may name only a package a selected
+profile or component installs on that machine, never a required package, and
+one that matches nothing is an error. `package_constraints` leaves the Phase
+1 schema until Phase 7 proves DNF5 version locking. Repository declarations
+carry `key_url` as well as the fingerprint, and a repository is removed only
+when no selected package names it and no installed package still comes from
+it.
+
+Rejected: dropping `launch browser` and `launch webapp` as scope that owns no
+system state, because the owner wants the browser detection and argument
+building typed and tested in one binary rather than kept in sync across
+Chezmoi scripts; Q-005 stands.
 
 ### Resolved questions
 
@@ -391,6 +442,13 @@ must not execute commands. Reading `remote.origin.url` from `.git/config`
 requires handling worktree `.git` files and `include` directives; `insteadOf`
 rewrites are ignored because they change transport, not identity.
 
+Amended 2026-09-03 after the passthrough. Nimbus reads `.git/config` and
+follows a worktree `.git` file's `gitdir` pointer, nothing more; an `include`
+or `includeIf` directive is an error that tells the user to set
+`remote.origin.url` directly. Rejected: reimplementing Git's include
+handling for one value, and running `git config`, which Q-002 already
+excluded.
+
 #### Q-003: Definition digest boundary and mode normalization (resolved)
 
 Resolved 2026-09-02.
@@ -414,6 +472,11 @@ and hashing. Symlinks or special files within the definition boundary are
 rejected. Re-resolution and trust, commit, and digest checks prevent changed
 effective input from reusing an earlier plan. SPEC.md owns the normative digest
 contract.
+
+Amended 2026-09-03 by D-016: the `catalog/` directory is gone, so the digest
+covers `nimbus.toml` plus `machines/`, `profiles/`, `components/`, and
+`system/`. The executable rule is Git's: the owner execute bit alone decides
+`100755`.
 
 #### Q-004: Supported system-file target roots (resolved)
 
@@ -809,6 +872,11 @@ listed with the plugin. Q-016 keeps the inventory's purpose and its remaining
 service-activation entries.
 
 Amended 2026-09-03 by D-015: Topgrade leaves Cargo for Terra.
+
+Amended 2026-09-03 after the passthrough: Fedora's lazygit package is
+`golang-github-jesseduffield-lazygit`, 1Password is `1password` and
+`1password-cli`, and the graphics entry names `mesa-dri-drivers`,
+`mesa-vulkan-drivers`, `intel-gpu-firmware`, and `amd-gpu-firmware`.
 
 #### Q-013: Phase 1 schema boundary and canonical ordering (resolved)
 

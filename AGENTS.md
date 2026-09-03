@@ -124,10 +124,12 @@ revalidate it against the active documents before reuse.
 
 `just package-search QUERY` runs `dnf5 search` in a throwaway container with
 Fedora 44, RPM Fusion, and Terra enabled; `docker run --rm
-nimbus-fedora-packages repoquery ...` answers anything else. Nothing touches the
-host. Results are evidence for a decision, never desired state; accepted
-packages go into profiles, components, or a manifest, prefixed with their
-declared repository when it is not Fedora.
+nimbus-fedora-packages repoquery ...` answers anything else. It changes no host
+package or repository configuration; it leaves a Docker image and build cache
+that `docker image rm nimbus-fedora-packages` removes. Results are evidence
+for a decision, never desired state; accepted packages go into profiles,
+components, or a manifest, prefixed with their declared repository when it is
+not Fedora.
 
 ## Protect the workstation and user
 
