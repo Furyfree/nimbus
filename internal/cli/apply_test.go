@@ -98,3 +98,16 @@ func TestApplyStopsAtTheFirstFailedOperation(t *testing.T) {
 		t.Fatalf("lock content = %q", lock)
 	}
 }
+
+func TestApplyJSONReportsFailureWithExitOne(t *testing.T) {
+	root := applyEnv(t)
+	src := fixtureSource(t, root)
+	withoutTerra(src)
+	answerLaptopInstall(t, src, root)
+	withSource(t, src)
+	digest := currentDigest(t, root)
+	code, out, _ := run(t, "apply", "--checkout", root, "--machine", "laptop", "--approve", digest, "--json")
+	if code != ExitFailure || !strings.Contains(out, `"failed": "repository:brave"`) {
+		t.Fatalf("json failure: %d\n%s", code, out)
+	}
+}
