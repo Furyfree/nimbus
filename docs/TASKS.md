@@ -26,14 +26,21 @@ the first VM run is deferred to Phase 4.
   RPM verified by SHA-256 with its key extracted through `rpm2archive` and
   imported before installation, a COPR enabled through DNF and its key
   checked afterwards.
-- [x] Adopt installed desired packages, install the rest through one DNF
-  transaction, plan declared removals as a separate transaction, and hold
-  packages whose repository is not enabled yet as blocked operations.
+- [x] Adopt installed desired packages when their recorded source matches
+  the prefix, install the rest through one DNF transaction, plan declared
+  removals the install transaction does not already erase as a separate
+  transaction, and hold packages whose repository this plan enables as
+  pending operations that name the repository operation.
 - [x] Refuse a transaction that goes beyond the definitions: an undeclared
   install, an undeclared removal, a package from the wrong repository, or a
   smuggled upgrade.
-- [x] List prune candidates and update information as separate informational
-  sections; hash only the apply section into the plan digest.
+- [x] Show update information as its own section and prune candidates only
+  with `--prune`; hash the machine, definition digest, and apply section
+  into the plan digest.
+- [x] Verify a declared repository is present from the Nimbus-owned file with
+  signature checking, the declared location, and priority; repair drift in
+  our own file, block a foreign one; match a Flatpak remote by URL as well
+  as name; refuse adoption from the wrong repository or remote.
 - [x] Add the `fedora-base` component, generated from Fedora's `core` and
   `standard` comps groups plus the packages Anaconda installs outside comps,
   and select it from `common` so the base is never a prune candidate.
@@ -41,7 +48,8 @@ the first VM run is deferred to Phase 4.
 ### Commands
 
 - [x] `nimbus plan` and `nimbus status` with `--checkout`, `--machine`, and
-  `--json`; an incomplete plan exits 1.
+  `--json`; `plan --prune` adds the prune section; an incomplete plan exits
+  1.
 - [x] `nimbus managed`, `nimbus unmanaged`, `nimbus why RESOURCE`,
   `nimbus profiles list`, `nimbus components list`, and
   `nimbus packages installed [QUERY]` as non-interactive lists; the picker
@@ -184,6 +192,13 @@ the first VM run is deferred to Phase 4.
 
 ## Blockers and residual risk
 
+- The hosted Codex review of pull request 7 found eight problems on
+  2026-09-03; seven are fixed in the third commit (pending operations so a
+  fresh host gets a complete plan, removal dedup, repository and remote
+  verification, adoption source checks, a digest bound to the definition
+  digest), and the eighth, `plan --refresh` as network access inside a
+  planning path, awaits the owner's call between keeping the flag and a
+  separate `nimbus refresh` command.
 - Q-018 asks whether the base should be read live from DNF history or the
   installed comps groups instead of listed; it is decided after the Phase 4 VM
   run. Until then the `fedora-base` component declares what the installer

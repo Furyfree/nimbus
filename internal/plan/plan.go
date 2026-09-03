@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
@@ -20,6 +21,7 @@ const (
 	KindFlatpak       = "flatpak"
 
 	ActionEnable  = "enable"
+	ActionRepair  = "repair"
 	ActionInstall = "install"
 	ActionAdopt   = "adopt"
 	ActionRemove  = "remove"
@@ -46,16 +48,19 @@ type Operation struct {
 	Paths       []string     `json:"paths,omitempty"`
 	Steps       []Step       `json:"steps,omitempty"`
 	Transaction *Transaction `json:"transaction,omitempty"`
-	// Blocked explains why the operation cannot be planned yet. A blocked
+	// After names the operation this one waits for. Apply runs the earlier
+	// operation, then re-plans so the exact transaction can be shown; a
+	// pending operation does not make the plan incomplete.
+	After string `json:"after,omitempty"`
+	// Blocked explains a problem the owner must resolve. A blocked
 	// operation keeps the plan incomplete.
 	Blocked string `json:"blocked,omitempty"`
-	// Notes are observations that do not block, such as a package installed
-	// from another repository than its prefix names.
+	// Notes are observations that do not block.
 	Notes []string `json:"notes,omitempty"`
 }
 
 // Prune is an installed, user-requested package that nothing desires. It is
-// informational until apply --prune exists.
+// shown only with --prune and removed only by apply --prune.
 type Prune struct {
 	Name       string `json:"name"`
 	EVR        string `json:"evr"`
@@ -70,10 +75,14 @@ type Updates struct {
 
 // Plan is the complete result for one machine.
 type Plan struct {
-	Machine    string      `json:"machine"`
-	Operations []Operation `json:"operations"`
-	Prune      []Prune     `json:"prune"`
-	Updates    Updates     `json:"updates"`
+	Machine string `json:"machine"`
+	// Definitions is the definition digest the plan was built from, and
+	// Checkout the Git identity of the checkout; both bind the plan digest.
+	Definitions string         `json:"definitions"`
+	Checkout    facts.Checkout `json:"checkout"`
+	Operations  []Operation    `json:"operations"`
+	Prune       []Prune        `json:"prune"`
+	Updates     Updates        `json:"updates"`
 	// Complete is false while any operation is blocked.
 	Complete bool   `json:"complete"`
 	Digest   string `json:"digest"`
@@ -82,10 +91,11 @@ type Plan struct {
 // Inputs are everything the planner reads. Source runs only read-only
 // native previews.
 type Inputs struct {
-	Resolved *definitions.Resolved
-	Root     definitions.Root
-	Facts    *facts.Facts
-	Source   facts.Source
+	Resolved    *definitions.Resolved
+	Root        definitions.Root
+	Definitions string // the checkout's definition digest
+	Facts       *facts.Facts
+	Source      facts.Source
 }
 
 // Build produces the plan. It returns an error only when the facts needed
@@ -101,16 +111,14 @@ func Build(in Inputs) (*Plan, error) {
 	if !in.Facts.Repositories.Known() {
 		return nil, fmt.Errorf("repositories are unknown: %s", in.Facts.Repositories.Error)
 	}
-	b := &builder{in: in, installed: map[string]facts.Package{}, enabledRepos: map[string]bool{}}
+	b := &builder{in: in, installed: map[string]facts.Package{}, repos: map[string][]facts.Repository{}, ready: map[string]bool{}, blockedRepo: map[string]string{}}
 	for _, p := range in.Facts.Packages.Value {
 		b.installed[p.Name] = p
 	}
 	for _, r := range in.Facts.Repositories.Value {
-		if r.Enabled {
-			b.enabledRepos[r.ID] = true
-		}
+		b.repos[r.ID] = append(b.repos[r.ID], r)
 	}
-	p := &Plan{Machine: in.Resolved.Machine, Complete: true}
+	p := &Plan{Machine: in.Resolved.Machine, Definitions: in.Definitions, Checkout: in.Facts.Checkout.Value, Complete: true}
 	p.Operations = append(p.Operations, b.repositories()...)
 	p.Operations = append(p.Operations, b.packages()...)
 	p.Operations = append(p.Operations, b.flatpaks()...)
@@ -126,9 +134,13 @@ func Build(in Inputs) (*Plan, error) {
 }
 
 type builder struct {
-	in           Inputs
-	installed    map[string]facts.Package
-	enabledRepos map[string]bool
+	in        Inputs
+	installed map[string]facts.Package
+	repos     map[string][]facts.Repository
+	// ready records declared repositories the host already provides
+	// correctly; blockedRepo records why one cannot be used.
+	ready       map[string]bool
+	blockedRepo map[string]string
 }
 
 // DNFRepoIDs returns the repository IDs a declared repository creates on the
@@ -148,25 +160,81 @@ func DNFRepoIDs(id string, r definitions.Repository) []string {
 	return nil
 }
 
+// fedoraRepos are the host repository IDs a bare Fedora package may come
+// from.
+var fedoraRepos = []string{"fedora", "updates", "updates-testing", "fedora-cisco-openh264"}
+
 // expectedRepos returns the host repository IDs a package with this prefix
 // may come from.
 func (b *builder) expectedRepos(prefix string) []string {
 	if prefix == definitions.PrefixDNF {
-		return []string{"fedora", "updates", "updates-testing", "fedora-cisco-openh264"}
+		return fedoraRepos
 	}
 	return DNFRepoIDs(prefix, b.in.Root.Repositories[prefix])
 }
 
-func (b *builder) repoReady(prefix string) bool {
-	if prefix == definitions.PrefixDNF {
-		return true
-	}
-	for _, id := range b.expectedRepos(prefix) {
-		if b.enabledRepos[id] {
-			return true
+// declaredRepoIDs returns every host repository ID a declared non-Fedora
+// repository would use, for recognizing a package installed from one.
+func (b *builder) declaredRepoIDs() map[string]string {
+	out := map[string]string{}
+	for id, r := range b.in.Root.Repositories {
+		for _, host := range DNFRepoIDs(id, r) {
+			out[host] = id
+		}
+		if r.Kind == "dnf" && r.ReleasePackage == "" {
+			out[id] = id // the maker's own ID, which Nimbus does not own
 		}
 	}
-	return false
+	return out
+}
+
+// inspectRepo decides whether the host already provides a declared DNF or
+// COPR repository as declared. It returns ready, a repair description for
+// a Nimbus-owned file that drifted, or a blocking problem.
+func (b *builder) inspectRepo(id string, r definitions.Repository) (ready bool, repair string, blocked string) {
+	ids := DNFRepoIDs(id, r)
+	var enabled []facts.Repository
+	for _, host := range ids {
+		for _, have := range b.repos[host] {
+			if have.Enabled {
+				enabled = append(enabled, have)
+			}
+		}
+	}
+	if len(enabled) == 0 {
+		if r.Kind == "dnf" && r.ReleasePackage == "" {
+			for _, have := range b.repos[id] {
+				if have.Enabled {
+					return false, "", fmt.Sprintf("repository %s is already enabled through %s, which Nimbus does not own; remove that file or keep the repository unmanaged", id, have.File)
+				}
+			}
+		}
+		return false, "", ""
+	}
+	var drift []string
+	for _, have := range enabled {
+		if have.GPGCheck != "1" {
+			drift = append(drift, have.ID+" has gpgcheck="+have.GPGCheck)
+		}
+		if r.Priority != nil && have.Priority != strconv.Itoa(*r.Priority) {
+			drift = append(drift, fmt.Sprintf("%s has priority %q, declared %d", have.ID, have.Priority, *r.Priority))
+		}
+		if r.Kind == "dnf" && r.ReleasePackage == "" {
+			if have.File != "nimbus-"+id+".repo" {
+				return false, "", fmt.Sprintf("repository %s is provided by %s, not by nimbus-%s.repo, which Nimbus would own; remove that file first", have.ID, have.File, id)
+			}
+			if have.BaseURL != r.BaseURL {
+				drift = append(drift, fmt.Sprintf("%s has baseurl %q, declared %q", have.ID, have.BaseURL, r.BaseURL))
+			}
+		}
+	}
+	if len(drift) > 0 {
+		if r.Kind == "dnf" && r.ReleasePackage == "" {
+			return false, "rewrite nimbus-" + id + ".repo: " + strings.Join(drift, "; "), ""
+		}
+		return false, "correct the repository file: " + strings.Join(drift, "; "), ""
+	}
+	return true, "", ""
 }
 
 func (b *builder) repositories() []Operation {
@@ -179,7 +247,9 @@ func (b *builder) repositories() []Operation {
 			}
 			continue
 		}
-		if b.repoReady(id) {
+		ready, repair, blocked := b.inspectRepo(id, r)
+		if ready {
+			b.ready[id] = true
 			continue
 		}
 		op := Operation{
@@ -188,27 +258,21 @@ func (b *builder) repositories() []Operation {
 			Paths:   b.repoPaths(id),
 			Steps:   repositorySteps(id, r),
 		}
-		if foreign := b.foreignRepo(id, r); foreign != "" {
-			op.Blocked = foreign
+		switch {
+		case blocked != "":
+			op.Blocked = blocked
+			b.blockedRepo[id] = blocked
+		case repair != "":
+			op.Action, op.Summary = ActionRepair, fmt.Sprintf("repair repository %s: %s", id, repair)
+			if r.Kind == "dnf" && r.ReleasePackage == "" {
+				op.Steps = repositorySteps(id, r)[3:]
+			} else {
+				op.Steps = []Step{{Description: repair}}
+			}
 		}
 		ops = append(ops, op)
 	}
 	return ops
-}
-
-// foreignRepo reports an enabled repository with the maker's own ID for a
-// repository Nimbus would write itself. Unknown ownership blocks: Nimbus
-// neither duplicates the source nor takes the file over silently.
-func (b *builder) foreignRepo(id string, r definitions.Repository) string {
-	if r.Kind != "dnf" || r.ReleasePackage != "" {
-		return ""
-	}
-	for _, have := range b.in.Facts.Repositories.Value {
-		if have.Enabled && have.ID == id {
-			return fmt.Sprintf("repository %s is already enabled through %s, which Nimbus does not own; remove that file or keep the repository unmanaged", id, have.File)
-		}
-	}
-	return ""
 }
 
 func repoLocation(r definitions.Repository) string {
@@ -266,14 +330,9 @@ func (b *builder) repoPaths(id string) []string {
 	return paths
 }
 
+// flatpakRemote returns the operation for a missing or mismatched system
+// remote. A remote with the declared name but another URL blocks.
 func (b *builder) flatpakRemote(id string, r definitions.Repository) (Operation, bool) {
-	if b.in.Facts.Flatpak.Known() {
-		for _, remote := range b.in.Facts.Flatpak.Value.Remotes {
-			if remote.Name == id {
-				return Operation{}, false
-			}
-		}
-	}
 	op := Operation{
 		ID: "flatpak-remote:" + id, Kind: KindFlatpakRemote, Action: ActionEnable, Risk: RiskMedium,
 		Summary: "add system Flatpak remote " + id, Paths: b.repoPaths(id),
@@ -284,21 +343,22 @@ func (b *builder) flatpakRemote(id string, r definitions.Repository) (Operation,
 	}
 	if !b.in.Facts.Flatpak.Known() {
 		op.Blocked = "Flatpak state is unknown: " + b.in.Facts.Flatpak.Error
+		b.blockedRepo[id] = op.Blocked
+		return op, true
+	}
+	for _, remote := range b.in.Facts.Flatpak.Value.Remotes {
+		if remote.Name != id {
+			continue
+		}
+		if remote.URL == r.URL || strings.TrimSuffix(remote.URL, "/") == strings.TrimSuffix(strings.TrimSuffix(r.URL, "flathub.flatpakrepo"), "/") {
+			b.ready[id] = true
+			return Operation{}, false
+		}
+		op.Blocked = fmt.Sprintf("system remote %s points to %s, not the declared %s; remove or fix it first", id, remote.URL, r.URL)
+		b.blockedRepo[id] = op.Blocked
+		return op, true
 	}
 	return op, true
-}
-
-func (b *builder) flatpakReady() bool {
-	if !b.in.Facts.Flatpak.Known() {
-		return false
-	}
-	id := flatpakRepoID(b.in.Root)
-	for _, remote := range b.in.Facts.Flatpak.Value.Remotes {
-		if remote.Name == id {
-			return true
-		}
-	}
-	return false
 }
 
 func flatpakRepoID(root definitions.Root) string {
@@ -310,8 +370,18 @@ func flatpakRepoID(root definitions.Root) string {
 	return ""
 }
 
+// waitOrBlock returns the After or Blocked value for a package whose
+// repository is not ready.
+func (b *builder) waitOrBlock(repoID, opKind string) (after, blocked string) {
+	if msg, ok := b.blockedRepo[repoID]; ok {
+		return "", "repository " + repoID + " cannot be used: " + msg
+	}
+	return opKind + ":" + repoID, ""
+}
+
 func (b *builder) packages() []Operation {
-	var adopt, pending []Operation
+	declared := b.declaredRepoIDs()
+	var adopt, pending, blocked []Operation
 	var install []definitions.ResolvedPackage
 	for _, p := range b.in.Resolved.Packages {
 		if p.Prefix == definitions.PrefixFlatpak {
@@ -320,28 +390,58 @@ func (b *builder) packages() []Operation {
 		if inst, ok := b.installed[p.Name]; ok {
 			op := Operation{ID: "package:" + p.Canonical, Kind: KindPackage, Action: ActionAdopt, Risk: RiskLow,
 				Summary: fmt.Sprintf("adopt %s %s, already installed", p.Name, inst.EVR()), Paths: p.Paths}
-			if !contains(b.expectedRepos(p.Prefix), inst.FromRepo) && inst.FromRepo != "" {
-				op.Notes = append(op.Notes, fmt.Sprintf("installed from repository %q rather than %s", inst.FromRepo, strings.Join(b.expectedRepos(p.Prefix), " or ")))
+			if reason := b.adoptionProblem(p, inst, declared); reason != "" {
+				op.Blocked = reason
+				blocked = append(blocked, op)
+				continue
 			}
 			adopt = append(adopt, op)
 			continue
 		}
-		if !b.repoReady(p.Prefix) {
-			pending = append(pending, Operation{ID: "package:" + p.Canonical, Kind: KindPackage, Action: ActionInstall, Risk: RiskLow,
-				Summary: "install " + p.Name, Paths: p.Paths,
-				Blocked: fmt.Sprintf("repository %s is not enabled yet; the exact transaction is planned after it is", p.Prefix)})
+		if p.Prefix != definitions.PrefixDNF && !b.ready[p.Prefix] {
+			op := Operation{ID: "package:" + p.Canonical, Kind: KindPackage, Action: ActionInstall, Risk: RiskLow,
+				Summary: "install " + p.Name, Paths: p.Paths}
+			op.After, op.Blocked = b.waitOrBlock(p.Prefix, KindRepository)
+			pending = append(pending, op)
 			continue
 		}
 		install = append(install, p)
 	}
-	ops := adopt
+	ops := append(adopt, blocked...)
+	var installTx *Transaction
 	if len(install) > 0 {
-		ops = append(ops, b.installTransaction(install))
+		op := b.installTransaction(install)
+		installTx = op.Transaction
+		ops = append(ops, op)
 	}
-	if op, ok := b.removeTransaction(); ok {
+	if op, ok := b.removeTransaction(installTx); ok {
 		ops = append(ops, op)
 	}
 	return append(ops, pending...)
+}
+
+// adoptionProblem explains why an installed desired package cannot simply
+// be adopted: it came from a repository other than its prefix names. A
+// package whose recorded source is the installer, a build, or unknown is
+// adoptable, since that is how a fresh Fedora records its base.
+func (b *builder) adoptionProblem(p definitions.ResolvedPackage, inst facts.Package, declared map[string]string) string {
+	expected := b.expectedRepos(p.Prefix)
+	if contains(expected, inst.FromRepo) {
+		return ""
+	}
+	if p.Prefix == definitions.PrefixDNF {
+		if owner, ok := declared[inst.FromRepo]; ok {
+			return fmt.Sprintf("installed from repository %s (%s), but the definitions select it from Fedora; remove it or change its prefix", inst.FromRepo, owner)
+		}
+		if inst.FromRepo != "" && !contains(fedoraRepos, inst.FromRepo) && strings.Contains(inst.FromRepo, ":") {
+			return fmt.Sprintf("installed from repository %s, which the definitions do not declare; remove it or declare the source", inst.FromRepo)
+		}
+		return ""
+	}
+	if inst.FromRepo == "" {
+		return ""
+	}
+	return fmt.Sprintf("installed from repository %s, not from %s; remove it or declare that source", inst.FromRepo, strings.Join(expected, " or "))
 }
 
 // installTransaction previews one DNF transaction for every installable
@@ -408,11 +508,19 @@ func (b *builder) installTransaction(pkgs []definitions.ResolvedPackage) Operati
 }
 
 // removeTransaction previews the removal of declared removes that are still
-// installed and not already erased by the install transaction.
-func (b *builder) removeTransaction() (Operation, bool) {
+// installed and that the install transaction does not already erase.
+func (b *builder) removeTransaction(installTx *Transaction) (Operation, bool) {
+	erased := map[string]bool{}
+	if installTx != nil {
+		for _, row := range installTx.Packages {
+			if strings.HasPrefix(row.Section, "removing") || row.Section == "replacing" {
+				erased[row.Name] = true
+			}
+		}
+	}
 	var names, paths []string
 	for _, name := range b.in.Resolved.Removes {
-		if _, ok := b.installed[name]; ok {
+		if _, ok := b.installed[name]; ok && !erased[name] {
 			names = append(names, name)
 			paths = append(paths, "removes:"+name)
 		}
@@ -465,15 +573,19 @@ func (b *builder) flatpaks() []Operation {
 			continue
 		}
 		if app, ok := installed[p.Name]; ok {
-			ops = append(ops, Operation{ID: "flatpak:" + p.Name, Kind: KindFlatpak, Action: ActionAdopt, Risk: RiskLow,
-				Summary: fmt.Sprintf("adopt Flatpak %s %s from %s, already installed", p.Name, app.Version, app.Origin), Paths: p.Paths})
+			op := Operation{ID: "flatpak:" + p.Name, Kind: KindFlatpak, Action: ActionAdopt, Risk: RiskLow,
+				Summary: fmt.Sprintf("adopt Flatpak %s %s from %s, already installed", p.Name, app.Version, app.Origin), Paths: p.Paths}
+			if app.Origin != remote {
+				op.Blocked = fmt.Sprintf("installed from remote %s, not %s; remove it or declare that remote", app.Origin, remote)
+			}
+			ops = append(ops, op)
 			continue
 		}
 		op := Operation{ID: "flatpak:" + p.Name, Kind: KindFlatpak, Action: ActionInstall, Risk: RiskLow,
 			Summary: "install Flatpak " + p.Name, Paths: p.Paths,
 			Steps: []Step{{Description: "install from the system remote", Argv: []string{"flatpak", "install", "--system", "--noninteractive", remote, p.Name}, Privileged: true}}}
-		if !b.flatpakReady() {
-			op.Blocked = fmt.Sprintf("Flatpak remote %s is not present yet", remote)
+		if !b.ready[remote] {
+			op.After, op.Blocked = b.waitOrBlock(remote, KindFlatpakRemote)
 		}
 		ops = append(ops, op)
 	}
@@ -516,14 +628,19 @@ func (b *builder) updates() Updates {
 	return Updates{Available: ups}
 }
 
-// digest hashes the canonical apply section: operations with their steps
-// and transactions, not the informational prune and update sections.
+// digest hashes the canonical apply section bound to its inputs: the
+// machine, the definition digest, and the operations with their steps and
+// transactions. Prune and update information are informational and
+// excluded; the checkout commit is reported beside the digest, not inside
+// it, so a documentation-only commit does not invalidate an approved plan
+// while the definition digest still does.
 func digest(p *Plan) string {
 	type canon struct {
-		Machine    string      `json:"machine"`
-		Operations []Operation `json:"operations"`
+		Machine     string      `json:"machine"`
+		Definitions string      `json:"definitions"`
+		Operations  []Operation `json:"operations"`
 	}
-	data, _ := json.Marshal(canon{Machine: p.Machine, Operations: p.Operations})
+	data, _ := json.Marshal(canon{Machine: p.Machine, Definitions: p.Definitions, Operations: p.Operations})
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
 }

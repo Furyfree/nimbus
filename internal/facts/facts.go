@@ -59,6 +59,8 @@ type Repository struct {
 	GPGCheck string `json:"gpgcheck"` // "1", "0", or "" when unset
 	GPGKey   string `json:"gpgkey"`
 	Priority string `json:"priority"`
+	BaseURL  string `json:"baseurl,omitempty"`
+	Metalink string `json:"metalink,omitempty"`
 }
 
 // Flatpak is the system installation's remotes and applications.

@@ -148,7 +148,7 @@ func find(p *Plan, id string) *Operation {
 func TestPlanOnFreshFedora(t *testing.T) {
 	c, r := repository(t)
 	src, f := host(t)
-	in := Inputs{Resolved: r, Root: c.Definitions(), Facts: f, Source: src}
+	in := Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src}
 	p := answerInstall(t, src, in, nil)
 
 	// Repositories: Terra and RPM Fusion are enabled on the fixture host;
@@ -158,9 +158,11 @@ func TestPlanOnFreshFedora(t *testing.T) {
 			t.Errorf("missing operation %s", id)
 		}
 	}
+	// RPM Fusion is enabled by its own release packages on this host but
+	// without the declared priority, so it is repaired, not re-enabled.
 	for _, id := range []string{"repository:rpmfusion-free", "repository:rpmfusion-nonfree"} {
-		if find(p, id) != nil {
-			t.Errorf("enabled repository %s planned again", id)
+		if op := find(p, id); op == nil || op.Action != ActionRepair || !strings.Contains(op.Summary, "priority") || op.Blocked != "" {
+			t.Errorf("%s = %+v", id, op)
 		}
 	}
 	// Terra is enabled through Terra's own file on this host, which Nimbus
@@ -168,7 +170,7 @@ func TestPlanOnFreshFedora(t *testing.T) {
 	if op := find(p, "repository:terra"); op == nil || !strings.Contains(op.Blocked, "terra.repo, which Nimbus does not own") {
 		t.Fatalf("terra = %+v", op)
 	}
-	if op := find(p, "package:terra:ghostty"); op == nil || !strings.Contains(op.Blocked, "repository terra is not enabled yet") {
+	if op := find(p, "package:terra:ghostty"); op == nil || !strings.Contains(op.Blocked, "repository terra cannot be used") {
 		t.Fatalf("ghostty = %+v", op)
 	}
 	docker := find(p, "repository:docker")
@@ -185,7 +187,9 @@ func TestPlanOnFreshFedora(t *testing.T) {
 	if op := find(p, "package:dnf:dnf5-plugins"); op == nil || op.Action != ActionAdopt || !strings.Contains(op.Summary, "already installed") {
 		t.Fatalf("dnf5-plugins = %+v", op)
 	}
-	if op := find(p, "package:docker:docker-ce"); op == nil || op.Blocked == "" || !strings.Contains(op.Blocked, "repository docker") {
+	// Docker's packages wait for the repository operation in this same plan
+	// instead of blocking it, so a fresh host gets one applicable plan.
+	if op := find(p, "package:docker:docker-ce"); op == nil || op.Blocked != "" || op.After != "repository:docker" {
 		t.Fatalf("docker-ce = %+v", op)
 	}
 	inst := find(p, "packages:install")
@@ -195,14 +199,17 @@ func TestPlanOnFreshFedora(t *testing.T) {
 	if !strings.HasPrefix(strings.Join(inst.Steps[0].Argv, " "), "dnf5 -y install --allowerasing ") {
 		t.Fatalf("argv = %v", inst.Steps[0].Argv)
 	}
-	if op := find(p, "flatpak:com.spotify.Client"); op == nil || !strings.Contains(op.Blocked, "flathub") {
+	if op := find(p, "flatpak:com.spotify.Client"); op == nil || op.After != "flatpak-remote:flathub" || op.Blocked != "" {
 		t.Fatalf("spotify = %+v", op)
 	}
 	if find(p, "packages:remove") != nil {
 		t.Fatal("nothing declared as removed is installed, yet a removal was planned")
 	}
 	if p.Complete {
-		t.Fatal("plan with blocked operations must be incomplete")
+		t.Fatal("the foreign Terra file blocks, so the plan must be incomplete")
+	}
+	if p.Definitions != c.Digest() || !strings.HasPrefix(p.Definitions, "sha256:") {
+		t.Fatalf("plan definitions = %s", p.Definitions)
 	}
 	if len(p.Updates.Available) != 1 || p.Updates.Available[0].Name != "librepo" {
 		t.Fatalf("updates = %+v", p.Updates)
@@ -260,7 +267,7 @@ func TestPlanRefusesTransactionsBeyondTheDefinitions(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			src, f := host(t)
-			p := answerInstall(t, src, Inputs{Resolved: r, Root: c.Definitions(), Facts: f, Source: src}, tc.mutate)
+			p := answerInstall(t, src, Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src}, tc.mutate)
 			op := find(p, "packages:install")
 			if op.Blocked == "" || !strings.Contains(op.Blocked, tc.want) {
 				t.Fatalf("blocked = %q", op.Blocked)
@@ -269,7 +276,7 @@ func TestPlanRefusesTransactionsBeyondTheDefinitions(t *testing.T) {
 	}
 	t.Run("dependencies are allowed", func(t *testing.T) {
 		src, f := host(t)
-		p := answerInstall(t, src, Inputs{Resolved: r, Root: c.Definitions(), Facts: f, Source: src}, func(rows []TxPackage) []TxPackage {
+		p := answerInstall(t, src, Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src}, func(rows []TxPackage) []TxPackage {
 			return append(rows, TxPackage{Name: "libfoo", Arch: "x86_64", EVR: "0:1-1", Repository: "fedora", Section: "installing dependencies"})
 		})
 		if op := find(p, "packages:install"); op.Blocked != "" {
@@ -278,7 +285,7 @@ func TestPlanRefusesTransactionsBeyondTheDefinitions(t *testing.T) {
 	})
 	t.Run("preview failure blocks with the reason", func(t *testing.T) {
 		src, f := host(t)
-		p, err := Build(Inputs{Resolved: r, Root: c.Definitions(), Facts: f, Source: src})
+		p, err := Build(Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -293,7 +300,7 @@ func TestPlanRemovesDeclaredPackages(t *testing.T) {
 	src, f := host(t)
 	// ffmpeg-free is installed on this host, so media-codecs must swap it.
 	f.Packages.Value = append(f.Packages.Value, facts.Package{Name: "ffmpeg-free", Epoch: "0", Version: "8.0.1", Release: "6.fc44", Arch: "x86_64", FromRepo: "fedora", Reason: "user"})
-	in := Inputs{Resolved: r, Root: c.Definitions(), Facts: f, Source: src}
+	in := Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src}
 	key := facts.Key("dnf5", "--assumeno", "--cacheonly", "remove", "ffmpeg-free")
 	src.Commands[key] = previewText([]TxPackage{{Name: "ffmpeg-free", Arch: "x86_64", EVR: "0:8.0.1-6.fc44", Repository: "@System", Section: "removing"}})
 	src.Failures[key] = "exit status 1"
@@ -310,15 +317,22 @@ func TestPlanRemovesDeclaredPackages(t *testing.T) {
 		{Name: "libavcodec-free", Arch: "x86_64", EVR: "0:8.0.1-6.fc44", Repository: "@System", Section: "removing unused dependencies"},
 	})
 	p, _ = Build(in)
-	if op := find(p, "packages:remove"); op.Blocked == "" || !strings.Contains(op.Blocked, "libavcodec-free") {
+	if op := find(p, "packages:remove"); op == nil || op.Blocked == "" || !strings.Contains(op.Blocked, "libavcodec-free") {
 		t.Fatalf("extra removal accepted: %+v", op)
+	}
+	// When the install transaction already erases it, no second removal.
+	erased := answerInstall(t, src, in, func(rows []TxPackage) []TxPackage {
+		return append(rows, TxPackage{Name: "ffmpeg-free", Arch: "x86_64", EVR: "0:8.0.1-6.fc44", Repository: "@System", Section: "removing"})
+	})
+	if find(erased, "packages:remove") != nil || find(erased, "packages:install").Blocked != "" {
+		t.Fatalf("erased removal planned twice: %+v", find(erased, "packages:remove"))
 	}
 }
 
 func TestPlanDigestCoversOnlyTheApplySection(t *testing.T) {
 	c, r := repository(t)
 	src, f := host(t)
-	in := Inputs{Resolved: r, Root: c.Definitions(), Facts: f, Source: src}
+	in := Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src}
 	a := answerInstall(t, src, in, nil)
 	b, _ := Build(in)
 	if a.Digest != b.Digest || !strings.HasPrefix(a.Digest, "sha256:") {
@@ -343,7 +357,7 @@ func TestUpdatesUnavailableIsReportedNotGuessed(t *testing.T) {
 	key := facts.Key("dnf5", "--cacheonly", "check-upgrade")
 	delete(src.Commands, key)
 	src.Failures[key] = "Cache-only enabled but no cache for 'fedora'"
-	p, err := Build(Inputs{Resolved: r, Root: c.Definitions(), Facts: f, Source: src})
+	p, err := Build(Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +365,119 @@ func TestUpdatesUnavailableIsReportedNotGuessed(t *testing.T) {
 		t.Fatalf("updates = %+v", p.Updates)
 	}
 	f.Packages = facts.Section[[]facts.Package]{Error: "dnf5 broken"}
-	if _, err := Build(Inputs{Resolved: r, Root: c.Definitions(), Facts: f, Source: src}); err == nil {
+	if _, err := Build(Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src}); err == nil {
 		t.Fatal("planning without installed packages must fail")
+	}
+}
+
+func withoutTerraFile(f *facts.Facts) {
+	var kept []facts.Repository
+	for _, r := range f.Repositories.Value {
+		if r.File != "terra.repo" {
+			kept = append(kept, r)
+		}
+	}
+	f.Repositories.Value = kept
+}
+
+func TestPlanIsCompleteOnAFreshHostWithoutForeignFiles(t *testing.T) {
+	c, r := repository(t)
+	src, f := host(t)
+	withoutTerraFile(f)
+	p := answerInstall(t, src, Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src}, nil)
+	for _, op := range p.Operations {
+		if op.Blocked != "" {
+			t.Fatalf("blocked on a fresh host: %s: %s", op.ID, op.Blocked)
+		}
+	}
+	if !p.Complete {
+		t.Fatal("a fresh host with pending operations must still produce a complete plan")
+	}
+	if op := find(p, "package:terra:ghostty"); op == nil || op.After != "repository:terra" {
+		t.Fatalf("ghostty = %+v", op)
+	}
+}
+
+func TestRepositoryStateIsVerifiedNotAssumed(t *testing.T) {
+	c, r := repository(t)
+	cases := []struct {
+		name string
+		repo facts.Repository
+		want func(*Operation) bool
+	}{
+		{"correct nimbus file is ready", facts.Repository{ID: "nimbus-docker", File: "nimbus-docker.repo", Enabled: true, GPGCheck: "1", Priority: "100", BaseURL: c.Definitions().Repositories["docker"].BaseURL},
+			func(op *Operation) bool { return op == nil }},
+		{"gpgcheck off is repaired", facts.Repository{ID: "nimbus-docker", File: "nimbus-docker.repo", Enabled: true, GPGCheck: "0", Priority: "100", BaseURL: c.Definitions().Repositories["docker"].BaseURL},
+			func(op *Operation) bool {
+				return op != nil && op.Action == ActionRepair && strings.Contains(op.Summary, "gpgcheck=0") && op.Blocked == ""
+			}},
+		{"wrong baseurl is repaired", facts.Repository{ID: "nimbus-docker", File: "nimbus-docker.repo", Enabled: true, GPGCheck: "1", Priority: "100", BaseURL: "https://example.invalid/docker"},
+			func(op *Operation) bool {
+				return op != nil && op.Action == ActionRepair && strings.Contains(op.Summary, "baseurl")
+			}},
+		{"foreign file with our id blocks", facts.Repository{ID: "nimbus-docker", File: "docker-ce.repo", Enabled: true, GPGCheck: "1", Priority: "100", BaseURL: c.Definitions().Repositories["docker"].BaseURL},
+			func(op *Operation) bool { return op != nil && strings.Contains(op.Blocked, "docker-ce.repo") }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src, f := host(t)
+			withoutTerraFile(f)
+			f.Repositories.Value = append(f.Repositories.Value, tc.repo)
+			p, err := Build(Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if op := find(p, "repository:docker"); !tc.want(op) {
+				t.Fatalf("repository:docker = %+v", op)
+			}
+		})
+	}
+}
+
+func TestFlatpakRemoteMustMatchTheDeclaredURL(t *testing.T) {
+	c, r := repository(t)
+	src, f := host(t)
+	withoutTerraFile(f)
+	f.Flatpak.Value.Remotes = []facts.FlatpakRemote{{Name: "flathub", URL: "https://example.invalid/not-flathub/"}}
+	p, _ := Build(Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src})
+	if op := find(p, "flatpak-remote:flathub"); op == nil || !strings.Contains(op.Blocked, "points to https://example.invalid/not-flathub/") {
+		t.Fatalf("mismatched remote = %+v", op)
+	}
+	if op := find(p, "flatpak:com.spotify.Client"); op == nil || !strings.Contains(op.Blocked, "cannot be used") {
+		t.Fatalf("spotify = %+v", op)
+	}
+	f.Flatpak.Value.Remotes = []facts.FlatpakRemote{{Name: "flathub", URL: "https://dl.flathub.org/repo/"}}
+	f.Flatpak.Value.Apps = []facts.FlatpakApp{{ID: "com.spotify.Client", Version: "1", Origin: "fedora"}}
+	p, _ = Build(Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src})
+	if op := find(p, "flatpak:com.spotify.Client"); op == nil || op.Action != ActionAdopt || !strings.Contains(op.Blocked, "remote fedora, not flathub") {
+		t.Fatalf("foreign origin adopted: %+v", op)
+	}
+}
+
+func TestAdoptionRefusesTheWrongSource(t *testing.T) {
+	c, r := repository(t)
+	src, f := host(t)
+	withoutTerraFile(f)
+	f.Packages.Value = append(f.Packages.Value,
+		facts.Package{Name: "ripgrep", Version: "1", Release: "1", Arch: "x86_64", FromRepo: "terra", Reason: "user"},
+		facts.Package{Name: "ghostty", Version: "1", Release: "1", Arch: "x86_64", FromRepo: "terra", Reason: "user"},
+		facts.Package{Name: "zsh", Version: "1", Release: "1", Arch: "x86_64", FromRepo: "copr:copr.fedorainfracloud.org:someone:zsh", Reason: "user"},
+		facts.Package{Name: "git", Version: "1", Release: "1", Arch: "x86_64", FromRepo: "anaconda", Reason: "user"},
+	)
+	p, _ := Build(Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src})
+	if op := find(p, "package:dnf:ripgrep"); op == nil || !strings.Contains(op.Blocked, "installed from repository terra (terra)") {
+		t.Fatalf("ripgrep from terra = %+v", op)
+	}
+	if op := find(p, "package:terra:ghostty"); op == nil || !strings.Contains(op.Blocked, "not from nimbus-terra") {
+		t.Fatalf("ghostty from the maker's terra = %+v", op)
+	}
+	if op := find(p, "package:dnf:zsh"); op == nil || !strings.Contains(op.Blocked, "which the definitions do not declare") {
+		t.Fatalf("zsh from an undeclared copr = %+v", op)
+	}
+	if op := find(p, "package:dnf:git"); op == nil || op.Blocked != "" || op.Action != ActionAdopt {
+		t.Fatalf("git from the installer must adopt: %+v", op)
+	}
+	if op := find(p, "package:dnf:dnf5-plugins"); op == nil || op.Blocked != "" {
+		t.Fatalf("a build-hash source must adopt: %+v", op)
 	}
 }
