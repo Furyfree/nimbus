@@ -80,6 +80,7 @@ func TestUnknownFactsAreReportedNotGuessed(t *testing.T) {
 	delete(src.Files, SELinuxPath)
 	src.Failures[Key("dnf5", PackageQueryArgs...)] = "dnf5: cannot open the package database"
 	src.Failures[Key("systemctl", "is-active", "firewalld")] = "inactive"
+	delete(src.Commands, Key("systemctl", "is-active", "firewalld"))
 	delete(src.Paths, "flatpak")
 	delete(src.Commands, Key("flatpak", "remotes", "--system", "--columns=name,url"))
 	f := Inspect(src, "")
@@ -150,5 +151,28 @@ func TestParsersRejectMalformedOutput(t *testing.T) {
 	}
 	if (Package{Epoch: "1", Version: "2", Release: "3"}).EVR() != "1:2-3" {
 		t.Fatal("epoch rendering")
+	}
+}
+
+func TestExecSourceReturnsOutputOnFailure(t *testing.T) {
+	out, err := (ExecSource{}).Run("sh", "-c", "echo inactive; exit 3")
+	if err == nil {
+		t.Fatal("non-zero exit must be an error")
+	}
+	if strings.TrimSpace(string(out)) != "inactive" {
+		t.Fatalf("stdout lost on failure: %q", out)
+	}
+	if _, err := (ExecSource{}).Run("sh", "-c", "echo bad >&2; exit 1"); err == nil || !strings.Contains(err.Error(), "bad") {
+		t.Fatalf("stderr missing from error: %v", err)
+	}
+}
+
+func TestFakeFailureKeepsRecordedOutput(t *testing.T) {
+	src := fedora44(t)
+	src.Commands[Key("systemctl", "is-active", "firewalld")] = []byte("inactive\n")
+	src.Failures[Key("systemctl", "is-active", "firewalld")] = "exit status 3"
+	f := Inspect(src, "")
+	if f.Firewalld.Value != "inactive" || !f.Firewalld.Known() {
+		t.Fatalf("firewalld = %+v", f.Firewalld)
 	}
 }

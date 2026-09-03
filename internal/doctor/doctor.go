@@ -193,15 +193,18 @@ func repositorySignatures(f *facts.Facts) Check {
 		c.Remediation = "make " + facts.RepoDir + " readable"
 		return c
 	}
-	var unchecked []string
+	var unchecked, unset []string
 	enabled := 0
 	for _, r := range f.Repositories.Value {
 		if !r.Enabled {
 			continue
 		}
 		enabled++
-		if r.GPGCheck == "0" {
+		switch r.GPGCheck {
+		case "0":
 			unchecked = append(unchecked, r.ID)
+		case "":
+			unset = append(unset, r.ID)
 		}
 	}
 	if len(unchecked) > 0 {
@@ -209,6 +212,12 @@ func repositorySignatures(f *facts.Facts) Check {
 		c.Observation = "signature checking is off for: " + strings.Join(unchecked, ", ")
 		c.Impact = "packages from these repositories install without a verified signature"
 		c.Remediation = "set gpgcheck=1 in the repository file or disable the repository"
+		return c
+	}
+	if len(unset) > 0 {
+		c.Status = Unknown
+		c.Observation = "gpgcheck is not set for: " + strings.Join(unset, ", ") + "; doctor does not vouch for DNF's default"
+		c.Remediation = "set gpgcheck=1 explicitly in the repository file"
 		return c
 	}
 	c.Status = Pass

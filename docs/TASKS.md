@@ -187,8 +187,8 @@ the first VM run is deferred to Phase 4.
 ## Completion rule
 
 Complete the phase only when every checkbox passes, evidence is recorded, root
-help exposes only validate and version, and the resolver contains no system
-inspection, state write, Git mutation, Chezmoi invocation, or apply path.
+help exposes only doctor, validate, and version, every host read goes through
+`facts.Source`, and no inspector writes, invokes sudo, or uses the network.
 
-Stop after the completed resolver and request separate authorization before
-starting Fedora inspection.
+Stop after the completed inspector and request separate authorization before
+starting planning.
