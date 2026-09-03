@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Furyfree/nimbus/internal/version"
 )
 
 func TestBaseTreeIsValid(t *testing.T) {
@@ -131,7 +133,7 @@ func TestInvalidTrees(t *testing.T) {
 		}, "matches no selected package"},
 		{"exclusion of a required component's package", func(f map[string]string) {
 			f["machines/one.toml"] = strings.Replace(f["machines/one.toml"], `package_exclusions = []`, `package_exclusions = ["dep-tool"]`, 1)
-		}, "required by a component"},
+		}, "another selected component requires"},
 		{"removed package is also selected", func(f map[string]string) {
 			f["profiles/extra.toml"] = strings.Replace(f["profiles/extra.toml"], `packages = []`, `packages = ["curl-minimal"]`, 1)
 		}, "also selected"},
@@ -205,12 +207,17 @@ func TestLoadWritesNothing(t *testing.T) {
 	}
 	root := writeTree(t, baseTree())
 	var dirs []string
-	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+	if err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
 		if d.IsDir() {
 			dirs = append(dirs, p)
 		}
 		return nil
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	for _, d := range dirs {
 		if err := os.Chmod(d, 0o555); err != nil {
 			t.Fatal(err)
@@ -223,5 +230,78 @@ func TestLoadWritesNothing(t *testing.T) {
 	})
 	if errs := loadAndValidate(t, root); len(errs) > 0 {
 		t.Fatal(errs)
+	}
+}
+
+func TestReviewedInvariants(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(map[string]string)
+		want   string
+	}{
+		{"duplicate fedora release", func(f map[string]string) {
+			f["nimbus.toml"] = strings.Replace(f["nimbus.toml"], `fedora = ["44"]`, `fedora = ["44", "44"]`, 1)
+		}, `lists "44" twice`},
+		{"missing priority", func(f map[string]string) {
+			f["nimbus.toml"] = strings.Replace(f["nimbus.toml"], "priority = 100\n", "", 1)
+		}, "priority is required"},
+		{"priority not above fedora", func(f map[string]string) {
+			f["nimbus.toml"] = strings.Replace(f["nimbus.toml"], "priority = 100", "priority = 99", 1)
+		}, "must be above Fedora's 99"},
+		{"copr key_url rejected", func(f map[string]string) {
+			f["nimbus.toml"] += "[repositories.c]\nkind = \"copr\"\nproject = \"a/b\"\nkey_url = \"https://example.invalid/k\"\nkey = \"AE09157A4DE88B497EA1D5D300CDAB43DE226D6F\"\npriority = 100\n"
+		}, "key URL derives from the project"},
+		{"key file must be a public key", func(f map[string]string) {
+			f["nimbus.toml"] = strings.Replace(f["nimbus.toml"], `key_url = "https://example.invalid/terra/key.asc"`, `key_file = "keys/terra.asc"`, 1)
+			f["system/keys/terra.asc"] = "not a key\n"
+		}, "not an armored PGP public key"},
+		{"one file lists two sources for one name", func(f map[string]string) {
+			f["profiles/extra.toml"] = strings.Replace(f["profiles/extra.toml"], `packages = []`, `packages = ["git", "terra:git"]`, 1)
+		}, "one package has one source"},
+		{"flatpak and rpm share a name", func(f map[string]string) {
+			f["profiles/extra.toml"] = strings.Replace(f["profiles/extra.toml"], `packages = []`, `packages = ["org.example.App"]`, 1)
+		}, "more than one repository"},
+		{"exclusion of a machine package", func(f map[string]string) {
+			f["machines/one.toml"] = strings.Replace(f["machines/one.toml"], `package_exclusions = []`, `package_exclusions = ["ripgrep"]`, 1)
+		}, "remove it there instead"},
+		{"exclusion of a required component also selected directly", func(f map[string]string) {
+			f["machines/one.toml"] = strings.Replace(f["machines/one.toml"], `["hardware"]`, `["hardware", "dep"]`, 1)
+			f["machines/one.toml"] = strings.Replace(f["machines/one.toml"], `package_exclusions = []`, `package_exclusions = ["dep-tool"]`, 1)
+		}, "another selected component requires"},
+		{"removal of a package selected from another repository", func(f map[string]string) {
+			f["profiles/extra.toml"] = strings.Replace(f["profiles/extra.toml"], `packages = []`, `packages = ["terra:curl-minimal"]`, 1)
+		}, "also selected as terra:curl-minimal"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tree := baseTree()
+			tc.mutate(tree)
+			requireError(t, loadAndValidate(t, writeTree(t, tree)), tc.want)
+		})
+	}
+}
+
+func TestTwoDotsInsideANameAreAllowed(t *testing.T) {
+	tree := baseTree()
+	tree["components/base.toml"] = strings.Replace(tree["components/base.toml"], `etc/example.conf`, `etc/example..conf`, 1)
+	tree["system/root/etc/example..conf"] = "x\n"
+	if errs := loadAndValidate(t, writeTree(t, tree)); len(errs) > 0 {
+		t.Fatal(errs)
+	}
+}
+
+func TestMinimumEngine(t *testing.T) {
+	root := writeTree(t, baseTree())
+	saved := version.Engine
+	t.Cleanup(func() { version.Engine = saved })
+	version.Engine = "0.0.0-dev"
+	if errs := loadAndValidate(t, root); len(errs) > 0 {
+		t.Fatalf("development build must skip the check: %v", errs)
+	}
+	version.Engine = "0.0.9"
+	requireError(t, loadAndValidate(t, root), "newer than this engine")
+	version.Engine = "0.1.0"
+	if errs := loadAndValidate(t, root); len(errs) > 0 {
+		t.Fatalf("equal release must pass: %v", errs)
 	}
 }

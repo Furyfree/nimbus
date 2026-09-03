@@ -49,6 +49,16 @@ func TestDigestIsStableAndBounded(t *testing.T) {
 	if err := os.Chmod(conf, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	rootFile := filepath.Join(root, "nimbus.toml")
+	if err := os.Chmod(rootFile, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if before == digestOf(t, root) {
+		t.Fatal("the executable bit on nimbus.toml did not alter the digest")
+	}
+	if err := os.Chmod(rootFile, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(conf, []byte("example = false\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

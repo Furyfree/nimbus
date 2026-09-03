@@ -6,7 +6,8 @@ fedora = ["44"]
 min_engine = "0.1.0"
 
 # Repositories other than Fedora. The table key is the prefix a package
-# reference uses. `key` is the fingerprint the signing key must have.
+# reference uses. `key` is the fingerprint the signing key must have, and
+# `priority` is above Fedora's default 99 so Fedora wins a shared name.
 
 [repositories.terra]
 kind = "dnf"
@@ -20,47 +21,55 @@ kind = "dnf"
 release_package = "https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-44.noarch.rpm"
 sha256 = "8af2dbb02e3a72f0961ec79cf1ea3f350719cb830b0f99f59e939389feb34b1c"
 key = "E9A4 91A3 DE24 7814 E7E0 67EA E06F 8ECD D651 FF2E"
+priority = 100
 
 [repositories.rpmfusion-nonfree]
 kind = "dnf"
 release_package = "https://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-44.noarch.rpm"
 sha256 = "c2606f494b0c4417bf6632f865448da3febb420e19182e47874d8db4c35a8a8e"
 key = "79BD B88F 9BBF 7391 0FD4 095B 6A2A F961 9484 3C65"
+priority = 100
 
 [repositories.docker]
 kind = "dnf"
 baseurl = "https://download.docker.com/linux/fedora/$releasever/$basearch/stable"
 key_url = "https://download.docker.com/linux/fedora/gpg"
 key = "060A 61C5 1B55 8A7F 742B 77AA C52F EB6B 621E 9F35"
+priority = 100
 
 [repositories.onepassword]
 kind = "dnf"
 baseurl = "https://downloads.1password.com/linux/rpm/stable/$basearch"
 key_url = "https://downloads.1password.com/linux/keys/1password.asc"
 key = "3FEF 9748 469A DBE1 5DA7 CA80 AC2D 6274 2012 EA22"
+priority = 100
 
 [repositories.brave]
 kind = "dnf"
 baseurl = "https://brave-browser-rpm-release.s3.brave.com/$basearch/"
 key_url = "https://brave-browser-rpm-release.s3.brave.com/brave-core.asc"
 key = "DBF1 A116 C220 B8C7 164F 9823 0686 B784 2003 8257"
+priority = 100
 
 [repositories.vscodium]
 kind = "dnf"
 baseurl = "https://download.vscodium.com/rpms/"
 key_url = "https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/-/raw/master/pub.gpg"
 key = "1302 DE60 2318 89FE 1EBA CADC 5467 8CF7 5A27 8D9C"
+priority = 100
 
 [repositories.chatgpt]
 kind = "dnf"
 baseurl = "https://persistent.oaistatic.com/codex-app-prod/linux/rpm/$basearch"
 key_file = "keys/chatgpt.asc"
 key = "3BFA 0E4A E8B8 CC16 A2D9 BA68 4A3B 4A56 6C46 60E4"
+priority = 100
 
 [repositories.hyprland-copr]
 kind = "copr"
 project = "lionheartp/Hyprland"
 key = "97E2 3476 C896 3513 5407 C7D5 E9BA 4134 2C4B 2995"
+priority = 100
 
 [repositories.flathub]
 kind = "flatpak"
