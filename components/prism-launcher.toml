@@ -1,0 +1,12 @@
+# Prism Launcher from Terra with Fedora's Java. Shared by gaming and
+# laptop-gaming.
+schema = 1
+id = "prism-launcher"
+
+requires = []
+conflicts = []
+packages = [
+  "terra:prismlauncher",
+  "java-25-openjdk",
+]
+removes = []

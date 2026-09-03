@@ -1,0 +1,23 @@
+# HP EliteBook X G1a: AMD integrated graphics.
+schema = 1
+id = "laptop"
+
+profiles = [
+  "common",
+  "development",
+  "laptop-gaming",
+  "hyprland-noctalia",
+  "virtualization",
+]
+
+components = [
+  "amd-graphics",
+  "laptop-power",
+]
+
+packages = []
+
+package_exclusions = []
+
+[dotfiles]
+repo = "https://github.com/Furyfree/dotfiles.git"

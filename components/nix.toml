@@ -1,0 +1,8 @@
+# Nix from Fedora. nix-daemon.service arrives with the service resource type.
+schema = 1
+id = "nix"
+
+requires = []
+conflicts = []
+packages = ["nix", "nix-daemon"]
+removes = []

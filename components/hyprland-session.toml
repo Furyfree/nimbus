@@ -1,0 +1,33 @@
+# Hyprland from its COPR, Noctalia from Fedora, the greeter from Terra, and
+# the portals, audio, and session helpers they need. The greeter service,
+# session entries, and recovery session arrive with the desktop phase.
+schema = 1
+id = "hyprland-session"
+
+requires = []
+conflicts = []
+packages = [
+  "hyprland-copr:hyprland",
+  "hyprland-copr:hyprland-guiutils",
+  "hyprland-copr:xdg-desktop-portal-hyprland",
+  "noctalia",
+  "terra:noctalia-greeter",
+  "greetd",
+  "xdg-desktop-portal-gtk",
+  "xorg-x11-server-Xwayland",
+  "qt6-qtwayland",
+  "qt5-qtwayland",
+  "xdg-utils",
+  "xdg-user-dirs",
+  "gnome-keyring",
+  "accountsservice",
+  "udiskie",
+  "udisks2",
+  "playerctl",
+  "pipewire",
+  "pipewire-pulse",
+  "pipewire-alsa",
+  "wireplumber",
+  "bluez",
+]
+removes = []

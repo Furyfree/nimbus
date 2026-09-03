@@ -1,0 +1,9 @@
+# Snapper creates and retires the recovery snapshots. Its configurations
+# arrive with the recovery phase.
+schema = 1
+id = "snapper"
+
+requires = []
+conflicts = []
+packages = ["snapper"]
+removes = []

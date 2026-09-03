@@ -1,0 +1,12 @@
+# Light gaming for the laptop: Prism Launcher and small helpers. Shares
+# components with the gaming profile instead of repeating packages.
+schema = 1
+id = "laptop-gaming"
+
+packages = [
+  "gamemode",
+]
+
+components = [
+  "prism-launcher",
+]

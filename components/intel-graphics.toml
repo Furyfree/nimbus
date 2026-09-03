@@ -1,0 +1,13 @@
+# Intel integrated graphics with video decoding from RPM Fusion.
+schema = 1
+id = "intel-graphics"
+
+requires = []
+conflicts = []
+packages = [
+  "mesa-dri-drivers",
+  "mesa-vulkan-drivers",
+  "intel-gpu-firmware",
+  "rpmfusion-nonfree:intel-media-driver",
+]
+removes = []

@@ -1,0 +1,8 @@
+# External monitor brightness on the desktop.
+schema = 1
+id = "desktop-display"
+
+requires = []
+conflicts = []
+packages = ["ddcutil"]
+removes = []

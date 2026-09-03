@@ -1,0 +1,20 @@
+# Steam and the launchers and helpers around it. Desktop only.
+schema = 1
+id = "steam-stack"
+
+requires = []
+conflicts = []
+packages = [
+  "rpmfusion-nonfree:steam",
+  "lutris",
+  "wine",
+  "winetricks",
+  "protontricks",
+  "gamescope",
+  "mangohud",
+  "goverlay",
+  "terra:umu-launcher",
+  "terra:heroic-games-launcher",
+  "terra:protonplus",
+]
+removes = []

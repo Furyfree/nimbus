@@ -1,0 +1,13 @@
+# Laptop display, power, battery, and fingerprint reader.
+schema = 1
+id = "laptop-power"
+
+requires = []
+conflicts = []
+packages = [
+  "brightnessctl",
+  "power-profiles-daemon",
+  "upower",
+  "fprintd",
+]
+removes = []

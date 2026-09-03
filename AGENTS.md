@@ -171,8 +171,8 @@ not Fedora.
 ## Verify honestly
 
 - Run focused checks while iterating and `just check` before handoff.
-- Once Go code exists, the complete local gate includes `gofmt`, `go vet ./...`,
-  `go test ./...`, and `git diff --check`.
+- The complete local gate is `just check`: `gofmt`, `go vet ./...`,
+  `go test ./...`, `git diff --check`, and markdownlint.
 - Read complete errors and relevant logs before fixing their cause.
 - Inspect the final diff, staged diff when applicable, and untracked files.
 - Report the exact checks run, failures, skipped checks, and unavailable tools.

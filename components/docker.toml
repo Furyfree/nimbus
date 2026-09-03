@@ -1,0 +1,27 @@
+# Docker from Docker's own Fedora repository. Shared by development and
+# windows-vm. docker.service and the group membership arrive with the
+# service and group resource types.
+schema = 1
+id = "docker"
+
+requires = []
+conflicts = []
+
+packages = [
+  "docker:docker-ce",
+  "docker:docker-ce-cli",
+  "docker:containerd.io",
+  "docker:docker-buildx-plugin",
+  "docker:docker-compose-plugin",
+]
+
+removes = [
+  "moby-engine",
+  "podman-docker",
+]
+
+[[files]]
+source = "etc/docker/daemon.json"
+owner = "root"
+group = "root"
+mode = "0644"

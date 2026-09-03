@@ -1,0 +1,60 @@
+# The Hyprland and Noctalia session, its theming, and the graphical
+# applications that need a desktop session.
+schema = 1
+id = "hyprland-noctalia"
+
+packages = [
+  # Files and media
+  "nautilus",
+  "sushi",
+  "gvfs",
+  "gvfs-mtp",
+  "gvfs-smb",
+  "loupe",
+  "celluloid",
+  "mpv",
+  "obs-studio",
+  "pinta",
+  "zathura",
+  "libreoffice",
+  "gnome-disk-utility",
+  "flatseal",
+  # Communication and browsing
+  "brave:brave-origin",
+  "terra:signal-desktop",
+  "terra:vesktop",
+  "onepassword:1password",
+  "onepassword:1password-cli",
+  "flatpak:com.spotify.Client",
+  "flatpak:md.obsidian.Obsidian",
+  # Terminal
+  "terra:ghostty",
+  # Theming
+  "papirus-icon-theme",
+  "terra:bibata-cursor-theme",
+  "qt6ct",
+  "jetbrains-mono-fonts-all",
+  "terra:jetbrainsmono-nerd-fonts",
+  "rsms-inter-fonts",
+  "terminus-fonts",
+  "google-noto-sans-fonts",
+  "google-noto-color-emoji-fonts",
+  "google-noto-sans-cjk-fonts",
+  # Noctalia plugin dependencies
+  "grim",
+  "slurp",
+  "tesseract",
+  "tesseract-langpack-eng",
+  "qrencode",
+  "sqlite",
+  "libnotify",
+  "socat",
+  "terra:gpu-screen-recorder",
+  "terra:librepods",
+]
+
+components = [
+  "hyprland-session",
+  "media-codecs",
+  "printing",
+]

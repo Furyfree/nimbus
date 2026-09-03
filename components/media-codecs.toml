@@ -1,0 +1,11 @@
+# Full codecs from RPM Fusion. ffmpeg replaces Fedora's ffmpeg-free.
+schema = 1
+id = "media-codecs"
+
+requires = []
+conflicts = []
+packages = [
+  "rpmfusion-free:ffmpeg",
+  "rpmfusion-free:gstreamer1-plugins-bad-freeworld",
+]
+removes = ["ffmpeg-free"]
