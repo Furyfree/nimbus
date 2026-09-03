@@ -575,6 +575,42 @@ help, and keyboard-only operation in a disposable VM. Exit when the dashboard
 can select profiles, components, and packages, review and apply the resulting
 plan, and present tasks without any behavior the commands lack.
 
+## 10. Performance and size
+
+This track never closes. It starts once Phase 9 is delivered and takes one
+measured improvement at a time, each as its own bounded task with a number
+before and after.
+
+### Outcome
+
+Nimbus stays fast enough that reviewing a plan feels immediate and applying
+one is bounded by DNF and the network, not by Nimbus, and the binary stays
+as small as a stripped static Go program can be.
+
+### Candidates
+
+- Binary size: `just build` already strips symbols and debug data; watch
+  the dependency count, keep the Charm libraries the only interactive
+  dependency, and refuse a module that a standard-library call would cover.
+- Inspection: one `dnf5 repoquery` per run rather than one per check,
+  facts cached inside a command instead of re-inspected between steps,
+  and the DNF preview reused between plan and the apply digest check when
+  nothing changed.
+- Apply: independent operations such as key downloads and Flatpak installs
+  run concurrently only where ordering does not matter and the plan shows
+  the same steps; DNF transactions stay single and sequential because DNF
+  owns that lock.
+- Startup: no work before the command is parsed, so `nimbus --version` and
+  help stay instant.
+
+### Rules
+
+- Measure first with the disposable VM and record the numbers in TASKS.md;
+  an optimization without a measurement is not merged.
+- Correctness, review, and verification are never traded for speed: every
+  mutation still appears in the plan and still gets its receipt.
+- The user-visible command surface does not change for performance work.
+
 ## Later
 
 - hibernation and supported boot-resource management

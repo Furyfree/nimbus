@@ -65,7 +65,8 @@ just check
 ~~~
 
 It runs `gofmt`, `go vet`, `go test`, `git diff --check`, and markdownlint.
-`just validate` runs `nimbus validate` against this checkout.
+`just validate` runs `nimbus validate` against this checkout, and `just build`
+produces a static `nimbus` binary that runs on any x86_64 Linux.
 
 The delivered commands are `validate`, `doctor`, `plan`, `status`, `apply`,
 `managed`, `unmanaged`, `why`, the `profiles`, `components`, and `packages`
