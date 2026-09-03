@@ -1006,11 +1006,40 @@ Q-017.
 
 ### Open questions
 
-None on 2026-09-03.
+#### Q-018: Should the Fedora base be extracted live instead of listed?
+
+Opened 2026-09-03 after Phase 3. `components/fedora-base.toml` lists the 132
+packages the installer leaves behind so that none of them is a prune
+candidate. The list is generated from Fedora's comps groups plus a
+hand-verified Anaconda set, must be regenerated per Fedora release, and can
+only be completed from the real prune output of the first VM run. The owner
+asks whether Nimbus should instead read the base set from the live system
+and always keep it out of the prune check, so the repository does not carry
+a list of every base package.
+
+Candidates, to be judged against real data from the Phase 4 VM run:
+
+- Read DNF history: the installer's transaction is the first one, and its
+  package set is the base by definition. Cheapest if DNF5 exposes it
+  reliably and Anaconda's transaction is identifiable.
+- Read the installed comps groups: `dnf5 group list --installed` plus
+  `group info` gives the same set the current list is generated from, but
+  live and per release, and misses the Anaconda-only packages the same way.
+- Keep the generated list, accepting the per-release regeneration.
+
+What a live rule changes: the base stops being desired state, so `why` no
+longer explains `bash`, apply neither adopts nor removes base packages, and
+prune eligibility becomes a policy on observed facts rather than a
+comparison with definitions. That is different from the D-012 hardware
+case, where observation was rejected as desired state, because a prune
+exclusion never installs anything. The candidate is the DNF-history rule
+with the comps rule as fallback, decided when the VM run shows whether the
+installer's transaction can be told apart. Until then the list stands.
 
 ### Consequences for the next documentation pass
 
-Every question through Q-017 is resolved and D-007 is closed. The only work
+Every question through Q-017 is resolved and D-007 is closed. Q-018 stays
+open until the Phase 4 VM run supplies the data to decide it. The only work
 outside this repository is the dotfiles template change from Q-015, which
 gates the Phase 5 Chezmoi handoff. The active documents are consolidated below
 `docs/`, and legacy history is retained only in the named Git snapshot. One

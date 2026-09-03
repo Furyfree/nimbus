@@ -184,12 +184,14 @@ the first VM run is deferred to Phase 4.
 
 ## Blockers and residual risk
 
-- The `fedora-base` component declares what the installer leaves behind, so
-  the base is desired rather than a prune candidate. Its comps half is
-  generated evidence; its Anaconda half (kernel, firmware, bootloader,
-  release packages) is the known set and is completed from the real prune
-  output in the first VM run. Prune stays informational until Phase 4 adds
-  protected-package and dependency eligibility.
+- Q-018 asks whether the base should be read live from DNF history or the
+  installed comps groups instead of listed; it is decided after the Phase 4 VM
+  run. Until then the `fedora-base` component declares what the installer
+  leaves behind, so the base is desired rather than a prune candidate. Its
+  comps half is generated evidence; its Anaconda half (kernel, firmware,
+  bootloader, release packages) is the known set and is completed from the
+  real prune output in the first VM run. Prune stays informational until Phase
+  4 adds protected-package and dependency eligibility.
 - A non-root `plan` reads DNF's metadata through the system cache when it is
   fresh and otherwise its user cache; apply runs DNF as root and re-resolves,
   so a difference surfaces as a refused digest rather than a silent change.
