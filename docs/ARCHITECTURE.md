@@ -11,6 +11,8 @@ implementation that delivers it. It grows one section per phase as
 cmd/nimbus/            main: calls cli.Execute and exits with its code
 internal/cli/          Cobra command tree, output rendering, exit codes
 internal/definitions/  desired configuration: load, validate, resolve, hash
+internal/facts/        observed system: read-only inspection behind a Source
+internal/doctor/       health checks over facts, each with its remediation
 internal/selector/     the local selector and the checkout origin check
 internal/version/      engine build identity and supported schema numbers
 
@@ -26,8 +28,11 @@ tools/package-query/   throwaway Fedora container for package research
 ~~~
 
 Everything under `internal/` is private to this module. Dependencies point
-one way: `cli` uses `definitions`, `selector`, and `version`; `definitions`
-uses `version` for the engine check; nothing imports `cli`.
+one way: `cli` uses `definitions`, `facts`, `doctor`, `selector`, and
+`version`; `doctor` uses `facts`; `facts` uses `selector` for the origin
+read; `definitions` uses `version` for the engine check; nothing imports
+`cli`, and `facts` never imports `definitions`, so observed state cannot
+leak into desired state.
 
 ## The flow of `nimbus validate`
 
@@ -64,6 +69,23 @@ selector (or --checkout)
    SPEC.md specifies.
 6. `cli` renders the result and maps the outcome to exit 0, 1, or 2.
 
+## The flow of `nimbus doctor`
+
+~~~text
+selector (or --checkout)  -> canonical root, definitions loaded for the
+                             supported releases; failures become checks
+facts.Inspect(Source)     -> one Section per fact family, unknown on error
+doctor.Run(facts, config) -> nine checks with observation, impact, fix
+render                    -> human lines or the JSON envelope; exit 1 on fail
+~~~
+
+`facts.Source` is the only door to the host: `Run` executes a command
+without a shell, `ReadFile`, `ReadDir`, and `LookPath` read the filesystem.
+`ExecSource` is the real one; `FakeSource` replays recorded Fedora output
+and fails on anything not recorded, so a test can never reach the host by
+accident. Each fact family is a `Section` holding a value or the reason it
+is unknown. Doctor treats unknown as a separate state from failure.
+
 ## Rules the code keeps
 
 - **Read-only.** Nothing in these packages runs a command, opens a network
@@ -95,8 +117,6 @@ the engine version and output schema number.
 
 ## Where later phases attach
 
-- Phase 2 adds an `internal/facts` package with an injectable command runner
-  and Fedora fixtures; `doctor` joins `cli`.
 - Phase 3 adds planning over desired, observed, and applied state; `status`,
   `plan`, and the ownership views join `cli`.
 - Phase 4 adds apply, the operation lock, receipts under `/var/lib/nimbus`,

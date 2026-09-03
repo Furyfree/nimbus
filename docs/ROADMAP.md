@@ -174,10 +174,12 @@ recovery.
 
 ### Validation and exit criteria
 
-Use fake-runner unit tests, Fedora 44 fixtures, golden doctor output, and manual
-comparison in a disposable Fedora VM. Exit when the same internal snapshot and
+Use fake-runner unit tests, Fedora 44 fixtures recorded from the research
+container, and golden doctor output. Exit when the same internal snapshot and
 doctor result are stable and no inspector writes, invokes sudo, or performs
-network access.
+network access. The first disposable-VM run waits for Phase 4 and covers
+doctor, plan, and apply together, because the read-only phases carry little
+risk a VM would expose earlier.
 
 ## 3. Planning and DNF
 
@@ -254,7 +256,9 @@ only from the lifecycle recorded in the receipt.
 
 ### Risks and recovery
 
-This is the first mutating phase. Tests run only in disposable Fedora VMs.
+This is the first mutating phase. Tests run only in disposable Fedora VMs,
+and the phase opens with the first VM run, which also compares doctor and
+plan output with the recorded fixtures before any apply is attempted.
 Failed verification never creates a successful receipt. DNF may refresh
 metadata between approval and execution; the re-resolution refusal covers
 that, and this phase decides whether download-then-cache-only execution is
