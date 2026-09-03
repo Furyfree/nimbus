@@ -26,7 +26,7 @@ preference is fixed and the same for every package:
 1. Fedora repositories, written as a bare package name.
 2. The maker's own channel: a signed repository or COPR at system scope, or
    an installer script, Cargo crate, or Mise runtime at user scope.
-3. Flathub, for a GUI application that needs no host integration.
+3. Flathub, which a GUI application without host integration may use.
 4. Terra, RPM Fusion, or a community COPR, when nothing above offers the
    package.
 5. A COPR the owner builds, when nothing offers the package at all: GitHub
@@ -42,31 +42,36 @@ Rules:
 
 - The earlier source wins where two carry the same name. Fedora provides
   Chezmoi, Noctalia, Just, Tailscale, and Nix; RPM Fusion provides Steam. A
-  later repository is declared with a lower DNF priority so it cannot shadow
-  an earlier one, and planning refuses a package that DNF would take from a
-  repository other than the one its prefix names.
+  later repository is declared with a higher numeric DNF `priority`, which
+  means lower precedence, so it cannot shadow an earlier one, and planning
+  refuses a package that DNF would take from a repository other than the one
+  its prefix names.
 - Maker repositories in use: Docker, 1Password, Brave for `brave-origin`,
   VSCodium, and OpenAI's ChatGPT repository. The ChatGPT RPM's own
   post-install script would add that repository; Nimbus declares it directly
   and installs `chatgpt` from it so DNF owns the updates.
 - User-scope maker channels are the Mise, Zed, and Herdr installer scripts,
   `cargo install`, and `mise install`. Nimbus runs them as the normal user,
-  never as root, as steps of the reviewed plan. A maker's script is fetched
-  from its documented URL and cannot be pinned to a version, so the plan
-  shows the URL and the digest of the fetched script. Mise installs Rust, so
-  Cargo steps follow the Mise runtime step. The maker owns later updates:
-  Mise's `auto_update = true`, Zed's own updater, and Topgrade for Herdr,
-  Cargo, and Mise runtimes.
+  never as root, as steps of the reviewed plan. A maker's script cannot be
+  pinned to a version, so Nimbus downloads it to a file, shows the URL and
+  the digest of that file, and runs exactly that file after approval; it
+  never pipes a download into a shell. Mise installs Rust, so Cargo steps
+  follow the Mise runtime step. The maker owns later updates: Mise's
+  `auto_update = true` in its Chezmoi-managed config, Zed's own updater, and
+  Topgrade for Herdr, Cargo, and Mise runtimes. Removal is explicit and shown
+  in the plan: `cargo uninstall`, `mise implode`, and `zed --uninstall`.
 - Cargo counts as the maker's channel, so Sheldon, VM Curator, Typst,
   Tinymist, Caligula, `cargo-update`, and Yazi's `resvg` helper stay on
-  Cargo although Terra packages some of them. Topgrade is the one deliberate
+  Cargo although Terra packages some of them. The owner's recorded
   exception: Nimbus installs Terra's `topgrade` so the tool that drives the
   user-scope update phase is not replaced by that phase.
-- Flatpaks are system scope and come from Flathub only: Spotify and Obsidian.
-  ProtonPlus, Heroic, Vesktop, gpu-screen-recorder, and Prism Launcher stay
-  native RPMs from Terra because they integrate with Steam, Wine, Noctalia,
-  or system Java. Per-application permission overrides are user
-  configuration and belong to Chezmoi.
+- Flathub is permitted, not preferred. The owner chooses native RPMs where an
+  accepted repository has one, so Flatpaks are Spotify and Obsidian only.
+  Signal comes from Terra rather than the community Flathub build for that
+  reason, and ProtonPlus, Heroic, Vesktop, gpu-screen-recorder, and Prism
+  Launcher stay Terra RPMs because they integrate with Steam, Wine, Noctalia,
+  or system Java. Flatpaks are system scope from Flathub only, and
+  per-application permission overrides belong to Chezmoi.
 - Nix comes from Fedora's `nix` and `nix-daemon` packages with
   `nix-daemon.service` as a system resource. The upstream multi-user
   installer is not accepted while its documented Linux prerequisite is
@@ -105,16 +110,24 @@ Rules:
 - TPM2 auto-unlock without a PIN is the accepted convenience, enrolled through
   `systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=7` as a later reviewed
   operation. It adds a slot and never replaces the passphrase slot. PCR 7 binds
-  the key to the Secure Boot state, so a stolen disk in another machine or a
+  the key to the Secure Boot state, so a disk moved to another machine or a
   boot with Secure Boot disabled falls back to the passphrase.
-- The known gap: with GRUB and an unencrypted `/boot`, PCR 7 does not measure
-  the kernel or initramfs, so a tampered initramfs signed by the same shim
-  chain could still receive the key. Closing that needs unified kernel images
-  with PCR 11 binding, which is later work; until then the auto-unlock protects
-  against theft, not against an attacker who can rewrite `/boot` first.
-- Firmware, Secure Boot, or bootloader changes invalidate the binding. Doctor
-  reports a slot that no longer unlocks, and re-enrollment is a reviewed
-  operation that removes the old TPM2 slot only after the new one is verified.
+- What that protects against: the disk read offline or moved to another
+  machine. What it does not protect against: an attacker who holds the
+  machine and rewrites the unencrypted `/boot` first, because with GRUB the
+  kernel and initramfs are not measured into PCR 7. That is the accepted
+  residual risk until the unified kernel image below is delivered.
+- The target design is a locally built unified kernel image: `systemd-ukify`
+  builds it on every kernel update, the machine owner key that already signs
+  the NVIDIA modules signs it, and the TPM2 slot binds to a signed PCR 11
+  policy so kernel updates need no re-enrollment. Fedora 44 ships a signed
+  unified kernel image only for virtual machines (`kernel-uki-virt`), so bare
+  metal builds its own. Boot stays hands-free and login stays the one
+  password. ROADMAP.md places this after recovery points and requires its
+  own restore drill.
+- Secure Boot policy changes invalidate the PCR 7 binding. Doctor reports a
+  slot that no longer unlocks, and re-enrollment is a reviewed operation that
+  removes the old TPM2 slot only after the new one is verified.
 - Nimbus inspects LUKS2 and never creates, converts, resizes, or re-encrypts a
   live volume.
 - Snapper recovery points live on the same encrypted disk and are not backups.
@@ -152,10 +165,13 @@ Rules:
   as a typed resource, and removal closes it.
 - Windows guest ports 8006 and 3389 bind to 127.0.0.1 only.
 - `sshd` is not enabled unless a component declares it. When enabled, password
-  authentication is off and keys come from the 1Password agent.
+  authentication is off and the component declares the `authorized_keys`
+  content as a system file. The 1Password agent supplies the owner's client
+  keys for outbound connections only.
 - Nimbus itself makes no network calls except through DNF, Flatpak, digest-
   pinned container image pulls, the user-scope maker channels named above,
-  and the one explicit Chezmoi initialization.
+  the one clone of the approved origin by `install.sh`, and the one explicit
+  Chezmoi initialization.
 
 ## Privilege
 
@@ -167,9 +183,10 @@ Rules:
   resource that the plan renders as `sudo usermod -aG docker <user>` and that
   takes effect at the next login. That membership is root-equivalent and is
   treated as such: it is the one standing privilege besides `sudo`, doctor
-  reports any other member, removal of the `docker` component removes it, and the
-  guest's Compose definition stays root-owned so the user cannot alter what
-  the daemon runs.
+  reports any other member, and removal of the `docker` component removes it.
+  The guest's Compose definition is root-owned so accidental edits and drift
+  are detected; it is not a boundary against that user, who can already run
+  any container.
 - Polkit rules, sudoers drop-ins, and group memberships are typed resources
   with owned removal.
 
@@ -191,10 +208,10 @@ Rules:
   DNF and Flatpak transactions itself, surrounded by its recovery point. It
   then offers a separately approved Topgrade phase for the user-scope
   managers. Topgrade reads the user's own Chezmoi-owned configuration, and
-  Nimbus passes `--disable` for the system, Flatpak, firmware, Nix, Chezmoi,
-  Git-repository, and self-update steps on the command line so that phase
-  cannot bypass the system plan or update source checkouts. Direct `topgrade`
-  runs are the user's own, like direct DNF.
+  Nimbus passes `--only` with the declared allowlist of user-scope steps plus
+  `--no-self-update`, so a step Topgrade adds later is never enabled by
+  accident and the phase cannot reach the system plan or source checkouts.
+  Direct `topgrade` runs are the user's own, like direct DNF.
 - Topgrade dry-run shows commands, not the downstream package versions selected
   by each manager. The plan therefore labels the user phase as command-level
   review, never as an exact or recoverable transaction. The root and Flatpak

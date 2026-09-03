@@ -82,10 +82,11 @@ an unsigned 32-bit big-endian integer holding octal `0100644` or `0100755`,
 content length as an unsigned 64-bit big-endian integer, and the exact content
 bytes. The digest renders as `sha256:` followed by lowercase hexadecimal.
 
-Regular-file mode is normalized to `100755` when any executable bit is set and
-to `100644` otherwise. Other permission bits and directory modes are ignored. A
-system file's desired target ownership and mode remain explicit resource data
-and participate through the content of the declaring definition.
+Regular-file mode is normalized to `100755` when the owner execute bit is set
+and to `100644` otherwise, which is Git's rule. Other permission bits and
+directory modes are ignored. A system file's desired target ownership and
+mode remain explicit resource data and participate through the content of
+the declaring definition.
 
 The configured checkout root may be a symlink. Nimbus resolves it once at the
 start of an operation and uses the resulting canonical directory for origin
@@ -139,7 +140,11 @@ suffix from the repository path, and preserving the remaining path. For example,
 
 For selector-based loading, Nimbus reads the checkout's local Git configuration
 without invoking Git or accessing the network and compares its normalized
-origin with the selector. A missing, invalid, or different origin is an error.
+origin with the selector. It reads `.git/config` directly, following the
+`gitdir` pointer when `.git` is a worktree file; an `include` or `includeIf`
+directive is an error that names the file and tells the user to set
+`remote.origin.url` directly. A missing, invalid, or different origin is an
+error.
 A legitimate origin change requires a separate explicit reviewed trust action
 that rewrites the selector; Nimbus never changes the remote. Commit,
 working-tree, and definition changes do not alter this repository trust and
@@ -157,12 +162,14 @@ min_engine = "0.1.0"
 [repositories.terra]
 kind = "dnf"
 baseurl = "https://repos.fyralabs.com/terra44"
+key_url = "https://repos.fyralabs.com/terra44/key.asc"
 key = "AE09 157A 4DE8 8B49 7EA1 D5D3 00CD AB43 DE22 6D6F"
 priority = 100
 
 [repositories.docker]
 kind = "dnf"
-baseurl = "https://download.docker.com/linux/fedora/$releasever/$basearch"
+baseurl = "https://download.docker.com/linux/fedora/$releasever/$basearch/stable"
+key_url = "https://download.docker.com/linux/fedora/gpg"
 key = "060A 61C5 1B55 8A7F 742B 77AA C52F EB6B 621E 9F35"
 
 [repositories.hyprland-copr]
@@ -178,11 +185,15 @@ key = "<fingerprint>"
 
 A repository ID is the prefix that package references use. `dnf` and
 `flatpak` are reserved: `dnf` is Fedora and `flatpak` is the single declared
-`flatpak` repository. A `dnf` repository may instead name a `release_package`
-URL with its `sha256` when the maker distributes a release RPM, as RPM Fusion
-does. `priority` is the DNF repository priority; a later source in the
-[SECURITY.md](SECURITY.md) order is declared with a higher number than
-Fedora's default so it cannot shadow an earlier one.
+`flatpak` repository. `key_url` is where DNF fetches the signing key and
+`key` is the fingerprint that key must have; a key with another fingerprint
+fails the operation. A COPR derives its key URL from the project, and a
+Flatpak remote carries its key inside the `.flatpakrepo` file. A `dnf`
+repository may instead name a `release_package` URL with its `sha256` when
+the maker distributes a release RPM, as RPM Fusion does. `priority` is the
+DNF repository priority; a later source in the [SECURITY.md](SECURITY.md)
+order is declared with a higher number than Fedora's default so it cannot
+shadow an earlier one.
 
 A machine manifest has a stable ID:
 
@@ -228,6 +239,54 @@ identity and PCI devices, propose the matching hardware components, and
 include them in the reviewed manifest diff. The accepted component IDs are
 then ordinary explicit desired state; later resolution never re-detects or
 silently changes them.
+
+A profile file and a component file look like this:
+
+~~~toml
+# profiles/common.toml
+schema = 1
+id = "common"
+
+packages = [
+  "git",
+  "chezmoi",
+  "flatpak",
+  "flatpak:com.spotify.Client",
+]
+
+components = ["snapper"]
+~~~
+
+~~~toml
+# components/docker.toml
+schema = 1
+id = "docker"
+
+requires = []
+conflicts = []
+packages = [
+  "docker:docker-ce",
+  "docker:docker-ce-cli",
+  "docker:containerd.io",
+  "docker:docker-buildx-plugin",
+  "docker:docker-compose-plugin",
+]
+removes = ["moby-engine", "podman-docker"]
+
+[[files]]
+source = "etc/docker/daemon.json"
+owner = "root"
+group = "root"
+mode = "0644"
+~~~
+
+`schema` and `id` are required and `id` must match the filename. Every other
+field is optional and defaults to empty. A profile carries `packages` and
+`components`. A component carries `requires` and `conflicts`, both lists of
+component IDs, `packages`, `removes`, and `files`. A `[[files]]` entry names
+its `source` relative to `system/root/`, which must start with `etc/`; the
+target is the same path below `/`. `owner`, `group`, and `mode` are required
+on every entry. An unknown field anywhere is an error.
 
 The initial profile vocabulary is:
 
@@ -314,7 +373,6 @@ Validation rejects:
 - conflicting components or desired resource states
 - duplicate lifecycle ownership
 - invalid package exclusions or constraints
-- exclusions of protected or technical dependencies
 - invalid provider configuration
 - arbitrary shell operations
 - path traversal, symlink escape, and system sources outside the checkout
@@ -355,7 +413,8 @@ provider-qualified native package target; references that resolve to the same
 canonical identity merge provenance when their prefix agrees, and two prefixes
 for one name are duplicate ownership and fail validation. A repository becomes
 a desired resource when any selected package names it, is owned once however
-many packages use it, and is removed only when no selected package names it.
+many packages use it, and is removed only when no selected package names it
+and inspection shows no installed package that still comes from it.
 Nimbus never enables a repository or installs its release package with
 signature checking disabled; the plan shows the pinned key or digest.
 
@@ -366,6 +425,13 @@ as RPM Fusion's `ffmpeg` replacing Fedora's `ffmpeg-free`. Package-specific
 behavior belongs in typed definition data, never package-name conditionals in
 Go.
 
+A `package_exclusions` entry in a manifest may name only a package that a
+selected profile or component installs on that machine, and never a package
+a selected component requires. An entry that matches nothing is a validation
+error. Whether an excluded package is protected or still needed by an
+installed package is a planning check against the observed system, not a
+validation check.
+
 One provider owns an installed executable lifecycle. Nimbus manages
 system-scoped Flatpaks from Flathub. User-scope tools follow the
 [SECURITY.md](SECURITY.md) source order: Nimbus runs a maker's installer
@@ -373,7 +439,10 @@ script, `cargo install`, or `mise install` as the normal user, without sudo,
 as a reviewed plan step. Runtimes declared in `~/.config/mise/config.toml`
 are installed by Mise after Chezmoi has written that file; Chezmoi owns the
 file, Mise owns the runtimes, and Nimbus plans the `mise install` step and
-reports runtimes that are missing.
+reports runtimes that are missing. User-scope steps are safe to repeat and
+write no receipt; verification is the presence of the tool or runtime. Their
+removal is explicit, shown in the plan, and never triggered by removing a
+profile: `cargo uninstall <crate>`, `mise implode`, and `zed --uninstall`.
 
 A package constraint is accepted only when the native provider can enforce it
 during normal native updates. Unsupported comparison syntax is rejected rather
@@ -444,7 +513,8 @@ Nimbus owns:
 Chezmoi owns:
 
 - files and templates below the user's home directory except the Nimbus local
-  selector
+  selector and the binaries that Nimbus-run maker installers, Cargo, and Mise
+  place below `~/.local` and `~/.cargo`
 - Hyprland, Noctalia, shell, terminal, editor, browser, and application user
   configuration
 - systemd user unit files, user scripts, and desktop entries
@@ -683,7 +753,9 @@ nimbus init:
 6. shows the complete system plan
 7. applies only after approval
 8. initializes Chezmoi when selected and its prerequisites are available
-9. reports direct Chezmoi and remaining manual steps
+9. runs the user-scope steps that depend on the Chezmoi-written
+   configuration, such as `mise install` and the Cargo tools
+10. reports direct Chezmoi and remaining manual steps
 
 Fresh installation and reinstallation use the same tracked machine manifest.
 Creating a new machine writes a reviewed manifest to the Nimbus checkout and
@@ -728,11 +800,12 @@ cross the handoff. The handoff keys are documented in the dotfiles repository's
 `PROFILES.md`.
 
 When the development profile is selected, apply installs Mise before the
-handoff by running the maker's `curl https://mise.run | sh` installer as the
-normal user, verifies `~/.local/bin/mise`, and runs
-`mise settings set auto_update true`. Chezmoi initialization then writes
-`~/.config/mise/config.toml`. After the handoff, apply runs the user-scope
-steps that depend on it:
+handoff: it downloads the maker's installer from `https://mise.run` to a
+file, shows the digest, runs that file as the normal user, and verifies
+`~/.local/bin/mise`. Chezmoi initialization then writes
+`~/.config/mise/config.toml`, which carries `auto_update = true` in its
+settings; Nimbus never edits that file. After the handoff, apply runs the
+user-scope steps that depend on it:
 
 ~~~sh
 MISE_SYSTEM_DEPS=warn mise -C "$HOME" install
@@ -963,17 +1036,20 @@ installed Fedora release and has no target-release flag.
 After the verified system phase, the command offers a separate Topgrade phase
 for the user-scope update managers. Topgrade reads the user's own
 Chezmoi-owned configuration; Nimbus installs the Topgrade package and passes
-`--disable` for the system, Flatpak, firmware, Nix, Chezmoi, Git-repository,
-and self-update steps on the command line. The reviewed plan identifies every
-remaining Topgrade step and its command, and Topgrade runs as the normal user
-without sudo. The phase is command-level review: Topgrade dry-run does not
-resolve the exact downstream versions selected by Mise, Cargo, npm, uv, and
-similar managers, so Nimbus does not describe those mutations as exact,
-managed, or recoverable transactions.
+`--only` with the declared allowlist of user-scope steps plus
+`--no-self-update`, so system, Flatpak, firmware, Nix, Chezmoi, and
+Git-repository steps, and any step Topgrade adds later, never run from this
+phase. The reviewed plan identifies every allowed Topgrade step and its
+command, and Topgrade runs as the normal user without sudo. The phase is
+command-level review: Topgrade dry-run does not resolve the exact downstream
+versions selected by Mise, Cargo, npm, uv, and similar managers, so Nimbus
+does not describe those mutations as exact, managed, or recoverable
+transactions.
 
 The recovery point's pre snapshot is created before the system mutation and
-its post snapshot after the complete upgrade workflow succeeds. It covers the
-root and system Flatpak subvolumes only. User tools below the home subvolume are
+its post snapshot as soon as the system phase is verified, before the
+Topgrade phase starts. It covers the root and system Flatpak subvolumes
+only. User tools below the home subvolume are
 outside that recovery boundary; a failed Topgrade step is repaired through its
 own manager or by reconstructing the declared user environment.
 
@@ -1103,7 +1179,9 @@ privilege, secrets, and the doctor checks. The engine invariants are:
 - External artifacts require an approved source and cryptographic digest or
   supported signature.
 - Remote shell scripts are not a resource type. A maker's installer script is
-  at most a user-scope manual task that Nimbus never runs.
+  downloaded to a file, shown with its digest, and run only as the normal
+  user; Nimbus never pipes a download into a shell and never runs one as
+  root.
 - Native package signatures remain enabled, and a repository is enabled only
   with a pinned release package or key.
 - Paths are validated against traversal, symlink escape, and unsafe ownership.

@@ -63,5 +63,5 @@ The local gate is:
 just check
 ~~~
 
-Today it runs git diff --check. It will also run formatting, vetting, and tests
-after Go code exists.
+Today it runs `git diff --check` and markdownlint. It will also run
+formatting, vetting, and tests after Go code exists.

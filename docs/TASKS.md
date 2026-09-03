@@ -18,6 +18,7 @@ change before the Phase 5 Chezmoi handoff.
   reject each listed omission.
 - [x] Replace the source tiers with the fixed five-step order in SECURITY.md
   and reconcile PACKAGES.md with it (D-015).
+- [x] Apply the 2026-09-03 passthrough corrections (D-019).
 - [ ] Create the Go module and the Cobra command tree.
 - [ ] Implement nimbus validate with an explicit checkout override and nimbus
   version without selector, checkout, or system dependencies.
@@ -25,7 +26,8 @@ change before the Phase 5 Chezmoi handoff.
   stubs in root help.
 - [ ] Add nimbus.toml with the first definition schema, supported Fedora
   releases, minimum-engine compatibility metadata, and the declared
-  repositories with pinned keys.
+  repositories with key URLs and pinned fingerprints.
+- [ ] Reject `package_constraints` as an unknown field in Phase 1.
 
 ### Configuration model
 
@@ -62,10 +64,11 @@ change before the Phase 5 Chezmoi handoff.
   and every declaration retained by Q-013 deterministically.
 - [ ] Preserve ordered profile IDs and selection provenance in the resolved
   model for the later Chezmoi handoff and why command.
-- [ ] Dotfiles repository, before Phase 5: add `Machine` and
-  `ManagedByNimbus` prompts to `.chezmoi.toml.tmpl`, drop the profile-choice
-  validation so the list is stored as sent, deploy every Linux config except
-  Hyprland and Noctalia unconditionally, and update PROFILES.md.
+- [ ] Dotfiles repository, before Phase 5: delete `machines/` and its
+  symlink-selector README, add `Machine` and `ManagedByNimbus` prompts to
+  `.chezmoi.toml.tmpl`, drop the profile-choice validation so the list is
+  stored as sent, deploy every Linux config except Hyprland and Noctalia
+  unconditionally, and update PROFILES.md.
 
 ### Output and evidence
 
@@ -101,8 +104,20 @@ change before the Phase 5 Chezmoi handoff.
   inspected and registers OpenAI's DNF repository, and Brave's repository
   carries `brave-origin`.
 - The dotfiles template currently prompts only for `onePasswordSsh` and
-  `Profiles` and fails on any profile outside its four choices, so the
-  three-value handoff cannot succeed until the template task above is done.
+  `Profiles` and fails on any profile outside its four choices, and the
+  repository still holds `machines/desktop.toml`, `machines/laptop.toml`, and
+  a README describing the old symlink selector; the handoff cannot succeed
+  until the template task above is done.
+- The 2026-09-03 passthrough ran three passes: the main agent, Codex
+  GPT-5.6 Sol at high reasoning (24 findings), and GLM 5.3 Flash at max
+  reasoning through opencode (15 findings). Grok did not run because its CLI
+  was not authenticated. Two findings were disproved by test in a scratch
+  home: Chezmoi's `--promptMultichoice` splits on slashes, not commas, and it
+  accepts flag-supplied values outside the template's choice list. Verified
+  the same way: `mise settings set` writes `~/.config/mise/config.toml`,
+  Topgrade 17.9 exposes over 150 steps to `--only` and `--disable`, and
+  `mise implode` and `zed --uninstall` exist. D-019 records the accepted
+  corrections; the worktree was unchanged by every pass.
 - The 2026-09-02 documentation reconciliation establishes one architecture and
   one active document hierarchy.
 - Q-002 establishes the selector as a regular Nimbus-owned local file that
@@ -136,7 +151,7 @@ change before the Phase 5 Chezmoi handoff.
   the Phase 1 desktop and laptop fixtures select those components directly.
 - D-013, as amended by D-018, keeps exact system updates in Nimbus and runs
   Topgrade with the user's Chezmoi-owned configuration and a command-line
-  `--disable` list. Topgrade dry-run shows command invocations rather than
+  `--only` allowlist. Topgrade dry-run shows command invocations rather than
   resolved downstream versions, and the recovery topology excludes those
   home-directory mutations.
 - Current upstream installation evidence accepts Mise's recommended user-scope
@@ -163,12 +178,12 @@ change before the Phase 5 Chezmoi handoff.
 
 - The dotfiles template change for Q-015 is outside this repository and
   blocks only the Phase 5 handoff.
-- Signing-key fingerprints for Terra, RPM Fusion, Brave, VSCodium, the
+- Key URLs and fingerprints for RPM Fusion, 1Password, Brave, VSCodium, the
   Hyprland COPR, Flathub, and the owner's COPRs must be recorded in
   nimbus.toml from the makers' published keys before those repositories are
-  used; Docker's and OpenAI's are already recorded.
-- A maker's installer script cannot be pinned; the plan shows its URL and
-  fetched digest only.
+  used; Docker's, OpenAI's, and Terra's are already recorded.
+- A maker's installer script cannot be pinned to a version; Nimbus downloads
+  it, shows the file's digest, and runs that file.
 - Exact DNF5 constraint and desktop-session update behavior remains deliberately
   outside this phase.
 - Exact hardware probes belong to Phase 5 and Topgrade orchestration belongs to
