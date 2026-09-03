@@ -13,6 +13,7 @@ internal/cli/          Cobra command tree, output rendering, exit codes
 internal/definitions/  desired configuration: load, validate, resolve, hash
 internal/facts/        observed system: read-only inspection behind a Source
 internal/doctor/       health checks over facts, each with its remediation
+internal/plan/         desired versus observed: operations, digest, previews
 internal/selector/     the local selector and the checkout origin check
 internal/version/      engine build identity and supported schema numbers
 
@@ -28,11 +29,11 @@ tools/package-query/   throwaway Fedora container for package research
 ~~~
 
 Everything under `internal/` is private to this module. Dependencies point
-one way: `cli` uses `definitions`, `facts`, `doctor`, `selector`, and
-`version`; `doctor` uses `facts`; `facts` uses `selector` for the origin
-read; `definitions` uses `version` for the engine check; nothing imports
-`cli`, and `facts` never imports `definitions`, so observed state cannot
-leak into desired state.
+one way: `cli` uses `definitions`, `facts`, `doctor`, `plan`, `selector`,
+and `version`; `doctor` uses `facts`; `plan` uses `definitions` and `facts`;
+`facts` uses `selector` for the origin read; `definitions` uses `version`
+for the engine check; nothing imports `cli`, and `facts` never imports
+`definitions`, so observed state cannot leak into desired state.
 
 ## The flow of `nimbus validate`
 
@@ -86,13 +87,40 @@ and fails on anything not recorded, so a test can never reach the host by
 accident. Each fact family is a `Section` holding a value or the reason it
 is unknown. Doctor treats unknown as a separate state from failure.
 
+## The flow of `nimbus plan`
+
+~~~text
+loadSelected            -> canonical root, validated checkout, one machine
+facts.Inspect(Source)   -> installed packages, repository files, Flatpak
+plan.Build(inputs)      -> repositories to enable, packages to adopt or
+                           install, declared removals, Flatpaks, prune
+                           candidates, update information, digest
+render                  -> apply section, prune section, updates section
+~~~
+
+The planner asks DNF for its own view of each transaction with
+`dnf5 --assumeno --cacheonly install ...`, which prints the resolved table
+and aborts. It parses that table and refuses anything the definitions did
+not ask for: an undeclared install, an undeclared removal, a package from
+the wrong repository, a smuggled upgrade. A package whose repository is not
+enabled yet, or a Flatpak whose remote is missing, becomes a blocked
+operation, and a plan with any blocked operation is incomplete. Only the
+apply section is hashed into the digest; prune candidates and update
+information are informational and volatile.
+
+`status`, `managed`, `unmanaged`, `why`, `profiles list`,
+`components list`, and `packages installed` are views over the same
+resolver and facts. Until receipts exist, "managed" means desired and
+installed, which apply would adopt.
+
 ## Rules the code keeps
 
 - **Read-only.** Nothing writes a file, invokes sudo, or opens a network
-  connection. `definitions` and `selector` run no command at all; `facts`
-  runs native read-only commands only through `Source`, so a test can see
-  every one of them. Tests run the loader against a read-only tree to prove
-  the first part.
+  connection, except `plan --refresh`, which runs `dnf5 makecache` visibly
+  before planning. `definitions` and `selector` run no command at all;
+  `facts` and `plan` run native read-only commands only through `Source`,
+  so a test can see every one of them. Tests run the loader against a
+  read-only tree to prove the first part.
 - **Errors are collected, not thrown.** `definitions.ErrorList` carries every
   problem with its checkout-relative path so `validate` reports all of them
   at once. Structural load errors are reported first; semantic checks run on
@@ -119,8 +147,6 @@ the engine version and output schema number.
 
 ## Where later phases attach
 
-- Phase 3 adds planning over desired, observed, and applied state; `status`,
-  `plan`, and the ownership views join `cli`.
 - Phase 4 adds apply, the operation lock, receipts under `/var/lib/nimbus`,
   and the interactive pickers built on the Charm libraries.
 

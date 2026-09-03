@@ -1,0 +1,85 @@
+package plan
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// fixture returns the recorded output of one named dnf5 run.
+func fixture(t *testing.T, name string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", "dnf5-previews.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := "##### " + name + "\n"
+	i := strings.Index(string(data), marker)
+	if i < 0 {
+		t.Fatalf("fixture %s not recorded", name)
+	}
+	rest := string(data)[i+len(marker):]
+	rest = rest[strings.IndexByte(rest, '\n')+1:] // drop the "$ dnf5 ..." line
+	end := strings.Index(rest, "##### exit")
+	return []byte(rest[:end])
+}
+
+func TestParsePreviewInstall(t *testing.T) {
+	tx, err := ParsePreview(fixture(t, "install-one"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tx.Packages) != 1 || tx.Packages[0] != (TxPackage{Name: "ripgrep", Arch: "x86_64", EVR: "0:15.2.0-1.fc44", Repository: "updates", Section: "installing"}) {
+		t.Fatalf("packages = %+v", tx.Packages)
+	}
+	tx, err = ParsePreview(fixture(t, "install-deps"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	deps := len(tx.Rows("installing dependencies")) + len(tx.Rows("installing weak dependencies"))
+	if len(tx.Rows("installing")) != 1 || deps != 90 || len(tx.Packages) != 91 {
+		t.Fatalf("git preview: %d direct, %d deps, %d total", len(tx.Rows("installing")), deps, len(tx.Packages))
+	}
+	tx, err = ParsePreview(fixture(t, "install-allowerasing"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows := tx.Rows("installing"); len(rows) != 1 || rows[0].Repository != "rpmfusion-free-updates" {
+		t.Fatalf("ffmpeg preview = %+v", rows)
+	}
+}
+
+func TestParsePreviewOutcomes(t *testing.T) {
+	tx, err := ParsePreview(fixture(t, "nothing-to-do"))
+	if err != nil || !tx.NothingToDo || len(tx.Packages) != 0 {
+		t.Fatalf("nothing to do: %+v %v", tx, err)
+	}
+	var resolveErr *ResolveError
+	if _, err := ParsePreview(fixture(t, "no-match")); !errors.As(err, &resolveErr) || !strings.Contains(err.Error(), "No match for argument: this-package-does-not-exist") {
+		t.Fatalf("no match: %v", err)
+	}
+	if _, err := ParsePreview(fixture(t, "remove-with-dependents")); !errors.As(err, &resolveErr) || len(resolveErr.Problems) < 2 || !strings.Contains(resolveErr.Problems[0], "protected packages") {
+		t.Fatalf("protected: %v", err)
+	}
+	if _, err := ParsePreview([]byte("Package Arch Version Repository Size\nSurprising:\n foo x86_64 0:1-1 fedora 1 KiB\n")); err == nil || !strings.Contains(err.Error(), "unknown preview section") {
+		t.Fatalf("unknown section accepted: %v", err)
+	}
+	if _, err := ParsePreview([]byte("garbage\n")); err == nil {
+		t.Fatal("garbage accepted")
+	}
+}
+
+func TestParseCheckUpgrade(t *testing.T) {
+	ups, err := ParseCheckUpgrade(fixture(t, "check-upgrade"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ups) != 3 || ups[0] != (Upgrade{Name: "ca-certificates", Arch: "noarch", EVR: "2026.2.90_v9.0.317-1.fc44", Repository: "updates"}) || ups[2].Name != "openssl-libs" {
+		t.Fatalf("upgrades = %+v", ups)
+	}
+	if ups, err := ParseCheckUpgrade([]byte("Updating and loading repositories:\nRepositories loaded.\n")); err != nil || len(ups) != 0 {
+		t.Fatalf("empty = %+v %v", ups, err)
+	}
+}

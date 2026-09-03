@@ -394,6 +394,31 @@ system state, because the owner wants the browser detection and argument
 building typed and tested in one binary rather than kept in sync across
 Chezmoi scripts; Q-005 stands.
 
+#### D-020: Planning reads the cache, apply replays the plan
+
+Decided 2026-09-03 before Phase 3. `plan` previews every DNF transaction
+from the local metadata cache with `dnf5 --assumeno --cacheonly`, so plan
+and apply read the same package lists and apply can refuse a changed
+transaction; `plan --refresh` runs `dnf5 makecache` as the one opt-in
+network step, and `upgrade` refreshes by design. DNF5's `--store` downloads
+packages while recording the transaction, so it is the Phase 4 apply
+mechanism, download then `dnf5 replay`, not a preview. Rejected: planning
+online by default, because two consecutive resolutions could then disagree
+through no fault of the owner.
+
+Repositories Nimbus enables from a `baseurl` live in
+`/etc/yum.repos.d/nimbus-<id>.repo`, so ownership is visible by name; a
+maker's release package keeps the maker's file and IDs, and RPM Fusion's
+key, which ships inside a release RPM signed by that same key, is extracted
+from the SHA-256-verified RPM with `rpm2archive` and imported before the
+package is installed. Terra stays a `baseurl` repository because its own
+installer uses that URL. A foreign file that already provides a declared
+repository blocks the operation instead of being duplicated or taken over.
+Rejected: writing every repository file ourselves, because a maker-updated
+release package tracks mirror moves that a hand-written file would miss;
+and `--nogpgcheck` for the release RPM, because the policy forbids it and
+extraction costs two read-only steps.
+
 ### Resolved questions
 
 #### Q-001: Package reference grammar and catalog precedence (resolved)

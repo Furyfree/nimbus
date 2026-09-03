@@ -53,6 +53,7 @@ packages = [
 ]
 
 components = [
+  "fedora-base",
   "snapper",
   "tailscale",
 ]

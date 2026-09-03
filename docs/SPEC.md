@@ -187,17 +187,22 @@ key = "<fingerprint>"
 
 A repository ID is the prefix that package references use. `dnf` and
 `flatpak` are reserved: `dnf` is Fedora and `flatpak` is the single declared
-`flatpak` repository. `key_url` is where DNF fetches the signing key and
-`key` is the fingerprint that key must have; a key with another fingerprint
-fails the operation. A maker that publishes no key URL, such as OpenAI, has
-its key stored in the checkout instead as `key_file`, a path below
-`system/`. A COPR derives its key URL from the project, and a Flatpak remote
-carries its key inside the `.flatpakrepo` file. A `dnf`
-repository may instead name a `release_package` URL with its `sha256` when
-the maker distributes a release RPM, as RPM Fusion does. `priority` is the
-DNF repository priority and is required on every `dnf` and `copr`
-repository: a number above Fedora's default of 99, so no later source in the
-[SECURITY.md](SECURITY.md) order can shadow Fedora. The stored key file is
+`flatpak` repository. On the host, a `dnf` repository Nimbus enables from a
+`baseurl` lives in `/etc/yum.repos.d/nimbus-<id>.repo` with the DNF
+repository ID `nimbus-<id>`, so ownership is readable from the directory; a
+release package and a COPR keep the IDs their own tooling creates. A file
+that already provides a declared repository under the maker's own ID is
+foreign: Nimbus neither duplicates it nor takes it over silently. `key_url` is
+where DNF fetches the signing key and `key` is the fingerprint that key must
+have; a key with another fingerprint fails the operation. A maker that
+publishes no key URL, such as OpenAI, has its key stored in the checkout
+instead as `key_file`, a path below `system/`. A COPR derives its key URL from
+the project, and a Flatpak remote carries its key inside the `.flatpakrepo`
+file. A `dnf` repository may instead name a `release_package` URL with its
+`sha256` when the maker distributes a release RPM, as RPM Fusion does.
+`priority` is the DNF repository priority and is required on every `dnf` and
+`copr` repository: a number above Fedora's default of 99, so no later source in
+the [SECURITY.md](SECURITY.md) order can shadow Fedora. The stored key file is
 checked for its armored public-key form at validation; its fingerprint is
 verified when the key is imported during planning.
 
@@ -293,7 +298,8 @@ on every entry. An unknown field anywhere is an error.
 
 The initial profile vocabulary is:
 
-- `common`: the base every machine needs
+- `common`: the base every machine needs, including the `fedora-base`
+  component that declares what the Fedora installer leaves behind
 - `development`: developer tooling, Docker, Nix, and the system dependencies
   Mise needs
 - `virtualization`: QEMU/KVM host packages for Linux and other guests the
@@ -590,8 +596,13 @@ for approval and refuses apply if configuration, definitions, facts, native
 transactions, or the digest changed before execution.
 
 Planning never invokes sudo, accesses the network, writes files, or changes
-Nimbus state. Upgrade information uses locally available native metadata and
-reports when its freshness or availability is insufficient.
+Nimbus state. DNF transactions are previewed from the local metadata cache,
+so plan and apply read the same package lists. `plan --refresh` runs
+`dnf5 makecache` first as the one explicit network step. Upgrade
+information uses locally available native metadata and reports when its
+freshness or availability is insufficient. A plan with a blocked operation,
+such as a package whose repository is not enabled yet, is incomplete and
+says so; apply runs only a complete plan.
 
 Plain apply installs and repairs desired resources, adopts compatible existing
 resources, and removes resources previously owned by Nimbus that are no longer

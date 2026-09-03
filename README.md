@@ -11,8 +11,8 @@ configuration below the home directory.
 The first target is Fedora 44 on x86_64. Nimbus does not initially install the
 operating system, repartition disks, or configure full-disk encryption.
 
-Nimbus is at Phase 2 of its roadmap: read-only system inspection. No system
-management commands are implemented.
+Nimbus is at Phase 3 of its roadmap: read-only planning. No command changes
+the system yet.
 
 ## Repository model
 
@@ -68,8 +68,8 @@ just check
 It runs `gofmt`, `go vet`, `go test`, `git diff --check`, and markdownlint.
 `just validate` runs `nimbus validate` against this checkout.
 
-Only `nimbus validate`, `nimbus doctor`, and `nimbus version` exist so far.
-`validate` reads the definitions in this checkout, validates them, resolves
-both tracked machines, and hashes the definition tree. `doctor` inspects the
-host and the selected checkout through read-only native interfaces and
-explains every problem it finds. Neither writes anything.
+The delivered commands are `validate`, `doctor`, `plan`, `status`, `managed`,
+`unmanaged`, `why`, `profiles list`, `components list`, `packages installed`,
+and `version`. All of them are read-only: `validate` checks the definitions,
+`doctor` inspects the host, and `plan` shows every operation apply would run
+without running any. Nothing mutates the system yet.

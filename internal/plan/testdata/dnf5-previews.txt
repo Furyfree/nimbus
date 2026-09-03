@@ -1,0 +1,528 @@
+##### install-one
+$ dnf5 --assumeno --cacheonly install ripgrep
+Updating and loading repositories:
+Repositories loaded.
+Package  Arch   Version         Repository      Size
+Installing:
+ ripgrep x86_64 0:15.2.0-1.fc44 updates      4.6 MiB
+
+Transaction Summary:
+ Installing:         1 package
+
+Total size of inbound packages is 2 MiB. Need to download 2 MiB.
+After this operation, 5 MiB extra will be used (install 5 MiB, remove 0 B).
+Operation aborted by the user.
+##### exit 1
+##### install-deps
+$ dnf5 --assumeno --cacheonly install git
+Updating and loading repositories:
+Repositories loaded.
+Package                     Arch   Version                   Repository      Size
+Installing:
+ git                        x86_64 0:2.55.0-1.fc44           updates     57.7 KiB
+Installing dependencies:
+ expat                      x86_64 0:2.8.3-1.fc44            updates    334.4 KiB
+ git-core                   x86_64 0:2.55.0-1.fc44           updates     25.6 MiB
+ git-core-doc               noarch 0:2.55.0-1.fc44           updates     18.9 MiB
+ groff-base                 x86_64 0:1.23.0-12.fc44          fedora       3.9 MiB
+ less                       x86_64 0:704-4.fc44              updates    479.5 KiB
+ libedit                    x86_64 0:3.1-59.20260512cvs.fc44 updates    248.3 KiB
+ libfdisk                   x86_64 0:2.41.5-1.fc44           updates    388.3 KiB
+ libgit2                    x86_64 0:1.9.7-1.fc44            updates      1.4 MiB
+ liblastlog2                x86_64 0:2.41.5-1.fc44           updates     41.6 KiB
+ libssh2                    x86_64 0:1.11.1-9.fc44           updates    338.6 KiB
+ llhttp                     x86_64 0:9.3.1-1.fc44            fedora      96.6 KiB
+ mpdecimal                  x86_64 0:4.0.1-3.fc44            fedora     217.1 KiB
+ ncurses                    x86_64 0:6.6-1.fc44              fedora     611.4 KiB
+ oniguruma                  x86_64 0:6.9.10-4.fc44           fedora     770.9 KiB
+ openssh                    x86_64 0:10.2p1-14.fc44          updates      1.4 MiB
+ openssh-clients            x86_64 0:10.2p1-14.fc44          updates      2.7 MiB
+ perl-AutoLoader            noarch 0:5.74-525.fc44           updates     20.6 KiB
+ perl-B                     x86_64 0:1.89-525.fc44           updates    501.2 KiB
+ perl-Carp                  noarch 0:1.54-521.fc44           fedora      46.6 KiB
+ perl-Class-Struct          noarch 0:0.68-525.fc44           updates     25.4 KiB
+ perl-Data-Dumper           x86_64 0:2.192-523.fc44          updates    115.5 KiB
+ perl-Digest                noarch 0:1.20-521.fc44           fedora      35.3 KiB
+ perl-Digest-MD5            x86_64 0:2.59-521.fc44           fedora      59.6 KiB
+ perl-DynaLoader            x86_64 0:1.57-525.fc44           updates     32.1 KiB
+ perl-Encode                x86_64 4:3.21-521.fc44           fedora       4.7 MiB
+ perl-Errno                 x86_64 0:1.38-525.fc44           updates      8.4 KiB
+ perl-Error                 noarch 1:0.17030-3.fc44          fedora      76.8 KiB
+ perl-Exporter              noarch 0:5.79-521.fc44           fedora      54.3 KiB
+ perl-Fcntl                 x86_64 0:1.20-525.fc44           updates     48.7 KiB
+ perl-File-Basename         noarch 0:2.86-525.fc44           updates     14.0 KiB
+ perl-File-Path             noarch 0:2.18-522.fc44           fedora      63.5 KiB
+ perl-File-Temp             noarch 1:0.231.200-2.fc44        fedora     163.7 KiB
+ perl-File-stat             noarch 0:1.14-525.fc44           updates     12.5 KiB
+ perl-FileHandle            noarch 0:2.05-525.fc44           updates      9.4 KiB
+ perl-Getopt-Long           noarch 1:2.58-521.fc44           fedora     144.5 KiB
+ perl-Getopt-Std            noarch 0:1.14-525.fc44           updates     11.2 KiB
+ perl-Git                   noarch 0:2.55.0-1.fc44           updates     64.4 KiB
+ perl-HTTP-Tiny             noarch 0:0.096-1.fc44            updates    162.4 KiB
+ perl-IO                    x86_64 0:1.55-525.fc44           updates    147.3 KiB
+ perl-IO-Socket-IP          noarch 0:0.43-522.fc44           fedora     100.3 KiB
+ perl-IO-Socket-SSL         noarch 0:2.098-2.fc44            fedora     723.5 KiB
+ perl-IPC-Open3             noarch 0:1.24-525.fc44           updates     27.7 KiB
+ perl-MIME-Base32           noarch 0:1.303-25.fc44           fedora      30.7 KiB
+ perl-MIME-Base64           x86_64 0:3.16-521.fc44           fedora      41.9 KiB
+ perl-Net-SSLeay            x86_64 0:1.94-12.fc44            fedora       1.3 MiB
+ perl-POSIX                 x86_64 0:2.23-525.fc44           updates    229.4 KiB
+ perl-PathTools             x86_64 0:3.94-521.fc44           fedora     179.9 KiB
+ perl-Pod-Escapes           noarch 1:1.07-521.fc44           fedora      24.9 KiB
+ perl-Pod-Perldoc           noarch 0:3.28.01-522.fc44        fedora     163.7 KiB
+ perl-Pod-Simple            noarch 1:3.47-4.fc44             fedora     565.3 KiB
+ perl-Pod-Usage             noarch 4:2.05-521.fc44           fedora      86.3 KiB
+ perl-Scalar-List-Utils     x86_64 5:1.70-2.fc44             fedora     144.8 KiB
+ perl-SelectSaver           noarch 0:1.02-525.fc44           updates      2.2 KiB
+ perl-Socket                x86_64 4:2.043-1.fc44            updates    121.8 KiB
+ perl-Storable              x86_64 1:3.37-522.fc44           fedora     235.1 KiB
+ perl-Symbol                noarch 0:1.09-525.fc44           updates      6.8 KiB
+ perl-Term-ANSIColor        noarch 0:5.01-522.fc44           fedora      97.5 KiB
+ perl-Term-Cap              noarch 0:1.18-521.fc44           fedora      29.3 KiB
+ perl-TermReadKey           x86_64 0:2.38-27.fc44            fedora      63.9 KiB
+ perl-Text-ParseWords       noarch 0:3.31-521.fc44           fedora      13.6 KiB
+ perl-Text-Tabs+Wrap        noarch 0:2024.001-521.fc44       fedora      22.6 KiB
+ perl-Time-HiRes            x86_64 4:1.9778-521.fc44         fedora     115.6 KiB
+ perl-Time-Local            noarch 2:1.350-521.fc44          fedora      69.0 KiB
+ perl-URI                   noarch 0:5.36-1.fc44             updates    275.7 KiB
+ perl-Unicode-Normalize     x86_64 0:1.32-521.fc44           fedora     486.0 KiB
+ perl-base                  noarch 0:2.27-525.fc44           updates     12.6 KiB
+ perl-constant              noarch 0:1.33-522.fc44           fedora      26.2 KiB
+ perl-if                    noarch 0:0.61.000-525.fc44       updates      5.8 KiB
+ perl-interpreter           x86_64 4:5.42.3-525.fc44         updates    118.8 KiB
+ perl-lib                   x86_64 0:0.65-525.fc44           updates      8.5 KiB
+ perl-libnet                noarch 0:3.15-522.fc44           fedora     289.4 KiB
+ perl-libs                  x86_64 4:5.42.3-525.fc44         updates     11.6 MiB
+ perl-locale                noarch 0:1.13-525.fc44           updates      6.1 KiB
+ perl-mro                   x86_64 0:1.29-525.fc44           updates     41.4 KiB
+ perl-overload              noarch 0:1.40-525.fc44           updates     71.6 KiB
+ perl-overloading           noarch 0:0.02-525.fc44           updates      4.9 KiB
+ perl-parent                noarch 1:0.244-521.fc44          fedora      10.3 KiB
+ perl-podlators             noarch 1:6.0.2-521.fc44          fedora     317.5 KiB
+ perl-vars                  noarch 0:1.05-525.fc44           updates      3.9 KiB
+ python-pip-wheel           noarch 0:26.0.1-3.fc44           updates      1.2 MiB
+ python3                    x86_64 0:3.14.7-1.fc44           updates     28.7 KiB
+ python3-libs               x86_64 0:3.14.7-1.fc44           updates     44.0 MiB
+ util-linux                 x86_64 0:2.41.5-1.fc44           updates      3.5 MiB
+Installing weak dependencies:
+ 7zip                       x86_64 0:26.02-1.fc44            updates      3.3 MiB
+ bat                        x86_64 0:0.26.1-4.fc44           updates      5.3 MiB
+ less-color                 x86_64 0:704-4.fc44              updates      2.4 KiB
+ perl-NDBM_File             x86_64 0:1.18-525.fc44           updates     28.4 KiB
+ python-unversioned-command noarch 0:3.14.7-1.fc44           updates     23.0   B
+ python3-html2text          noarch 0:2025.4.15-6.fc44        fedora     289.4 KiB
+ unzip                      x86_64 0:6.0-69.fc44             fedora     445.8 KiB
+
+Transaction Summary:
+ Installing:        91 packages
+
+Total size of inbound packages is 37 MiB. Need to download 37 MiB.
+After this operation, 139 MiB extra will be used (install 139 MiB, remove 0 B).
+Operation aborted by the user.
+##### exit 1
+##### install-terra
+$ dnf5 --assumeno --cacheonly install ghostty
+Updating and loading repositories:
+Repositories loaded.
+Failed to resolve the transaction:
+No match for argument: ghostty
+You can try to add to command line:
+  --skip-unavailable to skip unavailable packages
+##### exit 1
+##### install-allowerasing
+$ dnf5 --assumeno --cacheonly install --allowerasing ffmpeg
+Updating and loading repositories:
+Repositories loaded.
+Package                                  Arch   Version                            Repository                  Size
+Installing:
+ ffmpeg                                  x86_64 0:8.1.2-3.fc44                     rpmfusion-free-updates   2.6 MiB
+Installing dependencies:
+ ModemManager-glib                       x86_64 0:1.24.2-3.fc44                    fedora                   1.5 MiB
+ OpenCL-ICD-Loader                       x86_64 0:3.0.6-7.20250722gitad770a1.fc44  fedora                  90.6 KiB
+ SDL3                                    x86_64 0:3.4.14-1.fc44                    updates                  3.2 MiB
+ abattis-cantarell-vf-fonts              noarch 0:0.301-17.fc44                    fedora                 192.7 KiB
+ abseil-cpp                              x86_64 0:20260107.1-1.fc44                fedora                   2.6 MiB
+ adwaita-cursor-theme                    noarch 0:50.0-1.fc44                      fedora                  11.4 MiB
+ adwaita-icon-theme                      noarch 0:50.0-1.fc44                      fedora                   1.1 MiB
+ adwaita-icon-theme-legacy               noarch 0:46.2-7.fc44                      fedora                   2.1 MiB
+ alsa-lib                                x86_64 0:1.2.16.1-1.fc44                  updates                  1.5 MiB
+ aribb24                                 x86_64 0:1.0.3^20160216git5e9be27-5.fc44  fedora                  83.0 KiB
+ at-spi2-atk                             x86_64 0:2.60.6-1.fc44                    updates                284.1 KiB
+ at-spi2-core                            x86_64 0:2.60.6-1.fc44                    updates                  1.6 MiB
+ atk                                     x86_64 0:2.60.6-1.fc44                    updates                252.6 KiB
+ avahi-glib                              x86_64 0:0.9~rc2-8.fc44                   fedora                  19.5 KiB
+ avahi-libs                              x86_64 0:0.9~rc2-8.fc44                   fedora                 179.2 KiB
+ bluez-libs                              x86_64 0:5.87-6.fc44                      updates                202.2 KiB
+ bubblewrap                              x86_64 0:0.12.0-1.fc44                    updates                139.8 KiB
+ cairo                                   x86_64 0:1.18.4-6.fc44                    fedora                   1.8 MiB
+ cairo-gobject                           x86_64 0:1.18.4-6.fc44                    fedora                  31.0 KiB
+ cdparanoia-libs                         x86_64 0:10.2-50.fc44                     fedora                 113.3 KiB
+ codec2                                  x86_64 0:1.2.0-9.fc44                     fedora                   1.4 MiB
+ colord-libs                             x86_64 0:1.4.8-4.fc44                     fedora                 830.4 KiB
+ cryptsetup-libs                         x86_64 0:2.8.7-1.fc44                     updates                  2.8 MiB
+ cups-filesystem                         noarch 1:2.4.19-3.fc44                    updates                  0.0   B
+ cups-libs                               x86_64 1:2.4.19-3.fc44                    updates                634.6 KiB
+ dbus                                    x86_64 1:1.16.2-1.fc44                    fedora                   0.0   B
+ dbus-broker                             x86_64 0:37-8.fc44                        fedora                 394.9 KiB
+ dbus-common                             noarch 1:1.16.2-1.fc44                    fedora                  11.2 KiB
+ dbus-libs                               x86_64 1:1.16.2-1.fc44                    fedora                 357.4 KiB
+ default-fonts-core-sans                 noarch 0:4.3-1.fc44                       fedora                  11.9 KiB
+ device-mapper                           x86_64 0:1.02.212-2.fc44                  fedora                 346.8 KiB
+ device-mapper-libs                      x86_64 0:1.02.212-2.fc44                  fedora                 430.1 KiB
+ duktape                                 x86_64 0:2.7.0-11.fc44                    fedora                 623.6 KiB
+ exempi                                  x86_64 0:2.6.4-9.fc44                     fedora                   1.4 MiB
+ exiv2-libs                              x86_64 0:0.28.9-1.fc44                    updates                  2.9 MiB
+ expat                                   x86_64 0:2.8.3-1.fc44                     updates                334.4 KiB
+ fdk-aac                                 x86_64 0:2.0.3-6.fc44                     rpmfusion-nonfree        1.6 MiB
+ ffmpeg-libs                             x86_64 0:8.1.2-3.fc44                     rpmfusion-free-updates  23.3 MiB
+ fftw-libs-double                        x86_64 0:3.3.10-17.fc44                   fedora                   3.4 MiB
+ fftw-libs-single                        x86_64 0:3.3.10-17.fc44                   fedora                   3.6 MiB
+ flac-libs                               x86_64 0:1.5.0-8.fc44                     fedora                 627.3 KiB
+ fontconfig                              x86_64 0:2.17.0-4.fc44                    fedora                 776.4 KiB
+ fonts-filesystem                        noarch 1:5.0.0-2.fc44                     fedora                   0.0   B
+ freetype                                x86_64 0:2.14.3-1.fc44                    updates                918.3 KiB
+ fribidi                                 x86_64 0:1.0.16-4.fc44                    fedora                 190.0 KiB
+ fuse-common                             x86_64 0:3.18.2-1.fc44                    fedora                  38.0   B
+ fuse3                                   x86_64 0:3.18.2-1.fc44                    fedora                 132.4 KiB
+ fuse3-libs                              x86_64 0:3.18.2-1.fc44                    fedora                 297.8 KiB
+ game-music-emu                          x86_64 0:0.6.4-3.fc44                     fedora                 360.0 KiB
+ gdk-pixbuf2                             x86_64 0:2.44.6^really2.44.4-3.fc44       updates                  2.5 MiB
+ geoclue2                                x86_64 0:2.8.2-1.fc44                     updates                413.2 KiB
+ giflib                                  x86_64 0:6.1.3-2.fc44                     updates                122.1 KiB
+ glib-networking                         x86_64 0:2.80.1-4.fc44                    fedora                 750.4 KiB
+ glibc-gconv-extra                       x86_64 0:2.43-8.fc44                      updates                  7.4 MiB
+ glycin-libs                             x86_64 0:2.1.5-1.fc44                     updates                  4.3 MiB
+ glycin-loaders                          x86_64 0:2.1.5-1.fc44                     updates                 13.8 MiB
+ gobject-introspection                   x86_64 0:1.86.0-3.fc44                    fedora                 397.3 KiB
+ google-noto-fonts-common                noarch 0:20251201-2.fc44                  fedora                  17.7 KiB
+ google-noto-sans-vf-fonts               noarch 0:20251201-2.fc44                  fedora                   1.4 MiB
+ gpgme                                   x86_64 0:2.0.1-5.fc44                     updates                617.8 KiB
+ gpgmepp                                 x86_64 0:2.0.1-5.fc44                     updates                441.6 KiB
+ graphene                                x86_64 0:1.10.8-4.fc44                    fedora                 158.3 KiB
+ graphite2                               x86_64 0:1.3.14-20.fc44                   fedora                 191.5 KiB
+ gsettings-desktop-schemas               x86_64 0:50.1-1.fc44                      updates                  6.1 MiB
+ gsm                                     x86_64 0:1.0.24-2.fc44                    fedora                  65.7 KiB
+ gstreamer1                              x86_64 0:1.28.6-1.fc44                    updates                  5.4 MiB
+ gstreamer1-plugins-base                 x86_64 0:1.28.6-1.fc44                    updates                  7.5 MiB
+ gtk-update-icon-cache                   x86_64 0:3.24.52-2.fc44                   updates                 62.0 KiB
+ gtk3                                    x86_64 0:3.24.52-2.fc44                   updates                 22.8 MiB
+ harfbuzz                                x86_64 0:14.1.0-2.fc44                    updates                  2.8 MiB
+ hicolor-icon-theme                      noarch 0:0.18-3.fc44                      fedora                  72.4 KiB
+ highway                                 x86_64 0:1.3.0-2.fc44                     fedora                   5.5 MiB
+ hwdata                                  noarch 0:0.410-1.fc44                     updates                 10.0 MiB
+ ilbc                                    x86_64 0:3.0.4-19.fc44                    fedora                  91.3 KiB
+ inih                                    x86_64 0:62-2.fc44                        fedora                  22.3 KiB
+ inih-cpp                                x86_64 0:62-2.fc44                        fedora                  40.0 KiB
+ iso-codes                               noarch 0:4.20.1-3.fc44                    fedora                  22.3 MiB
+ jansson                                 x86_64 0:2.14-4.fc44                      fedora                  88.9 KiB
+ jbigkit-libs                            x86_64 0:2.1-33.fc44                      fedora                 117.2 KiB
+ json-glib                               x86_64 0:1.10.8-5.fc44                    fedora                 596.2 KiB
+ kbd                                     x86_64 0:2.9.0-4.fc44                     updates                  1.4 MiB
+ kbd-legacy                              noarch 0:2.9.0-4.fc44                     updates                559.6 KiB
+ kbd-misc                                noarch 0:2.9.0-4.fc44                     updates                  2.4 MiB
+ kmod                                    x86_64 0:34.2-4.fc44                      fedora                 251.0 KiB
+ lame-libs                               x86_64 0:3.100-21.fc44                    fedora                   1.2 MiB
+ lcms2                                   x86_64 0:2.16-7.fc44                      fedora                 445.7 KiB
+ leptonica                               x86_64 0:1.87.0-4.fc44                    updates                  3.2 MiB
+ libX11                                  x86_64 0:1.8.13-1.fc44                    fedora                   1.3 MiB
+ libX11-common                           noarch 0:1.8.13-1.fc44                    fedora                   1.1 MiB
+ libX11-xcb                              x86_64 0:1.8.13-1.fc44                    fedora                  10.8 KiB
+ libXau                                  x86_64 0:1.0.12-4.fc44                    fedora                  72.8 KiB
+ libXcomposite                           x86_64 0:0.4.6-7.fc44                     fedora                  40.3 KiB
+ libXcursor                              x86_64 0:1.2.3-4.fc44                     fedora                  53.3 KiB
+ libXdamage                              x86_64 0:1.1.6-7.fc44                     fedora                  39.5 KiB
+ libXext                                 x86_64 0:1.3.6-5.fc44                     fedora                  89.8 KiB
+ libXfixes                               x86_64 0:6.0.1-7.fc44                     fedora                  34.0 KiB
+ libXft                                  x86_64 0:2.3.8-10.fc44                    fedora                 168.3 KiB
+ libXi                                   x86_64 0:1.8.3-1.fc44                     updates                 80.6 KiB
+ libXinerama                             x86_64 0:1.1.5-10.fc44                    fedora                  14.8 KiB
+ libXrandr                               x86_64 0:1.5.4-7.fc44                     fedora                  55.6 KiB
+ libXrender                              x86_64 0:0.9.12-4.fc44                    fedora                  49.9 KiB
+ libXtst                                 x86_64 0:1.2.5-4.fc44                     fedora                  33.4 KiB
+ libXv                                   x86_64 0:1.0.13-4.fc44                    fedora                  25.9 KiB
+ libXxf86vm                              x86_64 0:1.1.6-4.fc44                     fedora                  25.1 KiB
+ libaom                                  x86_64 0:3.13.3-1.fc44                    updates                  5.1 MiB
+ libaribcaption                          x86_64 0:1.1.1-4.fc44                     fedora                 260.0 KiB
+ libass                                  x86_64 0:0.17.4-2.fc44                    fedora                 290.7 KiB
+ libasyncns                              x86_64 0:0.8-34.fc44                      updates                 55.4 KiB
+ libavdevice                             x86_64 0:8.1.2-3.fc44                     rpmfusion-free-updates 133.8 KiB
+ libbluray                               x86_64 0:1.4.0-3.fc44                     fedora                 318.3 KiB
+ libbs2b                                 x86_64 0:3.1.0-37.fc44                    fedora                  63.6 KiB
+ libcamera                               x86_64 0:0.7.1-1.fc44                     updates                  2.6 MiB
+ libcanberra                             x86_64 0:0.30-39.fc44                     fedora                 265.6 KiB
+ libcdio                                 x86_64 0:2.3.0-1.fc44                     fedora                 592.5 KiB
+ libcdio-paranoia                        x86_64 0:10.2+2.0.2-6.fc44                fedora                 178.5 KiB
+ libchromaprint                          x86_64 0:1.6.0-4.fc44                     fedora                  69.1 KiB
+ libcloudproviders                       x86_64 0:0.4.1-1.fc44                     updates                124.0 KiB
+ libcue                                  x86_64 0:2.3.0-14.fc44                    fedora                  85.7 KiB
+ libdatrie                               x86_64 0:0.2.14-2.fc44                    fedora                  61.7 KiB
+ libdav1d                                x86_64 0:1.5.3-1.fc44                     fedora                   1.7 MiB
+ libde265                                x86_64 0:1.0.18-1.fc44                    rpmfusion-free         593.3 KiB
+ libdecor                                x86_64 0:0.2.5-2.fc44                     fedora                 168.9 KiB
+ libdisplay-info                         x86_64 0:0.3.0-1.fc44                     fedora                 226.5 KiB
+ libdovi                                 x86_64 0:3.3.2-3.fc44                     updates                573.2 KiB
+ libdrm                                  x86_64 0:2.4.134-1.fc44                   updates                405.8 KiB
+ libebur128                              x86_64 0:1.2.6-15.fc44                    fedora                  39.2 KiB
+ libedit                                 x86_64 0:3.1-59.20260512cvs.fc44          updates                248.3 KiB
+ libepoxy                                x86_64 0:1.5.10-12.fc44                   fedora                   1.1 MiB
+ libfdisk                                x86_64 0:2.41.5-1.fc44                    updates                388.3 KiB
+ libgexiv2                               x86_64 0:0.16.2-1.fc44                    updates                267.7 KiB
+ libglvnd                                x86_64 1:1.7.0-9.fc44                     fedora                 526.5 KiB
+ libglvnd-egl                            x86_64 1:1.7.0-9.fc44                     fedora                  68.6 KiB
+ libglvnd-gles                           x86_64 1:1.7.0-9.fc44                     fedora                  97.7 KiB
+ libglvnd-glx                            x86_64 1:1.7.0-9.fc44                     fedora                 601.0 KiB
+ libgsf                                  x86_64 0:1.14.58-1.fc44                   updates                993.0 KiB
+ libgudev                                x86_64 0:238-9.fc44                       fedora                  91.7 KiB
+ libgusb                                 x86_64 0:0.4.9-5.fc44                     fedora                 157.9 KiB
+ libgxps                                 x86_64 0:0.3.2-12.fc44                    fedora                 192.0 KiB
+ libheif                                 x86_64 0:1.21.2-1.fc44                    fedora                   1.8 MiB
+ libicu                                  x86_64 0:77.1-3.fc44                      updates                 36.6 MiB
+ libimobiledevice                        x86_64 0:1.4.0-3.fc44                     updates                324.6 KiB
+ libimobiledevice-glue                   x86_64 0:1.3.2-1.fc44                     updates                123.2 KiB
+ libjpeg-turbo                           x86_64 0:3.1.3-1.fc44                     fedora                 818.2 KiB
+ libjxl                                  x86_64 1:0.11.2-1.fc44                    updates                  4.1 MiB
+ liblc3                                  x86_64 0:1.1.3-7.fc44                     fedora                 174.7 KiB
+ libldac                                 x86_64 0:2.0.2.3-19.fc44                  fedora                  78.0 KiB
+ libldb                                  x86_64 2:4.24.6-1.fc44                    updates                465.5 KiB
+ liblerc                                 x86_64 0:4.0.0-10.fc44                    fedora                 647.9 KiB
+ libmodplug                              x86_64 1:0.8.9.0-29.fc44                  fedora                 367.1 KiB
+ libmysofa                               x86_64 0:1.3.3-4.fc44                     fedora                  78.6 KiB
+ libnotify                               x86_64 0:0.8.8-1.fc44                     fedora                 126.3 KiB
+ libogg                                  x86_64 2:1.3.6-2.fc44                     fedora                  45.6 KiB
+ libopenjph                              x86_64 0:0.25.3-3.fc44                    fedora                 482.1 KiB
+ libopenmpt                              x86_64 0:0.8.9-1.fc44                     updates                  1.9 MiB
+ libosinfo                               x86_64 0:1.12.0-5.fc44                    fedora                   1.2 MiB
+ libpciaccess                            x86_64 0:0.16-17.fc44                     fedora                  48.4 KiB
+ libpkgconf                              x86_64 0:2.5.1-1.fc44                     fedora                  90.1 KiB
+ libplacebo                              x86_64 0:7.360.1-3.fc44                   fedora                   1.2 MiB
+ libplist                                x86_64 0:2.7.0-1.fc44                     updates                248.7 KiB
+ libpng                                  x86_64 2:1.6.58-1.fc44                    updates                249.6 KiB
+ libproxy                                x86_64 0:0.5.12-2.fc44                    fedora                 102.1 KiB
+ librsvg2                                x86_64 0:2.62.3-1.fc44                    updates                  5.0 MiB
+ libsamplerate                           x86_64 0:0.2.2-12.fc44                    fedora                   1.4 MiB
+ libsbc                                  x86_64 0:2.1-2.fc44                       fedora                  93.3 KiB
+ libseccomp                              x86_64 0:2.6.1-2.fc44                     updates                222.2 KiB
+ libshaderc                              x86_64 0:2026.1-1.fc44                    fedora                   4.0 MiB
+ libsmbclient                            x86_64 2:4.24.6-1.fc44                    updates                171.8 KiB
+ libsndfile                              x86_64 0:1.2.2-11.fc44                    fedora                 553.9 KiB
+ libsodium                               x86_64 0:1.0.22-1.fc44                    updates                481.5 KiB
+ libsoup3                                x86_64 0:3.6.6-9.fc44                     updates                  1.2 MiB
+ libstemmer                              x86_64 0:3.0.1-11.fc44                    fedora                 641.3 KiB
+ libtalloc                               x86_64 0:2.4.4-1.fc44                     fedora                  63.9 KiB
+ libtdb                                  x86_64 0:1.4.15-1.fc44                    fedora                 108.4 KiB
+ libtevent                               x86_64 0:0.17.1-4.fc44                    fedora                 101.3 KiB
+ libthai                                 x86_64 0:0.1.30-2.fc44                    fedora                 800.9 KiB
+ libtheora                               x86_64 1:1.1.1-41.fc44                    fedora                 480.9 KiB
+ libtiff                                 x86_64 0:4.7.2-1.fc44                     updates                640.4 KiB
+ libtinysparql                           x86_64 0:3.11.1-1.fc44                    updates                  1.0 MiB
+ libudfread                              x86_64 0:1.2.0-3.fc44                     fedora                  62.0 KiB
+ libunibreak                             x86_64 0:6.1-5.fc44                       fedora                 139.0 KiB
+ libunwind                               x86_64 0:1.8.3-1.fc44                     fedora                 194.1 KiB
+ libusbmuxd                              x86_64 0:2.1.1-1.fc44                     updates                 75.1 KiB
+ libv4l                                  x86_64 0:1.32.0-3.fc44                    fedora                 364.5 KiB
+ libva                                   x86_64 0:2.23.0-3.fc44                    fedora                 345.6 KiB
+ libvdpau                                x86_64 0:1.5-11.fc44                      fedora                  20.6 KiB
+ libvisual                               x86_64 1:0.4.2-4.fc44                     fedora                 464.5 KiB
+ libvmaf                                 x86_64 0:3.0.0-5.fc44                     fedora                 846.8 KiB
+ libvorbis                               x86_64 1:1.3.7-14.fc44                    fedora                 837.0 KiB
+ libvpl                                  x86_64 1:2.17.0-1.fc44                    updates                437.7 KiB
+ libvpx                                  x86_64 0:1.15.0-5.fc44                    fedora                   3.3 MiB
+ libwayland-client                       x86_64 0:1.25.0-1.fc44                    updates                 66.0 KiB
+ libwayland-cursor                       x86_64 0:1.25.0-1.fc44                    updates                 37.2 KiB
+ libwayland-egl                          x86_64 0:1.25.0-1.fc44                    updates                 12.3 KiB
+ libwbclient                             x86_64 2:4.24.6-1.fc44                    updates                 71.0 KiB
+ libwebp                                 x86_64 0:1.6.0-3.fc44                     fedora                 968.0 KiB
+ libxcb                                  x86_64 0:1.17.0-7.fc44                    fedora                   1.1 MiB
+ libxkbcommon                            x86_64 0:1.13.1-2.fc44                    fedora                 432.2 KiB
+ libxshmfence                            x86_64 0:1.3.2-8.fc44                     fedora                  12.3 KiB
+ libxslt                                 x86_64 0:1.1.43-6.fc44                    fedora                 471.8 KiB
+ libyuv                                  x86_64 0:0-0.61.20260213git6067afd.fc44   fedora                 683.7 KiB
+ libzip                                  x86_64 0:1.11.4-3.fc44                    fedora                 143.8 KiB
+ lilv-libs                               x86_64 0:0.26.4-1.fc44                    fedora                 125.4 KiB
+ llvm-filesystem                         x86_64 0:22.1.8-4.fc44                    updates                  0.0   B
+ llvm-libs                               x86_64 0:22.1.8-4.fc44                    updates                140.5 MiB
+ lm_sensors-libs                         x86_64 0:3.6.0-24.fc44                    fedora                  85.7 KiB
+ lmdb-libs                               x86_64 0:0.9.34-2.fc44                    fedora                 113.9 KiB
+ lpcnetfreedv                            x86_64 0:0.5-10.fc44                      fedora                  14.8 MiB
+ lttng-ust                               x86_64 0:2.14.0-5.fc44                    fedora                   1.3 MiB
+ lzo                                     x86_64 0:2.10-16.fc44                     fedora                 174.8 KiB
+ mesa-dri-drivers                        x86_64 0:26.1.8-1.fc44                    updates                 52.3 MiB
+ mesa-filesystem                         x86_64 0:26.1.8-1.fc44                    updates                  3.6 KiB
+ mesa-libEGL                             x86_64 0:26.1.8-1.fc44                    updates                394.4 KiB
+ mesa-libGL                              x86_64 0:26.1.8-1.fc44                    updates                374.0 KiB
+ mesa-libgbm                             x86_64 0:26.1.8-1.fc44                    updates                 19.5 KiB
+ mpdecimal                               x86_64 0:4.0.1-3.fc44                     fedora                 217.1 KiB
+ mpg123-libs                             x86_64 0:1.32.10-3.fc44                   fedora                 825.7 KiB
+ ngtcp2-crypto-gnutls                    x86_64 0:1.22.1-1.fc44                    updates                 43.5 KiB
+ nspr                                    x86_64 0:4.39.0-4.fc44                    updates                327.1 KiB
+ nss                                     x86_64 0:3.127.0-1.fc44                   updates                  2.0 MiB
+ nss-softokn                             x86_64 0:3.127.0-1.fc44                   updates                  2.1 MiB
+ nss-softokn-freebl                      x86_64 0:3.127.0-1.fc44                   updates                998.9 KiB
+ nss-sysinit                             x86_64 0:3.127.0-1.fc44                   updates                 17.9 KiB
+ nss-util                                x86_64 0:3.127.0-1.fc44                   updates                212.7 KiB
+ numactl-libs                            x86_64 0:2.0.19-4.fc44                    fedora                  56.8 KiB
+ openal-soft                             x86_64 0:1.24.2-6.fc44                    fedora                   1.6 MiB
+ openapv-libs                            x86_64 0:0.2.1.2-1.fc44                   fedora                 125.1 KiB
+ opencore-amr                            x86_64 0:0.1.6-10.fc44                    fedora                 352.6 KiB
+ openh264                                x86_64 0:2.6.0-3.fc44                     fedora-cisco-openh264    1.1 MiB
+ openjpeg                                x86_64 0:2.5.4-3.fc44                     fedora                 464.2 KiB
+ openpgm                                 x86_64 0:5.3.128-6.fc44                   fedora                 320.3 KiB
+ opus                                    x86_64 0:1.6-2.fc44                       fedora                 467.7 KiB
+ orc                                     x86_64 0:0.4.41-3.fc44                    fedora                 721.9 KiB
+ osinfo-db                               noarch 0:20251212-1.fc44                  fedora                   4.2 MiB
+ osinfo-db-tools                         x86_64 0:1.12.0-5.fc44                    fedora                 190.3 KiB
+ pango                                   x86_64 0:1.57.1-1.fc44                    fedora                   1.0 MiB
+ pipewire-jack-audio-connection-kit      x86_64 0:1.6.8-1.fc44                     updates                 30.0   B
+ pipewire-jack-audio-connection-kit-libs x86_64 0:1.6.8-1.fc44                     updates                520.4 KiB
+ pipewire-libs                           x86_64 0:1.6.8-1.fc44                     updates                  9.7 MiB
+ pixman                                  x86_64 0:0.46.2-3.fc44                    fedora                 718.2 KiB
+ pkgconf                                 x86_64 0:2.5.1-1.fc44                     fedora                  92.7 KiB
+ pkgconf-m4                              noarch 0:2.5.1-1.fc44                     fedora                  14.3 KiB
+ pkgconf-pkg-config                      x86_64 0:2.5.1-1.fc44                     fedora                 989.0   B
+ polkit                                  x86_64 0:127-2.fc44.2                     fedora                 493.8 KiB
+ polkit-libs                             x86_64 0:127-2.fc44.2                     fedora                 220.4 KiB
+ poppler                                 x86_64 0:26.01.0-3.fc44                   fedora                   4.0 MiB
+ poppler-data                            noarch 0:0.4.11-11.fc44                   fedora                  12.3 MiB
+ poppler-glib                            x86_64 0:26.01.0-3.fc44                   fedora                 658.8 KiB
+ pulseaudio-libs                         x86_64 0:17.0-9.fc44                      fedora                   3.4 MiB
+ python-pip-wheel                        noarch 0:26.0.1-3.fc44                    updates                  1.2 MiB
+ python3                                 x86_64 0:3.14.7-1.fc44                    updates                 28.7 KiB
+ python3-libs                            x86_64 0:3.14.7-1.fc44                    updates                 44.0 MiB
+ qrencode-libs                           x86_64 0:4.1.1-12.fc44                    fedora                 164.7 KiB
+ rav1e-libs                              x86_64 0:0.8.1-3.fc44                     fedora                   3.1 MiB
+ rtkit                                   x86_64 0:0.11-70.fc44                     fedora                 137.8 KiB
+ rubberband-libs                         x86_64 0:4.0.0-5.fc44                     fedora                 471.1 KiB
+ samba-client-libs                       x86_64 2:4.24.6-1.fc44                    updates                 11.2 MiB
+ samba-common                            noarch 2:4.24.6-1.fc44                    updates                220.6 KiB
+ samba-core-libs                         x86_64 2:4.24.6-1.fc44                    updates                  1.7 MiB
+ samba-ndr-libs                          x86_64 2:4.24.6-1.fc44                    updates                  4.7 MiB
+ sdl2-compat                             x86_64 0:2.32.70-1.fc44                   updates                412.3 KiB
+ serd                                    x86_64 0:0.32.8-1.fc44                    fedora                 140.0 KiB
+ shared-mime-info                        x86_64 0:2.4-3.fc44                       fedora                   5.2 MiB
+ snappy                                  x86_64 0:1.2.2-4.fc44                     fedora                  79.9 KiB
+ sord                                    x86_64 0:0.16.22-1.fc44                   fedora                  85.2 KiB
+ sound-theme-freedesktop                 noarch 0:0.8-31.fc44                      fedora                 460.4 KiB
+ soxr                                    x86_64 0:0.1.3-21.fc44                    fedora                 191.3 KiB
+ spandsp                                 x86_64 0:0.0.6-22.fc44                    fedora                 856.3 KiB
+ speex                                   x86_64 0:1.2.0-21.fc44                    fedora                 128.4 KiB
+ spirv-tools-libs                        x86_64 0:2026.1-1.fc44                    fedora                   6.1 MiB
+ sratom                                  x86_64 0:0.6.22-1.fc44                    fedora                  48.5 KiB
+ srt-libs                                x86_64 0:1.5.7-1.fc44                     updates                  1.1 MiB
+ svt-av1-libs                            x86_64 0:3.1.2-2.fc44                     fedora                   5.6 MiB
+ systemd                                 x86_64 0:259.8-1.fc44                     updates                 12.9 MiB
+ systemd-shared                          x86_64 0:259.8-1.fc44                     updates                  5.4 MiB
+ tesseract-common                        noarch 0:5.5.3-1.fc44                     updates                 14.7 KiB
+ tesseract-langpack-eng                  noarch 0:4.1.0-12.fc44                    fedora                   3.9 MiB
+ tesseract-libs                          x86_64 0:5.5.3-1.fc44                     updates                  3.3 MiB
+ tesseract-tessdata-doc                  noarch 0:4.1.0-12.fc44                    fedora                  15.0 KiB
+ totem-pl-parser                         x86_64 0:3.26.7-1.fc44                    updates                315.2 KiB
+ twolame-libs                            x86_64 0:0.4.0-9.fc44                     fedora                 161.4 KiB
+ uchardet                                x86_64 0:0.0.8-10.fc44                    fedora                 275.3 KiB
+ upower-libs                             x86_64 0:1.91.3-1.fc44                    updates                178.7 KiB
+ vid.stab                                x86_64 0:1.1.1-8.fc44                     fedora                  96.0 KiB
+ vo-amrwbenc                             x86_64 0:0.1.3-24.fc44                    fedora                 157.8 KiB
+ vulkan-loader                           x86_64 0:1.4.341.0-1.fc44                 fedora                 577.6 KiB
+ vvenc-libs                              x86_64 0:1.13.1-5.fc44                    rpmfusion-free           3.3 MiB
+ webrtc-audio-processing                 x86_64 0:2.1-5.fc44                       fedora                   1.1 MiB
+ wireplumber                             x86_64 0:0.5.14-1.fc44                    updates                427.0 KiB
+ wireplumber-libs                        x86_64 0:0.5.14-1.fc44                    updates                  1.4 MiB
+ x264-libs                               x86_64 0:0.165-5.20250608gitb35605ac.fc44 rpmfusion-free           2.8 MiB
+ x265-libs                               x86_64 0:4.1-4.fc44                       rpmfusion-free          16.7 MiB
+ xdg-desktop-portal                      x86_64 0:1.22.1-1.fc44                    updates                  1.9 MiB
+ xkeyboard-config                        noarch 0:2.47-1.fc44                      fedora                   6.4 MiB
+ xml-common                              noarch 0:0.6.3-68.fc44                    fedora                  78.4 KiB
+ xprop                                   x86_64 0:1.2.8-5.fc44                     fedora                  54.5 KiB
+ xvidcore                                x86_64 0:1.3.7-19.fc44                    fedora                 878.3 KiB
+ zeromq                                  x86_64 0:4.3.5-22.fc43                    fedora                 894.1 KiB
+ zimg                                    x86_64 0:3.0.6-3.fc44                     fedora                 610.9 KiB
+ zix                                     x86_64 0:0.8.0-2.fc44                     fedora                  58.7 KiB
+ zvbi                                    x86_64 0:0.2.44-3.fc44                    fedora                   1.2 MiB
+Installing weak dependencies:
+ adwaita-mono-fonts                      noarch 0:50.0-1.fc44                      fedora                   5.6 MiB
+ adwaita-sans-fonts                      noarch 0:50.0-1.fc44                      fedora                   1.7 MiB
+ dconf                                   x86_64 0:0.49.0-5.fc44                    fedora                 306.9 KiB
+ diffutils                               x86_64 0:3.12-5.fc44                      fedora                   1.6 MiB
+ exiv2                                   x86_64 0:0.28.9-1.fc44                    updates                 12.2 MiB
+ intel-mediasdk                          x86_64 0:23.2.2-11.fc44                   updates                 24.5 MiB
+ intel-vpl-gpu-rt                        x86_64 0:26.1.6-1.fc44                    updates                 11.6 MiB
+ kmod-libs                               x86_64 0:34.2-4.fc44                      fedora                 139.0 KiB
+ libbpf                                  x86_64 2:1.6.3-2.fc44                     updates                442.7 KiB
+ libcamera-ipa                           x86_64 0:0.7.1-1.fc44                     updates                733.6 KiB
+ libcanberra-gtk3                        x86_64 0:0.30-39.fc44                     fedora                  70.4 KiB
+ libheif-freeworld                       x86_64 0:1.21.2-3.fc44                    rpmfusion-free         185.7 KiB
+ localsearch                             x86_64 0:3.11.1-1.fc44                    updates                  3.4 MiB
+ logrotate                               x86_64 0:3.22.0-5.fc44                    fedora                 152.8 KiB
+ mesa-vulkan-drivers                     x86_64 0:26.1.8-1.fc44                    updates                169.3 MiB
+ pipewire                                x86_64 0:1.6.8-1.fc44                     updates                457.2 KiB
+ pipewire-alsa                           x86_64 0:1.6.8-1.fc44                     updates                157.7 KiB
+ pipewire-plugin-libcamera               x86_64 0:1.6.8-1.fc44                     updates                146.5 KiB
+ pipewire-pulseaudio                     x86_64 0:1.6.8-1.fc44                     updates                464.2 KiB
+ polkit-pkla-compat                      x86_64 0:0.1-32.fc44                      fedora                  89.1 KiB
+ python-unversioned-command              noarch 0:3.14.7-1.fc44                    updates                 23.0   B
+ systemd-networkd                        x86_64 0:259.8-1.fc44                     updates                  2.3 MiB
+ systemd-pam                             x86_64 0:259.8-1.fc44                     updates                  1.2 MiB
+ systemd-resolved                        x86_64 0:259.8-1.fc44                     updates                655.3 KiB
+ systemd-udev                            x86_64 0:259.8-1.fc44                     updates                 13.0 MiB
+ tinysparql                              x86_64 0:3.11.1-1.fc44                    updates                  2.6 MiB
+ upower                                  x86_64 0:1.91.3-1.fc44                    updates                315.2 KiB
+ usbmuxd                                 x86_64 0:1.1.1^20251205git3ded00c-1.fc44  updates                149.0 KiB
+ vmaf-models                             noarch 0:3.0.0-5.fc44                     fedora                   4.1 MiB
+ xdg-desktop-portal-gtk                  x86_64 0:1.15.3-3.fc44                    fedora                 469.2 KiB
+
+Transaction Summary:
+ Installing:       331 packages
+
+Total size of inbound packages is 250 MiB. Need to download 250 MiB.
+After this operation, 974 MiB extra will be used (install 974 MiB, remove 0 B).
+Operation aborted by the user.
+##### exit 1
+##### remove-with-dependents
+$ dnf5 --assumeno --cacheonly remove bzip2-libs
+Failed to resolve the transaction:
+Problem 1: The operation would result in broken dependencies for the following protected packages: dnf5
+Problem 2: installed package rpm-libs-6.0.2-1.fc44.x86_64 requires libbz2.so.1()(64bit), but none of the providers can be installed
+  - installed package dnf5-5.4.3.0-2.fc44.x86_64 requires librpm.so.10()(64bit), but none of the providers can be installed
+  - conflicting requests
+  - problem with installed package
+##### exit 1
+##### nothing-to-do
+$ dnf5 --assumeno --cacheonly install bash
+Updating and loading repositories:
+Repositories loaded.
+Package "bash-5.3.9-3.fc44.x86_64" is already installed.
+
+Nothing to do.
+##### exit 0
+##### no-match
+$ dnf5 --assumeno --cacheonly install this-package-does-not-exist
+Updating and loading repositories:
+Repositories loaded.
+Failed to resolve the transaction:
+No match for argument: this-package-does-not-exist
+You can try to add to command line:
+  --skip-unavailable to skip unavailable packages
+##### exit 1
+##### check-upgrade
+$ dnf5 --cacheonly check-upgrade
+Updating and loading repositories:
+Repositories loaded.
+Upgrades
+ca-certificates.noarch 2026.2.90_v9.0.317-1.fc44 updates
+librepo.x86_64         1.21.0-1.fc44             updates
+openssl-libs.x86_64    1:3.5.8-1.fc44            updates
+##### exit 100
+##### cacheonly-no-cache
+$ dnf5 --assumeno --cacheonly --setopt=cachedir=/tmp/empty-cache install ripgrep
+Updating and loading repositories:
+Repositories loaded.
+Package  Arch   Version         Repository      Size
+Installing:
+ ripgrep x86_64 0:15.2.0-1.fc44 updates      4.6 MiB
+
+Transaction Summary:
+ Installing:         1 package
+
+Total size of inbound packages is 2 MiB. Need to download 2 MiB.
+After this operation, 5 MiB extra will be used (install 5 MiB, remove 0 B).
+Operation aborted by the user.
+##### exit 1
