@@ -122,7 +122,8 @@ func Run(p *plan.Plan, opts Options) *Result {
 type executor struct {
 	p            *plan.Plan
 	opts         Options
-	seen         map[string]facts.Package // installed packages at start
+	seen         map[string]facts.Package // installed packages, kept current
+	before       []string                 // package names at the start, sorted
 	baselineDone bool
 	differences  []string // what the last transaction did beyond its preview
 }
@@ -135,16 +136,18 @@ func (ex *executor) snapshotPackages() error {
 	for _, p := range pkgs {
 		ex.seen[p.Name] = p
 	}
+	// The baseline is what existed before this run, frozen here: a
+	// transaction later in the run updates seen, never before.
+	ex.before = make([]string, 0, len(ex.seen))
+	for name := range ex.seen {
+		ex.before = append(ex.before, name)
+	}
+	sort.Strings(ex.before)
 	return nil
 }
 
 func (ex *executor) baseline() []string {
-	names := make([]string, 0, len(ex.seen))
-	for name := range ex.seen {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
+	return append([]string(nil), ex.before...)
 }
 
 // installed re-reads the installed packages through the same query facts
