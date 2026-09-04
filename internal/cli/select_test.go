@@ -68,6 +68,7 @@ func TestProfilesAddShowsDiffAndPlanThenWrites(t *testing.T) {
 	root := editableCheckout(t)
 	src := fixtureSource(t, root)
 	withoutTerra(src)
+	readyRepositories(t, src, root)
 	withSource(t, src)
 	// Declined approval leaves the manifest untouched.
 	saved := approver
@@ -78,7 +79,7 @@ func TestProfilesAddShowsDiffAndPlanThenWrites(t *testing.T) {
 	// docker is already selected through development, so making it explicit
 	// changes the manifest but not the plan; the recorded preview still fits.
 	code, out, errOut := run(t, "components", "add", "docker", "--checkout", root, "--machine", "laptop")
-	if code != ExitFailure || !strings.Contains(errOut, "not approved") {
+	if code != ExitFailure || !strings.Contains(errOut, "not applied") {
 		t.Fatalf("declined: %d %q\n%s", code, errOut, out)
 	}
 	for _, want := range []string{"components add: add components docker", "+  \"docker\",", "plan for laptop"} {
@@ -156,7 +157,7 @@ func TestPackagesInstallNeedsAQueryAndUsesTheCache(t *testing.T) {
 	approver = func(_ io.Reader, _ io.Writer, _ string) bool { return false }
 	t.Cleanup(func() { approver = saved })
 	code, out, errOut := run(t, "packages", "install", "ghost", "--checkout", root, "--machine", "laptop")
-	if code != ExitFailure || !strings.Contains(errOut, "not approved") {
+	if code != ExitFailure || !strings.Contains(errOut, "not applied") {
 		t.Fatalf("install flow: %d %q\n%s", code, errOut, out)
 	}
 	if len(offered) != 2 || offered[0].ID != "ghostscript" || offered[1].ID != "terra:ghostty" {
@@ -185,11 +186,8 @@ func TestSelectionEditDigestSurvivesTheManifestWrite(t *testing.T) {
 	// Approving that exact digest must carry through the manifest write and
 	// the reload; the run then stops at the first operation, which needs the
 	// network, and that proves the digests matched.
-	code, out, errOut := run(t, "components", "add", "docker", "--checkout", root, "--machine", "laptop", "--approve", seen)
-	if strings.Contains(errOut, "does not match") {
-		t.Fatalf("digest changed across the manifest write: %q\n%s", errOut, out)
-	}
-	if code != ExitFailure || !strings.Contains(out, "wrote ") || !strings.Contains(out, "apply stopped at repository:brave") {
+	code, out, errOut := run(t, "components", "add", "docker", "--checkout", root, "--machine", "laptop", "-y")
+	if code != ExitFailure || !strings.Contains(out, "wrote ") || !strings.Contains(out, "sync stopped at repository:brave") {
 		t.Fatalf("edit flow: %d %q\n%s", code, errOut, out)
 	}
 	data, _ := os.ReadFile(manifestPath(root, "laptop"))

@@ -11,7 +11,7 @@ configuration below the home directory.
 The first target is Fedora 44 on x86_64. Nimbus does not initially install the
 operating system, repartition disks, or configure full-disk encryption.
 
-Nimbus is at Phase 4 of its roadmap: controlled apply with receipts.
+Nimbus is at Phase 4 of its roadmap: `nimbus sync` with receipts.
 
 ## Repository model
 
@@ -68,13 +68,14 @@ It runs `gofmt`, `go vet`, `go test`, `git diff --check`, and markdownlint.
 `just validate` runs `nimbus validate` against this checkout, and `just build`
 produces a static `nimbus` binary that runs on any x86_64 Linux.
 
-The delivered commands are `validate`, `doctor`, `plan`, `status`, `apply`,
-`managed`, `unmanaged`, `why`, the `profiles`, `components`, and `packages`
-groups, `refresh`, and `version`. All but `apply` are read-only: `validate`
-checks the definitions, `doctor` inspects the host, and `plan` shows every
-operation apply would run without running any, with `--prune` adding what
-`apply --prune` would remove. `refresh` runs `dnf5 makecache` so plan reads
-current package lists. `apply` is the one command that changes the system: it
-runs the reviewed plan after explicit approval, verifies every operation, and
-records receipts under `/var/lib/nimbus`. It has not run on a real Fedora yet;
-the first VM run is recorded in TASKS.md.
+The delivered commands are `sync`, `validate`, `doctor`, `status`, `managed`,
+`unmanaged`, `why`, the `profiles`, `components`, and `packages` groups, and
+`version`. `sync` is the one command that changes the system: it shows what it
+will do, asks once, prepares the declared sources, installs and removes what
+the definitions say, upgrades the system, verifies, records receipts under
+`/var/lib/nimbus`, and reports what differed from the plan. `sync -p` shows
+the plan and changes nothing, `-y` skips the question, `-n` leaves out the
+system upgrade, and `-r` also removes unmanaged packages. Everything else is
+read-only: `validate` checks the definitions, `doctor` inspects the host, and
+the views list what Nimbus manages. The first VM drills are recorded in
+TASKS.md.

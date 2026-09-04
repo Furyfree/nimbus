@@ -2,21 +2,16 @@ package apply
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"io"
-	"os"
 	"strings"
 )
 
 // readKeysFromArchive returns the key files below etc/pki/rpm-gpg/ inside a
 // gzip tar written by rpm2archive.
-func readKeysFromArchive(path string) (map[string][]byte, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	gz, err := gzip.NewReader(f)
+func readKeysFromArchive(archive []byte) (map[string][]byte, error) {
+	gz, err := gzip.NewReader(bytes.NewReader(archive))
 	if err != nil {
 		return nil, err
 	}

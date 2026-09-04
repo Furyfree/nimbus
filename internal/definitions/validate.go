@@ -14,6 +14,8 @@ import (
 // COPR repository declares a higher number so it cannot shadow Fedora.
 const FedoraPriority = 99
 
+var dnfOptionRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
 var (
 	releaseRe     = regexp.MustCompile(`^[0-9]+$`)
 	versionRe     = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
@@ -78,10 +80,30 @@ func validateRoot(c *Checkout, errs *ErrorList) {
 	} else if release, ok := releaseVersion(version.Engine); ok && compareVersions(release, r.Compatibility.MinEngine) < 0 {
 		errs.Add(RootFile, "compatibility.min_engine %s is newer than this engine %s", r.Compatibility.MinEngine, version.Engine)
 	}
+	for _, key := range sortedKeys(r.DNF) {
+		if !dnfOptionRe.MatchString(key) {
+			errs.Add(RootFile, "dnf.%s: option names are lowercase letters, digits, and underscores", key)
+		}
+		switch r.DNF[key].(type) {
+		case int64, bool, string:
+		default:
+			errs.Add(RootFile, "dnf.%s: value must be a number, boolean, or string", key)
+		}
+	}
 	flatpaks := 0
+	priorities := map[int]string{}
 	for _, id := range sortedKeys(r.Repositories) {
 		repo := r.Repositories[id]
 		where := "repositories." + id
+		if repo.Priority != nil {
+			// Equal priorities let DNF break a tie by version, which is how
+			// a later source shadows an earlier one.
+			if other, taken := priorities[*repo.Priority]; taken {
+				errs.Add(RootFile, "%s: priority %d is also used by repository %s; each repository has its own", where, *repo.Priority, other)
+			} else {
+				priorities[*repo.Priority] = id
+			}
+		}
 		if id == PrefixDNF || id == PrefixFlatpak {
 			errs.Add(RootFile, "%s: %q is a reserved prefix", where, id)
 		} else if !prefixRe.MatchString(id) {
@@ -93,6 +115,11 @@ func validateRoot(c *Checkout, errs *ErrorList) {
 		keySources := 0
 		if repo.KeyURL != "" {
 			keySources++
+			// Apply downloads the key itself, so DNF's variables are not
+			// expanded the way they are in baseurl.
+			if strings.Contains(repo.KeyURL, "$") {
+				errs.Add(RootFile, "%s: key_url must be a concrete URL without DNF variables", where)
+			}
 		}
 		if repo.KeyFile != "" {
 			keySources++

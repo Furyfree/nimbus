@@ -138,3 +138,17 @@ func TestUnrecognizedGPGCheckIsUnknown(t *testing.T) {
 		t.Fatalf("unrecognized gpgcheck = %+v", c)
 	}
 }
+
+func TestMissingGitIsUnknownNotABrokenCheckout(t *testing.T) {
+	f, cfg := healthy(), healthyConfig()
+	f.Commands["git"] = ""
+	f.Checkout = facts.Section[facts.Checkout]{Error: `git: executable file not found`}
+	c := status(Run(f, cfg), "selector")
+	if c.Status != Unknown || !strings.Contains(c.Remediation, "common profile") {
+		t.Fatalf("missing git = %+v", c)
+	}
+	cfg.CheckoutOverride = true
+	if c := status(Run(f, cfg), "selector"); c.Status != Unknown {
+		t.Fatalf("missing git with override = %+v", c)
+	}
+}

@@ -3,6 +3,7 @@ package apply
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,14 +26,14 @@ type scripted struct {
 	repoIDs   []string
 	log       []string
 	fail      map[string]string // command prefix -> error
-	stored    string            // transaction.json content
+	installs  []string          // what dnf5 install adds
 	fpr       string            // fingerprint gpg reports
 	// privilegedNoop makes every sudo command succeed without effect.
 	privilegedNoop bool
 }
 
 func newScripted() *scripted {
-	s := &scripted{fail: map[string]string{}, fpr: "AE09157A4DE88B497EA1D5D300CDAB43DE226D6F"}
+	s := &scripted{fail: map[string]string{}, fpr: "AE09157A4DE88B497EA1D5D300CDAB43DE226D6F", installs: []string{"ripgrep", "libfoo"}}
 	s.Commands = map[string][]byte{}
 	s.Failures = map[string]string{}
 	s.Files = map[string][]byte{}
@@ -40,6 +41,11 @@ func newScripted() *scripted {
 	s.Paths = map[string]string{}
 	s.installed = []string{"bash", "coreutils"}
 	return s
+}
+
+func (s *scripted) Stream(_, _ io.Writer, name string, args ...string) error {
+	_, err := s.Run(name, args...)
+	return err
 }
 
 func (s *scripted) Run(name string, args ...string) ([]byte, error) {
@@ -86,11 +92,20 @@ func (s *scripted) privileged(argv []string) ([]byte, error) {
 		return nil, nil
 	}
 	switch {
-	case argv[0] == "dnf5" && argv[1] == "-y" && argv[2] == "install" && argv[3] == "--store":
-		s.Files[filepath.Join(argv[4], "transaction.json")] = []byte(s.stored)
-	case argv[0] == "dnf5" && argv[1] == "-y" && argv[2] == "replay":
-		for _, n := range []string{"ripgrep", "libfoo"} {
-			s.installed = append(s.installed, n)
+	case argv[0] == "dnf5" && argv[1] == "-y" && argv[2] == "install":
+		// DNF resolves again at install time; the fake installs what the
+		// test scripted, which may differ from the preview.
+		s.installed = append(s.installed, s.installs...)
+	case argv[0] == "dnf5" && argv[1] == "config-manager" && argv[2] == "setopt":
+		var override string
+		for _, a := range argv[3:] {
+			if id, value, ok := strings.Cut(a, ".enabled="); ok {
+				override += "[" + id + "]\nenabled=" + value + "\n"
+			}
+		}
+		if override != "" {
+			s.Dirs[facts.RepoOverride] = []string{"99-config_manager.repo"}
+			s.Files[filepath.Join(facts.RepoOverride, "99-config_manager.repo")] = []byte(override)
 		}
 	case argv[0] == "dnf5" && argv[1] == "-y" && argv[2] == "remove":
 		var kept []string
@@ -149,17 +164,12 @@ func samplePlan(t *testing.T) *plan.Plan {
 		{Name: "ripgrep", Arch: "x86_64", EVR: "0:15.2.0-1.fc44", Repository: "updates", Section: "installing"},
 		{Name: "libfoo", Arch: "x86_64", EVR: "0:1-1.fc44", Repository: "fedora", Section: "installing dependencies"},
 	}}
-	stage := plan.StageRoot + "/packages-install"
 	p := &plan.Plan{Machine: "desktop", Definitions: "sha256:defs", Complete: true, Digest: "sha256:plan", Operations: []plan.Operation{
 		{ID: "repository:terra", Kind: plan.KindRepository, Action: plan.ActionEnable, Risk: plan.RiskMedium, Summary: "enable terra"},
 		{ID: "flatpak-remote:flathub", Kind: plan.KindFlatpakRemote, Action: plan.ActionEnable, Summary: "add flathub"},
 		{ID: "package:dnf:bash", Kind: plan.KindPackage, Action: plan.ActionAdopt, Summary: "adopt bash", Paths: []string{"profile:common"}},
-		{ID: "packages:install", Kind: plan.KindPackage, Action: plan.ActionInstall, Summary: "install 1", Paths: []string{"dnf:ripgrep"}, Transaction: tx,
-			Steps: []plan.Step{
-				{Argv: []string{"dnf5", "-y", "install", "--store", stage, "ripgrep"}, Privileged: true},
-				{Argv: []string{"dnf5", "-y", "replay", stage}, Privileged: true},
-				{Argv: []string{"rm", "-rf", stage}, Privileged: true},
-			}},
+		{ID: "packages:install", Kind: plan.KindPackage, Action: plan.ActionInstall, Summary: "install 1", Paths: []string{"profile:common"}, Items: []string{"dnf:ripgrep"}, Transaction: tx,
+			Steps: []plan.Step{{Argv: []string{"dnf5", "-y", "install", "ripgrep"}, Privileged: true}}},
 		{ID: "package:dnf:ripgrep", Kind: plan.KindPackage, Action: plan.ActionInstall, Summary: "install ripgrep", Paths: []string{"profile:common"}, After: "packages:install"},
 		{ID: "flatpak:com.spotify.Client", Kind: plan.KindFlatpak, Action: plan.ActionInstall, Summary: "install spotify", Paths: []string{"profile:hyprland-noctalia"},
 			Steps: []plan.Step{{Argv: []string{"flatpak", "install", "--system", "--noninteractive", "flathub", "com.spotify.Client"}, Privileged: true}}},
@@ -194,7 +204,6 @@ func options(t *testing.T, src *scripted, root string) Options {
 
 func TestRunExecutesVerifiesAndRecords(t *testing.T) {
 	src := newScripted()
-	src.stored = `{"rpms":[{"nevra":"ripgrep-15.2.0-1.fc44.x86_64","action":"Install"},{"nevra":"libfoo-1-1.fc44.x86_64","action":"Install"}],"version":"1.0"}`
 	root := t.TempDir()
 	opts := options(t, src, root)
 	p := samplePlan(t)
@@ -207,7 +216,7 @@ func TestRunExecutesVerifiesAndRecords(t *testing.T) {
 	}
 	for _, want := range []string{
 		"sudo install -m 0644 ", "sudo rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-nimbus-terra", "sudo dnf5 config-manager addrepo --id=nimbus-terra",
-		"sudo flatpak remote-add --if-not-exists --system --from flathub ", "sudo dnf5 -y install --store", "sudo dnf5 -y replay", "sudo rm -rf",
+		"sudo flatpak remote-add --if-not-exists --system --from flathub ", "sudo dnf5 -y install ripgrep",
 		"sudo flatpak install --system --noninteractive flathub com.spotify.Client", "gpg --batch --show-keys --with-colons ",
 	} {
 		if !src.ran(want) {
@@ -232,16 +241,33 @@ func TestRunExecutesVerifiesAndRecords(t *testing.T) {
 	}
 }
 
-func TestRunStopsAtTheFirstFailureAndKeepsEarlierReceipts(t *testing.T) {
+func TestDifferencesFromThePreviewAreReportedNotRefused(t *testing.T) {
 	src := newScripted()
-	src.stored = `{"rpms":[{"nevra":"ripgrep-15.2.0-1.fc44.x86_64","action":"Install"},{"nevra":"surprise-1-1.fc44.x86_64","action":"Install"}],"version":"1.0"}`
+	// DNF resolved again at install time and brought a package the preview
+	// did not show; the run continues and says so.
+	src.installs = []string{"ripgrep", "libfoo", "surprise"}
 	root := t.TempDir()
 	r := Run(samplePlan(t), options(t, src, root))
-	if r.Failed != "packages:install" || !strings.Contains(r.Error, "surprise-1-1.fc44.x86_64 x1 appeared in the stored transaction without review") {
+	// The fake reports every installed package as 1-1.fc44, so ripgrep's
+	// version differs from its preview as well; both are reported.
+	if r.Error != "" || len(r.Differences) != 2 || r.Differences[0] != "DNF also installed surprise 1-1.fc44 (fedora)" || !strings.Contains(r.Differences[1], "ripgrep was installed as 1-1.fc44, the preview showed 0:15.2.0-1.fc44") {
 		t.Fatalf("result = %+v", r)
 	}
-	if src.ran("sudo dnf5 -y replay") || !src.ran("sudo rm -rf") {
-		t.Fatalf("replay must not run and the stage must be cleaned:\n%s", strings.Join(src.log, "\n"))
+	src = newScripted()
+	src.installs = []string{"libfoo"}
+	r = Run(samplePlan(t), options(t, src, t.TempDir()))
+	if r.Failed != "packages:install" || !strings.Contains(r.Error, "ripgrep is not installed after the transaction") {
+		t.Fatalf("a requested package that did not arrive must fail verification: %+v", r)
+	}
+}
+
+func TestRunStopsAtTheFirstFailureAndKeepsEarlierReceipts(t *testing.T) {
+	src := newScripted()
+	root := t.TempDir()
+	src.fail["sudo dnf5 -y install"] = "exit status 1"
+	r := Run(samplePlan(t), options(t, src, root))
+	if r.Failed != "packages:install" || !strings.Contains(r.Error, "exit status 1") {
+		t.Fatalf("result = %+v", r)
 	}
 	a, _ := state.Read(root)
 	if _, ok := a.Receipts["repository:terra"]; !ok || len(a.Receipts) != 3 {
@@ -270,7 +296,6 @@ func TestKeyFingerprintMismatchStopsBeforeAnyPrivilegedCommand(t *testing.T) {
 
 func TestVerificationFailureGetsNoReceipt(t *testing.T) {
 	src := newScripted()
-	src.stored = `{"rpms":[{"nevra":"ripgrep-15.2.0-1.fc44.x86_64","action":"Install"},{"nevra":"libfoo-1-1.fc44.x86_64","action":"Install"}],"version":"1.0"}`
 	src.fail["sudo flatpak install"] = "" // succeeds silently but installs nothing
 	delete(src.fail, "sudo flatpak install")
 	root := t.TempDir()
@@ -315,59 +340,6 @@ func TestIncompletePlanIsRefusedAndOwnedRemovalRetiresReceipts(t *testing.T) {
 	a, _ := state.Read(root)
 	if _, ok := a.Receipts["package:dnf:old"]; ok {
 		t.Fatal("receipt not retired after owned removal")
-	}
-}
-
-func TestNevraAndActionHelpers(t *testing.T) {
-	if nevraName("xorg-x11-drv-nvidia-libs-3:610.57.04-1.fc44.i686") != "xorg-x11-drv-nvidia-libs" || nevraName("git-core-doc-2.55.0-1.fc44.noarch") != "git-core-doc" {
-		t.Fatal(nevraName("git-core-doc-2.55.0-1.fc44.noarch"))
-	}
-	if actionOf("installing weak dependencies") != "install" || actionOf("removing unused dependencies") != "remove" || actionOf("upgrading") != "upgrade" {
-		t.Fatal("action mapping")
-	}
-	tx := &plan.Transaction{Packages: []plan.TxPackage{{Name: "a", EVR: "0:1-1.fc44", Arch: "x86_64", Section: "installing"}, {Name: "old", EVR: "0:1-1.fc44", Arch: "x86_64", Section: "removing"}}}
-	if err := compareStored(tx, storedTransaction{RPMs: []struct {
-		NEVRA  string `json:"nevra"`
-		Action string `json:"action"`
-	}{{NEVRA: "a-1-1.fc44.x86_64", Action: "Install"}, {NEVRA: "old-1-1.fc44.x86_64", Action: "Remove"}}}); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestStoredTransactionMustMatchCompleteIdentities(t *testing.T) {
-	tx := &plan.Transaction{Packages: []plan.TxPackage{
-		{Name: "ripgrep", Arch: "x86_64", EVR: "0:15.2.0-1.fc44", Section: "installing"},
-		{Name: "glibc", Arch: "x86_64", EVR: "0:2.43-8.fc44", Section: "installing dependencies"},
-		{Name: "glibc", Arch: "i686", EVR: "0:2.43-8.fc44", Section: "installing dependencies"},
-		{Name: "nvidia", Arch: "x86_64", EVR: "3:610.57.04-1.fc44", Section: "installing"},
-	}}
-	stored := func(nevras ...string) storedTransaction {
-		var st storedTransaction
-		for _, n := range nevras {
-			st.RPMs = append(st.RPMs, struct {
-				NEVRA  string `json:"nevra"`
-				Action string `json:"action"`
-			}{NEVRA: n, Action: "Install"})
-		}
-		return st
-	}
-	good := stored("ripgrep-15.2.0-1.fc44.x86_64", "glibc-2.43-8.fc44.x86_64", "glibc-2.43-8.fc44.i686", "nvidia-3:610.57.04-1.fc44.x86_64")
-	if err := compareStored(tx, good); err != nil {
-		t.Fatal(err)
-	}
-	cases := map[string]storedTransaction{
-		"newer build":        stored("ripgrep-15.2.1-1.fc44.x86_64", "glibc-2.43-8.fc44.x86_64", "glibc-2.43-8.fc44.i686", "nvidia-3:610.57.04-1.fc44.x86_64"),
-		"other arch":         stored("ripgrep-15.2.0-1.fc44.aarch64", "glibc-2.43-8.fc44.x86_64", "glibc-2.43-8.fc44.i686", "nvidia-3:610.57.04-1.fc44.x86_64"),
-		"multilib collapsed": stored("ripgrep-15.2.0-1.fc44.x86_64", "glibc-2.43-8.fc44.x86_64", "nvidia-3:610.57.04-1.fc44.x86_64"),
-		"epoch dropped":      stored("ripgrep-15.2.0-1.fc44.x86_64", "glibc-2.43-8.fc44.x86_64", "glibc-2.43-8.fc44.i686", "nvidia-610.57.04-1.fc44.x86_64"),
-	}
-	for name, st := range cases {
-		if err := compareStored(tx, st); err == nil {
-			t.Errorf("%s accepted", name)
-		}
-	}
-	if n, evr, arch := splitNEVRA("xorg-x11-drv-nvidia-libs-3:610.57.04-1.fc44.i686"); n != "xorg-x11-drv-nvidia-libs" || evr != "3:610.57.04-1.fc44" || arch != "i686" {
-		t.Fatalf("splitNEVRA = %q %q %q", n, evr, arch)
 	}
 }
 
@@ -419,5 +391,91 @@ func TestRepositoryRepairIsVerifiedAsDeclared(t *testing.T) {
 	src2.privilegedNoop = true
 	if r := Run(p2, opts2); r.Error == "" || !strings.Contains(r.Error, "gpgcheck") {
 		t.Fatalf("repair that left gpgcheck off was verified: %+v", r)
+	}
+}
+
+func TestDNFDropInIsWrittenThenReadBack(t *testing.T) {
+	src := newScripted()
+	src.privilegedNoop = true
+	root := t.TempDir()
+	opts := options(t, src, root)
+	opts.Root.DNF = map[string]any{"max_parallel_downloads": int64(10), "fastestmirror": true}
+	want := plan.DNFDropIn(opts.Root)
+	op := plan.Operation{ID: "dnf:config", Kind: plan.KindDNFConfig, Action: plan.ActionInstall, Summary: "configure DNF",
+		Steps: []plan.Step{{Description: "set fastestmirror=True"}, {Argv: []string{"install", "-m", "0644", plan.DNFDropInPlaceholder, facts.DNFDropInPath}, Privileged: true}}}
+	p := &plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:dnf", Operations: []plan.Operation{op}}
+	// The privileged install is a no-op in the fake, so the file never
+	// appears: verification must refuse the receipt.
+	if r := Run(p, opts); r.Error == "" || !strings.Contains(r.Error, "does not hold the rendered drop-in") {
+		t.Fatalf("unwritten drop-in verified: %+v", r)
+	}
+	staged, err := os.ReadFile(filepath.Join(opts.Stage, "dnf-drop-in.conf"))
+	if err != nil || string(staged) != want {
+		t.Fatalf("staged content = %q, %v", staged, err)
+	}
+	for _, l := range src.log {
+		if strings.HasPrefix(l, "sudo install") && (strings.Contains(l, plan.DNFDropInPlaceholder) || !strings.Contains(l, opts.Stage)) {
+			t.Fatalf("placeholder not filled: %s", l)
+		}
+	}
+	src.Files[facts.DNFDropInPath] = []byte(want)
+	r := Run(p, opts)
+	if r.Error != "" || len(r.Executed) != 1 {
+		t.Fatalf("written drop-in: %+v", r)
+	}
+	a, err := state.Read(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rc, ok := a.Receipts["dnf:config"]; !ok || rc.Provider != "dnf-config" || rc.Previous != "absent" {
+		t.Fatalf("receipt = %+v", rc)
+	}
+}
+
+func TestADuplicateRepositoryIsDisabledAndVerified(t *testing.T) {
+	src := newScripted()
+	root := t.TempDir()
+	opts := options(t, src, root)
+	src.Dirs[facts.RepoDir] = []string{"nimbus-terra.repo", "terra-maker.repo"}
+	owned := "[nimbus-terra]\n"
+	for _, o := range plan.OwnedRepoOptions("terra", opts.Root.Repositories["terra"]) {
+		owned += o.Key + "=" + o.Value + "\n"
+	}
+	src.Files[filepath.Join(facts.RepoDir, "nimbus-terra.repo")] = []byte(owned)
+	src.Files[filepath.Join(facts.RepoDir, "terra-maker.repo")] = []byte("[terra-maker]\nname=Terra\nbaseurl=" + opts.Root.Repositories["terra"].BaseURL + "\nenabled=1\ngpgcheck=1\n")
+	src.privilegedNoop = false
+	p := &plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:dup", Operations: []plan.Operation{
+		{ID: "repository:terra", Kind: plan.KindRepository, Action: plan.ActionRepair, Summary: "repair terra",
+			Steps: []plan.Step{{Description: plan.DisableDuplicateDescription, Argv: []string{"dnf5", "config-manager", "setopt", "terra-maker.enabled=0"}, Privileged: true}}},
+	}}
+	r := Run(p, opts)
+	if r.Error != "" || !src.ran("sudo dnf5 config-manager setopt terra-maker.enabled=0") {
+		t.Fatalf("duplicate not disabled: %+v\n%s", r, strings.Join(src.log, "\n"))
+	}
+	if src.ran("sudo dnf5 config-manager addrepo") {
+		t.Fatal("the owned file was rewritten although only the duplicate drifted")
+	}
+}
+
+func TestUpgradeRunsTheNativeUpdatersWithVisibleOutput(t *testing.T) {
+	src := newScripted()
+	src.privilegedNoop = true
+	opts := options(t, src, t.TempDir())
+	if err := Upgrade(opts, opts.Root); err != nil {
+		t.Fatal(err)
+	}
+	if !src.ran("sudo dnf5 -y upgrade") || src.ran("sudo flatpak update") {
+		t.Fatalf("without flatpak on PATH only DNF upgrades:\n%s", strings.Join(src.log, "\n"))
+	}
+	src.Paths["flatpak"] = "/usr/bin/flatpak"
+	if err := Upgrade(opts, opts.Root); err != nil {
+		t.Fatal(err)
+	}
+	if !src.ran("sudo flatpak update --system --noninteractive") {
+		t.Fatalf("flatpak update missing:\n%s", strings.Join(src.log, "\n"))
+	}
+	src.fail["sudo dnf5 -y upgrade"] = "exit status 1"
+	if err := Upgrade(opts, opts.Root); err == nil {
+		t.Fatal("a failed dnf5 upgrade was not reported")
 	}
 }

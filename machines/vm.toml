@@ -1,0 +1,22 @@
+# Disposable Fedora virtual machine for apply drills: virtio graphics, so no
+# hardware component; Mesa comes in directly for the Hyprland session.
+schema = 1
+id = "vm"
+
+profiles = [
+  "common",
+  "development",
+  "hyprland-noctalia",
+]
+
+components = []
+
+packages = [
+  "mesa-dri-drivers",
+  "mesa-vulkan-drivers",
+]
+
+package_exclusions = []
+
+[dotfiles]
+repo = "https://github.com/Furyfree/dotfiles.git"

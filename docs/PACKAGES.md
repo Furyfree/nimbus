@@ -18,9 +18,10 @@ order. This list feeds the definitions and shrinks as they land.
   - `greetd`, `xdg-desktop-portal-gtk`, `xorg-x11-server-Xwayland`
     (`DNF/Fedora`)
   - `qt6-qtwayland`, `qt5-qtwayland` (`DNF/Fedora`)
-  - `xdg-utils`, `xdg-user-dirs`, `gnome-keyring` (`DNF/Fedora`)
+  - `xdg-utils`, `xdg-user-dirs`, `xdg-terminal-exec`, `gnome-keyring`
+    (`DNF/Fedora`)
   - `accountsservice`, `udiskie`, `udisks2` (`DNF/Fedora`)
-  - `playerctl`, `pipewire-pulse`, `pipewire-alsa` (`DNF/Fedora`)
+  - `playerctl`, `pipewire-pulseaudio`, `pipewire-alsa` (`DNF/Fedora`)
 
 ## GUI Apps
 
@@ -103,8 +104,7 @@ order. This list feeds the definitions and shrinks as they land.
 - WireGuard (`DNF/Fedora: wireguard-tools`)
 - Tailscale (`DNF/Fedora: tailscale`)
 - Compression
-  - `zip`, `unzip`, `7zip` (`DNF/Fedora`)
-  - `unrar` (`DNF/RPM Fusion Nonfree`; Fedora's `unrar` is `unrar-free`)
+  - `zip`, `unzip`, `7zip`, `unrar` (`DNF/Fedora`)
 - Nimbus system helpers
   (`DNF/Fedora: dnf5-plugins policycoreutils-python-utils`)
 
@@ -158,7 +158,7 @@ order. This list feeds the definitions and shrinks as they land.
 - Git (`DNF/Fedora: git`)
 - Git LFS (`DNF/Fedora: git-lfs`)
 - GitHub CLI (`DNF/Fedora: gh`)
-- lazygit (`DNF/Fedora: golang-github-jesseduffield-lazygit`)
+- lazygit (`DNF/Terra: golang-github-jesseduffield-lazygit`)
 - Yazi (`DNF/Terra: yazi`)
   - Required: `file` (`DNF/Fedora`)
   - Preview support: `ffmpeg`, `7zip`, `jq`, `poppler-utils`,

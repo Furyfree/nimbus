@@ -37,7 +37,7 @@ packages = [
   "jq",
   "poppler-utils",
   "ImageMagick",
-  "golang-github-jesseduffield-lazygit",
+  "terra:golang-github-jesseduffield-lazygit",
   "just",
   "terra:topgrade",
   "ShellCheck",
@@ -46,7 +46,7 @@ packages = [
   "zip",
   "unzip",
   "7zip",
-  "rpmfusion-nonfree:unrar",
+  "unrar",
   # Networking
   "NetworkManager-openconnect",
   "wireguard-tools",

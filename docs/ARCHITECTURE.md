@@ -15,7 +15,7 @@ internal/facts/        observed system: read-only inspection behind a Source
 internal/doctor/       health checks over facts, each with its remediation
 internal/plan/         desired versus observed: operations, digest, previews
 internal/state/        applied state: receipts, baseline, journal, record action
-internal/apply/        executes an approved plan: lock, native steps, receipts
+internal/apply/        executes the plan: lock, native steps, receipts
 internal/selector/     the local selector and the checkout origin check
 internal/version/      engine build identity and supported schema numbers
 
@@ -91,60 +91,55 @@ and fails on anything not recorded, so a test can never reach the host by
 accident. Each fact family is a `Section` holding a value or the reason it
 is unknown. Doctor treats unknown as a separate state from failure.
 
-## The flow of `nimbus plan`
+## The flow of `nimbus sync`
 
 ~~~text
 loadSelected            -> canonical root, validated checkout, one machine
+dnf5 makecache          -> current metadata, as the user; failure is reported
 facts.Inspect(Source)   -> installed packages, repository files, Flatpak
-plan.Build(inputs)      -> repositories to enable, packages to adopt or
-                           install, declared removals, Flatpaks, prune
-                           candidates, update information, digest
-render                  -> apply section, prune section, updates section
+plan.Build(inputs)      -> sources to prepare, packages to adopt or install,
+                           declared removals, Flatpaks, prune candidates,
+                           update information, digest
+render, Proceed? [Y/n]  -> --plan stops here; -y or --json skips the question
+apply.Run(sources)      -> DNF drop-in, repositories, Flatpak remote; refresh
+apply.Run(plan)         -> per operation: native steps through Source with
+                           their output on the terminal, verification by
+                           re-inspection, receipts through `internal record`
+apply.Upgrade           -> dnf5 upgrade, flatpak update (unless -n)
+report                  -> operations applied, differences from the plan
 ~~~
 
 The planner asks DNF for its own view of each transaction with
 `dnf5 --assumeno --cacheonly install ...`, which prints the resolved table
-and aborts. It parses that table and refuses anything the definitions did
-not ask for: an undeclared install, an undeclared removal, a package from
-the wrong repository, a smuggled upgrade. A package whose repository is not
-enabled yet, or a Flatpak whose remote is missing, becomes a blocked
-operation, and a plan with any blocked operation is incomplete. Only the
-apply section is hashed into the digest; prune candidates and update
+and aborts. It parses that table and notes what goes beyond the definitions:
+an undeclared install or removal, a package from another repository, an
+upgrade the requested packages need. A package whose repository does not
+exist yet waits for the source preparation of the same run. Only the
+operations are hashed into the digest; prune candidates and update
 information are informational and volatile.
 
 `status`, `managed`, `unmanaged`, `why`, `profiles list`,
 `components list`, and `packages installed` are views over the same
 resolver and facts. Until receipts exist, "managed" means desired and
-installed, which apply would adopt.
-
-## The flow of `nimbus apply`
-
-~~~text
-plan (with receipts and baseline)  -> shown, approval by prompt or digest
-apply.Acquire                      -> the kernel lock under the runtime dir
-plan again                         -> digest must equal the approved one
-apply.Run                          -> per operation: native steps through
-                                      Source, verification by re-inspection,
-                                      receipts through `internal record`
-pending operations                 -> refresh metadata, plan and approve again
-~~~
+installed, which sync would adopt.
 
 The executor never runs a shell. Privileged commands are the exact argv
-the plan showed, prefixed with `sudo`. Keys are verified with `gpg` before
-any privileged command touches them. A DNF install is `dnf5 install
---store`, a comparison of the stored transaction with the reviewed preview,
-then `dnf5 replay`. Receipts go through the hidden `nimbus internal record`
-action, which validates the stage against the approved digest and writes
-atomically below `/var/lib/nimbus`; it is the one privileged action of this
-phase. The selection commands edit a manifest in memory, validate and plan
-it, show the diff and plan, and only then write the file and apply.
+the plan holds, prefixed with `sudo`, streamed to the terminal. Keys are
+verified with `gpg` before any privileged command touches them. A DNF
+install is one `dnf5 install`; afterwards the installed set is compared
+with the preview and the differences are reported, not refused. Receipts go
+through the hidden `nimbus internal record` action, which validates the
+stage against the plan digest and writes atomically below `/var/lib/nimbus`;
+it is the one privileged action of this phase. The selection commands edit a
+manifest in memory, validate and plan it, show the diff and plan, ask once,
+and then write the file and sync without system updates.
 
 ## Rules the code keeps
 
-- **Read-only.** Nothing writes a file, invokes sudo, or opens a network
-  connection, except `nimbus refresh`, which runs `dnf5 makecache` and is
-  its own command so plan stays pure. `definitions` and `selector` run no
-  command at all;
+- **Read-only.** Nothing writes a file or invokes sudo except `sync`
+  without `--plan`; the only network step of the read-only path is the
+  metadata refresh at the start of sync. `definitions` and `selector` run
+  no command at all;
   `facts` and `plan` run native read-only commands only through `Source`,
   so a test can see every one of them. Tests run the loader against a
   read-only tree to prove the first part.

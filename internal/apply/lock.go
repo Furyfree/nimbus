@@ -1,7 +1,8 @@
-// Package apply executes one approved plan: it takes the operation lock,
-// re-checks every input, runs the exact native commands the plan showed,
-// verifies each result, and records receipts through the privileged record
-// action. A failed operation stops the run and never gets a receipt.
+// Package apply executes a plan: under the operation lock it runs the exact
+// native commands the plan holds with their output visible, verifies each
+// result, records receipts through the privileged record action, and
+// reports what a transaction did beyond its preview. A failed operation
+// stops the run and never gets a receipt.
 package apply
 
 import (

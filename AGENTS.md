@@ -2,8 +2,8 @@
 
 Nimbus is a personal, opinionated Fedora workstation installer and system
 manager. It turns a supported Fedora base into the system its owner wants,
-keeps that system inspectable, and makes changes through reviewed plans rather
-than hidden automation.
+keeps that system inspectable, and makes changes through plans it shows first
+rather than hidden automation.
 
 The repository contains the Go engine and the versioned definitions it uses.
 The first target is post-install Fedora 44 on x86_64. A separate dotfiles
@@ -31,8 +31,8 @@ users, distributions, or providers.
   bare names are Fedora packages.
 - **desired, observed, applied** are the three states: checkout definitions,
   live system inspection, and receipts under `/var/lib/nimbus`.
-- **plan** is the complete reviewed set of operations. A mutation absent from
-  it is a bug.
+- **plan** is the complete set of operations sync shows before it asks. A
+  mutation that neither the plan nor the closing report shows is a bug.
 - **receipt** records one verified operation. A failed operation never gets a
   successful receipt.
 - **recovery point** is a Snapper snapshot pair plus Nimbus boot archives and
@@ -49,11 +49,13 @@ extension points for imagined future needs.
 Configuration and code should say what the machine is meant to be. Avoid
 special cases hidden in control flow when the behavior belongs in typed data.
 
-### 2. Review before mutation
+### 2. Show before mutation
 
-A user must be able to understand what Nimbus observed, what it intends to
-change, why the change is needed, and what requires privilege before approving
-it. A mutation absent from the reviewed plan is a bug.
+A user must be able to see what Nimbus observed and what it intends to
+install, upgrade, and remove before it runs, and to learn afterwards what
+differed from that. Preparing declared sources needs no question; a change to
+packages does, once. A mutation that neither the plan nor the report shows is
+a bug.
 
 Read-only work stays read-only. Do not add incidental writes, privilege
 escalation, network access, or native-tool mutation to validation, inspection,

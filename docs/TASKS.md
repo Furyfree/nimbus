@@ -12,7 +12,7 @@ and is the owner's; its steps are in the evidence below.
   per resource, a journal, and the baseline of packages that existed before
   Nimbus first applied anything. The normal user reads it; only the hidden
   `nimbus internal record` action, run through sudo, writes it, and only a
-  stage bound to the approved plan digest with verified receipts.
+  stage bound to the plan digest with verified receipts.
 - [x] Record the baseline with the first receipt of the first apply; a later
   record never replaces it.
 
@@ -28,20 +28,20 @@ and is the owner's; its steps are in the evidence below.
   extracted through `rpm2archive`; `dnf5 copr enable`; priorities through
   `dnf5 config-manager setopt`, which writes a DNF override instead of the
   maker's file; a Flatpak remote added from the verified `.flatpakrepo`.
-- [x] Install packages with `dnf5 install --store` then `dnf5 replay`, after
-  comparing the stored transaction with the reviewed preview; a difference
-  stops before replay and cleans the stage.
+- [x] Install packages with one `dnf5 install`; afterwards the installed
+  set is compared with the preview and the differences are reported, not
+  refused (D-027).
 - [x] Verify every operation by re-inspecting the host; a failed
   verification gets no receipt and stops the run; earlier receipts stay.
 - [x] Owned removal of packages with a receipt that the definitions no
-  longer select; `apply --prune` removes the third-bucket candidates.
+  longer select; `sync --prune` removes the third-bucket candidates.
 
 ### Commands
 
-- [x] `nimbus apply [--prune] [--approve DIGEST]`: shows the plan, requires
-  approval by prompt or exact digest, takes the lock, re-plans, refuses a
-  changed digest, runs, and plans again for operations that waited for a
-  repository enabled in the same run.
+- [x] `nimbus sync [-p] [-y] [-n] [-r]`: refreshes metadata, shows the plan,
+  asks once, prepares the declared sources, runs the native commands with
+  their output visible, upgrades the system, verifies, records receipts, and
+  reports differences from the plan. `-p` is the read-only plan.
 - [x] `packages install [QUERY]`, `packages remove [QUERY]`,
   `profiles add|remove [ID...]`, `components add|remove [ID...]`: edit the
   manifest in memory, show the diff and plan, require approval, write the
@@ -61,9 +61,9 @@ and is the owner's; its steps are in the evidence below.
   failure with earlier receipts kept, key mismatch before any privileged
   command, verification failure without a receipt, incomplete plan refused,
   owned removal retiring its receipt.
-- [x] CLI tests: approval and digest refusal, incomplete plan, stop at the
-  first failed operation with the lock held, manifest rendering and diff,
-  the selection flows without approval, the picker hook.
+- [x] CLI tests: the one question and its refusal, incomplete plan, stop at
+  the first failed operation with the lock held, manifest rendering and
+  diff, the selection flows, the picker hook.
 - [x] Run `just check`.
 - [ ] First disposable-VM run, owner's action: see the evidence section.
 
@@ -78,7 +78,7 @@ and is the owner's; its steps are in the evidence below.
 ## Evidence
 
 - Phase 4 apply, 2026-09-03: `internal/state`, `internal/apply`, the hidden
-  `internal record` action, `nimbus apply`, the selection commands, and the
+  `internal record` action, `nimbus sync`, the selection commands, and the
   picker. Probed in the research container: `dnf5 config-manager addrepo
   --id=... --set=...` writes exactly the repository file Nimbus wants, and
   `dnf5 config-manager setopt <repo>.priority=100` writes
@@ -86,16 +86,17 @@ and is the owner's; its steps are in the evidence below.
   maker's file, so no Nimbus-owned file-writing action is needed for
   repositories. Facts now read the override directory so effective values
   are compared.
-- VM run, to be done by the owner on the Fedora 44 VM from INSTALLATION.md:
-  build the engine on the host with `go build -o nimbus ./cmd/nimbus`, copy
-  the binary and a clone of this repository into the VM, then in the VM run
-  `./nimbus doctor --checkout <clone> --machine laptop`,
-  `./nimbus plan --checkout <clone> --machine laptop`, and
-  `./nimbus apply --checkout <clone> --machine laptop`; compare doctor and
-  plan output with the fixtures, check `/var/lib/nimbus` after apply, run
-  `plan` again and expect nothing to run, then `unmanaged --all` to see the
-  baseline. Record the outcome here.
-
+- VM drill, 2026-09-04, on the Fedora 44 VM from INSTALLATION.md with the
+  `vm` manifest: five fresh-snapshot runs, each finding conditions the unit
+  fixtures had not modelled (rpm2archive writing to stdout, `repo_gpgcheck`
+  against DNF's own keyring, Terra's `$releasever` key URL, Fedora carrying
+  `unrar`, the 1Password and ChatGPT packages writing repository files,
+  `dnf5 replay` recording `@stored_transaction(...)` sources and skipping
+  signature checks, and openssl-libs needing an upgrade on a fresh base).
+  Each is recorded in DECISIONS.md D-022 through D-027 with its fix. The
+  final shape, one `nimbus sync` that shows, asks once, runs, and reports,
+  installed 900 packages and 2 Flatpaks and left `sync -p` with nothing to
+  do. The next drill after D-027 is the owner's.
 - Phase 3 planner, 2026-09-03: `internal/plan` with `nimbus plan`, `status`,
   `managed`, `unmanaged`, `why`, `profiles list`, `components list`, and
   `packages installed`. DNF5's `--store` was probed and found to download
@@ -135,8 +136,8 @@ and is the owner's; its steps are in the evidence below.
   order, repositories in nimbus.toml with prefix references, Nimbus running
   the user-scope installs as the user, and Topgrade with a Chezmoi-owned
   configuration. Fedora 44 package-query evidence confirmed Tailscale,
-  Noctalia, and `golang-github-jesseduffield-lazygit` in Fedora, Hyprland in
-  no accepted repository, and `librepods` in Terra; the ChatGPT RPM was
+  Noctalia in Fedora, `golang-github-jesseduffield-lazygit` and `librepods`
+  in Terra, Hyprland in no accepted repository; the ChatGPT RPM was
   inspected and registers OpenAI's DNF repository, and Brave's repository
   carries `brave-origin`.
 - The dotfiles template currently prompts only for `onePasswordSsh` and
@@ -177,7 +178,7 @@ and is the owner's; its steps are in the evidence below.
   handoff and `mise install` under `MISE_SYSTEM_DEPS=warn` plus the Cargo
   steps after it, all as the normal user.
 - Q-008 permanently delegates Fedora release upgrades to native DNF5 tooling,
-  keeps `nimbus upgrade` within one release, and limits Nimbus to compatibility
+  keeps the upgrade step within one release, and limits Nimbus to compatibility
   reporting plus post-upgrade drift inspection.
 - Q-009 fixes the supported recovery topology, three-point retention, 20 GiB
   low-space refusal, manual restore drill, and user runtime operation lock. On
@@ -212,12 +213,12 @@ and is the owner's; its steps are in the evidence below.
 
 ## Blockers and residual risk
 
-- Apply has not run on a real Fedora yet; the VM run above is the first.
-  The scripted tests prove the control flow, not DNF's behavior.
-- A round with pending operations refreshes the user metadata cache with
-  `dnf5 makecache`; root's cache is refreshed by the `--store` download
-  itself. The two caches can differ for a moment, which surfaces as a
-  refused digest, never a silent change.
+- The scripted tests prove the control flow, not DNF's behavior; the VM
+  drills above are the evidence for that, and the sync of D-028 has had one
+  full fresh-host run.
+- Sync refreshes the user metadata cache with `dnf5 makecache`; root's
+  cache is refreshed by `dnf5 install` itself. The two can differ for a
+  moment, which surfaces in the differences report, never silently.
 - The picker is untested interactively; its model logic is small and the
   commands accept explicit IDs without it.
 
@@ -226,11 +227,11 @@ and is the owner's; its steps are in the evidence below.
   fresh host gets a complete plan, removal dedup, repository and remote
   verification, adoption source checks, a digest bound to the definition
   digest), and the eighth, `plan --refresh` as network access inside a
-  planning path, in the fourth: the flag is gone and `nimbus refresh` is
-  its own command.
-- A non-root `plan` reads DNF's metadata through the system cache when it is
-  fresh and otherwise its user cache; apply runs DNF as root and re-resolves,
-  so a difference surfaces as a refused digest rather than a silent change.
+  planning path, in the fourth: the flag is gone; sync now refreshes as its
+  first step, since it is the command that acts.
+- A non-root plan reads DNF's metadata through the system cache when it is
+  fresh and otherwise its user cache; sync runs DNF as root and re-resolves,
+  so a difference surfaces in the differences report rather than silently.
 
 - The declared repository URLs for 1Password, Brave, VSCodium, and Terra are
   taken from the makers' documentation and the container's repository files;

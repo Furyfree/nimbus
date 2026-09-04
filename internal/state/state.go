@@ -1,8 +1,8 @@
 // Package state is the applied state under /var/lib/nimbus: receipts for
 // every verified operation, the baseline of packages that existed before
 // Nimbus took over, and a journal. The normal user reads it; only the
-// privileged record action writes it, and only data bound to an approved
-// plan digest.
+// privileged record action writes it, and only data bound to the digest of
+// the plan that produced it.
 package state
 
 import (

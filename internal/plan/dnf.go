@@ -26,6 +26,9 @@ type Transaction struct {
 	Packages []TxPackage `json:"packages"`
 	// NothingToDo is set when DNF reported nothing to change.
 	NothingToDo bool `json:"nothing_to_do,omitempty"`
+	// Download is DNF's own estimate of the inbound size, such as "3 GiB",
+	// when the preview printed one.
+	Download string `json:"download,omitempty"`
 }
 
 // Rows returns the packages of one section.
@@ -60,8 +63,12 @@ var knownSections = map[string]bool{
 	"removing":                     true,
 	"removing dependent packages":  true,
 	"removing unused dependencies": true,
-	"replacing":                    true,
 }
+
+// SectionReplaced holds the packages an upgrade or an obsoleting install
+// replaces. DNF5 prints them indented below the new package as
+// "replacing NAME ARCH EVR REPO SIZE", not as a section of their own.
+const SectionReplaced = "replaced"
 
 // ParsePreview reads the output of dnf5 --assumeno <install|remove> ...,
 // which prints the resolved transaction table and then aborts.
@@ -88,6 +95,9 @@ func ParsePreview(out []byte) (*Transaction, error) {
 			continue
 		case trimmed == "Nothing to do.":
 			tx.NothingToDo = true
+			continue
+		case strings.HasPrefix(trimmed, "Total size of inbound packages is "):
+			tx.Download = DownloadSize(trimmed)
 			continue
 		case strings.HasPrefix(trimmed, "Package ") && strings.HasSuffix(trimmed, "Arch   Version") || strings.HasPrefix(line, "Package") && strings.Contains(line, "Repository"):
 			inTable = true
@@ -116,6 +126,13 @@ func ParsePreview(out []byte) (*Transaction, error) {
 		if section == "" {
 			return nil, fmt.Errorf("preview row before any section: %q", trimmed)
 		}
+		if fields[0] == "replacing" {
+			if len(fields) < 5 {
+				return nil, fmt.Errorf("unexpected preview row %q", trimmed)
+			}
+			tx.Packages = append(tx.Packages, TxPackage{Name: fields[1], Arch: fields[2], EVR: fields[3], Repository: fields[4], Section: SectionReplaced})
+			continue
+		}
 		tx.Packages = append(tx.Packages, TxPackage{Name: fields[0], Arch: fields[1], EVR: fields[2], Repository: fields[3], Section: section})
 	}
 	if err := scanner.Err(); err != nil {
@@ -128,6 +145,24 @@ func ParsePreview(out []byte) (*Transaction, error) {
 		return nil, fmt.Errorf("no transaction table in dnf5 output")
 	}
 	return tx, nil
+}
+
+// DownloadSize extracts DNF's inbound size from the line that states it,
+// "Total size of inbound packages is 3 GiB. Need to download 3 GiB.", which
+// DNF prints on stderr and so may reach the planner outside the table.
+func DownloadSize(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		size, ok := strings.CutPrefix(line, "Total size of inbound packages is ")
+		if !ok {
+			continue
+		}
+		if i := strings.Index(size, ". "); i > 0 {
+			size = size[:i]
+		}
+		return strings.TrimSuffix(size, ".")
+	}
+	return ""
 }
 
 // Upgrade is one row of dnf5 check-upgrade.
