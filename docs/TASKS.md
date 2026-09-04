@@ -219,6 +219,10 @@ and is the owner's; its steps are in the evidence below.
 - Sync refreshes the user metadata cache with `dnf5 makecache`; root's
   cache is refreshed by `dnf5 install` itself. The two can differ for a
   moment, which surfaces in the differences report, never silently.
+- A repository or Flatpak remote whose last selected package leaves keeps
+  its receipt and stays enabled at its declared low priority; retiring it
+  needs the repository ownership rule Phase 6 defines, since an adopted
+  package may still take updates from it.
 - The picker is untested interactively; its model logic is small and the
   commands accept explicit IDs without it.
 
