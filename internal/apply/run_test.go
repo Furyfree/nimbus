@@ -505,3 +505,49 @@ func TestBaselineIsTheSnapshotBeforeTheRunNotAfter(t *testing.T) {
 		t.Fatalf("packages installed by the run are in the baseline: %v", a.Baseline.Packages)
 	}
 }
+
+func TestAResolvedProvideIsVerifiedByItsRealName(t *testing.T) {
+	src := newScripted()
+	src.installs = []string{"pipewire-pulseaudio"}
+	root := t.TempDir()
+	tx := &plan.Transaction{Packages: []plan.TxPackage{{Name: "pipewire-pulseaudio", Arch: "x86_64", EVR: "0:1.6.8-1.fc44", Repository: "updates", Section: "installing"}}}
+	p := &plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:provide", Operations: []plan.Operation{
+		{ID: "packages:install", Kind: plan.KindPackage, Action: plan.ActionInstall, Summary: "install 1", Items: []string{"dnf:pipewire-pulse"}, Resolved: map[string]string{"pipewire-pulse": "pipewire-pulseaudio"}, Transaction: tx,
+			Steps: []plan.Step{{Argv: []string{"dnf5", "-y", "install", "pipewire-pulse"}, Privileged: true}}},
+	}}
+	if r := Run(p, options(t, src, root)); r.Error != "" {
+		t.Fatalf("resolved provide failed verification: %+v", r)
+	}
+	a, _ := state.Read(root)
+	if rc, ok := a.Receipts["package:dnf:pipewire-pulse"]; !ok || !strings.Contains(rc.Intended, "pipewire-pulseaudio") {
+		t.Fatalf("receipt = %+v", rc)
+	}
+}
+
+func TestCOPRImportsTheVerifiedKeyBeforeEnabling(t *testing.T) {
+	src := newScripted()
+	src.privilegedNoop = true
+	opts := options(t, src, t.TempDir())
+	opts.Fetch = func(url string) ([]byte, error) { return []byte("-----BEGIN PGP PUBLIC KEY BLOCK-----\ncopr\n"), nil }
+	src.fpr = "97E23476C89635135407C7D5E9BA41342C4B2995" // the declared COPR key
+	op := plan.Operation{ID: "repository:hyprland-copr", Kind: plan.KindRepository, Action: plan.ActionEnable, Summary: "enable copr"}
+	ex := &executor{p: &plan.Plan{}, opts: opts, seen: map[string]facts.Package{}}
+	ex.opts.Out = io.Discard
+	priority := 130
+	copr := definitions.Repository{Kind: "copr", Project: "lionheartp/Hyprland", Key: "97E2 3476 C896 3513 5407 C7D5 E9BA 4134 2C4B 2995", Priority: &priority}
+	if err := ex.enableCOPR("hyprland-copr", copr, op); err != nil {
+		t.Fatal(err)
+	}
+	var importAt, enableAt int
+	for i, l := range src.log {
+		if strings.HasPrefix(l, "sudo rpm --import ") {
+			importAt = i + 1
+		}
+		if strings.HasPrefix(l, "sudo dnf5 copr enable -y") {
+			enableAt = i + 1
+		}
+	}
+	if importAt == 0 || enableAt == 0 || importAt > enableAt {
+		t.Fatalf("import %d enable %d:\n%s", importAt, enableAt, strings.Join(src.log, "\n"))
+	}
+}

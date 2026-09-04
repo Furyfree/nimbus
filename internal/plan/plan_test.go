@@ -247,15 +247,13 @@ func TestPlanOnFreshFedora(t *testing.T) {
 	if len(p.Updates.Available) != 1 || p.Updates.Available[0].Name != "librepo" {
 		t.Fatalf("updates = %+v", p.Updates)
 	}
-	names := map[string]bool{}
-	for _, pr := range p.Prune {
-		names[pr.Name] = true
+	// Before the first sync there is no baseline, so nothing can be told
+	// apart from the base install: no candidates, and the plan says why.
+	if len(p.Prune) != 0 || p.PruneUnavailable != "" {
+		t.Fatalf("prune before a baseline = %+v %q", p.Prune, p.PruneUnavailable)
 	}
-	// Before the first apply there is no baseline, so every user-installed
-	// package nothing selects is a candidate, base packages included; the
-	// baseline recorded by the first apply moves them to pre-existing.
-	if names["dnf5-plugins"] || !names["bash"] || !names["bzip2"] || !names["gzip"] {
-		t.Fatalf("prune = %+v", p.Prune)
+	if withPrune, _ := Build(Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src, Prune: true}); !strings.Contains(withPrune.PruneUnavailable, "baseline") {
+		t.Fatalf("prune unavailable = %q", withPrune.PruneUnavailable)
 	}
 	// Repositories and remotes come before every package operation.
 	lastRepo, firstPkg := -1, len(p.Operations)
@@ -866,5 +864,51 @@ func TestReleasePackagesBelongToTheirRepository(t *testing.T) {
 	}
 	if got := ReleasePackageName("https://example.invalid/x/foo-bar-release-1.2-3.fc44.noarch.rpm"); got != "foo-bar-release" {
 		t.Fatalf("name = %q", got)
+	}
+}
+
+func TestAPrefixChangeRetiresTheOldReceiptAndAdoptsTheNew(t *testing.T) {
+	c, r := repository(t)
+	src, f := readyHost(t, c)
+	// ghostty was recorded under dnf: and is now selected as terra:ghostty;
+	// the package stays, the old receipt goes, the new identity is adopted.
+	f.Packages.Value = append(f.Packages.Value, facts.Package{Name: "ghostty", Version: "1", Release: "1", Arch: "x86_64", FromRepo: "nimbus-terra", Reason: "user"})
+	a := applied("package:dnf:ghostty")
+	a.Baseline = &state.Baseline{Schema: state.Schema, Packages: []string{"bash"}}
+	p, err := Build(Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src, Applied: a})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op := find(p, "package:dnf:ghostty"); op == nil || op.Action != ActionRetire {
+		t.Fatalf("old receipt = %+v", op)
+	}
+	if op := find(p, "package:terra:ghostty"); op == nil || op.Action != ActionAdopt || len(op.Notes) != 0 {
+		t.Fatalf("new identity = %+v", op)
+	}
+	if op := find(p, "packages:remove-owned"); op != nil {
+		t.Fatalf("the package must not be removed: %+v", op)
+	}
+}
+
+func TestAnotherSourceIsNotedOnAdoptionAndKeep(t *testing.T) {
+	c, r := repository(t)
+	src, f := readyHost(t, c)
+	f.Packages.Value = append(f.Packages.Value,
+		facts.Package{Name: "ripgrep", Version: "1", Release: "1", Arch: "x86_64", FromRepo: "nimbus-terra", Reason: "user"},
+		facts.Package{Name: "ghostty", Version: "1", Release: "1", Arch: "x86_64", FromRepo: "copr:copr.fedorainfracloud.org:someone:ghostty", Reason: "user"},
+		facts.Package{Name: "git", Version: "1", Release: "1", Arch: "x86_64", FromRepo: "anaconda", Reason: "user"},
+	)
+	p, _ := Build(Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src, Applied: applied("package:dnf:ripgrep")})
+	if op := find(p, "package:dnf:ripgrep"); op == nil || op.Action != ActionKeep || len(op.Notes) != 1 || !strings.Contains(op.Notes[0], "installed from nimbus-terra, not from fedora") {
+		t.Fatalf("kept from another source = %+v", op)
+	}
+	if op := find(p, "package:terra:ghostty"); op == nil || op.Action != ActionAdopt || len(op.Notes) != 1 || !strings.Contains(op.Notes[0], "not from nimbus-terra") {
+		t.Fatalf("adopted from another source = %+v", op)
+	}
+	if op := find(p, "package:dnf:git"); op == nil || len(op.Notes) != 0 {
+		t.Fatalf("the installer's source needs no note: %+v", op)
+	}
+	if steps := repositorySteps("hyprland-copr", c.Definitions().Repositories["hyprland-copr"]); steps[1].Argv[0] != "rpm" || steps[1].Argv[1] != "--import" || !steps[1].Privileged {
+		t.Fatalf("the COPR key must be imported before the enable: %+v", steps)
 	}
 }

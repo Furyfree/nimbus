@@ -178,7 +178,9 @@ Rules:
 ## Privilege
 
 - The root account is disabled. One user in `wheel` runs `sudo` with a
-  password. No `NOPASSWD` rules, no sudo keepalive, no root daemon.
+  password. No `NOPASSWD` rules, no root daemon. Sync asks for the password
+  once and renews the sudo credential only while that one run lasts, so a
+  long transaction does not ask again; nothing keeps it alive afterwards.
 - Nimbus runs as the user and refuses to run as root. Each privileged command
   is rendered in the plan and executed through `sudo` directly.
 - The owner's account is in the `docker` group, declared as a group-membership

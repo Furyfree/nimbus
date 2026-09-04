@@ -125,3 +125,38 @@ func TestSourceOperationsComeFirstAndOnlyRepositoriesNeedARefresh(t *testing.T) 
 		t.Fatal("repository change detection is wrong")
 	}
 }
+
+func TestSyncStopsWhenThePlanChangesWhileTheQuestionIsOpen(t *testing.T) {
+	root := applyEnv(t)
+	src := fixtureSource(t, root)
+	readyRepositories(t, src, root)
+	answerLaptopInstall(t, src, root)
+	withSource(t, src)
+	saved := approver
+	approver = func(_ io.Reader, _ io.Writer, _ string) bool {
+		// Another run finished meanwhile: a desired package is now installed.
+		src.Commands[facts.Key("dnf5", facts.PackageQueryArgs...)] = append(src.Commands[facts.Key("dnf5", facts.PackageQueryArgs...)], []byte("ripgrep|0|15.2.0|1.fc44|x86_64|updates|User\n")...)
+		return true
+	}
+	t.Cleanup(func() { approver = saved })
+	code, _, errOut := run(t, "sync", "-n", "--checkout", root, "--machine", "laptop")
+	if code != ExitFailure || !strings.Contains(errOut, "changed while the question was open") {
+		t.Fatalf("stale plan ran: %d %q", code, errOut)
+	}
+}
+
+func TestSelectionCommandsKeepJSONOnStdout(t *testing.T) {
+	applyEnv(t)
+	root := editableCheckout(t)
+	src := fixtureSource(t, root)
+	readyRepositories(t, src, root)
+	answerLaptopInstall(t, src, root)
+	withSource(t, src)
+	code, out, errOut := run(t, "components", "add", "docker", "--checkout", root, "--machine", "laptop", "--json")
+	if code != ExitFailure || !strings.HasPrefix(strings.TrimSpace(out), "{") || !strings.Contains(out, `"failed"`) {
+		t.Fatalf("stdout is not one envelope: %d\n%s", code, out)
+	}
+	if !strings.Contains(errOut, "components add: add components docker") || !strings.Contains(errOut, "plan for laptop") {
+		t.Fatalf("the review text must go to stderr:\n%s", errOut)
+	}
+}

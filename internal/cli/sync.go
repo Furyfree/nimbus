@@ -161,10 +161,13 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 		return err
 	}
 	src := newSource()
-	// Current metadata makes the plan and the upgrade exact; the cache is
-	// the user's and needs no privilege.
-	if _, err := src.Run("dnf5", "makecache"); err != nil {
-		fmt.Fprintf(errOut, "metadata not refreshed: %v\n", err)
+	// The run refreshes metadata first so the plan and the upgrade are
+	// exact; the cache is the user's and needs no privilege. Plan-only
+	// reads the cache as it is and touches nothing.
+	if !sf.plan {
+		if _, err := src.Run("dnf5", "makecache"); err != nil {
+			fmt.Fprintf(errOut, "metadata not refreshed: %v\n", err)
+		}
 	}
 	p, applied, err := planWithState(s, src, sf.prune)
 	if err != nil {
@@ -177,6 +180,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			}
 		} else {
 			out.Write(renderPlan(p, sf.prune, !sf.noUpgrade))
+			fmt.Fprintln(out, "\nfrom the local metadata cache; sync refreshes it before it runs")
 		}
 		if !p.Complete {
 			return reported{}
@@ -190,6 +194,9 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 		return errors.New("the plan has problems; see above")
 	}
 	if nothingToRun(p) && sf.noUpgrade {
+		if opts.json {
+			return writeJSON(out, syncResult{Digest: p.Digest, Executed: []string{}, Differences: []string{}}, nil)
+		}
 		fmt.Fprintln(out, "nothing to do; the system matches the definitions")
 		return nil
 	}
@@ -215,6 +222,13 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	}
 	held = nil
 	defer lock.Release()
+	// Another Nimbus run may have finished while the question was open;
+	// the plan answered must still be the plan that runs.
+	if fresh, _, err := planWithState(s, src, sf.prune); err != nil {
+		return err
+	} else if fresh.Digest != p.Digest {
+		return errors.New("the system changed while the question was open and the plan with it; run sync again")
+	}
 	stage := filepath.Join(filepath.Dir(lockPath), "stage")
 	if err := os.MkdirAll(stage, 0o700); err != nil {
 		return err

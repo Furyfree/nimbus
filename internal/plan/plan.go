@@ -55,9 +55,12 @@ type Operation struct {
 	Paths   []string `json:"paths,omitempty"`
 	// Items are the package references a merged transaction installs, one
 	// receipt each; Paths then explains the transaction as a whole.
-	Items       []string     `json:"items,omitempty"`
-	Steps       []Step       `json:"steps,omitempty"`
-	Transaction *Transaction `json:"transaction,omitempty"`
+	Items []string `json:"items,omitempty"`
+	// Resolved maps a requested name to the package DNF resolved it to when
+	// they differ, so verification looks for what actually arrives.
+	Resolved    map[string]string `json:"resolved,omitempty"`
+	Steps       []Step            `json:"steps,omitempty"`
+	Transaction *Transaction      `json:"transaction,omitempty"`
 	// After names the operation this one waits for. Apply runs the earlier
 	// operation, then re-plans so the exact transaction can be shown; a
 	// pending operation does not make the plan incomplete.
@@ -93,7 +96,9 @@ type Plan struct {
 	Checkout    facts.Checkout `json:"checkout"`
 	Operations  []Operation    `json:"operations"`
 	Prune       []Prune        `json:"prune"`
-	Updates     Updates        `json:"updates"`
+	// PruneUnavailable says why prune candidates cannot be known yet.
+	PruneUnavailable string  `json:"prune_unavailable,omitempty"`
+	Updates          Updates `json:"updates"`
 	// Complete is false while any operation is blocked.
 	Complete bool   `json:"complete"`
 	Digest   string `json:"digest"`
@@ -143,6 +148,9 @@ func Build(in Inputs) (*Plan, error) {
 	p.Operations = append(p.Operations, b.flatpaks()...)
 	p.Operations = append(p.Operations, b.ownedRemovals()...)
 	p.Prune = b.prune()
+	if in.Prune && (in.Applied == nil || in.Applied.Baseline == nil) {
+		p.PruneUnavailable = "prune needs the baseline the first sync records; run sync once first"
+	}
 	if in.Prune && len(p.Prune) > 0 {
 		p.Operations = append(p.Operations, b.pruneTransaction(p.Prune))
 	}
@@ -558,6 +566,7 @@ func repositorySteps(id string, r definitions.Repository) []Step {
 	case r.Kind == "copr":
 		return append([]Step{
 			{Description: "download the COPR key and verify its fingerprint is " + fp, Argv: []string{"gpg", "--batch", "--show-keys", "--with-colons", "<verified key>"}},
+			{Description: "import the verified key into the RPM database, so packages are checked against exactly it", Argv: []string{"rpm", "--import", "<verified key>"}, Privileged: true},
 			{Description: "enable the COPR through DNF", Argv: []string{"dnf5", "copr", "enable", "-y", r.Project}, Privileged: true},
 		}, PrioritySteps(id, r)...)
 	case r.ReleasePackage != "":
@@ -660,8 +669,9 @@ func (b *builder) packages() []Operation {
 				Summary: fmt.Sprintf("adopt %s %s, already installed", p.Name, inst.EVR()), Paths: p.Paths}
 			if _, managed := b.in.Applied.Receipts[op.ID]; managed {
 				op.Action, op.Summary = ActionKeep, fmt.Sprintf("%s %s is managed and unchanged", p.Name, inst.EVR())
-				adopt = append(adopt, op)
-				continue
+			}
+			if note := b.sourceNote(p, inst); note != "" {
+				op.Notes = append(op.Notes, note)
 			}
 			adopt = append(adopt, op)
 			continue
@@ -692,6 +702,18 @@ func (b *builder) packages() []Operation {
 // such as package:terra:ghostty.
 func PackageName(id string) string {
 	return id[strings.LastIndexByte(id, ':')+1:]
+}
+
+// sourceNote says when an installed desired package comes from a
+// repository other than the one its prefix names. The package is adopted
+// or kept either way; the owner sees where it came from.
+func (b *builder) sourceNote(p definitions.ResolvedPackage, inst facts.Package) string {
+	from := inst.FromRepo
+	// The installer and local files record no repository worth noting.
+	if from == "" || from == "anaconda" || strings.HasPrefix(from, "@") || contains(b.expectedRepos(p.Prefix), from) {
+		return ""
+	}
+	return fmt.Sprintf("%s is installed from %s, not from %s", p.Name, from, strings.Join(b.expectedRepos(p.Prefix), " or "))
 }
 
 // installTransaction previews one DNF transaction for every installable
@@ -785,6 +807,10 @@ func (b *builder) installTransaction(pkgs []definitions.ResolvedPackage) Operati
 				requested := unmatched[0]
 				unmatched = unmatched[1:]
 				p = byName[requested]
+				if op.Resolved == nil {
+					op.Resolved = map[string]string{}
+				}
+				op.Resolved[requested] = row.Name
 				op.Notes = append(op.Notes, fmt.Sprintf("%s resolves to the package %s", requested, row.Name))
 			}
 			if !contains(b.expectedRepos(p.Prefix), row.Repository) {
@@ -949,9 +975,11 @@ func (b *builder) flatpaks() []Operation {
 // lifecycle the receipt recorded.
 func (b *builder) ownedRemovals() []Operation {
 	desired := map[string]bool{}
+	desiredNames := map[string]bool{}
 	for _, p := range b.in.Resolved.Packages {
 		desired["package:"+p.Canonical] = true
 		desired["flatpak:"+p.Name] = true
+		desiredNames[p.Name] = true
 	}
 	var dnf, ops []Operation
 	for _, id := range sortedKeys(b.in.Applied.Receipts) {
@@ -962,6 +990,13 @@ func (b *builder) ownedRemovals() []Operation {
 		switch r.Provider {
 		case "dnf":
 			name := PackageName(id)
+			if desiredNames[name] {
+				// The package is still desired under another prefix; the
+				// new identity is adopted and only the old receipt goes.
+				ops = append(ops, Operation{ID: id, Kind: KindPackage, Action: ActionRetire, Risk: RiskLow,
+					Summary: fmt.Sprintf("retire the receipt of %s, which is now selected as another reference", name), Paths: []string{"receipt"}})
+				continue
+			}
 			if _, ok := b.installed[name]; !ok {
 				// Already gone: only the receipt is retired, so a later
 				// hand installation is not mistaken for Nimbus's.
@@ -1043,6 +1078,11 @@ func (b *builder) pruneTransaction(cands []Prune) Operation {
 // that existed before Nimbus took over. Before the first apply there is no
 // baseline, so every such package is a candidate.
 func (b *builder) prune() []Prune {
+	if b.in.Applied == nil || b.in.Applied.Baseline == nil {
+		// Without the baseline every pre-existing package would look
+		// unmanaged; the first sync records it and prune waits for that.
+		return []Prune{}
+	}
 	desired := map[string]bool{}
 	for _, p := range b.in.Resolved.Packages {
 		desired[p.Name] = true
