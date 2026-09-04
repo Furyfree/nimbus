@@ -95,12 +95,14 @@ is unknown. Doctor treats unknown as a separate state from failure.
 
 ~~~text
 loadSelected            -> canonical root, validated checkout, one machine
-dnf5 makecache          -> current metadata, as the user; failure is reported
+dnf5 makecache          -> current metadata, as the user; failure is reported;
+                           --plan skips it and reads the cache as it is
 facts.Inspect(Source)   -> installed packages, repository files, Flatpak
 plan.Build(inputs)      -> sources to prepare, packages to adopt or install,
                            declared removals, Flatpaks, prune candidates,
                            update information, digest
 render, Proceed? [Y/n]  -> --plan stops here; -y or --json skips the question
+lock, plan again        -> the digest must equal the one answered
 apply.Run(sources)      -> DNF drop-in, repositories, Flatpak remote; refresh
 apply.Run(plan)         -> per operation: native steps through Source with
                            their output on the terminal, verification by
@@ -136,10 +138,9 @@ and then write the file and sync without system updates.
 
 ## Rules the code keeps
 
-- **Read-only.** Nothing writes a file or invokes sudo except `sync`
-  without `--plan`; the only network step of the read-only path is the
-  metadata refresh at the start of sync. `definitions` and `selector` run
-  no command at all;
+- **Read-only.** Nothing writes a file, invokes sudo, or opens a network
+  connection except `sync` without `--plan`, whose first step is the
+  metadata refresh. `definitions` and `selector` run no command at all;
   `facts` and `plan` run native read-only commands only through `Source`,
   so a test can see every one of them. Tests run the loader against a
   read-only tree to prove the first part.

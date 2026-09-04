@@ -439,7 +439,11 @@ func (ex *executor) enableCOPR(id string, r definitions.Repository, op plan.Oper
 	if err != nil {
 		return fmt.Errorf("download COPR key: %w", err)
 	}
-	if _, err := ex.verifiedKey("key-"+id+".gpg", data, r.Key); err != nil {
+	key, err := ex.verifiedKey("key-"+id+".gpg", data, r.Key)
+	if err != nil {
+		return err
+	}
+	if err := ex.sudo("rpm", "--import", key); err != nil {
 		return err
 	}
 	if err := ex.sudo("dnf5", "copr", "enable", "-y", r.Project); err != nil {
@@ -524,12 +528,15 @@ func (ex *executor) installTransaction(op plan.Operation) ([]state.Receipt, []st
 	var receipts []state.Receipt
 	for _, canonical := range op.Items {
 		name := canonical[strings.LastIndexByte(canonical, ':')+1:]
+		if resolved, ok := op.Resolved[name]; ok {
+			name = resolved
+		}
 		inst, ok := have[name]
 		if !ok {
 			return nil, nil, fmt.Errorf("verification: %s is not installed after the transaction", name)
 		}
 		sub := plan.Operation{ID: "package:" + canonical, Action: plan.ActionInstall, Paths: pathsFor(ex.p, "package:"+canonical)}
-		receipts = append(receipts, ex.receipt(sub, "dnf", "absent", "installed "+inst.EVR(), "dnf5 repoquery --installed lists "+inst.EVR()))
+		receipts = append(receipts, ex.receipt(sub, "dnf", "absent", "installed "+name+" "+inst.EVR(), "dnf5 repoquery --installed lists "+name+" "+inst.EVR()))
 	}
 	ex.differences = transactionDifferences(op.Transaction, ex.seen, have)
 	for _, p := range installed {

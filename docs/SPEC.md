@@ -639,14 +639,14 @@ and native transactions; the checkout origin, commit, and dirty state are
 reported beside it. The plan carries a digest that receipts record, so the
 state says which plan produced it.
 
-Planning never invokes sudo, writes files, or changes Nimbus state. Sync
-refreshes the DNF metadata cache first, as the user, so the plan and the
+Planning never invokes sudo, writes files, accesses the network, or changes
+Nimbus state; `sync --plan` reads the DNF metadata cache as it is and says so. A
+run refreshes that cache first, as the user, so the plan it shows and the
 transactions read current package lists; a refresh that fails is reported and
 the plan reads the cache as it is. DNF transactions are previewed from that
-cache. Update information uses the same metadata and reports when its
-freshness or availability is insufficient. A plan with a problem, such as a
-package no repository provides, is incomplete and says so; sync runs only a
-complete plan.
+cache. Update information uses the same metadata and reports when its freshness
+or availability is insufficient. A plan with a problem, such as a package no
+repository provides, is incomplete and says so; sync runs only a complete plan.
 
 Sync installs and repairs desired resources, adopts existing ones whatever
 their source and records that source, and removes resources previously owned
@@ -656,7 +656,9 @@ command keeps the machine both as declared and current.
 
 `nimbus sync` works the way an installer does: show, ask once, run, report.
 It shows the plan as it is known at that moment and asks `Proceed? [Y/n]`
-once; `-y` answers yes and `--json` asks nothing. On a host whose sources
+once; `-y` answers yes and `--json` asks nothing. After the answer it takes
+the lock and plans again; a plan that changed while the question was open
+stops the run. On a host whose sources
 exist the plan is exact, with versions, dependencies, and download size. On a
 fresh host the sources do not exist yet, so the plan names the packages and
 DNF prints the exact transaction as it starts. Sudo is primed once after the
@@ -675,7 +677,8 @@ actually installed, and reports the differences by name, or "none". A
 requested package that is not installed after its transaction is a failure.
 A failed command stops the run; earlier receipts stay. `nimbus sync --prune`
 uses the same process with prune candidates promoted into a visibly separate
-expanded plan. An unmanaged resource is eligible only when
+expanded plan; before the first sync has recorded the baseline there are no
+candidates, and the plan says why. An unmanaged resource is eligible only when
 the native provider proves explicit installation, non-protected status,
 dependency safety, and an exact removal and verification path.
 

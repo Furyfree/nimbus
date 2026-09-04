@@ -43,19 +43,18 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 	adopted, kept := 0, 0
 	for i := range p.Operations {
 		op := &p.Operations[i]
-		switch {
-		case op.Blocked != "":
+		if op.Blocked != "" {
 			problems = append(problems, op.Summary+": "+op.Blocked)
 			continue
-		case op.Action == plan.ActionKeep:
+		}
+		notes = append(notes, op.Notes...)
+		switch op.Action {
+		case plan.ActionKeep:
 			kept++
 			continue
-		case op.Action == plan.ActionAdopt:
+		case plan.ActionAdopt:
 			adopted++
 			continue
-		}
-		for _, n := range op.Notes {
-			notes = append(notes, n)
 		}
 		switch {
 		case op.Kind == plan.KindDNFConfig || op.Kind == plan.KindRepository || op.Kind == plan.KindFlatpakRemote:
@@ -158,7 +157,9 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 	if kept > 0 {
 		fmt.Fprintf(&b, "%d managed and unchanged\n", kept)
 	}
-	if prune {
+	if prune && p.PruneUnavailable != "" {
+		fmt.Fprintf(&b, "\nprune: %s\n", p.PruneUnavailable)
+	} else if prune {
 		fmt.Fprintf(&b, "\nprune %d unmanaged packages:\n", len(p.Prune))
 		items := make([]string, 0, len(p.Prune))
 		for _, pr := range p.Prune {

@@ -45,8 +45,8 @@ func TestPlanRendersSectionsAndReportsIncomplete(t *testing.T) {
 	if strings.Contains(out, "prune ") {
 		t.Fatal("prune section shown without --prune")
 	}
-	if _, out, _ := run(t, "sync", "-p", "-r", "--checkout", root, "--machine", "laptop"); !strings.Contains(out, "prune ") || !strings.Contains(out, "unmanaged packages") {
-		t.Fatalf("plan --prune lacks the prune section:\n%s", out)
+	if _, out, _ := run(t, "sync", "-p", "-r", "--checkout", root, "--machine", "laptop"); !strings.Contains(out, "prune: prune needs the baseline") {
+		t.Fatalf("plan --prune without a baseline must say why:\n%s", out)
 	}
 	code, out, _ = run(t, "sync", "-p", "--checkout", root, "--machine", "laptop", "-j")
 	if code != ExitFailure {
@@ -101,16 +101,21 @@ func TestMachineOverridesWithoutSelector(t *testing.T) {
 	}
 }
 
-func TestSyncRefreshesMetadataButKeepsGoingWithoutNetwork(t *testing.T) {
+func TestPlanReadsTheCacheAndARunRefreshesIt(t *testing.T) {
 	root := repoRoot(t)
 	src := fixtureSource(t, root)
 	withForeignTerra(t, src)
 	src.Failures[facts.Key("dnf5", "makecache")] = "no network"
 	withSource(t, src)
-	// A failed refresh is reported, not fatal: the plan reads the cache.
+	// Plan-only never refreshes: the failure is not even reached.
 	code, out, errOut := run(t, "sync", "-p", "--checkout", root, "--machine", "laptop")
-	if code != ExitFailure || !strings.Contains(errOut, "metadata not refreshed: no network") || !strings.Contains(out, "plan for laptop") {
-		t.Fatalf("sync -p without network: %d %q\n%s", code, errOut, out)
+	if code != ExitFailure || strings.Contains(errOut, "metadata") || !strings.Contains(out, "from the local metadata cache") {
+		t.Fatalf("sync -p: %d %q\n%s", code, errOut, out)
+	}
+	// A run refreshes first; a failed refresh is reported, not fatal.
+	code, _, errOut = run(t, "sync", "-y", "-n", "--checkout", root, "--machine", "laptop")
+	if code != ExitFailure || !strings.Contains(errOut, "metadata not refreshed: no network") {
+		t.Fatalf("sync without network: %d %q", code, errOut)
 	}
 }
 

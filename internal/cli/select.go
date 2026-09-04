@@ -304,6 +304,9 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 	edit.edit(&edited)
 	after := renderManifest(before, &edited)
 	if string(after) == strings.TrimRight(string(before), "\n") {
+		if opts.json {
+			return writeJSON(out, map[string]string{"manifest": "unchanged"}, nil)
+		}
 		fmt.Fprintf(out, "%s: the manifest already says that\n", edit.cmdName)
 		return nil
 	}
@@ -338,13 +341,19 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "%s: %s\n\n%s\n", edit.cmdName, edit.summary, unifiedDiff(path, before, append(after, '\n')))
-	out.Write(renderPlan(p, false, false))
+	// In JSON mode the review text goes to stderr and the envelope from the
+	// sync that follows is the only thing on stdout; JSON asks nothing.
+	review := out
+	if opts.json {
+		review, yes = cmd.ErrOrStderr(), true
+	}
+	fmt.Fprintf(review, "%s: %s\n\n%s\n", edit.cmdName, edit.summary, unifiedDiff(path, before, append(after, '\n')))
+	review.Write(renderPlan(p, false, false))
 	if !p.Complete {
 		return errors.New("the plan for the edited manifest is incomplete; resolve the blocked operations first")
 	}
 	if !yes {
-		fmt.Fprintln(out, "proceeding writes the manifest change shown and then applies the plan")
+		fmt.Fprintln(review, "proceeding writes the manifest change shown and then applies the plan")
 		if !approver(cmd.InOrStdin(), out, p.Digest) {
 			return errors.New("not applied; the manifest is unchanged")
 		}
@@ -368,9 +377,12 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 		lock.Release()
 		return err
 	}
-	fmt.Fprintf(out, "wrote %s; the Git change is yours to commit\n", path)
+	fmt.Fprintf(review, "wrote %s; the Git change is yours to commit\n", path)
 	if nothingToRun(p) {
 		lock.Release()
+		if opts.json {
+			return writeJSON(out, syncResult{Digest: p.Digest, Executed: []string{}, Differences: []string{}}, nil)
+		}
 		return nil
 	}
 	flags.machine = s.Resolved.Machine

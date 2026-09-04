@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -80,6 +81,14 @@ func newRoot() (*cobra.Command, *options) {
 		},
 	}
 	root.PersistentFlags().BoolVarP(&opts.json, "json", "j", false, "render the result as versioned JSON")
+	// Nimbus runs as the user and escalates per command; only the hidden
+	// record action is meant for root.
+	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		if os.Geteuid() == 0 && !strings.HasPrefix(cmd.CommandPath(), "nimbus internal") {
+			return usageError{errors.New("nimbus runs as the normal user and uses sudo per command; do not run it as root")}
+		}
+		return nil
+	}
 	root.Flags().BoolVarP(&opts.showVersion, "version", "v", false, "same as nimbus version")
 	root.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error { return usageError{err} })
 	root.CompletionOptions.DisableDefaultCmd = true
