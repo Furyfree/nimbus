@@ -479,3 +479,29 @@ func TestUpgradeRunsTheNativeUpdatersWithVisibleOutput(t *testing.T) {
 		t.Fatal("a failed dnf5 upgrade was not reported")
 	}
 }
+
+func TestBaselineIsTheSnapshotBeforeTheRunNotAfter(t *testing.T) {
+	src := newScripted()
+	root := t.TempDir()
+	// The first receipt of a first run comes from the package transaction
+	// itself when the sources already exist: the baseline must still be the
+	// set that was installed before the run.
+	tx := &plan.Transaction{Packages: []plan.TxPackage{{Name: "ripgrep", Arch: "x86_64", EVR: "0:15.2.0-1.fc44", Repository: "updates", Section: "installing"}}}
+	p := &plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:first", Operations: []plan.Operation{
+		{ID: "packages:install", Kind: plan.KindPackage, Action: plan.ActionInstall, Summary: "install 1", Items: []string{"dnf:ripgrep"}, Transaction: tx,
+			Steps: []plan.Step{{Argv: []string{"dnf5", "-y", "install", "ripgrep"}, Privileged: true}}},
+	}}
+	if r := Run(p, options(t, src, root)); r.Error != "" {
+		t.Fatal(r.Error)
+	}
+	a, err := state.Read(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Baseline == nil || !a.InBaseline("bash") {
+		t.Fatalf("baseline = %+v", a.Baseline)
+	}
+	if a.InBaseline("ripgrep") || a.InBaseline("libfoo") {
+		t.Fatalf("packages installed by the run are in the baseline: %v", a.Baseline.Packages)
+	}
+}
