@@ -11,6 +11,10 @@ type Root struct {
 	Schema        int                   `toml:"schema"`
 	Compatibility Compatibility         `toml:"compatibility"`
 	Repositories  map[string]Repository `toml:"repositories"`
+	// DNF holds libdnf5 [main] options, written verbatim to a drop-in
+	// below /etc/dnf/libdnf5.conf.d before any package transaction. Values
+	// are numbers, booleans, or strings.
+	DNF map[string]any `toml:"dnf"`
 }
 
 // Compatibility declares the supported Fedora releases and the minimum engine.

@@ -105,6 +105,9 @@ func platform(f *facts.Facts, cfg Config) Check {
 func selector(f *facts.Facts, cfg Config) Check {
 	c := Check{ID: "selector"}
 	switch {
+	case cfg.CheckoutOverride && !f.Checkout.Known() && f.Commands["git"] == "":
+		c.Status, c.Observation = Unknown, "--checkout override in use; git is not installed, so the checkout's commit cannot be read yet"
+		c.Remediation = "apply installs git through the common profile; run doctor again afterwards"
 	case cfg.CheckoutOverride && !f.Checkout.Known():
 		c.Status, c.Observation = Fail, "--checkout override in use; "+f.Checkout.Error
 		c.Impact = "the override skips selector approval only; a checkout whose origin and commit cannot be read is not inspectable"
@@ -115,6 +118,9 @@ func selector(f *facts.Facts, cfg Config) Check {
 		c.Status, c.Observation = Fail, cfg.SelectorError
 		c.Impact = "no machine is selected, so nothing can be resolved or applied"
 		c.Remediation = "run nimbus init to select a checkout and machine"
+	case !f.Checkout.Known() && f.Commands["git"] == "":
+		c.Status, c.Observation = Unknown, "git is not installed, so the checkout's commit cannot be read yet"
+		c.Remediation = "apply installs git through the common profile; run doctor again afterwards"
 	case !f.Checkout.Known():
 		c.Status, c.Observation = Fail, f.Checkout.Error
 		c.Impact = "the selected checkout cannot be trusted"

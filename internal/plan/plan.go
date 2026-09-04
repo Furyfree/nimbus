@@ -4,7 +4,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,13 +16,9 @@ import (
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
-// StageRoot is where apply stores a downloaded DNF transaction before it
-// replays exactly those bytes. It lives below the state root so it is
-// root-owned and never mixed with user files.
-const StageRoot = state.Root + "/" + state.StageDir
-
 // Operation kinds, actions, and risk classes.
 const (
+	KindDNFConfig     = "dnf-config"
 	KindRepository    = "repository"
 	KindPackage       = "package"
 	KindFlatpakRemote = "flatpak-remote"
@@ -49,12 +47,15 @@ type Step struct {
 
 // Operation is one reviewed unit of the plan.
 type Operation struct {
-	ID          string       `json:"id"`
-	Kind        string       `json:"kind"`
-	Action      string       `json:"action"`
-	Risk        string       `json:"risk"`
-	Summary     string       `json:"summary"`
-	Paths       []string     `json:"paths,omitempty"`
+	ID      string   `json:"id"`
+	Kind    string   `json:"kind"`
+	Action  string   `json:"action"`
+	Risk    string   `json:"risk"`
+	Summary string   `json:"summary"`
+	Paths   []string `json:"paths,omitempty"`
+	// Items are the package references a merged transaction installs, one
+	// receipt each; Paths then explains the transaction as a whole.
+	Items       []string     `json:"items,omitempty"`
 	Steps       []Step       `json:"steps,omitempty"`
 	Transaction *Transaction `json:"transaction,omitempty"`
 	// After names the operation this one waits for. Apply runs the earlier
@@ -128,7 +129,7 @@ func Build(in Inputs) (*Plan, error) {
 	if in.Applied == nil {
 		in.Applied = &state.Applied{Receipts: map[string]state.Receipt{}}
 	}
-	b := &builder{in: in, installed: map[string]facts.Package{}, repos: map[string][]facts.Repository{}, ready: map[string]bool{}, blockedRepo: map[string]string{}}
+	b := &builder{in: in, installed: map[string]facts.Package{}, repos: map[string][]facts.Repository{}, ready: map[string]bool{}, blockedRepo: map[string]string{}, pendingRepo: map[string]bool{}, duplicates: map[string][]string{}}
 	for _, p := range in.Facts.Packages.Value {
 		b.installed[p.Name] = p
 	}
@@ -136,6 +137,7 @@ func Build(in Inputs) (*Plan, error) {
 		b.repos[r.ID] = append(b.repos[r.ID], r)
 	}
 	p := &Plan{Machine: in.Resolved.Machine, Definitions: in.Definitions, Checkout: in.Facts.Checkout.Value, Complete: true}
+	p.Operations = append(p.Operations, b.dnfConfig()...)
 	p.Operations = append(p.Operations, b.repositories()...)
 	p.Operations = append(p.Operations, b.packages()...)
 	p.Operations = append(p.Operations, b.flatpaks()...)
@@ -159,9 +161,35 @@ type builder struct {
 	installed map[string]facts.Package
 	repos     map[string][]facts.Repository
 	// ready records declared repositories the host already provides
-	// correctly; blockedRepo records why one cannot be used.
+	// correctly; blockedRepo records why one cannot be used; pendingRepo
+	// records one that an earlier operation of this plan provides.
 	ready       map[string]bool
 	blockedRepo map[string]string
+	pendingRepo map[string]bool
+	// repoChanges lists the DNF repository operations of this round. A
+	// transaction previewed before they run would resolve against other
+	// metadata than the one downloaded after them, so every DNF
+	// transaction waits for them.
+	repoChanges []string
+	// duplicates lists, per declared repository, the enabled host
+	// repositories under other IDs that serve the declared baseurl, such
+	// as the file a maker's package writes at install; each is disabled
+	// through an override so the declared one stays the only provider.
+	duplicates map[string][]string
+}
+
+// installsPackage reports whether the plan installs a bare Fedora package
+// that is desired and not yet present.
+func (b *builder) installsPackage(name string) bool {
+	if _, installed := b.installed[name]; installed {
+		return false
+	}
+	for _, p := range b.in.Resolved.Packages {
+		if p.Prefix == definitions.PrefixDNF && p.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // DNFRepoIDs returns the repository IDs a declared repository creates on the
@@ -194,21 +222,6 @@ func (b *builder) expectedRepos(prefix string) []string {
 	return DNFRepoIDs(prefix, b.in.Root.Repositories[prefix])
 }
 
-// declaredRepoIDs returns every host repository ID a declared non-Fedora
-// repository would use, for recognizing a package installed from one.
-func (b *builder) declaredRepoIDs() map[string]string {
-	out := map[string]string{}
-	for id, r := range b.in.Root.Repositories {
-		for _, host := range DNFRepoIDs(id, r) {
-			out[host] = id
-		}
-		if r.Kind == "dnf" && r.ReleasePackage == "" {
-			out[id] = id // the maker's own ID, which Nimbus does not own
-		}
-	}
-	return out
-}
-
 // inspectRepo decides whether the host already provides a declared DNF or
 // COPR repository as declared. It returns ready, a repair description for
 // a Nimbus-owned file that drifted, or a blocking problem.
@@ -234,28 +247,168 @@ func (b *builder) inspectRepo(id string, r definitions.Repository) (ready bool, 
 	}
 	var drift []string
 	for _, have := range enabled {
+		if r.Kind == "dnf" && r.ReleasePackage == "" {
+			if have.File != "nimbus-"+id+".repo" {
+				return false, "", fmt.Sprintf("repository %s is provided by %s, not by nimbus-%s.repo, which Nimbus would own; remove that file first", have.ID, have.File, id)
+			}
+			if fileDrift := ownedFileDrift(id, r, have); len(fileDrift) > 0 {
+				drift = append(drift, fileDrift...)
+				continue
+			}
+		}
+		// The effective values include overrides below repos.override.d,
+		// which is where a maker's file is corrected and where a file
+		// Nimbus owns could still be changed from outside.
 		if have.GPGCheck != "1" {
 			drift = append(drift, have.ID+" has gpgcheck="+have.GPGCheck)
 		}
 		if r.Priority != nil && have.Priority != strconv.Itoa(*r.Priority) {
 			drift = append(drift, fmt.Sprintf("%s has priority %q, declared %d", have.ID, have.Priority, *r.Priority))
 		}
-		if r.Kind == "dnf" && r.ReleasePackage == "" {
-			if have.File != "nimbus-"+id+".repo" {
-				return false, "", fmt.Sprintf("repository %s is provided by %s, not by nimbus-%s.repo, which Nimbus would own; remove that file first", have.ID, have.File, id)
+	}
+	if r.Kind == "dnf" && r.ReleasePackage == "" {
+		for _, host := range sortedKeys(b.repos) {
+			if contains(ids, host) {
+				continue
 			}
-			if have.BaseURL != r.BaseURL {
-				drift = append(drift, fmt.Sprintf("%s has baseurl %q, declared %q", have.ID, have.BaseURL, r.BaseURL))
+			for _, have := range b.repos[host] {
+				if have.Enabled && have.BaseURL == r.BaseURL {
+					b.duplicates[id] = append(b.duplicates[id], host)
+					drift = append(drift, fmt.Sprintf("%s from %s also serves the declared baseurl and is disabled through an override", host, have.File))
+				}
 			}
 		}
 	}
 	if len(drift) > 0 {
-		if r.Kind == "dnf" && r.ReleasePackage == "" {
+		switch {
+		case len(b.duplicates[id]) == len(drift):
+			return false, strings.Join(drift, "; "), ""
+		case r.Kind == "dnf" && r.ReleasePackage == "":
 			return false, "rewrite nimbus-" + id + ".repo: " + strings.Join(drift, "; "), ""
 		}
 		return false, "correct the repository file: " + strings.Join(drift, "; "), ""
 	}
 	return true, "", ""
+}
+
+// disableDuplicateSteps renders the override that disables each host
+// repository serving a declared baseurl under another ID.
+func (b *builder) disableDuplicateSteps(id string) []Step {
+	var opts []string
+	for _, host := range b.duplicates[id] {
+		opts = append(opts, host+".enabled=0")
+	}
+	if len(opts) == 0 {
+		return nil
+	}
+	return []Step{{Description: DisableDuplicateDescription, Argv: append([]string{"dnf5", "config-manager", "setopt"}, opts...), Privileged: true}}
+}
+
+// DisableDuplicateDescription marks the override step that disables a
+// duplicate host repository; apply runs it after the repository's own steps.
+const DisableDuplicateDescription = "disable the duplicate repository through a DNF override"
+
+// IsReleasePackage reports whether an installed package is the release
+// package of a declared repository, which Nimbus installs while enabling
+// it and which therefore belongs to that repository, never to prune.
+func IsReleasePackage(root definitions.Root, name string) bool {
+	for _, r := range root.Repositories {
+		if r.ReleasePackage != "" && ReleasePackageName(r.ReleasePackage) == name {
+			return true
+		}
+	}
+	return false
+}
+
+// ReleasePackageName derives the package name from a release package URL
+// such as .../rpmfusion-free-release-44.noarch.rpm: the file name without
+// .rpm, the architecture, and the version and release fields, which are
+// the trailing dash-separated fields that start with a digit.
+func ReleasePackageName(url string) string {
+	name := strings.TrimSuffix(path.Base(url), ".rpm")
+	if i := strings.LastIndexByte(name, '.'); i > 0 {
+		name = name[:i]
+	}
+	for range 2 {
+		i := strings.LastIndexByte(name, '-')
+		if i <= 0 || i+1 >= len(name) || name[i+1] < '0' || name[i+1] > '9' {
+			break
+		}
+		name = name[:i]
+	}
+	return name
+}
+
+// DNFDropIn renders the [dnf] table of nimbus.toml as the libdnf5 drop-in
+// Nimbus owns: sorted keys, booleans as DNF spells them. It is empty when
+// nothing is declared.
+func DNFDropIn(root definitions.Root) string {
+	if len(root.DNF) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("# Written by Nimbus from the [dnf] table of nimbus.toml; edit that instead.\n[main]\n")
+	for _, key := range sortedKeys(root.DNF) {
+		fmt.Fprintf(&b, "%s=%s\n", key, dnfValue(root.DNF[key]))
+	}
+	return b.String()
+}
+
+func dnfValue(v any) string {
+	switch v := v.(type) {
+	case bool:
+		if v {
+			return "True"
+		}
+		return "False"
+	default:
+		return fmt.Sprint(v)
+	}
+}
+
+// DNFDropInPlaceholder stands for the rendered drop-in in the plan; apply
+// writes the file to its stage directory and fills the path in.
+const DNFDropInPlaceholder = "<rendered drop-in>"
+
+// dnfConfig plans the libdnf5 drop-in first, so every transaction that
+// follows downloads with the declared settings.
+func (b *builder) dnfConfig() []Operation {
+	const id = "dnf:config"
+	want := DNFDropIn(b.in.Root)
+	_, managed := b.in.Applied.Receipts[id]
+	op := Operation{ID: id, Kind: KindDNFConfig, Risk: RiskLow, Paths: []string{"nimbus.toml:dnf"}}
+	if !b.in.Facts.DNFDropIn.Known() {
+		op.Action, op.Summary = ActionInstall, "configure DNF through "+facts.DNFDropInPath
+		op.Blocked = "the DNF drop-in cannot be read: " + b.in.Facts.DNFDropIn.Error
+		return []Operation{op}
+	}
+	have := b.in.Facts.DNFDropIn.Value
+	switch {
+	case want == "" && have == "":
+		return nil
+	case want == "" && !managed:
+		// A file Nimbus never wrote is not Nimbus's to remove.
+		return nil
+	case want == "":
+		op.Action, op.Summary = ActionRemove, "remove "+facts.DNFDropInPath+", no longer declared"
+		op.Steps = []Step{{Description: "remove the drop-in", Argv: []string{"rm", "-f", facts.DNFDropInPath}, Privileged: true}}
+		return []Operation{op}
+	case have == want && managed:
+		op.Action, op.Summary = ActionKeep, facts.DNFDropInPath+" is managed and as declared"
+		return []Operation{op}
+	case have == want:
+		op.Action, op.Summary = ActionAdopt, "adopt "+facts.DNFDropInPath+", already as declared"
+		return []Operation{op}
+	case have == "":
+		op.Action, op.Summary = ActionInstall, "configure DNF through "+facts.DNFDropInPath
+	default:
+		op.Action, op.Summary = ActionRepair, "rewrite "+facts.DNFDropInPath+", which differs from the declared options"
+	}
+	for _, key := range sortedKeys(b.in.Root.DNF) {
+		op.Steps = append(op.Steps, Step{Description: "set " + key + "=" + dnfValue(b.in.Root.DNF[key])})
+	}
+	op.Steps = append(op.Steps, Step{Description: "write the drop-in", Argv: []string{"install", "-m", "0644", DNFDropInPlaceholder, facts.DNFDropInPath}, Privileged: true})
+	return []Operation{op}
 }
 
 func (b *builder) repositories() []Operation {
@@ -285,11 +438,18 @@ func (b *builder) repositories() []Operation {
 			b.blockedRepo[id] = blocked
 		case repair != "":
 			op.Action, op.Summary = ActionRepair, fmt.Sprintf("repair repository %s: %s", id, repair)
-			if r.Kind == "dnf" && r.ReleasePackage == "" {
+			switch {
+			case strings.HasPrefix(repair, "rewrite "):
 				op.Steps = []Step{AddRepoStep(id, r, true)}
-			} else {
+			case strings.HasPrefix(repair, "correct "):
 				op.Steps = PrioritySteps(id, r)
+			default:
+				op.Steps = nil
 			}
+			op.Steps = append(op.Steps, b.disableDuplicateSteps(id)...)
+		}
+		if op.Blocked == "" {
+			b.repoChanges = append(b.repoChanges, op.ID)
 		}
 		ops = append(ops, op)
 	}
@@ -328,20 +488,60 @@ func PrioritySteps(id string, r definitions.Repository) []Step {
 // CheckRepository decides whether the host provides a declared DNF or COPR
 // repository as declared. Apply uses it to verify an enable or repair.
 func CheckRepository(root definitions.Root, id string, repos []facts.Repository) (ready bool, repair string, blocked string) {
-	b := &builder{in: Inputs{Root: root}, repos: map[string][]facts.Repository{}}
+	b := &builder{in: Inputs{Root: root}, repos: map[string][]facts.Repository{}, duplicates: map[string][]string{}}
 	for _, r := range repos {
 		b.repos[r.ID] = append(b.repos[r.ID], r)
 	}
 	return b.inspectRepo(id, root.Repositories[id])
 }
 
+// RepoOption is one key of the repository file Nimbus owns.
+type RepoOption struct{ Key, Value string }
+
+// OwnedRepoOptions is the complete content of nimbus-<id>.repo: what
+// AddRepoStep writes and what inspectRepo verifies, so the two cannot
+// drift apart. A key the file has beyond these is drift too.
+func OwnedRepoOptions(id string, r definitions.Repository) []RepoOption {
+	opts := []RepoOption{
+		{"name", id + " (Nimbus)"},
+		{"enabled", "1"},
+		{"baseurl", r.BaseURL},
+		{"gpgcheck", "1"},
+		{"gpgkey", "file://" + KeyPath(id)},
+	}
+	if r.Priority != nil {
+		opts = append(opts, RepoOption{"priority", strconv.Itoa(*r.Priority)})
+	}
+	return opts
+}
+
+// ownedFileDrift compares a section of nimbus-<id>.repo with what Nimbus
+// would write.
+func ownedFileDrift(id string, r definitions.Repository, have facts.Repository) []string {
+	var drift []string
+	expected := map[string]bool{}
+	for _, o := range OwnedRepoOptions(id, r) {
+		expected[o.Key] = true
+		switch got, ok := have.Options[o.Key]; {
+		case !ok:
+			drift = append(drift, fmt.Sprintf("%s lacks %s=%s", have.File, o.Key, o.Value))
+		case got != o.Value:
+			drift = append(drift, fmt.Sprintf("%s has %s=%s, declared %s", have.File, o.Key, got, o.Value))
+		}
+	}
+	for _, key := range sortedKeys(have.Options) {
+		if !expected[key] {
+			drift = append(drift, fmt.Sprintf("%s has %s=%s, which Nimbus does not write", have.File, key, have.Options[key]))
+		}
+	}
+	return drift
+}
+
 // AddRepoStep renders the native command that writes nimbus-<id>.repo.
 func AddRepoStep(id string, r definitions.Repository, overwrite bool) Step {
-	argv := []string{"dnf5", "config-manager", "addrepo", "--id=nimbus-" + id,
-		"--set=name=" + id + " (Nimbus)", "--set=baseurl=" + r.BaseURL, "--set=gpgcheck=1", "--set=repo_gpgcheck=1",
-		"--set=gpgkey=file://" + KeyPath(id)}
-	if r.Priority != nil {
-		argv = append(argv, fmt.Sprintf("--set=priority=%d", *r.Priority))
+	argv := []string{"dnf5", "config-manager", "addrepo", "--id=nimbus-" + id}
+	for _, o := range OwnedRepoOptions(id, r) {
+		argv = append(argv, "--set="+o.Key+"="+o.Value)
 	}
 	if overwrite {
 		argv = append(argv, "--overwrite")
@@ -404,6 +604,13 @@ func (b *builder) flatpakRemote(id string, r definitions.Repository) (Operation,
 		},
 	}
 	if !b.in.Facts.Flatpak.Known() {
+		if b.in.Facts.Commands["flatpak"] == "" && b.installsPackage("flatpak") {
+			// flatpak itself arrives with this plan's install transaction;
+			// the remote and its applications wait for it.
+			op.After = "packages:install"
+			b.pendingRepo[id] = true
+			return op, true
+		}
 		op.Blocked = "Flatpak state is unknown: " + b.in.Facts.Flatpak.Error
 		b.blockedRepo[id] = op.Blocked
 		return op, true
@@ -442,7 +649,6 @@ func (b *builder) waitOrBlock(repoID, opKind string) (after, blocked string) {
 }
 
 func (b *builder) packages() []Operation {
-	declared := b.declaredRepoIDs()
 	var adopt, pending, blocked []Operation
 	var install []definitions.ResolvedPackage
 	for _, p := range b.in.Resolved.Packages {
@@ -455,11 +661,6 @@ func (b *builder) packages() []Operation {
 			if _, managed := b.in.Applied.Receipts[op.ID]; managed {
 				op.Action, op.Summary = ActionKeep, fmt.Sprintf("%s %s is managed and unchanged", p.Name, inst.EVR())
 				adopt = append(adopt, op)
-				continue
-			}
-			if reason := b.adoptionProblem(p, inst, declared); reason != "" {
-				op.Blocked = reason
-				blocked = append(blocked, op)
 				continue
 			}
 			adopt = append(adopt, op)
@@ -493,48 +694,30 @@ func PackageName(id string) string {
 	return id[strings.LastIndexByte(id, ':')+1:]
 }
 
-// AdoptionProblem explains why an installed desired package cannot simply
-// be adopted: it came from a repository other than its prefix names. A
-// package whose recorded source is the installer, a build, or unknown is
-// adoptable, since that is how a fresh Fedora records its base. The views
-// share this rule with the planner.
-func AdoptionProblem(root definitions.Root, prefix, fromRepo string) string {
-	b := &builder{in: Inputs{Root: root}}
-	return b.adoptionProblem(definitions.ResolvedPackage{Prefix: prefix}, facts.Package{FromRepo: fromRepo}, b.declaredRepoIDs())
-}
-
-func (b *builder) adoptionProblem(p definitions.ResolvedPackage, inst facts.Package, declared map[string]string) string {
-	expected := b.expectedRepos(p.Prefix)
-	if contains(expected, inst.FromRepo) {
-		return ""
-	}
-	if p.Prefix == definitions.PrefixDNF {
-		if owner, ok := declared[inst.FromRepo]; ok {
-			return fmt.Sprintf("installed from repository %s (%s), but the definitions select it from Fedora; remove it or change its prefix", inst.FromRepo, owner)
-		}
-		if inst.FromRepo != "" && !contains(fedoraRepos, inst.FromRepo) && strings.Contains(inst.FromRepo, ":") {
-			return fmt.Sprintf("installed from repository %s, which the definitions do not declare; remove it or declare the source", inst.FromRepo)
-		}
-		return ""
-	}
-	if inst.FromRepo == "" {
-		return ""
-	}
-	return fmt.Sprintf("installed from repository %s, not from %s; remove it or declare that source", inst.FromRepo, strings.Join(expected, " or "))
-}
-
 // installTransaction previews one DNF transaction for every installable
 // package and refuses anything the definitions did not ask for.
 func (b *builder) installTransaction(pkgs []definitions.ResolvedPackage) Operation {
 	names := make([]string, 0, len(pkgs))
 	byName := map[string]definitions.ResolvedPackage{}
-	var paths []string
+	// The merged operation is explained by the profiles and components
+	// that selected its packages; the packages themselves are its command.
+	pathSet := map[string]bool{}
+	items := make([]string, 0, len(pkgs))
 	for _, p := range pkgs {
 		names = append(names, p.Name)
 		byName[p.Name] = p
-		paths = append(paths, p.Canonical)
+		items = append(items, p.Canonical)
+		for _, path := range p.Paths {
+			pathSet[path] = true
+		}
 	}
 	sort.Strings(names)
+	sort.Strings(items)
+	paths := make([]string, 0, len(pathSet))
+	for path := range pathSet {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
 	args := []string{"install"}
 	removes := map[string]bool{}
 	for _, r := range b.in.Resolved.Removes {
@@ -544,46 +727,97 @@ func (b *builder) installTransaction(pkgs []definitions.ResolvedPackage) Operati
 		args = append(args, "--allowerasing")
 	}
 	args = append(args, names...)
-	stage := StageRoot + "/packages-install"
 	op := Operation{ID: "packages:install", Kind: KindPackage, Action: ActionInstall, Risk: RiskLow,
-		Summary: fmt.Sprintf("install %d packages through one DNF transaction", len(names)), Paths: paths,
-		Steps: []Step{
-			{Description: "download the transaction and store it without running it", Argv: append(append([]string{"dnf5", "-y"}, args[:1]...), append([]string{"--store", stage}, args[1:]...)...), Privileged: true},
-			{Description: "check the stored transaction matches the reviewed preview, then replay exactly those packages", Argv: []string{"dnf5", "-y", "replay", stage}, Privileged: true},
-			{Description: "remove the stored transaction", Argv: []string{"rm", "-rf", stage}, Privileged: true},
-		}}
+		Summary: fmt.Sprintf("install %d packages through one DNF transaction", len(names)), Paths: paths, Items: items,
+		Steps: []Step{{Description: "install through DNF", Argv: append([]string{"dnf5", "-y"}, args...), Privileged: true}}}
+	if b.waitsForRepositories(&op) {
+		return op
+	}
 	out, err := b.in.Source.Run("dnf5", append([]string{"--assumeno", "--cacheonly"}, args...)...)
 	tx, perr := ParsePreview(out)
 	if perr != nil {
-		if err != nil && len(strings.TrimSpace(string(out))) == 0 {
-			op.Blocked = "dnf5 preview failed: " + err.Error()
-		} else {
-			op.Blocked = perr.Error()
+		op.Blocked = previewFailure(out, err, perr)
+		if repos := uncachedRepositories(op.Blocked, byName); len(repos) > 0 {
+			// The repository is enabled, so the preview ran with its
+			// packages; nothing matched because the local cache has never
+			// held its metadata, as after an apply that stopped before
+			// its refresh. The blocked reason must name the fix.
+			op.Blocked = fmt.Sprintf("the enabled repositories %s have no cached metadata; sync again to refresh it (%s)", strings.Join(repos, ", "), op.Blocked)
 		}
 		return op
 	}
 	op.Transaction = tx
-	var problems []string
+	if tx.Download == "" && err != nil {
+		// The size summary is on stderr, which Run folds into the error.
+		tx.Download = DownloadSize(err.Error())
+	}
+	// A requested name may be a provide that DNF resolves to a package with
+	// another name; such rows are accepted only while a requested name is
+	// still unaccounted for, and each substitution is noted for review.
+	seen := map[string]bool{}
+	for _, row := range tx.Packages {
+		if row.Section == "installing" {
+			seen[row.Name] = true
+		}
+	}
+	var unmatched []string
+	for _, n := range names {
+		if !seen[n] {
+			unmatched = append(unmatched, n)
+		}
+	}
+	var problems, needed []string
+	upgraded := map[string]bool{}
+	for _, row := range tx.Packages {
+		if row.Section == "upgrading" {
+			upgraded[row.Name] = true
+		}
+	}
 	for _, row := range tx.Packages {
 		switch row.Section {
 		case "installing":
 			p, wanted := byName[row.Name]
 			if !wanted {
-				problems = append(problems, "would install "+row.Name+", which nothing selects")
-			} else if !contains(b.expectedRepos(p.Prefix), row.Repository) {
+				if len(unmatched) == 0 {
+					problems = append(problems, "would install "+row.Name+", which nothing selects")
+					continue
+				}
+				requested := unmatched[0]
+				unmatched = unmatched[1:]
+				p = byName[requested]
+				op.Notes = append(op.Notes, fmt.Sprintf("%s resolves to the package %s", requested, row.Name))
+			}
+			if !contains(b.expectedRepos(p.Prefix), row.Repository) {
 				problems = append(problems, fmt.Sprintf("%s would come from repository %s, not %s", row.Name, row.Repository, strings.Join(b.expectedRepos(p.Prefix), " or ")))
 			}
 		case "installing dependencies", "installing weak dependencies":
-		case "removing", "removing dependent packages", "removing unused dependencies", "replacing":
+		case "removing", "removing dependent packages", "removing unused dependencies":
 			if !removes[row.Name] {
 				problems = append(problems, "would remove "+row.Name+", which no component declares in removes")
 			}
-		case "upgrading", "downgrading", "reinstalling":
-			problems = append(problems, fmt.Sprintf("would %s %s; run nimbus upgrade first", strings.TrimSuffix(row.Section, "ing")+"e", row.Name))
+		case SectionReplaced:
+			// The old version of an upgrade is fine; a package replaced by
+			// another name is a removal nothing declared.
+			if !upgraded[row.Name] && !removes[row.Name] {
+				problems = append(problems, "would replace "+row.Name+", which no component declares in removes")
+			}
+		case "upgrading":
+			// An install transaction upgrades an installed package only
+			// when a requested package needs the newer version; the update
+			// of everything else is nimbus upgrade's.
+			needed = append(needed, row.Name)
+		case "downgrading", "reinstalling":
+			problems = append(problems, fmt.Sprintf("would %s %s", strings.TrimSuffix(row.Section, "ing")+"e", row.Name))
 		}
 	}
-	if len(problems) > 0 {
-		op.Blocked = "the transaction goes beyond the definitions: " + strings.Join(problems, "; ")
+	if len(needed) > 0 {
+		op.Notes = append(op.Notes, fmt.Sprintf("%d installed packages are upgraded because the requested packages need the newer versions: %s", len(needed), strings.Join(needed, ", ")))
+	}
+	// DNF's resolution is what will run; anything beyond the definitions is
+	// shown for the review rather than refused, since the owner wrote the
+	// definitions and DNF's own rules already bound the sources.
+	for _, problem := range problems {
+		op.Notes = append(op.Notes, "beyond the definitions: "+problem)
 	}
 	if tx.NothingToDo {
 		op.Blocked = "dnf5 reports nothing to do although packages are missing"
@@ -597,7 +831,7 @@ func (b *builder) removeTransaction(installTx *Transaction) (Operation, bool) {
 	erased := map[string]bool{}
 	if installTx != nil {
 		for _, row := range installTx.Packages {
-			if strings.HasPrefix(row.Section, "removing") || row.Section == "replacing" {
+			if strings.HasPrefix(row.Section, "removing") || row.Section == SectionReplaced {
 				erased[row.Name] = true
 			}
 		}
@@ -616,6 +850,60 @@ func (b *builder) removeTransaction(installTx *Transaction) (Operation, bool) {
 		op.Paths = append(op.Paths, "removes:"+n)
 	}
 	return op, true
+}
+
+// waitsForRepositories makes a DNF transaction pending when this round
+// changes a repository: the preview would run against metadata the
+// download no longer sees. Apply runs the repository operations, refreshes
+// the cache, and plans the transaction again.
+func (b *builder) waitsForRepositories(op *Operation) bool {
+	if len(b.repoChanges) == 0 {
+		return false
+	}
+	op.After = strings.Join(b.repoChanges, ", ")
+	return true
+}
+
+// uncachedRepositories returns the non-Fedora repositories of the packages
+// DNF reported no match for. Such a repository is enabled, or the preview
+// would not have included its packages, so the miss means its metadata is
+// not in the local cache yet.
+func uncachedRepositories(blocked string, byName map[string]definitions.ResolvedPackage) []string {
+	seen := map[string]bool{}
+	var repos []string
+	for _, problem := range strings.Split(strings.TrimPrefix(blocked, "dnf5 could not resolve the transaction: "), "; ") {
+		name, ok := strings.CutPrefix(problem, "No match for argument: ")
+		if !ok {
+			continue
+		}
+		p, known := byName[strings.TrimSpace(name)]
+		if !known || p.Prefix == definitions.PrefixDNF || seen[p.Prefix] {
+			continue
+		}
+		seen[p.Prefix] = true
+		repos = append(repos, p.Prefix)
+	}
+	sort.Strings(repos)
+	return repos
+}
+
+// previewFailure turns a failed dnf5 preview into one readable reason. DNF5
+// prints its resolution problems on stderr, which the command error
+// carries, so that text is parsed before falling back to the raw error.
+func previewFailure(out []byte, runErr, parseErr error) string {
+	if runErr != nil {
+		if _, err := ParsePreview([]byte(runErr.Error())); err != nil {
+			var resolve *ResolveError
+			if errors.As(err, &resolve) {
+				return resolve.Error()
+			}
+		}
+		if len(strings.TrimSpace(string(out))) == 0 {
+			lines := strings.Split(strings.TrimSpace(runErr.Error()), "\n")
+			return "dnf5 preview failed: " + lines[len(lines)-1]
+		}
+	}
+	return parseErr.Error()
 }
 
 func (b *builder) flatpaks() []Operation {
@@ -637,7 +925,7 @@ func (b *builder) flatpaks() []Operation {
 			if _, managed := b.in.Applied.Receipts[op.ID]; managed {
 				op.Action, op.Summary = ActionKeep, fmt.Sprintf("Flatpak %s %s is managed and unchanged", p.Name, app.Version)
 			} else if app.Origin != remote {
-				op.Blocked = fmt.Sprintf("installed from remote %s, not %s; remove it or declare that remote", app.Origin, remote)
+				op.Notes = append(op.Notes, fmt.Sprintf("installed from remote %s, not %s", app.Origin, remote))
 			}
 			ops = append(ops, op)
 			continue
@@ -645,7 +933,10 @@ func (b *builder) flatpaks() []Operation {
 		op := Operation{ID: "flatpak:" + p.Name, Kind: KindFlatpak, Action: ActionInstall, Risk: RiskLow,
 			Summary: "install Flatpak " + p.Name, Paths: p.Paths,
 			Steps: []Step{{Description: "install from the system remote", Argv: []string{"flatpak", "install", "--system", "--noninteractive", remote, p.Name}, Privileged: true}}}
-		if !b.ready[remote] {
+		// The command is exact without a preview, so the application runs
+		// in the same round as its remote; it waits only when the remote
+		// itself waits for the flatpak package, or is blocked.
+		if !b.ready[remote] && (b.pendingRepo[remote] || b.blockedRepo[remote] != "") {
 			op.After, op.Blocked = b.waitOrBlock(remote, KindFlatpakRemote)
 		}
 		ops = append(ops, op)
@@ -707,14 +998,13 @@ func (b *builder) previewRemoval(id string, names []string, summary string) Oper
 	sort.Strings(names)
 	op := Operation{ID: id, Kind: KindPackage, Action: ActionRemove, Risk: RiskMedium, Summary: summary,
 		Steps: []Step{{Description: "run the reviewed removal", Argv: append([]string{"dnf5", "-y", "remove"}, names...), Privileged: true}}}
+	if b.waitsForRepositories(&op) {
+		return op
+	}
 	out, err := b.in.Source.Run("dnf5", append([]string{"--assumeno", "--cacheonly", "remove"}, names...)...)
 	tx, perr := ParsePreview(out)
 	if perr != nil {
-		if err != nil && len(strings.TrimSpace(string(out))) == 0 {
-			op.Blocked = "dnf5 preview failed: " + err.Error()
-		} else {
-			op.Blocked = perr.Error()
-		}
+		op.Blocked = previewFailure(out, err, perr)
 		return op
 	}
 	op.Transaction = tx
@@ -768,7 +1058,7 @@ func (b *builder) prune() []Prune {
 	}
 	var out []Prune
 	for _, p := range b.in.Facts.Packages.Value {
-		if p.Reason != "user" || desired[p.Name] || b.in.Applied.InBaseline(p.Name) || managed[p.Name] {
+		if p.Reason != "user" || desired[p.Name] || b.in.Applied.InBaseline(p.Name) || managed[p.Name] || IsReleasePackage(b.in.Root, p.Name) {
 			continue
 		}
 		out = append(out, Prune{Name: p.Name, EVR: p.EVR(), Repository: p.FromRepo})
@@ -787,7 +1077,7 @@ func (b *builder) updates() Updates {
 		return Updates{Available: []Upgrade{}, Unavailable: perr.Error()}
 	}
 	if len(ups) == 0 && err != nil && !strings.Contains(string(out), "Repositories loaded") {
-		return Updates{Available: []Upgrade{}, Unavailable: "update information unavailable: " + err.Error() + "; run nimbus refresh"}
+		return Updates{Available: []Upgrade{}, Unavailable: "update information unavailable: " + err.Error() + "; sync refreshes it"}
 	}
 	if ups == nil {
 		ups = []Upgrade{}

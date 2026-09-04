@@ -20,7 +20,10 @@ type Facts struct {
 	SELinux      Section[string]       `json:"selinux"`
 	Firewalld    Section[string]       `json:"firewalld"`
 	Checkout     Section[Checkout]     `json:"checkout"`
-	Commands     map[string]string     `json:"commands"`
+	// DNFDropIn is the content of Nimbus's libdnf5 drop-in, empty when the
+	// file is absent.
+	DNFDropIn Section[string]   `json:"dnf_drop_in"`
+	Commands  map[string]string `json:"commands"`
 }
 
 // Platform is the operating system identity.
@@ -61,6 +64,9 @@ type Repository struct {
 	Priority string `json:"priority"`
 	BaseURL  string `json:"baseurl,omitempty"`
 	Metalink string `json:"metalink,omitempty"`
+	// Options is every key of the section as written in its file, so a
+	// file Nimbus owns can be compared whole with what Nimbus would write.
+	Options map[string]string `json:"options,omitempty"`
 	// Overrides lists the files below /etc/dnf/repos.override.d that
 	// changed this repository's effective values.
 	Overrides []string `json:"overrides,omitempty"`

@@ -159,12 +159,17 @@ schema = 1
 fedora = ["44"]
 min_engine = "0.1.0"
 
+[dnf]
+max_parallel_downloads = 10
+fastestmirror = true
+defaultyes = true
+
 [repositories.terra]
 kind = "dnf"
 baseurl = "https://repos.fyralabs.com/terra44"
 key_url = "https://repos.fyralabs.com/terra44/key.asc"
 key = "AE09 157A 4DE8 8B49 7EA1 D5D3 00CD AB43 DE22 6D6F"
-priority = 100
+priority = 110
 
 [repositories.docker]
 kind = "dnf"
@@ -177,7 +182,7 @@ priority = 100
 kind = "copr"
 project = "lionheartp/Hyprland"
 key = "<fingerprint>"
-priority = 100
+priority = 130
 
 [repositories.flathub]
 kind = "flatpak"
@@ -202,9 +207,20 @@ file. A `dnf` repository may instead name a `release_package` URL with its
 `sha256` when the maker distributes a release RPM, as RPM Fusion does.
 `priority` is the DNF repository priority and is required on every `dnf` and
 `copr` repository: a number above Fedora's default of 99, so no later source in
-the [SECURITY.md](SECURITY.md) order can shadow Fedora. The stored key file is
+the [SECURITY.md](SECURITY.md) order can shadow Fedora, and distinct for every
+repository in that order, since DNF breaks a tie by version and a later
+source could then shadow an earlier one. The stored key file is
 checked for its armored public-key form at validation; its fingerprint is
 verified when the key is imported during planning.
+
+The `[dnf]` table holds libdnf5 `[main]` options as numbers, booleans, or
+strings. Nimbus renders it, keys sorted, into
+`/etc/dnf/libdnf5.conf.d/20-nimbus.conf`, the drop-in directory libdnf5 reads
+before `dnf.conf`, and plans that file as the first operation so every
+transaction downloads with the declared settings. The file is compared whole
+with the rendering: an absent file is written, a differing one rewritten, an
+identical one adopted, and a file Nimbus wrote is removed when the table is
+removed. A drop-in Nimbus never wrote is left alone.
 
 A machine manifest has a stable ID:
 
@@ -342,7 +358,9 @@ targets are the MSI Z690 desktop with Intel integrated graphics and NVIDIA RTX
 the machine's DMI product or board identity plus relevant PCI vendor and device
 IDs. The desktop display component selects `ddcutil`; the laptop display and
 power component selects `brightnessctl`. An unknown or ambiguous device yields
-a warning and a component picker, never a guessed selection.
+a warning and a component picker, never a guessed selection. The `vm`
+manifest is the disposable Fedora virtual machine used for apply drills; it
+selects no hardware component and lists Mesa directly for virtio graphics.
 
 ## Resolution
 
@@ -444,7 +462,7 @@ One provider owns an installed executable lifecycle. Nimbus manages
 system-scoped Flatpaks from Flathub. User-scope tools follow the
 [SECURITY.md](SECURITY.md) source order: Nimbus runs a maker's installer
 script, `cargo install`, or `mise install` as the normal user, without sudo,
-as a reviewed plan step. Runtimes declared in `~/.config/mise/config.toml`
+as a plan step. Runtimes declared in `~/.config/mise/config.toml`
 are installed by Mise after Chezmoi has written that file; Chezmoi owns the
 file, Mise owns the runtimes, and Nimbus plans the `mise install` step and
 reports runtimes that are missing. User-scope steps are safe to repeat and
@@ -556,7 +574,7 @@ Nimbus operations and never replaces current inspection.
 Nimbus state and receipts below /var/lib/nimbus are versioned, contain no
 secrets, are readable by the normal user, and are written atomically through a
 narrow operation-scoped privileged action that accepts only a stage bound to
-the approved plan digest. The first apply also records the baseline: the
+the plan digest. The first sync also records the baseline: the
 packages installed before Nimbus took over, which are never prune candidates
 and are listed by `unmanaged --all` as pre-existing. The Windows guest data
 root mounted at `/var/lib/nimbus/windows` is a separate subvolume holding guest
@@ -568,7 +586,7 @@ data, not Nimbus state. A receipt records at least:
 - resource and provider
 - previous observation and intended state
 - exact lifecycle operation
-- approved plan digest
+- plan digest
 - verification result
 - recovery-point ID when applicable
 - timestamp and reboot or logout requirement
@@ -592,9 +610,10 @@ A plan contains:
 - verification, triggers, recovery, warnings, and reboot requirements
 - known normal-update candidates kept separate from normal apply
 
-`plan` shows exactly what `apply` would run. `plan --prune` adds a visibly
-separate section with the unmanaged packages `apply --prune` would remove;
-without the flag that section is absent. A pending operation waits for an
+`nimbus sync --plan` shows exactly what `nimbus sync` would do and changes
+nothing. With `--prune` the plan adds a visibly separate section with the
+unmanaged packages `sync --prune` would remove; without the flag that section
+is absent. A pending operation waits for an
 earlier operation in the same plan, such as a package whose repository the
 plan enables; apply runs the earlier operation and re-plans so the exact
 transaction is reviewed before it runs. A blocked operation is a problem
@@ -606,41 +625,59 @@ remote, is blocked with the reason rather than taken over. A package whose
 recorded source is the installer or unknown is adopted, since that is how a
 fresh Fedora records its base. A declared repository counts as present only
 when the host provides it from the file Nimbus owns, with signature checking
-on and the declared location and priority; drift in a Nimbus-owned file is a
-repair operation, a foreign file blocks.
+on and the declared location and priority. The owned file is compared whole
+with what Nimbus would write, so a changed value, a missing key, or a key
+Nimbus does not write is a repair operation that rewrites the file; a
+foreign file blocks. A host repository under another ID that serves a
+declared baseurl, such as the file a maker's package writes when it is
+installed, is a duplicate provider: the repository operation disables it
+through a DNF override and never edits the maker's file. A release package
+Nimbus installed to enable a repository belongs to that repository and is
+managed, never unmanaged or pruned.
 
 The canonical plan excludes volatile display data. Its digest covers the
 machine, the definition digest, and the operations with their exact steps
 and native transactions; the checkout origin, commit, and dirty state are
-reported beside it. Nimbus hashes the plan when shown for approval and
-refuses apply if configuration, definitions, facts, native transactions, or
-the digest changed before execution.
+reported beside it. The plan carries a digest that receipts record, so the
+state says which plan produced it.
 
-Planning never invokes sudo, accesses the network, writes files, or changes
-Nimbus state. DNF transactions are previewed from the local metadata cache,
-so plan and apply read the same package lists. `nimbus refresh` is the one
-explicit network step among the read-only commands: it runs `dnf5 makecache`
-as the user and changes nothing but that cache. Upgrade
-information uses locally available native metadata and reports when its
-freshness or availability is insufficient. A plan with a blocked operation,
-such as a package whose repository is not enabled yet, is incomplete and
-says so; apply runs only a complete plan.
+Planning never invokes sudo, writes files, or changes Nimbus state. Sync
+refreshes the DNF metadata cache first, as the user, so the plan and the
+transactions read current package lists; a refresh that fails is reported and
+the plan reads the cache as it is. DNF transactions are previewed from that
+cache. Update information uses the same metadata and reports when its
+freshness or availability is insufficient. A plan with a problem, such as a
+package no repository provides, is incomplete and says so; sync runs only a
+complete plan.
 
-Plain apply installs and repairs desired resources, adopts compatible existing
-resources, and removes resources previously owned by Nimbus that are no longer
-desired. It leaves unrelated unmanaged resources unchanged and does not upgrade
-an already-satisfied resource merely because a newer version exists.
+Sync installs and repairs desired resources, adopts existing ones whatever
+their source and records that source, and removes resources previously owned
+by Nimbus that are no longer desired. It leaves unrelated unmanaged resources
+unchanged. It then upgrades the system, unless `--no-upgrade` is given, so one
+command keeps the machine both as declared and current.
 
-`nimbus apply` re-resolves desired state, re-inspects the system, shows the
-complete plan, and requires explicit approval: an interactive answer or the
-exact plan digest passed with `--approve`. Immediately before execution it
-repeats the relevant checks and refuses a changed digest or native
-transaction. A DNF transaction is downloaded and stored first, compared with
-the reviewed preview, and then replayed, so exactly the reviewed packages
-are what runs. Operations that waited for a repository enabled in the same
-run are planned again after a metadata refresh and need their own approval.
-`nimbus apply --prune` uses the same process with prune candidates promoted into
-a visibly separate expanded plan. An unmanaged resource is eligible only when
+`nimbus sync` works the way an installer does: show, ask once, run, report.
+It shows the plan as it is known at that moment and asks `Proceed? [Y/n]`
+once; `-y` answers yes and `--json` asks nothing. On a host whose sources
+exist the plan is exact, with versions, dependencies, and download size. On a
+fresh host the sources do not exist yet, so the plan names the packages and
+DNF prints the exact transaction as it starts. Sudo is primed once after the
+answer and its credential is renewed while sync runs, so the password is
+asked once. Execution then prepares the declared sources, each declared in
+`nimbus.toml` with its pinned key: the DNF drop-in, the repositories and their
+duplicates, the Flatpak remote when `flatpak` is present, and a metadata
+refresh when a DNF repository changed. It runs the native commands with their
+own output on the terminal: one `dnf5 install` for the packages, then Flatpak
+and removals; whatever waited on that run, such as a Flatpak behind the
+`flatpak` package, runs in a further pass without asking again. Then it
+upgrades the system with `dnf5 upgrade` and `flatpak update`. DNF resolves at
+install time, so the result may differ from the preview; sync does not stop
+for that but verifies the result afterwards, writes receipts from what is
+actually installed, and reports the differences by name, or "none". A
+requested package that is not installed after its transaction is a failure.
+A failed command stops the run; earlier receipts stay. `nimbus sync --prune`
+uses the same process with prune candidates promoted into a visibly separate
+expanded plan. An unmanaged resource is eligible only when
 the native provider proves explicit installation, non-protected status,
 dependency safety, and an exact removal and verification path.
 
@@ -649,14 +686,17 @@ dependency safety, and an exact removal and verification path.
 Nimbus runs as the normal user and refuses to run the whole CLI as root.
 Read-only system operations never invoke sudo.
 
-Every privileged operation is rendered in the reviewed plan. Native operations
+Privileged native commands run with their own output on the terminal, so
+DNF's and Flatpak's download and transaction progress stays visible; in JSON
+mode that output goes to standard error. Every privileged operation is
+rendered in the plan. Native operations
 run directly through sudo. Nimbus may expose only two classes of narrow
 internal privileged action:
 
 - atomically install the approved system-file payload for one plan step
 - atomically record the approved root-owned state and receipts
 
-They accept only staged data bound to the approved plan digest. Nimbus has no
+They accept only staged data bound to the plan digest. Nimbus has no
 general privileged executor, root daemon, helper service, or sudo keepalive.
 
 Only one mutating Nimbus operation may run at a time. Locks identify the
@@ -667,13 +707,13 @@ directory with mode `0700` and the lock file with mode `0600`; both are owned by
 that user. A missing, foreign, symlinked, or otherwise invalid runtime directory
 blocks mutation.
 
-The lock is acquired after approval but before the final re-inspection, any
-manifest write, sudo, or other mutation, and is held through verification and
-receipt recording. Its content identifies the command, operation ID, PID, and
-start time for diagnostics. Kernel lock state is authoritative: stale content
-is replaced only after the file is successfully locked, never deleted merely
-because it is old. Read-only commands and unapproved plan review may run
-concurrently when they can obtain consistent input.
+The lock is acquired after the answer but before any manifest write, sudo, or
+other mutation, and is held through verification and receipt recording. Its
+content identifies the command, operation ID, PID, and start time for
+diagnostics. Kernel lock state is authoritative: stale content is replaced only
+after the file is successfully locked, never deleted merely because it is old.
+Read-only commands and plan review may run concurrently when they can obtain
+consistent input; `sync --plan` is one.
 
 ## System files, triggers, and migrations
 
@@ -1023,7 +1063,8 @@ when it supports application mode or a configured Chromium-family fallback.
 Both accept only `http` and `https` URLs, parse desktop entries without shell
 evaluation, and launch an exact argv vector. Chezmoi may call them from its
 owned keybindings and desktop entries. They do not install browsers, write user
-configuration, or become generic process launchers.
+configuration, or become generic process launchers. How desktop entries for
+terminal applications open a terminal is Q-019 in DECISIONS.md.
 
 ### Interactive dashboard
 
@@ -1065,14 +1106,13 @@ managed packages, repository state, enforceable constraints, coordinated update
 groups, recovery requirements, and post-update verification. Nimbus does not
 silently update itself, its checkout, dotfiles, or system packages.
 
-`nimbus upgrade` is the primary entry point for normal workstation updates. Its
-first phase updates desired Nimbus-managed resources. It may refresh native
-repository metadata, then shows the exact DNF and Flatpak transaction,
-verification, recovery, and reboot or logout requirements before approval. It
-never prunes. It does not silently reconcile unrelated desired-state drift and
-blocks with a direction to run `nimbus apply` first when that drift is a
-prerequisite for a safe update. The command operates only within the currently
-installed Fedora release and has no target-release flag.
+`nimbus sync` is the primary entry point for normal workstation updates as
+well: its last step upgrades the system with `dnf5 upgrade` and `flatpak
+update`, after the definition changes of the same run, so drift and updates
+are one decision. `--no-upgrade` leaves that step out. Recovery points and
+reboot or logout requirements join the plan when Phase 7 delivers them. The
+upgrade operates only within the currently installed Fedora release and has
+no target-release flag.
 
 After the verified system phase, the command offers a separate Topgrade phase
 for the user-scope update managers. Topgrade reads the user's own
@@ -1112,7 +1152,7 @@ minimum-engine contract.
 Before starting the native Fedora workflow, the user ensures that the installed
 engine and selected checkout declare support for the target release. After the
 native upgrade succeeds, the user runs `nimbus validate`, `nimbus status`, and
-then `nimbus plan` or `nimbus apply` as needed. These commands inspect and repair
+then `nimbus sync` as needed. These commands inspect and repair
 Nimbus-owned drift after the event; they do not retroactively make the Fedora
 release upgrade a Nimbus operation.
 
@@ -1244,10 +1284,7 @@ nimbus
 nimbus init
 nimbus validate
 nimbus status
-nimbus plan [--prune]
-nimbus refresh
-nimbus apply [--prune] [--approve DIGEST]
-nimbus upgrade
+nimbus sync [-p|--plan] [-y|--yes] [-n|--no-upgrade] [-r|--prune]
 nimbus postinstall
 nimbus packages install [QUERY]
 nimbus packages remove [QUERY]
@@ -1286,9 +1323,9 @@ error with its source location, and performs no system inspection. It accepts a
 checkout override but no machine override because validation is checkout-wide.
 
 `nimbus status` is the concise desired, observed, and last-applied overview.
-`nimbus plan` is its complete non-mutating explanation, and `nimbus refresh`
-refreshes the DNF metadata cache both read. `nimbus managed` lists
-resources Nimbus owns or has explicitly adopted; `nimbus unmanaged` lists only
+`nimbus sync --plan` is its complete non-mutating explanation. `nimbus managed`
+lists resources Nimbus owns or has explicitly adopted; `nimbus unmanaged` lists
+only
 supported resources Nimbus can identify but does not own, not arbitrary user
 data. `nimbus why RESOURCE` reports every desired, dependency, adoption, and
 ownership path for one canonical resource.
@@ -1315,7 +1352,7 @@ then require approval before writing the manifest atomically and applying it.
 They leave the Git change for the user and never commit, pull, or push. A failed
 apply leaves the reviewed desired configuration present and reports the
 remaining drift. The remove picker does not offer unmanaged packages; eligible
-unmanaged removal remains part of `apply --prune`. In a non-interactive context,
+unmanaged removal remains part of `sync --prune`. In a non-interactive context,
 a package command that still requires selection or approval fails rather than
 guessing.
 
@@ -1345,7 +1382,7 @@ approval, writes only the source content, and leaves the Git change for the
 user. It is not a general drift sync, does not accept multiple files, does not
 capture ownership or mode, and never changes or adopts foreign system state.
 Accidental drift continues to be repaired in the forward direction through
-`nimbus apply`.
+`nimbus sync`.
 
 `nimbus doctor` performs read-only health checks for the capabilities available
 in the installed engine. Each failure already includes its observation, impact,
@@ -1408,7 +1445,8 @@ Nimbus is complete when a supported clean Fedora installation can:
 
 - select a tracked machine and resolve the same desired graph deterministically
 - inspect the real system and show a complete non-mutating plan
-- apply only the approved unchanged plan with scoped privilege
+- run only what the plan showed, with scoped privilege, and report what
+  differed
 - verify every successful mutation and write complete receipts
 - report and repair owned drift without claiming unrelated state
 - remove owned resources safely while preserving unmanaged data

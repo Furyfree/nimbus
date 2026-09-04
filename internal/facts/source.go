@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"sort"
@@ -21,6 +22,10 @@ type Source interface {
 	// Run executes a command without a shell and returns its stdout. A
 	// non-zero exit is an error carrying stderr.
 	Run(name string, args ...string) ([]byte, error)
+	// Stream executes a command with its output written to stdout and
+	// stderr as it happens, for native tools whose progress the user
+	// should see. A non-zero exit is an error.
+	Stream(stdout, stderr io.Writer, name string, args ...string) error
 	ReadFile(path string) ([]byte, error)
 	// ReadDir returns the sorted entry names of a directory.
 	ReadDir(path string) ([]string, error)
@@ -48,6 +53,19 @@ func (ExecSource) Run(name string, args ...string) ([]byte, error) {
 		return stdout.Bytes(), fmt.Errorf("%s %s: %s", name, strings.Join(args, " "), msg)
 	}
 	return stdout.Bytes(), nil
+}
+
+// Stream runs name with args attached to the given writers and to this
+// process's stdin, which sudo and interactive prompts need.
+func (ExecSource) Stream(stdout, stderr io.Writer, name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
+	}
+	return nil
 }
 
 // ReadFile reads a file.
@@ -110,6 +128,12 @@ func (f *FakeSource) Run(name string, args ...string) ([]byte, error) {
 		return nil, fmt.Errorf("%s: %w", key, ErrNotRecorded)
 	}
 	return out, nil
+}
+
+// Stream replays a recorded command; the fixture has no output to show.
+func (f *FakeSource) Stream(_, _ io.Writer, name string, args ...string) error {
+	_, err := f.Run(name, args...)
+	return err
 }
 
 // ReadFile replays a recorded file. A recorded directory reads as EISDIR.

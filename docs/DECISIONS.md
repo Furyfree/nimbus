@@ -277,18 +277,25 @@ Sheldon, and Yazi's `resvg` preview helper. Fedora still wins over Cargo, so
 Just moves to Fedora's `just`. Tailscale and Nix with `nix-daemon` come from
 Fedora rather than their maker scripts, which D-010 rejects; Starship comes
 from Terra because its script installs to `/usr/local/bin` with sudo and has
-no self-update; `unrar` comes from RPM Fusion because Fedora's package is the
-`unrar-free` wrapper. Where Fedora and Terra both carry a package, Noctalia
+no self-update. Where Fedora and Terra both carry a package, Noctalia
 and Chezmoi, Fedora is the provider and Terra must not shadow it.
+
+Corrected 2026-09-04 by the first VM apply: `unrar` was declared from RPM
+Fusion because Fedora's package is the `unrar-free` wrapper, but both carry
+the name `unrar`, and the priority rule in SECURITY.md gives Fedora every
+name it carries. The planner refused the transaction as declared. Fedora's
+`unrar` is the source; it reads RAR3 and RAR5 archives through libarchive,
+which covers the owner's use.
 
 WoWUp remains desired but unavailable from the accepted Fedora 44 sources. It
 may enter through a separately reviewed Nimbus-owned COPR package when that
 package exists; its upstream AppImage remains rejected by the standing policy.
 
 Amended 2026-09-03 by D-015. Topgrade moves to Terra as the one exception to
-the Cargo rule, `librepods` moves to Terra, which now carries it, and Fedora's
-lazygit package is `golang-github-jesseduffield-lazygit`; nothing provides
-the bare name.
+the Cargo rule, `librepods` moves to Terra, which now carries it, and lazygit
+is Terra's `golang-github-jesseduffield-lazygit`; nothing provides the bare
+name. Corrected 2026-09-04 by the first VM run: the container search that
+found the package had Terra enabled, and Fedora 44 itself carries no lazygit.
 
 #### D-015: One fixed source order replaces the tiers
 
@@ -435,8 +442,155 @@ recorded on the first apply. Pending operations that waited for a
 repository enabled in the same run are planned again after a metadata
 refresh and approved again; `--approve` covers the first round only.
 Rejected: a general privileged helper, because the two narrow actions
-suffice; and a single approval for every round, because the later
-transactions were not visible at the first approval.
+suffice.
+
+Amended 2026-09-04 after the fresh-VM drill: one approval covers a run. The
+drill asked four times and for the sudo password twice, and every later
+round held exactly what the first plan had listed as pending. The first
+plan now names every package a pending transaction will install, a later
+round runs without asking when it holds only those pending operations and
+packages, and anything beyond them is put to the user again; the checks
+that refuse a transaction beyond the definitions and a stored transaction
+that differs from its preview bound what a later round can do. sudo is
+primed once and kept alive. The metadata refresh between rounds runs only
+after a round that changed a DNF repository, and a Flatpak application
+joins its remote's round. The earlier objection, that later transactions
+were not visible at the first approval, is met by naming their packages
+up front and by the bound.
+
+#### D-022: Package signatures are checked, metadata signatures are not
+
+Decided 2026-09-04 after the first VM apply. The Nimbus-owned repository
+file sets `gpgcheck=1` with the pinned key, which RPM verifies through the
+key `rpm --import` installed. It does not set `repo_gpgcheck=1`: DNF
+verifies a metadata signature against its own per-cache keyring, imports a
+key there only after an interactive confirmation, and keeps separate caches
+for root and the user. The first apply enabled five repositories that way
+and every later user-level refresh failed with "Signing key not found", so
+the plan could not resolve their packages. SECURITY.md requires pinned keys
+and package signature checking, which stays; it never required metadata
+signatures, and the makers' own repository files for Docker, Brave, and RPM
+Fusion do not set them either. Rejected: a root refresh that auto-accepts
+keys, because it would accept keys for foreign repositories too; and
+importing keys into DNF's keyring by hand, because DNF exposes no command
+for it.
+
+#### D-023: Transactions wait for repository changes; priorities are distinct
+
+Decided 2026-09-04 after the third VM apply. The stored transaction check
+stopped the run: Terra had been enabled in the same round, so the download
+saw metadata the preview had not, and Terra carried `1password-cli` and
+`uwsm` at the same priority as 1Password's repository and the Hyprland
+COPR with newer versions, so DNF changed their sources. Two rules follow.
+A DNF transaction never shares a round with a repository enable or repair;
+it waits, apply refreshes the cache after the round, and the next round
+previews it. Every repository has a distinct priority in the SECURITY.md
+order, validated at load, because equal priorities let DNF break a tie by
+version and a later source then shadows an earlier one. Rejected: keeping
+one round and accepting the stored transaction as reviewed, because the
+approval would then cover a transaction nobody saw; and equal priorities
+within one tier, because the check that refuses a package from the wrong
+repository would fire on every version bump.
+
+Amended the same day by the fourth apply. Within the fourth SECURITY.md tier
+Terra comes before RPM Fusion and a community COPR, as that tier lists them:
+the Hyprland COPR also carries `gpu-screen-recorder`, which is declared from
+Terra, and with the COPR ahead DNF took the COPR's build.
+
+#### D-024: An install transaction carries the upgrades it needs
+
+Decided 2026-09-04 after the fourth VM apply. The requested packages needed
+`openssl` 3.5.8, which needs the newer `openssl-libs`, so DNF upgraded the
+installed one; the planner refused every upgrade inside an install and sent
+the owner to `nimbus upgrade`, which Phase 7 has not built, and a fresh
+Fedora always has updates pending. DNF's `install` upgrades an installed
+package only when a dependency requires it, so such upgrades are accepted,
+listed in the preview, and noted with their names; downgrades and reinstalls
+stay refused. The stored transaction lists the old version as `Replaced`,
+which the parser now reads from DNF's indented "replacing" row instead of
+taking it for a package named "replacing". Rejected: refusing until the
+system is fully updated, because apply would then depend on a command that
+does not exist yet and on a fully updated base forever after.
+
+#### D-025: DNF is configured through a typed table before any transaction
+
+Decided 2026-09-04. The owner wants DNF tuned before the first transaction:
+parallel downloads and the other settings a Fedora workstation usually
+carries. Generic system files arrive with Phase 5, and a DNF option is
+better said as data than as a file anyway, so `nimbus.toml` carries a
+`[dnf]` table of libdnf5 `[main]` options that Nimbus renders into
+`/etc/dnf/libdnf5.conf.d/20-nimbus.conf`, verifies whole, and plans first.
+The declared options, against libdnf5's defaults on Fedora 44:
+`max_parallel_downloads = 10` (default 3, maximum 20), `fastestmirror =
+true` (default off; picks a mirror by TCP latency instead of the metalink
+order, which helps most on Terra and RPM Fusion mirrorlists), and
+`defaultyes = true` (default off; the owner's own interactive `dnf` prompts
+default to Yes, while Nimbus always passes an explicit answer). Left at
+their defaults: `installonly_limit` is already 3, `keepcache` would keep
+every downloaded RPM on disk, `zchunk` is already on, `countme` is Fedora's
+own per-repository setting, and `deltarpm` no longer exists in DNF5.
+Rejected: passing `--setopt` on Nimbus's own invocations only, because the
+owner's own DNF and Topgrade runs would not benefit; and waiting for the
+Phase 5 file provider, because the option belongs to typed data.
+
+#### D-026: A maker's own repository file is a duplicate provider
+
+Decided 2026-09-04 after the fresh-VM drill. Installing `1password` and
+`chatgpt` wrote `1password.repo` and `chatgpt.repo` from their package
+scripts: enabled, at DNF's default priority 99, with an unpinned key URL,
+and serving the same baseurl as the Nimbus-owned files. Nothing broke in
+that run, but 99 beats the declared priority, so the next update would have
+come from the maker's file and failed the provider check. The repository
+check now treats an enabled host repository under another ID with the
+declared baseurl as a duplicate and disables it through
+`dnf5 config-manager setopt <id>.enabled=0`, an override, as D-021 requires
+for a maker's file. The same drill showed `rpmfusion-free-release` as an
+unmanaged prune candidate although Nimbus installed it to enable the
+repository; release packages of declared repositories are managed by that
+repository. Rejected: adopting the maker's file as the source, because its
+key is fetched by URL rather than pinned; and deleting it, because a package
+upgrade would write it again and Nimbus does not edit makers' files.
+
+#### D-027: Apply prepares, shows, asks once, runs, and reports
+
+Decided 2026-09-04 after the fresh-VM drills. The apply of D-020 and D-021
+asked four times, ran DNF twice through `--store` and `replay`, stopped
+twice on a stored transaction that differed from its preview, and skipped
+package signature checks on replay; every stop was correct by its own rules
+and every rule was in the way of an owner who wrote the definitions. The
+owner's verdict was that it did not need to be religious, and the design is
+now the one installers share. Sources declared with pinned keys are prepared
+without a question. One plan is shown with versions and download size, one
+question is asked, one `dnf5 install` runs with its own output, and the run
+ends with what differed from the plan, by name or "none". Adoption never
+blocks on the source a package came from; the source is recorded. What goes
+beyond the definitions in DNF's resolution is a note in the plan, not a
+refusal. Digests, `--approve`, rounds as a visible concept, the stored
+transaction and its comparison, the scope check, and blocked adoption are
+gone; validation, pinned keys, receipts, the baseline, and read-only
+commands that never touch the system stay. Rejected: keeping `replay` with
+`localpkg_gpgcheck`, because the second DNF run and its second table bought
+an exactness the owner does not want to pay for; and forcing `plan` before
+`apply`, because apply shows the plan and asks, which is the plan step.
+
+#### D-028: One command, sync, with flags for the other cases
+
+Decided 2026-09-04, on the owner's observation that nobody would run `plan`
+when `apply` shows the plan and asks, and that updates should keep the
+system in every way. `plan`, `apply`, `refresh`, and the planned `upgrade`
+are one command: `nimbus sync` refreshes metadata, shows the plan, asks
+once, prepares sources, installs and removes as declared, upgrades the
+system with `dnf5 upgrade` and `flatpak update`, and reports. `-p` shows
+the plan and stops, `-y` skips the question, `-n` leaves out the upgrade,
+`-r` prunes, `-j` is JSON. The question comes first, on the plan as known
+at that moment: exact on a host whose sources exist, by name on a fresh
+host, where DNF prints the exact transaction seconds later and the report
+names what differed. The selection commands sync without the upgrade,
+since an edit is the request. Rejected: a second question after the
+sources are prepared, because one command is one decision; a mutating
+`plan`, because a command called plan that changes the system misleads;
+and asking nothing by default, because the first run on a new machine
+installs hundreds of packages and deserves a pause.
 
 ### Resolved questions
 
@@ -954,7 +1108,7 @@ same day:
 - Tailscale, Nix with `nix-daemon`, and Just move to Fedora; Starship moves to
   Terra; Topgrade and `resvg` stay on Cargo under the amended D-014 rule.
 - Noctalia and Chezmoi come from Fedora, Steam from RPM Fusion, and `unrar`
-  from RPM Fusion because Fedora's `unrar` is the `unrar-free` wrapper.
+  from Fedora since the 2026-09-04 correction under D-014.
 - Accepted additions: `mesa-va-drivers-freeworld`, `intel-media-driver`,
   `playerctl`, `pipewire-pulse`, `pipewire-alsa`, `gvfs` with MTP and SMB,
   `ShellCheck`, `gitleaks`, `yq`, `duf`, `sane-airscan`, `simple-scan`,
@@ -971,7 +1125,7 @@ service-activation entries.
 
 Amended 2026-09-03 by D-015: Topgrade leaves Cargo for Terra.
 
-Amended 2026-09-03 after the passthrough: Fedora's lazygit package is
+Amended 2026-09-03 after the passthrough: lazygit is Terra's
 `golang-github-jesseduffield-lazygit`, 1Password is `1password` and
 `1password-cli`, and the graphics entry names `mesa-dri-drivers`,
 `mesa-vulkan-drivers`, `intel-gpu-firmware`, and `amd-gpu-firmware`.
@@ -1079,11 +1233,27 @@ Q-017.
 
 ### Open questions
 
-None on 2026-09-03.
+#### Q-019: How desktop entries open a terminal application
+
+Opened 2026-09-04. Desktop entries for terminal applications such as VM
+Curator, btop, and lazydocker must open the user's terminal running one
+command. Omarchy does it with a script that hardcodes its terminal. ROADMAP
+Phase 8 lists the options: `Exec=xdg-terminal-exec COMMAND` in the
+Chezmoi-owned desktop entry, `Terminal=true` alone, a Chezmoi-owned script,
+or a `nimbus launch terminal` helper wrapping `xdg-terminal-exec`.
+
+Fedora 44 packages `xdg-terminal-exec`, the freedesktop terminal-exec
+implementation, and the `hyprland-session` component installs it, so the
+first option needs no code anywhere and the fourth adds only argument
+validation on top of it. `Terminal=true` alone depends on the launcher
+honouring it, and a hardcoded script is what the spec replaced. Decide
+before Phase 8; until then the SPEC command contract carries only the
+browser and webapp helpers.
 
 ### Consequences for the next documentation pass
 
-Every question through Q-018 is resolved and D-007 is closed. The only work
+Every question through Q-018 is resolved and D-007 is closed; Q-019 waits
+for Phase 8. The only work
 outside this repository is the dotfiles template change from Q-015, which
 gates the Phase 5 Chezmoi handoff. The active documents are consolidated below
 `docs/`, and legacy history is retained only in the named Git snapshot. One

@@ -7,7 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/plan"
 )
 
 // fixtureSource replays a healthy Fedora 44 host whose checkout is the
@@ -45,6 +47,11 @@ func fixtureSource(t *testing.T, root string) *facts.FakeSource {
 	if root != "" {
 		src.Dirs[filepath.Join(root, ".git")] = []string{"config"}
 		src.Files[filepath.Join(root, ".git", "config")] = []byte("[remote \"origin\"]\n\turl = https://github.com/Furyfree/nimbus.git\n")
+		// The DNF drop-in is already as declared, so plans start at the
+		// repositories the tests reason about.
+		if c, err := definitions.Load(root); err == nil {
+			src.Files[facts.DNFDropInPath] = []byte(plan.DNFDropIn(c.Definitions()))
+		}
 	}
 	for _, name := range facts.RequiredCommands {
 		src.Paths[name] = "/usr/bin/" + name

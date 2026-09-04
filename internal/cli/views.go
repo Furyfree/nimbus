@@ -72,9 +72,6 @@ func packageViews(s *selected, f *facts.Facts, applied *state.Applied) []package
 		} else if inst, ok := installed[p.Name]; ok {
 			v.Installed, v.Repository, v.Reason = inst.EVR(), inst.FromRepo, inst.Reason
 			v.State = "adopt"
-			if plan.AdoptionProblem(s.Checkout.Definitions(), p.Prefix, inst.FromRepo) != "" {
-				v.State = "blocked"
-			}
 		}
 		if _, ok := applied.Receipts[id]; ok && v.Installed != "" {
 			v.State = "managed"
@@ -89,6 +86,8 @@ func packageViews(s *selected, f *facts.Facts, applied *state.Applied) []package
 		switch {
 		case applied.InBaseline(p.Name):
 			st = "pre-existing"
+		case plan.IsReleasePackage(s.Checkout.Definitions(), p.Name):
+			st = "managed" // installed by Nimbus while enabling its repository
 		case p.Reason != "user":
 		default:
 			st = "unmanaged"

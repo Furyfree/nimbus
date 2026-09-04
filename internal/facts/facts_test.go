@@ -243,3 +243,30 @@ func TestRepositoryOverridesWin(t *testing.T) {
 		}
 	}
 }
+
+func TestReplayedPackagesKeepTheirSourceRepository(t *testing.T) {
+	pkgs, err := parsePackages([]byte("hyprland|0|0.56.2|2.fc44|x86_64|@stored_transaction(copr:copr.fedorainfracloud.org:lionheartp:Hyprland)|User\nbat|0|0.26.1|4.fc44|x86_64|@stored_transaction(updates)|Dependency\nzsh|0|5.9|21.fc44|x86_64|updates|User\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pkgs[0].FromRepo != "copr:copr.fedorainfracloud.org:lionheartp:Hyprland" || pkgs[1].FromRepo != "updates" || pkgs[2].FromRepo != "updates" {
+		t.Fatalf("from_repo = %q %q %q", pkgs[0].FromRepo, pkgs[1].FromRepo, pkgs[2].FromRepo)
+	}
+}
+
+func TestAnOverrideCanDisableARepository(t *testing.T) {
+	src := &FakeSource{
+		Files: map[string][]byte{
+			filepath.Join(RepoDir, "1password.repo"):              []byte("[1password]\nname=1Password\nbaseurl=https://example.invalid/1p\nenabled=1\n"),
+			filepath.Join(RepoOverride, "99-config_manager.repo"): []byte("[1password]\nenabled=0\n"),
+		},
+		Dirs: map[string][]string{RepoDir: {"1password.repo"}, RepoOverride: {"99-config_manager.repo"}},
+	}
+	repos, err := repositories(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repos) != 1 || repos[0].Enabled || len(repos[0].Overrides) != 1 {
+		t.Fatalf("repos = %+v", repos)
+	}
+}

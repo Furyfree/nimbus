@@ -43,16 +43,17 @@ Rules:
 - The earlier source wins where two carry the same name. Fedora provides
   Chezmoi, Noctalia, Just, Tailscale, and Nix; RPM Fusion provides Steam. A
   later repository is declared with a higher numeric DNF `priority`, which
-  means lower precedence, so it cannot shadow an earlier one, and planning
-  refuses a package that DNF would take from a repository other than the one
-  its prefix names.
+  means lower precedence, so it cannot shadow an earlier one. Every
+  repository has its own number in this order, because DNF breaks a tie by
+  version. Planning refuses a package that DNF would take from a repository
+  other than the one its prefix names.
 - Maker repositories in use: Docker, 1Password, Brave for `brave-origin`,
   VSCodium, and OpenAI's ChatGPT repository. The ChatGPT RPM's own
   post-install script would add that repository; Nimbus declares it directly
   and installs `chatgpt` from it so DNF owns the updates.
 - User-scope maker channels are the Mise, Zed, and Herdr installer scripts,
   `cargo install`, and `mise install`. Nimbus runs them as the normal user,
-  never as root, as steps of the reviewed plan. A maker's script cannot be
+  never as root, as steps of the plan. A maker's script cannot be
   pinned to a version, so Nimbus downloads it to a file, shows the URL and
   the digest of that file, and runs exactly that file after approval; it
   never pipes a download into a shell. Mise installs Rust, so Cargo steps
@@ -170,8 +171,8 @@ Rules:
   keys for outbound connections only.
 - Nimbus itself makes no network calls except through DNF, Flatpak, digest-
   pinned container image pulls, the user-scope maker channels named above,
-  the one clone of the approved origin by `install.sh`, the explicit
-  `nimbus refresh` metadata step, and the one explicit Chezmoi
+  the one clone of the approved origin by `install.sh`, the metadata
+  refresh at the start of `nimbus sync`, and the one explicit Chezmoi
   initialization.
 
 ## Privilege
@@ -203,11 +204,11 @@ Rules:
 
 ## Updates
 
-- System-layer updates from every source go through `nimbus upgrade` or
+- System-layer updates from every source go through `nimbus sync` or
   direct DNF and Flatpak; nothing in the system layer updates unattended.
-- `nimbus upgrade` is the primary entry point. Nimbus plans and applies exact
-  DNF and Flatpak transactions itself, surrounded by its recovery point. It
-  then offers a separately approved Topgrade phase for the user-scope
+- `nimbus sync` is the primary entry point: its last step runs `dnf5 upgrade`
+  and `flatpak update`, surrounded by its recovery point once Phase 7 adds
+  it. It then offers a Topgrade phase for the user-scope
   managers. Topgrade reads the user's own Chezmoi-owned configuration, and
   Nimbus passes `--only` with the declared allowlist of user-scope steps plus
   `--no-self-update`, so a step Topgrade adds later is never enabled by

@@ -196,10 +196,10 @@ ordering, and the nimbus status, plan, packages installed, profiles list,
 components list, managed, unmanaged, and why views.
 
 The planner renders exact native argv, canonicalizes the plan, and calculates
-its digest. Plan writes nothing. It shows normal apply operations, prune
+its digest. Planning writes nothing. It shows the operations, prune
 candidates, and the availability and freshness of update information as
-separate sections. Prune candidates stay informational unless a later
-`apply --prune` explicitly enables them. Before Phase 7, unavailable upgrade
+separate sections. Prune candidates stay informational unless
+`sync --prune` explicitly enables them. Before Phase 7, unavailable upgrade
 information is reported rather than guessed.
 
 `packages installed [QUERY]` provides the read-only interactive view of
@@ -234,20 +234,21 @@ complete versioned receipts under /var/lib/nimbus.
 ### Context and decisions
 
 Add the user-owned kernel operation lock at
-`$XDG_RUNTIME_DIR/nimbus/operation.lock`, approval boundary, immediate
-re-inspection and re-resolution, digest refusal, direct sudo native commands,
-the narrow atomic record action, partial-failure behavior, adoption, owned
-removal, and explicit pruning through `nimbus apply --prune`. Acquire the lock
-after approval and before the final checks or any write, and hold it through
-verification and receipt recording.
+`$XDG_RUNTIME_DIR/nimbus/operation.lock`, the one question, direct sudo
+native commands with their output visible, the narrow atomic record action,
+partial-failure behavior, adoption, owned removal, the differences report,
+and explicit pruning through `nimbus sync --prune`. Acquire the lock after
+the answer and before any write, and hold it through verification and
+receipt recording.
 
 `packages install [QUERY]` and `packages remove [QUERY]` use interactive
 multi-selection, change only the selected machine manifest, and show both the
-manifest diff and complete system plan before approval. They then reuse the
-same apply path. Remove is limited to desired or Nimbus-managed packages;
-eligible unmanaged packages remain the responsibility of `apply --prune`.
-`profiles add|remove` and `components add|remove` edit the manifest's
-selection lists through the same diff, plan, approval, and apply path; a
+manifest diff and complete system plan before the question. They then reuse
+the sync path without the system upgrade. Remove is limited to desired or
+Nimbus-managed packages; eligible unmanaged packages remain the
+responsibility of `sync --prune`. `profiles add|remove` and
+`components add|remove` edit the manifest's selection lists through the same
+diff, plan, question, and sync path; a
 profile change prints the direct Chezmoi re-initialization command once
 Phase 5 exists. Nimbus leaves every manifest edit as an uncommitted Git change.
 
@@ -259,10 +260,10 @@ only from the lifecycle recorded in the receipt.
 This is the first mutating phase. Tests run only in disposable Fedora VMs,
 and the phase opens with the first VM run, which also compares doctor and
 plan output with the recorded fixtures before any apply is attempted.
-Failed verification never creates a successful receipt. DNF may refresh
-metadata between approval and execution; the re-resolution refusal covers
-that, and this phase decides whether download-then-cache-only execution is
-worth adding on top. A failed transaction
+Failed verification never creates a successful receipt. DNF resolves again
+at install time, so the result may differ from the preview; the closing
+report names such differences, and the receipts record what is actually
+installed. A failed transaction
 retains the reviewed desired manifest, accurate prior receipts, and native DNF
 history needed for recovery. Status and plan then expose the remaining drift.
 
@@ -409,9 +410,9 @@ does not modify the live target or metadata, and leaves Git untouched.
 
 ### Outcome
 
-Deliver `nimbus upgrade` for controlled normal updates, enforce native
-constraints, coordinate the desktop-session group, and create tested recovery
-points for disruptive transactions.
+Deliver the recovery and coordination around the upgrade step `nimbus sync`
+already runs: enforce native constraints, coordinate the desktop-session
+group, and create tested recovery points for disruptive transactions.
 
 ### Context and decisions
 
@@ -444,10 +445,9 @@ before freezing the implementation, and record the results in TASKS.md:
   Snapper's own cleanup limits
 - confirmation that no excluded subvolume nests below `root`
 
-Upgrade may refresh native metadata, shows its own exact reviewed system plan,
-never prunes, and does not silently apply unrelated desired-state drift. It
-blocks with a direction to run `nimbus apply` when that drift is a prerequisite.
-After system verification it offers a separately approved Topgrade phase that
+The upgrade step runs inside `nimbus sync`, after the definition changes of
+the same run, so drift and updates are one decision; `--no-upgrade` leaves it
+out. After system verification sync offers a Topgrade phase that
 reads the user's Chezmoi-owned configuration and runs only the declared
 allowlist through `--only` plus `--no-self-update`, so system, Flatpak,
 firmware, Nix, Chezmoi, and Git repository steps never run from it. The plan
@@ -482,7 +482,7 @@ creation and cleanup, protected failed operations, retention cleanup, delayed
 Btrfs deletion, the 20 GiB refusal, checksums, and preservation of home and
 guest data. Exercise the Topgrade `--only` allowlist, command preview,
 refusal of sudo and system managers, partial user-step failure, and the
-explicit lack of home rollback. Prove that `nimbus upgrade` remains
+explicit lack of home rollback. Prove that the upgrade step remains
 within the installed release, exposes no target-release path, and never invokes
 DNF5 system-upgrade. Verify that unsupported releases preserve version,
 validation, and doctor diagnostics while blocking mutation, and that supported
@@ -532,6 +532,22 @@ Launch helpers safely resolve the XDG browser, translate supported private-mode
 flags, use an explicit Chromium-family webapp fallback, accept only HTTP(S)
 URLs, and execute no shell-derived command. Chezmoi retains ownership of the
 keybindings and desktop entries that call them.
+
+Desktop entries for terminal applications such as VM Curator, btop, and
+lazydocker need a way to open the user's terminal with one command. Q-019
+decides between these options before this phase starts:
+
+- `Exec=xdg-terminal-exec COMMAND` in the Chezmoi-owned desktop entry.
+  Fedora 44 ships `xdg-terminal-exec`, the freedesktop terminal-exec
+  implementation, and the `hyprland-session` component already installs it.
+  No Nimbus code; the terminal is whatever the user configured for the spec.
+- `Terminal=true` in the desktop entry alone. Standard, but launchers differ
+  in whether they honour it.
+- A Chezmoi-owned script like Omarchy's `omarchy-launch-tui`, which
+  hardcodes the terminal and builds the command line.
+- `nimbus launch terminal COMMAND [ARG...]`, a typed wrapper that validates
+  the arguments and hands the exact argv to `xdg-terminal-exec`, alongside
+  the browser and webapp helpers.
 
 Validate the typed task list in terminal, non-terminal, and JSON modes. Test the
 Windows lifecycle, absent component refusal, root-owned Compose integrity,
@@ -593,9 +609,8 @@ as small as a stripped static Go program can be.
   the dependency count, keep the Charm libraries the only interactive
   dependency, and refuse a module that a standard-library call would cover.
 - Inspection: one `dnf5 repoquery` per run rather than one per check,
-  facts cached inside a command instead of re-inspected between steps,
-  and the DNF preview reused between plan and the apply digest check when
-  nothing changed.
+  and facts cached inside a command instead of re-inspected between
+  passes when nothing changed.
 - Apply: independent operations such as key downloads and Flatpak installs
   run concurrently only where ordering does not matter and the plan shows
   the same steps; DNF transactions stay single and sequential because DNF

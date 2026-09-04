@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -11,147 +12,237 @@ import (
 	"github.com/Furyfree/nimbus/internal/plan"
 )
 
-func newPlan(opts *options) *cobra.Command {
-	var flags machineFlags
-	var prune bool
-	cmd := &cobra.Command{
-		Use:   "plan",
-		Short: "Show the complete plan for the selected machine without changing anything",
-		Long: `Plan compares the desired configuration with the installed system and shows
-every operation apply would run, plus the known update information. With
---prune it also shows the unmanaged packages apply --prune would remove. It
-writes nothing, uses no network, and runs no mutating command. DNF previews
-come from the local metadata cache; run nimbus refresh first when it is
-stale.`,
-		Args: noArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			s, err := loadSelected(flags)
-			if err != nil {
-				return err
-			}
-			p, _, err := planWithState(s, newSource(), prune)
-			if err != nil {
-				return err
-			}
-			if !prune {
-				p.Prune = nil
-			}
-			if opts.json {
-				err = writeJSON(cmd.OutOrStdout(), p, nil)
-			} else {
-				_, err = cmd.OutOrStdout().Write(renderPlan(p, prune))
-			}
-			if err != nil {
-				return err
-			}
-			if !p.Complete {
-				return reported{}
-			}
-			return nil
-		},
-	}
-	addMachineFlags(&flags, cmd.Flags())
-	cmd.Flags().BoolVar(&prune, "prune", false, "also show the unmanaged packages apply --prune would remove")
-	return cmd
-}
-
 func buildPlan(s *selected, src facts.Source) (*plan.Plan, error) {
 	p, _, err := planWithState(s, src, false)
 	return p, err
 }
 
-func renderPlan(p *plan.Plan, prune bool) []byte {
+// planWidth is the column at which rendered lists wrap. Terminals differ,
+// so the plan wraps at the conventional width rather than measuring one.
+const planWidth = 80
+
+// renderPlan writes the plan the way an installer shows its work: what
+// will be prepared, installed, upgraded, and removed, then problems. The
+// update list is plan's information; apply passes listUpdates false and
+// gets one line.
+func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 	var b bytes.Buffer
-	fmt.Fprintf(&b, "plan for %s\n", p.Machine)
-	fmt.Fprintf(&b, "definitions %s\n", p.Definitions)
+	fmt.Fprintf(&b, "plan for %s", p.Machine)
 	if p.Checkout.Commit != "" {
 		state := "clean"
 		if p.Checkout.Dirty {
 			state = "dirty"
 		}
-		fmt.Fprintf(&b, "checkout %s at %s (%s)\n", p.Checkout.Origin, p.Checkout.Commit, state)
+		fmt.Fprintf(&b, " (checkout %s at %.12s, %s)", p.Checkout.Origin, p.Checkout.Commit, state)
 	}
 	b.WriteString("\n")
-	adopted := 0
-	fmt.Fprintln(&b, "apply:")
-	for _, op := range p.Operations {
-		if op.Action == plan.ActionAdopt && op.Blocked == "" && len(op.Notes) == 0 {
+
+	var sources, problems, notes []string
+	var installTx *plan.Operation
+	var pendingNames, flatpaks, removals []string
+	adopted, kept := 0, 0
+	for i := range p.Operations {
+		op := &p.Operations[i]
+		switch {
+		case op.Blocked != "":
+			problems = append(problems, op.Summary+": "+op.Blocked)
+			continue
+		case op.Action == plan.ActionKeep:
+			kept++
+			continue
+		case op.Action == plan.ActionAdopt:
 			adopted++
 			continue
 		}
-		status := op.Risk
-		switch {
-		case op.Blocked != "":
-			status = "blocked"
-		case op.After != "":
-			status = "pending"
-		}
-		fmt.Fprintf(&b, "  [%s] %s\n", status, op.Summary)
-		if len(op.Paths) > 0 {
-			fmt.Fprintf(&b, "        because: %s\n", strings.Join(op.Paths, ", "))
-		}
 		for _, n := range op.Notes {
-			fmt.Fprintf(&b, "        note: %s\n", n)
+			notes = append(notes, n)
 		}
-		if op.Blocked != "" {
-			// Nothing below a blocked operation is runnable yet, so its
-			// steps and transaction are not shown as if it were.
-			fmt.Fprintf(&b, "        blocked: %s\n", op.Blocked)
-			continue
-		}
-		if op.After != "" {
-			fmt.Fprintf(&b, "        after %s; the exact transaction is shown once that has run\n", op.After)
-			continue
-		}
-		for _, st := range op.Steps {
-			if st.Argv != nil {
-				prefix := ""
-				if st.Privileged {
-					prefix = "sudo "
+		switch {
+		case op.Kind == plan.KindDNFConfig || op.Kind == plan.KindRepository || op.Kind == plan.KindFlatpakRemote:
+			summary := op.Summary
+			if op.Action == plan.ActionEnable {
+				// The location is in nimbus.toml; the line is for scanning.
+				if i := strings.Index(summary, " ("); i > 0 {
+					summary = summary[:i]
 				}
-				fmt.Fprintf(&b, "        $ %s%s\n", prefix, strings.Join(st.Argv, " "))
-			} else {
-				fmt.Fprintf(&b, "        - %s\n", st.Description)
+			}
+			sources = append(sources, summary)
+		case op.ID == "packages:install":
+			installTx = op
+		case op.Kind == plan.KindPackage && op.Action == plan.ActionInstall:
+			pendingNames = append(pendingNames, plan.PackageName(op.ID))
+		case op.Kind == plan.KindFlatpak && op.Action == plan.ActionInstall:
+			flatpaks = append(flatpaks, strings.TrimPrefix(op.ID, "flatpak:"))
+		case op.Action == plan.ActionRemove || op.Action == plan.ActionPrune || op.Action == plan.ActionRetire:
+			removals = append(removals, op.Summary)
+			if op.Transaction != nil {
+				writeTransactionInto(&removals, op.Transaction)
 			}
 		}
-		if op.Transaction != nil {
-			for _, sec := range []string{"installing", "installing dependencies", "installing weak dependencies", "removing", "removing dependent packages", "removing unused dependencies", "replacing", "upgrading", "downgrading", "reinstalling"} {
-				rows := op.Transaction.Rows(sec)
-				if len(rows) == 0 {
-					continue
-				}
-				names := make([]string, 0, len(rows))
-				for _, r := range rows {
-					names = append(names, r.Name+"-"+r.EVR+" ("+r.Repository+")")
-				}
-				fmt.Fprintf(&b, "        %s (%d): %s\n", sec, len(rows), strings.Join(names, ", "))
+	}
+	if len(sources) > 0 {
+		b.WriteString("\nsources to prepare:\n")
+		for _, src := range sources {
+			writeWrapped(&b, "  ", strings.Fields(src), " ", "", "    ")
+		}
+	}
+	names := pendingNames
+	if installTx != nil {
+		for _, item := range installTx.Items {
+			names = append(names, plan.PackageName(item))
+		}
+	}
+	sort.Strings(names)
+	switch {
+	case installTx != nil && installTx.Transaction != nil:
+		tx := installTx.Transaction
+		size := ""
+		if tx.Download != "" {
+			size = ", " + tx.Download + " to download"
+		}
+		fmt.Fprintf(&b, "\ninstall %d packages%s:\n", len(names), size)
+		rows := make([]string, 0, len(names))
+		for _, r := range tx.Rows("installing") {
+			rows = append(rows, r.Name+"-"+r.EVR+" ("+r.Repository+")")
+		}
+		for _, n := range pendingNames {
+			rows = append(rows, n+" (after its repository is prepared)")
+		}
+		writeWrapped(&b, "  ", rows, ", ", ",", "  ")
+		deps, weak := len(tx.Rows("installing dependencies")), len(tx.Rows("installing weak dependencies"))
+		if deps+weak > 0 {
+			fmt.Fprintf(&b, "  plus %d dependencies and %d weak dependencies\n", deps, weak)
+		}
+		if up := tx.Rows("upgrading"); len(up) > 0 {
+			items := make([]string, 0, len(up))
+			for _, r := range up {
+				items = append(items, r.Name+"-"+r.EVR)
+			}
+			writeWrapped(&b, "  upgrades needed: ", items, ", ", ",", "    ")
+		}
+		var removing []string
+		for _, sec := range []string{"removing", "removing dependent packages", "removing unused dependencies"} {
+			for _, r := range tx.Rows(sec) {
+				removing = append(removing, r.Name+"-"+r.EVR)
 			}
 		}
+		if len(removing) > 0 {
+			writeWrapped(&b, "  removes on the way: ", removing, ", ", ",", "    ")
+		}
+	case len(names) > 0:
+		fmt.Fprintf(&b, "\ninstall %d packages (exact versions once sources are prepared):\n", len(names))
+		writeWrapped(&b, "  ", names, ", ", ",", "  ")
+	}
+	if len(flatpaks) > 0 {
+		sort.Strings(flatpaks)
+		writeWrapped(&b, fmt.Sprintf("\ninstall %d Flatpaks: ", len(flatpaks)), flatpaks, ", ", ",", "  ")
+	}
+	if len(removals) > 0 {
+		b.WriteString("\n")
+		for _, r := range removals {
+			fmt.Fprintf(&b, "%s\n", r)
+		}
+	}
+	if len(notes) > 0 {
+		b.WriteString("\n")
+		for _, n := range notes {
+			writeWrapped(&b, "note: ", strings.Fields(n), " ", "", "  ")
+		}
+	}
+	if adopted+kept > 0 {
+		b.WriteString("\n")
 	}
 	if adopted > 0 {
-		fmt.Fprintf(&b, "  %d installed packages are adopted unchanged\n", adopted)
+		fmt.Fprintf(&b, "adopt %d already installed\n", adopted)
+	}
+	if kept > 0 {
+		fmt.Fprintf(&b, "%d managed and unchanged\n", kept)
 	}
 	if prune {
-		fmt.Fprintf(&b, "\nprune (%d unmanaged packages apply --prune would remove):\n", len(p.Prune))
+		fmt.Fprintf(&b, "\nprune %d unmanaged packages:\n", len(p.Prune))
+		items := make([]string, 0, len(p.Prune))
 		for _, pr := range p.Prune {
-			fmt.Fprintf(&b, "  %s-%s (%s)\n", pr.Name, pr.EVR, pr.Repository)
+			items = append(items, pr.Name+"-"+pr.EVR+" ("+pr.Repository+")")
 		}
+		writeWrapped(&b, "  ", items, ", ", ",", "  ")
 	}
-	fmt.Fprintln(&b, "\nupdates (apply never installs these; use nimbus upgrade):")
-	if p.Updates.Unavailable != "" {
-		fmt.Fprintf(&b, "  %s\n", p.Updates.Unavailable)
-	} else if len(p.Updates.Available) == 0 {
-		fmt.Fprintln(&b, "  none known from the local metadata cache")
-	}
-	for _, u := range p.Updates.Available {
-		fmt.Fprintf(&b, "  %s %s (%s)\n", u.Name, u.EVR, u.Repository)
-	}
-	if p.Complete {
-		fmt.Fprintf(&b, "\ncomplete; digest %s\n", p.Digest)
-	} else {
-		fmt.Fprintf(&b, "\nincomplete: blocked operations above must be resolved first; digest %s\n", p.Digest)
+	writeUpdates(&b, p.Updates, listUpdates)
+	if len(problems) > 0 {
+		b.WriteString("\nproblems:\n")
+		for _, pr := range problems {
+			writeWrapped(&b, "  ", []string{pr}, " ", "", "    ")
+		}
+		b.WriteString("incomplete: fix the problems above\n")
 	}
 	return b.Bytes()
+}
+
+// writeTransactionInto renders a removal preview's rows as lines of the
+// removal section.
+func writeTransactionInto(lines *[]string, tx *plan.Transaction) {
+	for _, sec := range []string{"removing", "removing dependent packages", "removing unused dependencies"} {
+		rows := tx.Rows(sec)
+		if len(rows) == 0 {
+			continue
+		}
+		items := make([]string, 0, len(rows))
+		for _, r := range rows {
+			items = append(items, r.Name+"-"+r.EVR)
+		}
+		var b bytes.Buffer
+		writeWrapped(&b, "  "+sec+": ", items, ", ", ",", "    ")
+		*lines = append(*lines, strings.TrimSuffix(b.String(), "\n"))
+	}
+}
+
+// writeUpdates renders the system updates: with upgrade on, as the step sync
+// will run; with it off, as a count the owner can act on later.
+func writeUpdates(b *bytes.Buffer, u plan.Updates, upgrade bool) {
+	switch {
+	case !upgrade && u.Unavailable != "":
+		fmt.Fprintf(b, "\nupdates: %s\n", u.Unavailable)
+	case !upgrade && len(u.Available) > 0:
+		fmt.Fprintf(b, "\n%d updates are available; sync without -n installs them\n", len(u.Available))
+	case !upgrade:
+	case u.Unavailable != "":
+		fmt.Fprintf(b, "\nupgrade the system (dnf5 upgrade, flatpak update): %s\n", u.Unavailable)
+	case len(u.Available) == 0:
+		fmt.Fprintln(b, "\nupgrade the system (dnf5 upgrade, flatpak update): no package updates known")
+	default:
+		items := make([]string, 0, len(u.Available))
+		for _, up := range u.Available {
+			items = append(items, up.Name+"-"+up.EVR)
+		}
+		fmt.Fprintf(b, "\nupgrade the system (dnf5 upgrade, flatpak update), %d package updates:\n", len(u.Available))
+		writeWrapped(b, "  ", items, ", ", ",", "  ")
+	}
+}
+
+// writeWrapped writes prefix followed by items, breaking the line before an
+// item that would pass planWidth. Items on one line are joined by sep; a
+// broken line ends with brk instead, so a comma list keeps its comma and a
+// shell command keeps its continuation backslash. Continuation lines start
+// with cont. Nothing is written when items is empty.
+func writeWrapped(b *bytes.Buffer, prefix string, items []string, sep, brk, cont string) {
+	if len(items) == 0 {
+		return
+	}
+	b.WriteString(prefix)
+	col := len(prefix)
+	for i, item := range items {
+		if i > 0 {
+			if col+len(sep)+len(item)+len(brk) > planWidth {
+				b.WriteString(brk + "\n" + cont)
+				col = len(cont)
+			} else {
+				b.WriteString(sep)
+				col += len(sep)
+			}
+		}
+		b.WriteString(item)
+		col += len(item)
+	}
+	b.WriteString("\n")
 }
 
 func newStatus(opts *options) *cobra.Command {
@@ -178,9 +269,9 @@ func newStatus(opts *options) *cobra.Command {
 			fmt.Fprintf(&b, "adopted %d, to install %d, to remove %d, repositories to enable %d, pending %d, blocked %d\n", st.Adopted, st.ToInstall, st.ToRemove, st.Repositories, st.Pending, st.Blocked)
 			fmt.Fprintf(&b, "prune candidates %d, updates available %d\n", st.Prune, st.Updates)
 			if st.Complete {
-				fmt.Fprintln(&b, "plan complete; run nimbus plan to review it")
+				fmt.Fprintln(&b, "plan complete; nimbus sync -p shows it")
 			} else {
-				fmt.Fprintln(&b, "plan incomplete; run nimbus plan to see what blocks it")
+				fmt.Fprintln(&b, "plan incomplete; nimbus sync -p shows the problems")
 			}
 			_, err = cmd.OutOrStdout().Write(b.Bytes())
 			return err
@@ -196,6 +287,7 @@ type statusResult struct {
 	Components   int    `json:"components"`
 	Desired      int    `json:"desired_packages"`
 	Adopted      int    `json:"adopted"`
+	Managed      int    `json:"managed"`
 	ToInstall    int    `json:"to_install"`
 	ToRemove     int    `json:"to_remove"`
 	Repositories int    `json:"repositories_to_enable"`
@@ -222,8 +314,10 @@ func summarize(s *selected, p *plan.Plan) statusResult {
 			st.ToRemove++
 		case op.Kind == plan.KindRepository || op.Kind == plan.KindFlatpakRemote:
 			st.Repositories++
+		case op.Action == plan.ActionKeep:
+			st.Managed++
 		case op.ID == "packages:install":
-			st.ToInstall += len(op.Paths)
+			st.ToInstall += len(op.Items)
 		default:
 			st.ToInstall++
 		}

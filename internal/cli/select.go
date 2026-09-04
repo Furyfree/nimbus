@@ -200,7 +200,7 @@ func pickAvailable(s *selected, query string) ([]string, error) {
 	}
 	out, err := newSource().Run("dnf5", "-q", "--cacheonly", "repoquery", "--available", "--qf", "%{name}|%{evr}|%{reponame}\n", "*"+query+"*")
 	if err != nil && len(out) == 0 {
-		return nil, fmt.Errorf("search the package cache: %w (run nimbus refresh if it is empty)", err)
+		return nil, fmt.Errorf("search the package cache: %w (nimbus sync refreshes it)", err)
 	}
 	seen := map[string]bool{}
 	var items []pickItem
@@ -265,14 +265,11 @@ func dnfRepoIDs(id string, r definitions.Repository) []string {
 // newEditCommand wraps one manifest edit in the shared flow.
 func newEditCommand(opts *options, use, short string, build func(*selected, []string) (*selectionEdit, error)) *cobra.Command {
 	var flags machineFlags
-	var approve string
+	var yes bool
 	cmd := &cobra.Command{
 		Use:   use,
 		Short: short,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if opts.json && approve == "" {
-				return usageError{errors.New("--json needs --approve DIGEST; JSON output cannot answer the approval prompt")}
-			}
 			s, err := loadSelected(flags)
 			if err != nil {
 				return err
@@ -281,17 +278,17 @@ func newEditCommand(opts *options, use, short string, build func(*selected, []st
 			if err != nil {
 				return err
 			}
-			return runEdit(cmd, opts, flags, s, edit, approve)
+			return runEdit(cmd, opts, flags, s, edit, yes)
 		},
 	}
 	addMachineFlags(&flags, cmd.Flags())
-	cmd.Flags().StringVar(&approve, "approve", "", "approve exactly this plan digest without a prompt")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "write the manifest and apply without asking")
 	return cmd
 }
 
 // runEdit shows the manifest diff and the plan for the edited manifest,
 // asks for approval, writes the manifest, and applies.
-func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected, edit *selectionEdit, approve string) error {
+func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected, edit *selectionEdit, yes bool) error {
 	out := cmd.OutOrStdout()
 	path := manifestPath(s.Root, s.Resolved.Machine)
 	before, err := os.ReadFile(path)
@@ -342,17 +339,14 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 		return err
 	}
 	fmt.Fprintf(out, "%s: %s\n\n%s\n", edit.cmdName, edit.summary, unifiedDiff(path, before, append(after, '\n')))
-	out.Write(renderPlan(p, false))
+	out.Write(renderPlan(p, false, false))
 	if !p.Complete {
 		return errors.New("the plan for the edited manifest is incomplete; resolve the blocked operations first")
 	}
-	switch {
-	case approve != "" && approve == p.Digest:
-	case approve != "":
-		return fmt.Errorf("--approve %s does not match the plan %s", approve, p.Digest)
-	default:
+	if !yes {
+		fmt.Fprintln(out, "proceeding writes the manifest change shown and then applies the plan")
 		if !approver(cmd.InOrStdin(), out, p.Digest) {
-			return errors.New("not approved; the manifest is unchanged")
+			return errors.New("not applied; the manifest is unchanged")
 		}
 	}
 	// The lock covers the manifest write and the apply that follows, so a
@@ -380,7 +374,9 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 		return nil
 	}
 	flags.machine = s.Resolved.Machine
-	return runApplyWith(cmd, opts, flags, false, p.Digest, lock)
+	// The edit is the request; it runs without system updates, which are
+	// a plain sync's job.
+	return runSyncWith(cmd, opts, flags, syncFlags{yes: true, noUpgrade: true}, lock)
 }
 
 func listProfiles(s *selected) []selectionView {

@@ -52,7 +52,7 @@ func parsePackages(data []byte) ([]Package, error) {
 		}
 		pkgs = append(pkgs, Package{
 			Name: fields[0], Epoch: fields[1], Version: fields[2], Release: fields[3],
-			Arch: fields[4], FromRepo: fields[5], Reason: normalizeReason(fields[6]),
+			Arch: fields[4], FromRepo: normalizeRepo(fields[5]), Reason: normalizeReason(fields[6]),
 		})
 	}
 	if err := scanner.Err(); err != nil {
@@ -78,8 +78,9 @@ func normalizeReason(raw string) string {
 	}
 }
 
-// parseRepoFile reads every [section] of one .repo file. Only the keys the
-// engine needs are kept; enabled defaults to true as DNF does.
+// parseRepoFile reads every [section] of one .repo file. The keys the
+// engine reasons about are typed, every key is kept in Options, and
+// enabled defaults to true as DNF does.
 func parseRepoFile(file string, data []byte) []Repository {
 	var repos []Repository
 	var current *Repository
@@ -90,7 +91,7 @@ func parseRepoFile(file string, data []byte) []Repository {
 			continue
 		}
 		if line[0] == '[' && strings.HasSuffix(line, "]") {
-			repos = append(repos, Repository{ID: line[1 : len(line)-1], File: filepath.Base(file), Enabled: true})
+			repos = append(repos, Repository{ID: line[1 : len(line)-1], File: filepath.Base(file), Enabled: true, Options: map[string]string{}})
 			current = &repos[len(repos)-1]
 			continue
 		}
@@ -102,6 +103,7 @@ func parseRepoFile(file string, data []byte) []Repository {
 			continue
 		}
 		key, value = strings.TrimSpace(key), strings.TrimSpace(value)
+		current.Options[key] = value
 		switch key {
 		case "name":
 			current.Name = value
@@ -120,6 +122,16 @@ func parseRepoFile(file string, data []byte) []Repository {
 		}
 	}
 	return repos
+}
+
+// normalizeRepo returns the repository a package came from. A package
+// installed by dnf5 replay is recorded as @stored_transaction(<repo>); the
+// repository inside is the source that matters for ownership.
+func normalizeRepo(v string) string {
+	if inner, ok := strings.CutPrefix(v, "@stored_transaction("); ok {
+		return strings.TrimSuffix(inner, ")")
+	}
+	return v
 }
 
 func normalizeBool(v string) string {

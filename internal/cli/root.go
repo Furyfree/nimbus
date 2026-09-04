@@ -79,7 +79,7 @@ func newRoot() (*cobra.Command, *options) {
 			return cmd.Help()
 		},
 	}
-	root.PersistentFlags().BoolVar(&opts.json, "json", false, "render the result as versioned JSON")
+	root.PersistentFlags().BoolVarP(&opts.json, "json", "j", false, "render the result as versioned JSON")
 	root.Flags().BoolVarP(&opts.showVersion, "version", "v", false, "same as nimbus version")
 	root.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error { return usageError{err} })
 	root.CompletionOptions.DisableDefaultCmd = true
@@ -89,7 +89,7 @@ func newRoot() (*cobra.Command, *options) {
 		return cmd.Root().Help()
 	}})
 	root.SetUsageTemplate(strings.Replace(root.UsageTemplate(), `(or .IsAvailableCommand (eq .Name "help"))`, `.IsAvailableCommand`, 1))
-	root.AddCommand(newInternal(), newApply(opts), newComponents(opts), newDoctor(opts), newManaged(opts), newPackages(opts), newPlan(opts), newProfiles(opts), newRefresh(opts), newStatus(opts), newUnmanaged(opts), newValidate(opts), newVersion(opts), newWhy(opts))
+	root.AddCommand(newInternal(), newComponents(opts), newDoctor(opts), newManaged(opts), newPackages(opts), newProfiles(opts), newStatus(opts), newSync(opts), newUnmanaged(opts), newValidate(opts), newVersion(opts), newWhy(opts))
 	return root, opts
 }
 

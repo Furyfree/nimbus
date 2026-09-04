@@ -20,7 +20,7 @@ func TestRootHelpListsOnlyDeliveredCommands(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("exit %d", code)
 	}
-	for _, want := range []string{"apply", "doctor", "plan", "refresh", "status", "validate", "version"} {
+	for _, want := range []string{"doctor", "status", "sync", "validate", "version"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help lacks %s:\n%s", want, out)
 		}
@@ -80,7 +80,7 @@ func TestValidateRepositoryCheckout(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &env); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(env.Data.Digest, "sha256:") || len(env.Data.Machines) != 2 || env.Data.Machines[0].Profiles[0] != "common" {
+	if !strings.HasPrefix(env.Data.Digest, "sha256:") || len(env.Data.Machines) != 3 || env.Data.Machines[0].Profiles[0] != "common" {
 		t.Fatalf("envelope = %+v", env)
 	}
 }

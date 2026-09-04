@@ -83,3 +83,29 @@ func TestParseCheckUpgrade(t *testing.T) {
 		t.Fatalf("empty = %+v %v", ups, err)
 	}
 }
+
+func TestPreviewReadsTheReplacedVersionBelowAnUpgrade(t *testing.T) {
+	out := []byte(`Updating and loading repositories:
+Repositories loaded.
+Package                                  Arch   Version         Repository      Size
+Upgrading:
+ openssl-libs                            x86_64 1:3.5.8-1.fc44  updates      9.2 MiB
+   replacing openssl-libs                x86_64 1:3.5.7-2.fc44  updates      9.2 MiB
+Installing:
+ openssl                                 x86_64 1:3.5.8-1.fc44  updates      1.8 MiB
+
+Transaction Summary:
+ Installing:        1 package
+ Upgrading:         1 package
+ Replacing:         1 package
+
+Operation aborted by the user.
+`)
+	tx, err := ParsePreview(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tx.Packages) != 3 || tx.Packages[0].Section != "upgrading" || tx.Packages[1].Section != SectionReplaced || tx.Packages[1].Name != "openssl-libs" || tx.Packages[1].EVR != "1:3.5.7-2.fc44" || tx.Packages[2].Section != "installing" {
+		t.Fatalf("rows = %+v", tx.Packages)
+	}
+}

@@ -12,7 +12,9 @@ import (
 
 // Paths the inspector reads.
 const (
-	OSReleasePath  = "/etc/os-release"
+	OSReleasePath = "/etc/os-release"
+	// DNFDropInPath is the libdnf5 configuration file Nimbus owns.
+	DNFDropInPath  = "/etc/dnf/libdnf5.conf.d/20-nimbus.conf"
 	RepoDir        = "/etc/yum.repos.d"
 	RepoOverride   = "/etc/dnf/repos.override.d"
 	SecureBootPath = "/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"
@@ -38,7 +40,19 @@ func Inspect(src Source, checkoutRoot string) *Facts {
 	f.SELinux = collect(func() (string, error) { return selinux(src) })
 	f.Firewalld = collect(func() (string, error) { return firewalld(src) })
 	f.Checkout = collect(func() (Checkout, error) { return checkout(src, checkoutRoot) })
+	f.DNFDropIn = collect(func() (string, error) { return dnfDropIn(src) })
 	return f
+}
+
+func dnfDropIn(src Source) (string, error) {
+	data, err := src.ReadFile(DNFDropInPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 func collect[T any](fn func() (T, error)) Section[T] {
@@ -117,6 +131,9 @@ func repositories(src Source) ([]Repository, error) {
 					}
 					if o.GPGCheck != "" {
 						repos[i].GPGCheck = o.GPGCheck
+					}
+					if _, ok := o.Options["enabled"]; ok {
+						repos[i].Enabled = o.Enabled
 					}
 					repos[i].Overrides = append(repos[i].Overrides, name)
 				}

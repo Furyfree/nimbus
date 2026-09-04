@@ -24,7 +24,7 @@ func TestRepositoryDefinitionsValidate(t *testing.T) {
 	if errs := Validate(c); len(errs) > 0 {
 		t.Fatalf("repository definitions are invalid:\n%s", errs.Error())
 	}
-	for _, id := range []string{"desktop", "laptop"} {
+	for _, id := range []string{"desktop", "laptop", "vm"} {
 		if _, ok := c.Machines[id]; !ok {
 			t.Fatalf("machine %s is not tracked", id)
 		}
@@ -251,6 +251,18 @@ func TestReviewedInvariants(t *testing.T) {
 		{"copr key_url rejected", func(f map[string]string) {
 			f["nimbus.toml"] += "[repositories.c]\nkind = \"copr\"\nproject = \"a/b\"\nkey_url = \"https://example.invalid/k\"\nkey = \"AE09157A4DE88B497EA1D5D300CDAB43DE226D6F\"\npriority = 100\n"
 		}, "key URL derives from the project"},
+		{"two repositories with one priority rejected", func(f map[string]string) {
+			f["nimbus.toml"] += "[repositories.other]\nkind = \"dnf\"\nbaseurl = \"https://example.invalid/other\"\nkey_url = \"https://example.invalid/other/key.asc\"\nkey = \"AE09157A4DE88B497EA1D5D300CDAB43DE226D6F\"\npriority = 100\n"
+		}, "priority 100 is also used by repository other"},
+		{"dnf option with a bad name rejected", func(f map[string]string) {
+			f["nimbus.toml"] += "[dnf]\n\"Max-Parallel\" = 10\n"
+		}, "dnf.Max-Parallel: option names are lowercase"},
+		{"dnf option with a table value rejected", func(f map[string]string) {
+			f["nimbus.toml"] += "[dnf]\nmax_parallel_downloads = [10]\n"
+		}, "dnf.max_parallel_downloads: value must be a number, boolean, or string"},
+		{"key_url with a DNF variable rejected", func(f map[string]string) {
+			f["nimbus.toml"] = strings.Replace(f["nimbus.toml"], `key_url = "https://example.invalid/terra/key.asc"`, `key_url = "https://example.invalid/terra$releasever/key.asc"`, 1)
+		}, "concrete URL without DNF variables"},
 		{"key file must be a public key", func(f map[string]string) {
 			f["nimbus.toml"] = strings.Replace(f["nimbus.toml"], `key_url = "https://example.invalid/terra/key.asc"`, `key_file = "keys/terra.asc"`, 1)
 			f["system/keys/terra.asc"] = "not a key\n"
