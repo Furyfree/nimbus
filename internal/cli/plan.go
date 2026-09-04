@@ -86,7 +86,7 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 			writeWrapped(&b, "  ", strings.Fields(src), " ", "", "    ")
 		}
 	}
-	names := pendingNames
+	names := append([]string(nil), pendingNames...)
 	if installTx != nil {
 		for _, item := range installTx.Items {
 			names = append(names, plan.PackageName(item))
@@ -310,7 +310,7 @@ func summarize(s *selected, p *plan.Plan) statusResult {
 			st.Pending++
 		case op.Action == plan.ActionAdopt:
 			st.Adopted++
-		case op.Action == plan.ActionRemove:
+		case op.Action == plan.ActionRemove || op.Action == plan.ActionPrune || op.Action == plan.ActionRetire:
 			st.ToRemove++
 		case op.Kind == plan.KindRepository || op.Kind == plan.KindFlatpakRemote:
 			st.Repositories++

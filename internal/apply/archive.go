@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"fmt"
 	"io"
 	"strings"
 )
@@ -30,9 +31,12 @@ func readKeysFromArchive(archive []byte) (map[string][]byte, error) {
 		if hdr.Typeflag != tar.TypeReg || !strings.HasPrefix(name, "etc/pki/rpm-gpg/") {
 			continue
 		}
-		data, err := io.ReadAll(io.LimitReader(tr, 1<<20))
+		data, err := io.ReadAll(io.LimitReader(tr, 1<<20+1))
 		if err != nil {
 			return nil, err
+		}
+		if len(data) > 1<<20 {
+			return nil, fmt.Errorf("%s is larger than a key can be", name)
 		}
 		keys[name] = data
 	}

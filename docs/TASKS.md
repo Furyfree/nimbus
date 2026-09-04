@@ -65,7 +65,7 @@ and is the owner's; its steps are in the evidence below.
   the first failed operation with the lock held, manifest rendering and
   diff, the selection flows, the picker hook.
 - [x] Run `just check`.
-- [ ] First disposable-VM run, owner's action: see the evidence section.
+- [x] First disposable-VM runs, 2026-09-04: see the evidence section.
 
 ### Outside this repository
 

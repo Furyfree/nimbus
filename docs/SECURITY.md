@@ -45,8 +45,8 @@ Rules:
   later repository is declared with a higher numeric DNF `priority`, which
   means lower precedence, so it cannot shadow an earlier one. Every
   repository has its own number in this order, because DNF breaks a tie by
-  version. Planning refuses a package that DNF would take from a repository
-  other than the one its prefix names.
+  version. The plan notes a package that DNF would take from a repository
+  other than the one its prefix names, so the owner sees it before the run.
 - Maker repositories in use: Docker, 1Password, Brave for `brave-origin`,
   VSCodium, and OpenAI's ChatGPT repository. The ChatGPT RPM's own
   post-install script would add that repository; Nimbus declares it directly
