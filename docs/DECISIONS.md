@@ -564,14 +564,15 @@ without a question. One plan is shown with versions and download size, one
 question is asked, one `dnf5 install` runs with its own output, and the run
 ends with what differed from the plan, by name or "none". Adoption never
 blocks on the source a package came from; the source is recorded. What goes
-beyond the definitions in DNF's resolution is a note in the plan, not a
-refusal. Digests, `--approve`, rounds as a visible concept, the stored
-transaction and its comparison, the scope check, and blocked adoption are
-gone; validation, pinned keys, receipts, the baseline, and read-only
-commands that never touch the system stay. Rejected: keeping `replay` with
-`localpkg_gpgcheck`, because the second DNF run and its second table bought
-an exactness the owner does not want to pay for; and forcing `plan` before
-`apply`, because apply shows the plan and asks, which is the plan step.
+beyond the definitions in DNF's resolution is a note in the plan, not a refusal.
+The digest as an approval token and `--approve`, rounds as a visible concept,
+the stored transaction and its comparison, the scope check, and blocked adoption
+are gone; the plan digest itself stays, since every receipt records the plan it
+ran under, as do validation, pinned keys, the baseline, and read-only commands
+that never touch the system. Rejected: keeping `replay` with
+`localpkg_gpgcheck`, because the second DNF run and its second table bought an
+exactness the owner does not want to pay for; and forcing `plan` before `apply`,
+because apply shows the plan and asks, which is the plan step.
 
 #### D-028: One command, sync, with flags for the other cases
 
@@ -1110,7 +1111,9 @@ same day:
 - Noctalia and Chezmoi come from Fedora, Steam from RPM Fusion, and `unrar`
   from Fedora since the 2026-09-04 correction under D-014.
 - Accepted additions: `mesa-va-drivers-freeworld`, `intel-media-driver`,
-  `playerctl`, `pipewire-pulse`, `pipewire-alsa`, `gvfs` with MTP and SMB,
+  `playerctl`, `pipewire-pulse` (renamed `pipewire-pulseaudio` on
+  2026-09-04, the package's real name), `pipewire-alsa`, `gvfs` with MTP and
+  SMB,
   `ShellCheck`, `gitleaks`, `yq`, `duf`, `sane-airscan`, `simple-scan`,
   Herdr under D-010, and Sheldon on Cargo.
 - Rejected: `pavucontrol` and `wtype`, because Noctalia covers them; `tmux`,

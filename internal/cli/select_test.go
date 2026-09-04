@@ -120,12 +120,10 @@ func TestPickerIsUsedWhenNoIDsAreGiven(t *testing.T) {
 		return nil, nil
 	}
 	t.Cleanup(func() { pickerFn = savedPick })
-	code, _, errOut := run(t, "components", "remove", "--checkout", root, "--machine", "laptop")
-	if code != ExitFailure || !strings.Contains(errOut, "unchanged") && !strings.Contains(errOut, "already says") {
-		// Nothing chosen: the edit is empty and the manifest already says that.
-		if !strings.Contains(errOut+"", "") {
-			t.Fatalf("empty pick: %d %q", code, errOut)
-		}
+	// Nothing chosen: the edit is empty and the manifest already says that.
+	code, out, errOut := run(t, "components", "remove", "--checkout", root, "--machine", "laptop")
+	if code != ExitOK || !strings.Contains(out, "already says that") {
+		t.Fatalf("empty pick: %d %q\n%s", code, errOut, out)
 	}
 	if strings.Join(offered, ",") != "amd-graphics,laptop-power" {
 		t.Fatalf("picker offered %v", offered)

@@ -75,7 +75,8 @@ will do, asks once, prepares the declared sources, installs and removes what
 the definitions say, upgrades the system, verifies, records receipts under
 `/var/lib/nimbus`, and reports what differed from the plan. `sync -p` shows
 the plan and changes nothing, `-y` skips the question, `-n` leaves out the
-system upgrade, and `-r` also removes unmanaged packages. Everything else is
-read-only: `validate` checks the definitions, `doctor` inspects the host, and
-the views list what Nimbus manages. The first VM drills are recorded in
-TASKS.md.
+system upgrade, and `-r` also removes unmanaged packages. The `packages`,
+`profiles`, and `components` edit commands change the machine manifest and
+then run the same sync for it. Everything else is read-only: `validate`
+checks the definitions, `doctor` inspects the host, and the views list what
+Nimbus manages. The first VM drills are recorded in TASKS.md.

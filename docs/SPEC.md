@@ -444,7 +444,7 @@ and inspection shows no installed package that still comes from it.
 Nimbus never enables a repository or installs its release package with
 signature checking disabled; the plan shows the pinned key or digest.
 
-Planning refuses a package that DNF would install from a repository other
+The plan notes a package that DNF would install from a repository other
 than the one its prefix names. A component may list `removes`, packages that
 must leave when it is applied; the plan renders that as a native swap, such
 as RPM Fusion's `ffmpeg` replacing Fedora's `ffmpeg-free`. Package-specific
@@ -619,11 +619,9 @@ plan enables; apply runs the earlier operation and re-plans so the exact
 transaction is reviewed before it runs. A blocked operation is a problem
 the owner must resolve, and it makes the plan incomplete.
 
-Adoption is not automatic. A desired package already installed from a
-repository other than the one its prefix names, or a Flatpak from another
-remote, is blocked with the reason rather than taken over. A package whose
-recorded source is the installer or unknown is adopted, since that is how a
-fresh Fedora records its base. A declared repository counts as present only
+A desired package that is already installed is adopted whatever its source,
+and the receipt records that source; a Flatpak from another remote is
+adopted with a note. A declared repository counts as present only
 when the host provides it from the file Nimbus owns, with signature checking
 on and the declared location and priority. The owned file is compared whole
 with what Nimbus would write, so a changed value, a missing key, or a key

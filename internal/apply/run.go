@@ -565,8 +565,9 @@ func transactionDifferences(tx *plan.Transaction, before, after map[string]facts
 		row, shown := previewed[name]
 		switch {
 		case had && has && was.EVR() == now.EVR():
-			if shown && !strings.HasPrefix(row.Section, "reinstall") {
-				diffs = append(diffs, fmt.Sprintf("%s was previewed as %s but is unchanged", name, strings.TrimSuffix(row.Section, "ing")))
+			// A previewed removal that did not happen is reported below.
+			if shown && (strings.HasPrefix(row.Section, "upgrading") || strings.HasPrefix(row.Section, "downgrading")) {
+				diffs = append(diffs, fmt.Sprintf("%s was previewed for %s but is unchanged", name, row.Section))
 			}
 		case !had && has && !shown:
 			diffs = append(diffs, fmt.Sprintf("DNF also installed %s %s (%s)", name, now.EVR(), now.FromRepo))
@@ -615,6 +616,9 @@ func (ex *executor) removeTransaction(op plan.Operation) ([]state.Receipt, []str
 		return nil, nil, errors.New("the removal carries no command")
 	}
 	argv := op.Steps[0].Argv
+	if len(argv) < 4 {
+		return nil, nil, errors.New("the removal command names no packages")
+	}
 	names := argv[3:] // dnf5 -y remove <names>
 	if err := ex.sudo(argv...); err != nil {
 		return nil, nil, err

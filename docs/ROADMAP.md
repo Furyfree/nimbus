@@ -227,9 +227,10 @@ every selected package without executing a mutating command.
 
 ### Outcome
 
-Apply one reviewed unchanged DNF plan, add the focused package, profile, and
-component selection workflows, verify each successful operation, and record
-complete versioned receipts under /var/lib/nimbus.
+Run the shown plan after one question, report what differed, add the
+focused package, profile, and component selection workflows, verify each
+successful operation, and record complete versioned receipts under
+/var/lib/nimbus.
 
 ### Context and decisions
 
