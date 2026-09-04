@@ -200,6 +200,16 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 		fmt.Fprintln(out, "nothing to do; the system matches the definitions")
 		return nil
 	}
+	// Everything left waits for something outside this run, such as the
+	// Chezmoi handoff: say so and touch nothing, sudo included.
+	if runnable(p) == 0 && sf.noUpgrade {
+		if opts.json {
+			return writeJSON(out, syncResult{Digest: p.Digest, Executed: []string{}, Differences: []string{}}, nil)
+		}
+		out.Write(renderPlan(p, sf.prune, false))
+		fmt.Fprintln(out, "\n"+waitingLine(p))
+		return nil
+	}
 	// One decision, at the start: the plan as it is known now. On a fresh
 	// host that names the packages; DNF prints the exact transaction as it
 	// starts, and the report at the end names what differed.
@@ -233,11 +243,15 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	if err := os.MkdirAll(stage, 0o700); err != nil {
 		return err
 	}
-	stopSudo, err := sudoKeepalive(src, execOut, errOut)
-	if err != nil {
-		return err
+	// User-scope steps run without sudo; the credential is primed only when
+	// a privileged command, a receipt, or the upgrade will need it.
+	if needsSudo(p, sf.noUpgrade, applied.Present) {
+		stopSudo, err := sudoKeepalive(src, execOut, errOut)
+		if err != nil {
+			return err
+		}
+		defer stopSudo()
 	}
-	defer stopSudo()
 	options := func(p *plan.Plan) apply.Options {
 		return apply.Options{
 			Source: src, Fetch: newFetcher(), Record: newRecorder(src, stage), Keys: apply.ExtractKeysWithRPM2Archive(src),
@@ -304,7 +318,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 		if r.Error != "" {
 			return fail(r.Failed, r.Error)
 		}
-		if len(r.Pending) == 0 {
+		if len(r.Pending) == 0 || len(r.Executed) == 0 {
 			break
 		}
 	}
@@ -318,7 +332,14 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	if opts.json {
 		return writeJSON(out, result, nil)
 	}
-	fmt.Fprintf(out, "done: %d operations applied; receipts recorded under %s\n", len(result.Executed), stateRoot)
+	if len(result.Executed) == 0 {
+		fmt.Fprintln(out, "done: nothing applied")
+	} else {
+		fmt.Fprintf(out, "done: %d operations applied; receipts recorded under %s\n", len(result.Executed), stateRoot)
+	}
+	if w := waitingLine(p); w != "" {
+		fmt.Fprintln(out, w)
+	}
 	if len(result.Differences) == 0 {
 		fmt.Fprintln(out, "differences from the plan: none")
 	} else {
@@ -354,6 +375,53 @@ func changedRepositories(executed []string) bool {
 		}
 	}
 	return false
+}
+
+// runnable counts the operations this run can execute now: not kept, not
+// blocked, and not waiting for an earlier operation or the handoff.
+func runnable(p *plan.Plan) int {
+	n := 0
+	for _, op := range p.Operations {
+		if op.Action != plan.ActionKeep && op.Blocked == "" && op.After == "" {
+			n++
+		}
+	}
+	return n
+}
+
+// needsSudo reports whether the run will invoke sudo: the upgrade, the
+// baseline of a first run, or any operation that is not a user-scope step,
+// since those run privileged commands or record receipts.
+func needsSudo(p *plan.Plan, noUpgrade, statePresent bool) bool {
+	if !noUpgrade || !statePresent {
+		return true
+	}
+	for _, op := range p.Operations {
+		if op.Action != plan.ActionKeep && op.Kind != plan.KindUser {
+			return true
+		}
+	}
+	return false
+}
+
+// waitingLine names what the pending operations wait for, or "" when
+// nothing waits.
+func waitingLine(p *plan.Plan) string {
+	n := 0
+	var targets []string
+	for _, op := range p.Operations {
+		if op.After == "" || op.Blocked != "" {
+			continue
+		}
+		n++
+		if d := describeAfter(p, op.After); !contains(targets, d) {
+			targets = append(targets, d)
+		}
+	}
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d operations wait for %s; nothing else to run now", n, strings.Join(targets, ", then "))
 }
 
 func nothingToRun(p *plan.Plan) bool {

@@ -14,7 +14,10 @@ import (
 const (
 	OSReleasePath = "/etc/os-release"
 	// DNFDropInPath is the libdnf5 configuration file Nimbus owns.
-	DNFDropInPath  = "/etc/dnf/libdnf5.conf.d/20-nimbus.conf"
+	DNFDropInPath = "/etc/dnf/libdnf5.conf.d/20-nimbus.conf"
+	// DMIDir holds the firmware's machine identity; PCIDir lists devices.
+	DMIDir         = "/sys/class/dmi/id"
+	PCIDir         = "/sys/bus/pci/devices"
 	RepoDir        = "/etc/yum.repos.d"
 	RepoOverride   = "/etc/dnf/repos.override.d"
 	SecureBootPath = "/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"
@@ -25,7 +28,7 @@ const (
 // checkout is selected; the checkout section then records that.
 func Inspect(src Source, checkoutRoot string) *Facts {
 	f := &Facts{Commands: map[string]string{}}
-	for _, name := range RequiredCommands {
+	for _, name := range append(append([]string(nil), RequiredCommands...), OptionalCommands...) {
 		if p, err := src.LookPath(name); err == nil {
 			f.Commands[name] = p
 		} else {
@@ -41,7 +44,119 @@ func Inspect(src Source, checkoutRoot string) *Facts {
 	f.Firewalld = collect(func() (string, error) { return firewalld(src) })
 	f.Checkout = collect(func() (Checkout, error) { return checkout(src, checkoutRoot) })
 	f.DNFDropIn = collect(func() (string, error) { return dnfDropIn(src) })
+	f.Hardware = collect(func() (Hardware, error) { return hardware(src) })
+	f.Chezmoi = collect(func() (Chezmoi, error) { return chezmoi(src) })
+	f.User = collect(func() (User, error) { return user(src) })
 	return f
+}
+
+// CargoListArgs lists the crates cargo install has placed in ~/.cargo/bin.
+var CargoListArgs = []string{"install", "--list"}
+
+// user reads the user-scope tool state. Cargo lives where rustup puts it,
+// which is where the Rust runtime from Mise puts it too.
+func user(src Source) (User, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return User{}, err
+	}
+	u := User{Home: home, Crates: []string{}}
+	cargo := filepath.Join(home, ".cargo", "bin", "cargo")
+	if names, err := src.ReadDir(filepath.Dir(cargo)); err != nil || !contains(names, "cargo") {
+		return u, nil
+	}
+	u.Cargo = true
+	out, err := src.Run(cargo, CargoListArgs...)
+	if err != nil {
+		return u, fmt.Errorf("cargo install --list: %w", err)
+	}
+	u.Crates = parseCargoList(out)
+	return u, nil
+}
+
+func contains(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
+// ChezmoiDataArgs reads Chezmoi's template data without changing anything.
+var ChezmoiDataArgs = []string{"data", "--format", "json"}
+
+// ChezmoiInitialized reports whether the home holds a Chezmoi source
+// checkout. An empty source directory, which a failed clone leaves behind,
+// does not count.
+func ChezmoiInitialized(src Source, home string) bool {
+	names, err := src.ReadDir(filepath.Join(home, ".local", "share", "chezmoi"))
+	return err == nil && len(names) > 0
+}
+
+// chezmoi reports whether Chezmoi is initialized in this home and what it
+// stored. An absent tool or source directory is not an error.
+func chezmoi(src Source) (Chezmoi, error) {
+	if _, err := src.LookPath("chezmoi"); err != nil {
+		return Chezmoi{}, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return Chezmoi{}, err
+	}
+	if !ChezmoiInitialized(src, home) {
+		return Chezmoi{}, nil
+	}
+	out, err := src.Run("chezmoi", ChezmoiDataArgs...)
+	if err != nil {
+		return Chezmoi{Initialized: true}, err
+	}
+	return parseChezmoiData(out)
+}
+
+// hardware reads the DMI identity and the display adapters. A machine
+// without DMI, such as some virtual machines, still reports its adapters.
+func hardware(src Source) (Hardware, error) {
+	var h Hardware
+	read := func(name string) string {
+		data, err := src.ReadFile(filepath.Join(DMIDir, name))
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(data))
+	}
+	h.Product, h.Board = read("product_name"), read("board_name")
+	h.Chassis = chassisKind(read("chassis_type"))
+	devices, err := src.ReadDir(PCIDir)
+	if err != nil {
+		return h, fmt.Errorf("list PCI devices: %w", err)
+	}
+	for _, dev := range devices {
+		class, err := src.ReadFile(filepath.Join(PCIDir, dev, "class"))
+		if err != nil || !strings.HasPrefix(strings.TrimSpace(string(class)), "0x03") {
+			continue // not a display controller
+		}
+		vendor, _ := src.ReadFile(filepath.Join(PCIDir, dev, "vendor"))
+		device, _ := src.ReadFile(filepath.Join(PCIDir, dev, "device"))
+		h.Display = append(h.Display, PCIDevice{Vendor: pciID(vendor), Device: pciID(device)})
+	}
+	return h, nil
+}
+
+func pciID(data []byte) string {
+	return strings.TrimPrefix(strings.TrimSpace(string(data)), "0x")
+}
+
+// chassisKind maps the SMBIOS chassis type to the two kinds the
+// definitions distinguish.
+func chassisKind(code string) string {
+	switch code {
+	case "8", "9", "10", "11", "14", "31", "32":
+		return "laptop"
+	case "3", "4", "5", "6", "7", "13", "15", "16", "35", "36":
+		return "desktop"
+	}
+	return ""
 }
 
 func dnfDropIn(src Source) (string, error) {

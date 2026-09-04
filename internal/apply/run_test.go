@@ -27,7 +27,10 @@ type scripted struct {
 	log       []string
 	fail      map[string]string // command prefix -> error
 	installs  []string          // what dnf5 install adds
-	fpr       string            // fingerprint gpg reports
+	crates    []string          // what cargo install --list shows
+	// installerLeavesNothing makes sh leave no binary behind.
+	installerLeavesNothing bool
+	fpr                    string // fingerprint gpg reports
 	// privilegedNoop makes every sudo command succeed without effect.
 	privilegedNoop bool
 }
@@ -83,6 +86,25 @@ func (s *scripted) Run(name string, args ...string) ([]byte, error) {
 		return []byte("active\n"), nil
 	case name == "sudo":
 		return s.privileged(args)
+	case strings.HasSuffix(name, "/.cargo/bin/cargo") && args[0] == "install" && args[1] == "--list":
+		var b strings.Builder
+		for _, c := range s.crates {
+			fmt.Fprintf(&b, "%s v1.0.0:\n    %s\n", c, c)
+		}
+		return []byte(b.String()), nil
+	case strings.HasSuffix(name, "/.cargo/bin/cargo") && args[0] == "install":
+		s.crates = append(s.crates, args[1])
+		return nil, nil
+	case name == "sh":
+		// The maker's installer leaves its binary below the home directory,
+		// unless the test says it leaves nothing.
+		if !s.installerLeavesNothing {
+			home, _ := os.UserHomeDir()
+			s.Dirs[filepath.Join(home, ".local", "bin")] = []string{"mise"}
+		}
+		return nil, nil
+	case name == "env":
+		return nil, nil
 	}
 	return nil, fmt.Errorf("%s: %w", key, facts.ErrNotRecorded)
 }
@@ -549,5 +571,55 @@ func TestCOPRImportsTheVerifiedKeyBeforeEnabling(t *testing.T) {
 	}
 	if importAt == 0 || enableAt == 0 || importAt > enableAt {
 		t.Fatalf("import %d enable %d:\n%s", importAt, enableAt, strings.Join(src.log, "\n"))
+	}
+}
+
+func TestUserToolsRunAsTheUserAndAreVerifiedByPresence(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	src := newScripted()
+	root := t.TempDir()
+	opts := options(t, src, root)
+	opts.Fetch = func(url string) ([]byte, error) {
+		if url != "https://mise.run" {
+			return nil, errors.New("unexpected " + url)
+		}
+		return []byte("#!/bin/sh\necho installer\n"), nil
+	}
+	src.Dirs[filepath.Join(home, ".cargo", "bin")] = []string{"cargo"}
+	var out strings.Builder
+	opts.Out = &out
+	p := &plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:user", Operations: []plan.Operation{
+		{ID: "user:mise", Kind: plan.KindUser, Action: plan.ActionInstall, Summary: "install mise",
+			Steps: []plan.Step{{Description: "download https://mise.run to the stage directory and show its sha256"}, {Argv: []string{"sh", plan.InstallerScript}}, {Description: "verify ~/.local/bin/mise exists"}}},
+		{ID: "user:mise:install", Kind: plan.KindUser, Action: plan.ActionInstall, Summary: "install runtimes",
+			Steps: []plan.Step{{Argv: []string{"env", "MISE_SYSTEM_DEPS=warn", plan.HomeDir + "/.local/bin/mise", "-C", plan.HomeDir, "install"}}}},
+		{ID: "package:cargo:sheldon", Kind: plan.KindUser, Action: plan.ActionInstall, Summary: "cargo install sheldon",
+			Steps: []plan.Step{{Argv: []string{plan.HomeDir + "/.cargo/bin/cargo", "install", "sheldon"}}}},
+	}}
+	r := Run(p, opts)
+	if r.Error != "" || strings.Join(r.Executed, ",") != "user:mise,user:mise:install,package:cargo:sheldon" {
+		t.Fatalf("result = %+v\n%s", r, strings.Join(src.log, "\n"))
+	}
+	for _, want := range []string{"sha256 ", "sh " + filepath.Join(opts.Stage, "installer-mise.sh"), "env MISE_SYSTEM_DEPS=warn " + home + "/.local/bin/mise -C " + home + " install", home + "/.cargo/bin/cargo install sheldon"} {
+		if !src.ran(want) && !strings.Contains(out.String(), want) {
+			t.Errorf("missing %q\n%s\n%s", want, strings.Join(src.log, "\n"), out.String())
+		}
+	}
+	for _, l := range src.log {
+		if strings.HasPrefix(l, "sudo ") {
+			t.Fatalf("a user-scope step went through sudo: %s", l)
+		}
+	}
+	if a, _ := state.Read(root); a != nil && len(a.Receipts) != 0 {
+		t.Fatalf("user-scope steps must write no receipt: %v", a.Receipts)
+	}
+	// The installer left nothing: verification fails and the run stops.
+	src2 := newScripted()
+	src2.installerLeavesNothing = true
+	opts2 := options(t, src2, t.TempDir())
+	opts2.Fetch = opts.Fetch
+	if r := Run(&plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:user2", Operations: p.Operations[:1]}, opts2); r.Error == "" || !strings.Contains(r.Error, "~/.local/bin/mise does not exist") {
+		t.Fatalf("missing binary passed verification: %+v", r)
 	}
 }

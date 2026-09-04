@@ -20,12 +20,25 @@ func (r Ref) Canonical() string { return r.Prefix + ":" + r.Name }
 const (
 	PrefixDNF     = "dnf"
 	PrefixFlatpak = "flatpak"
+	// PrefixCargo names a crate installed as the user with cargo install,
+	// after the Rust runtime Mise provides.
+	PrefixCargo = "cargo"
 )
+
+// ValidateID checks a machine, profile, component, or repository ID: lowercase
+// letters, digits, and dashes, starting with a letter or digit.
+func ValidateID(id string) error {
+	if !prefixRe.MatchString(id) {
+		return fmt.Errorf("%q must be lowercase letters, digits, and dashes", id)
+	}
+	return nil
+}
 
 var (
 	prefixRe    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 	rpmNameRe   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*$`)
 	flatpakIDRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*(\.[A-Za-z_][A-Za-z0-9_-]*){2,}$`)
+	crateRe     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 )
 
 // ParseRef parses one package reference. It checks the grammar only; whether
@@ -56,6 +69,10 @@ func ParseRef(raw string) (Ref, error) {
 	if prefix == PrefixFlatpak {
 		if !flatpakIDRe.MatchString(name) {
 			return Ref{}, fmt.Errorf("invalid Flatpak application ID %q", name)
+		}
+	} else if prefix == PrefixCargo {
+		if !crateRe.MatchString(name) {
+			return Ref{}, fmt.Errorf("invalid crate name %q", name)
 		}
 	} else if !rpmNameRe.MatchString(name) {
 		return Ref{}, fmt.Errorf("invalid package name %q", name)

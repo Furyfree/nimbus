@@ -270,3 +270,55 @@ func TestAnOverrideCanDisableARepository(t *testing.T) {
 		t.Fatalf("repos = %+v", repos)
 	}
 }
+
+func TestHardwareReadsDMIAndDisplayAdapters(t *testing.T) {
+	src := &FakeSource{
+		Files: map[string][]byte{
+			filepath.Join(DMIDir, "product_name"):           []byte("HP EliteBook X G1a\n"),
+			filepath.Join(DMIDir, "board_name"):             []byte("8CB1\n"),
+			filepath.Join(DMIDir, "chassis_type"):           []byte("10\n"),
+			filepath.Join(PCIDir, "0000:00:02.0", "class"):  []byte("0x030000\n"),
+			filepath.Join(PCIDir, "0000:00:02.0", "vendor"): []byte("0x1002\n"),
+			filepath.Join(PCIDir, "0000:00:02.0", "device"): []byte("0x150e\n"),
+			filepath.Join(PCIDir, "0000:00:14.0", "class"):  []byte("0x0c0330\n"),
+		},
+		Dirs: map[string][]string{PCIDir: {"0000:00:02.0", "0000:00:14.0"}},
+	}
+	h, err := hardware(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.Product != "HP EliteBook X G1a" || h.Board != "8CB1" || h.Chassis != "laptop" || len(h.Display) != 1 || h.Display[0] != (PCIDevice{Vendor: "1002", Device: "150e"}) {
+		t.Fatalf("hardware = %+v", h)
+	}
+	// No DMI at all still yields the adapters and no chassis kind.
+	delete(src.Files, filepath.Join(DMIDir, "product_name"))
+	delete(src.Files, filepath.Join(DMIDir, "chassis_type"))
+	if h, err := hardware(src); err != nil || h.Chassis != "" || h.Product != "" || len(h.Display) != 1 {
+		t.Fatalf("without DMI = %+v %v", h, err)
+	}
+}
+
+func TestChezmoiDataIsReadOnlyWhenInitialized(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	src := &FakeSource{Commands: map[string][]byte{}, Failures: map[string]string{}, Files: map[string][]byte{}, Dirs: map[string][]string{}, Paths: map[string]string{}}
+	if c, err := chezmoi(src); err != nil || c.Initialized {
+		t.Fatalf("without chezmoi = %+v %v", c, err)
+	}
+	src.Paths["chezmoi"] = "/usr/bin/chezmoi"
+	if c, err := chezmoi(src); err != nil || c.Initialized {
+		t.Fatalf("not initialized = %+v %v", c, err)
+	}
+	// A failed clone leaves an empty source directory: not initialized.
+	src.Dirs[filepath.Join(home, ".local", "share", "chezmoi")] = []string{}
+	if c, err := chezmoi(src); err != nil || c.Initialized {
+		t.Fatalf("empty source directory = %+v %v", c, err)
+	}
+	src.Dirs[filepath.Join(home, ".local", "share", "chezmoi")] = []string{".git"}
+	src.Commands[Key("chezmoi", ChezmoiDataArgs...)] = []byte(`{"Machine":"laptop","ManagedByNimbus":true,"Profiles":["common","development"],"onePasswordSsh":false,"chezmoi":{"os":"linux"}}`)
+	c, err := chezmoi(src)
+	if err != nil || !c.Initialized || c.Machine != "laptop" || !c.ManagedByNimbus || strings.Join(c.Profiles, ",") != "common,development" {
+		t.Fatalf("initialized = %+v %v", c, err)
+	}
+}

@@ -20,4 +20,5 @@ jobs:
           go-version-file: go.mod
       - uses: extractions/setup-just@v4
       - run: npm install --global markdownlint-cli
+      - run: sudo apt-get install -y shellcheck
       - run: just check

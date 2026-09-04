@@ -1,0 +1,18 @@
+# Mise from its maker's installer, as the user; the runtimes come from the
+# Chezmoi-written ~/.config/mise/config.toml, which Mise installs after the
+# handoff. The binary is named by path because ~/.local/bin joins PATH only
+# at the next login. MISE_SYSTEM_DEPS=warn keeps Mise from installing system
+# packages, which are Nimbus's.
+schema = 1
+id = "mise"
+
+requires = []
+conflicts = []
+packages = []
+removes = []
+
+[installer]
+url = "https://mise.run"
+binary = ".local/bin/mise"
+config = ".config/mise/config.toml"
+install = ["env", "MISE_SYSTEM_DEPS=warn", "<home>/.local/bin/mise", "-C", "<home>", "install"]

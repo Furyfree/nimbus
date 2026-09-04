@@ -19,6 +19,8 @@ internal/apply/        executes the plan: lock, native steps, receipts
 internal/selector/     the local selector and the checkout origin check
 internal/version/      engine build identity and supported schema numbers
 
+install.sh, bootstrap  the remote entry point and the checkout-owned handoff
+
 nimbus.toml            schema, supported Fedora releases, repositories
 machines/              one manifest per workstation
 profiles/              user-facing bundles: packages and components
@@ -80,7 +82,7 @@ selector (or --checkout)
 selector (or --checkout)  -> canonical root, definitions loaded for the
                              supported releases; failures become checks
 facts.Inspect(Source)     -> one Section per fact family, unknown on error
-doctor.Run(facts, config) -> nine checks with observation, impact, fix
+doctor.Run(facts, config) -> ten checks with observation, impact, fix
 render                    -> human lines or the JSON envelope; exit 1 on fail
 ~~~
 
@@ -140,7 +142,9 @@ and then write the file and sync without system updates.
 
 - **Read-only.** Nothing writes a file, invokes sudo, or opens a network
   connection except `sync` without `--plan`, whose first step is the
-  metadata refresh. `definitions` and `selector` run no command at all;
+  metadata refresh, and the commands that lead into it: `init` writes the
+  selector and a new manifest, the selection commands write the manifest.
+  `definitions` and `selector` run no command at all;
   `facts` and `plan` run native read-only commands only through `Source`,
   so a test can see every one of them. Tests run the loader against a
   read-only tree to prove the first part.
@@ -168,10 +172,34 @@ packages with their selection paths, removals, files with derived `/etc`
 targets, and the repositories in use. The JSON envelope wraps any result with
 the engine version and output schema number.
 
+## The flow of `nimbus init`
+
+~~~text
+loadCheckout, CheckoutOrigin  -> validated definitions, the approved origin
+facts.Inspect(Source).Hardware -> DMI names, chassis kind, display adapters
+plan.MatchMachine, pick one    -> a tracked manifest, or --new with the dialog:
+plan.ProposeComponents            profiles, components pre-selected by the
+                                  detection rules, the dotfiles repository
+renderManifest, selector.Write -> machines/<id>.toml, ~/.config/nimbus/config.toml
+runSyncWith                    -> the first sync, one question
+chezmoiHandoff                 -> chezmoi init with the prompt flags, once
+runSyncWith(yes)               -> the user-scope steps that waited for it
+~~~
+
+`install.sh` and `bootstrap` are the shell in front of this: the first
+checks the platform and the user, obtains Git, clones or validates the
+checkout, and runs the second with its input on the terminal; the second
+installs the engine through DNF and runs init. Both are shellcheck-clean and
+part of `just check`.
+
+User-scope tools are planned by `plan.userTools` from `Resolved.Installers`
+and the `cargo:` references, executed by `apply.userTool` as the user through
+`Source.Stream`, and verified by presence: the installer's binary, or the
+crate in `cargo install --list`. They write no receipt.
+
 ## Where later phases attach
 
-- Phase 5 adds bootstrap, `init`, the hardware detector, and the Chezmoi
-  handoff.
+- Phase 6 adds services, groups, and the remaining system resources.
 
 Each arrives as its own package with its own tests, and `cli` stays a thin
 layer over them.

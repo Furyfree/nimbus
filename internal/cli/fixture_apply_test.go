@@ -124,7 +124,7 @@ func answerLaptopInstall(t *testing.T, src *facts.FakeSource, root string) {
 	}
 	repoOf := map[string]string{}
 	for _, p := range resolved.Packages {
-		if p.Prefix != definitions.PrefixDNF && p.Prefix != definitions.PrefixFlatpak {
+		if p.Prefix != definitions.PrefixDNF && p.Prefix != definitions.PrefixFlatpak && p.Prefix != definitions.PrefixCargo {
 			repoOf[p.Name] = plan.DNFRepoIDs(p.Prefix, c.Definitions().Repositories[p.Prefix])[0]
 		}
 	}

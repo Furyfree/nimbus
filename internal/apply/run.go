@@ -180,6 +180,8 @@ func (ex *executor) receipt(op plan.Operation, provider, previous, intended, ver
 
 func (ex *executor) execute(op plan.Operation) (receipts []state.Receipt, remove []string, err error) {
 	switch {
+	case op.Kind == plan.KindUser:
+		return nil, nil, ex.userTool(op)
 	case op.Kind == plan.KindDNFConfig:
 		return ex.dnfConfig(op)
 	case op.Kind == plan.KindRepository:
@@ -712,6 +714,96 @@ func Upgrade(opts Options, root definitions.Root) error {
 		if r.Kind == "flatpak" {
 			if _, err := opts.Source.LookPath("flatpak"); err == nil {
 				return ex.sudo("flatpak", "update", "--system", "--noninteractive")
+			}
+		}
+	}
+	return nil
+}
+
+// userTool runs a user-scope step as the user, with its output visible: a
+// maker's installer fetched to the stage directory and shown by digest, a
+// runtimes command, or a cargo install. Presence afterwards is the check;
+// nothing is recorded.
+func (ex *executor) userTool(op plan.Operation) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	for _, st := range op.Steps {
+		if st.Argv == nil {
+			continue
+		}
+		argv := slices.Clone(st.Argv)
+		for i, a := range argv {
+			switch {
+			case a == plan.InstallerScript:
+				path, err := ex.fetchInstaller(op)
+				if err != nil {
+					return err
+				}
+				argv[i] = path
+			case strings.HasPrefix(a, plan.HomeDir):
+				argv[i] = home + strings.TrimPrefix(a, plan.HomeDir)
+			}
+		}
+		fmt.Fprintf(ex.opts.Out, "   $ %s\n", strings.Join(argv, " "))
+		errOut := ex.opts.ErrOut
+		if errOut == nil {
+			errOut = ex.opts.Out
+		}
+		if err := ex.opts.Source.Stream(ex.opts.Out, errOut, argv[0], argv[1:]...); err != nil {
+			return err
+		}
+	}
+	return ex.verifyUserTool(op, home)
+}
+
+// fetchInstaller downloads the installer named in the operation's first
+// step, keeps it below the stage directory, and prints its digest.
+func (ex *executor) fetchInstaller(op plan.Operation) (string, error) {
+	url := ""
+	for _, st := range op.Steps {
+		if u, ok := strings.CutPrefix(st.Description, "download "); ok {
+			url, _, _ = strings.Cut(u, " ")
+		}
+	}
+	if url == "" {
+		return "", errors.New("the installer step names no URL")
+	}
+	data, err := ex.opts.Fetch(url)
+	if err != nil {
+		return "", fmt.Errorf("download installer: %w", err)
+	}
+	if err := os.MkdirAll(ex.opts.Stage, 0o700); err != nil {
+		return "", err
+	}
+	path := filepath.Join(ex.opts.Stage, "installer-"+strings.TrimPrefix(op.ID, "user:")+".sh")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return "", err
+	}
+	fmt.Fprintf(ex.opts.Out, "   downloaded %s, sha256 %x\n", url, sha256.Sum256(data))
+	return path, nil
+}
+
+// verifyUserTool re-reads what the step should have left: the installer's
+// binary, or the crate in cargo's list. A runtimes command is verified by
+// its own exit status.
+func (ex *executor) verifyUserTool(op plan.Operation, home string) error {
+	switch {
+	case strings.HasPrefix(op.ID, "package:cargo:"):
+		crate := strings.TrimPrefix(op.ID, "package:cargo:")
+		f := facts.Inspect(ex.opts.Source, "")
+		if !f.User.Known() || !contains(f.User.Value.Crates, crate) {
+			return fmt.Errorf("verification: cargo install --list does not show %s", crate)
+		}
+	case strings.HasPrefix(op.ID, "user:") && !strings.HasSuffix(op.ID, ":install"):
+		for _, st := range op.Steps {
+			if rel, ok := strings.CutPrefix(st.Description, "verify ~/"); ok {
+				rel = strings.TrimSuffix(rel, " exists")
+				names, err := ex.opts.Source.ReadDir(filepath.Join(home, filepath.Dir(rel)))
+				if err != nil || !contains(names, filepath.Base(rel)) {
+					return fmt.Errorf("verification: ~/%s does not exist after the installer ran", rel)
+				}
 			}
 		}
 	}

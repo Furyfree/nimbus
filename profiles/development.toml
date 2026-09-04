@@ -1,6 +1,5 @@
-# Developer tooling, Docker, Nix, and the system dependencies Mise needs.
-# Mise, its runtimes, and the Cargo tools are user-scope steps that later
-# schema fields will declare; see docs/PACKAGES.md.
+# Developer tooling, Docker, Nix, Mise with its runtimes, and the Cargo tools
+# built with the Rust runtime Mise provides.
 schema = 1
 id = "development"
 
@@ -13,9 +12,17 @@ packages = [
   "vscodium:codium",
   "terra:t3code",
   "chatgpt:chatgpt",
+  "cargo:caligula",
+  "cargo:typst-cli",
+  "cargo:tinymist",
+  "cargo:cargo-update",
+  "cargo:sheldon",
+  "cargo:resvg",
+  "cargo:vm-curator",
 ]
 
 components = [
   "docker",
   "nix",
+  "mise",
 ]

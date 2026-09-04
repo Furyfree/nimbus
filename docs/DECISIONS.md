@@ -521,7 +521,8 @@ better said as data than as a file anyway, so `nimbus.toml` carries a
 `[dnf]` table of libdnf5 `[main]` options that Nimbus renders into
 `/etc/dnf/libdnf5.conf.d/20-nimbus.conf`, verifies whole, and plans first.
 The declared options, against libdnf5's defaults on Fedora 44:
-`max_parallel_downloads = 10` (default 3, maximum 20), `fastestmirror =
+`max_parallel_downloads = 10` (default 3, maximum 20; raised to the maximum
+on 2026-09-04 after the Phase 4 performance look), `fastestmirror =
 true` (default off; picks a mirror by TCP latency instead of the metalink
 order, which helps most on Terra and RPM Fusion mirrorlists), and
 `defaultyes = true` (default off; the owner's own interactive `dnf` prompts
@@ -592,6 +593,38 @@ sources are prepared, because one command is one decision; a mutating
 `plan`, because a command called plan that changes the system misleads;
 and asking nothing by default, because the first run on a new machine
 installs hundreds of packages and deserves a pause.
+
+#### D-029: Init asks four things and detection is typed data
+
+Decided 2026-09-04 at the start of Phase 5. Init's first question is which
+machine this is, listing the tracked manifests and "new"; the tracked one
+whose `hardware` identity appears in the DMI product or board name is
+pre-selected, which makes the common case one keypress. A new machine
+answers three more: profiles, components, and the dotfiles repository, with
+the components proposed by `[detect]` rules on the hardware components
+(chassis kind from the SMBIOS chassis type, display adapter by PCI vendor)
+and the repository defaulting to the one every tracked manifest shares. The
+rules and identities live in the definitions, not in code, so a new machine
+or adapter is a TOML change. `--machine`, `--new`, `--dotfiles`, and
+`--no-dotfiles` answer without prompts. Rejected: a code table of known
+machines, because it hides behavior the definitions should say; and asking
+for the dotfiles repository on every init, because a tracked manifest
+already knows.
+
+#### D-030: User-scope tools are an installer table and cargo references
+
+Decided 2026-09-04. A maker's installer is a component `[installer]` table:
+its URL, the binary it leaves below the home directory, and for Mise the
+Chezmoi-written config and the install command that runs once it exists.
+Cargo tools are package references with the reserved `cargo:` prefix, so
+they resolve, select, and show like every other package. Both run as the
+user through the same streaming source the privileged steps use, never
+through sudo, and are verified by presence rather than recorded, as
+SPEC.md says for user scope. The runtimes command runs on every sync once
+its config exists, since Mise itself is idempotent and fast when nothing
+is missing. Rejected: a separate user-scope provider package, because two
+operation shapes did not justify one; and receipts for user tools, because
+their removal is explicit and their presence is the record.
 
 ### Resolved questions
 

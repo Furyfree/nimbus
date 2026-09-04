@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# The checked-out half of the Nimbus installation. install.sh runs this with
+# its input on the terminal. It makes sure the Nimbus engine is installed,
+# from the owner's COPR through DNF, and starts nimbus init for this checkout.
+# It installs nothing else: the first sync does that, after review.
+set -euo pipefail
+
+CHECKOUT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+COPR="${NIMBUS_COPR:-furyfree/nimbus}"
+
+say() { printf '%s\n' "$*"; }
+fail() { printf 'bootstrap: %s\n' "$*" >&2; exit 1; }
+
+[ "$(id -u)" -ne 0 ] || fail "run as the normal user, not root"
+[ -f "${CHECKOUT}/nimbus.toml" ] || fail "${CHECKOUT} holds no nimbus.toml"
+
+if command -v nimbus >/dev/null 2>&1; then
+  say "nimbus is already installed: $(nimbus version)"
+else
+  say "the Nimbus engine is installed from the COPR ${COPR} through DNF:"
+  say "  sudo dnf5 copr enable -y ${COPR}"
+  say "  sudo dnf5 -y install nimbus"
+  sudo dnf5 copr enable -y "${COPR}"
+  sudo dnf5 -y install nimbus
+fi
+
+if ! report="$(nimbus validate --checkout "${CHECKOUT}" 2>&1)"; then
+  printf '%s\n' "${report}" >&2
+  fail "the checkout does not validate with this engine"
+fi
+exec nimbus init --checkout "${CHECKOUT}" "$@"

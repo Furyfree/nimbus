@@ -12,6 +12,7 @@ import (
 
 	"github.com/Furyfree/nimbus/internal/apply"
 	"github.com/Furyfree/nimbus/internal/definitions"
+	"github.com/Furyfree/nimbus/internal/doctor"
 )
 
 // The selection commands edit the two manifest lists a user would otherwise
@@ -378,6 +379,9 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 		return err
 	}
 	fmt.Fprintf(review, "wrote %s; the Git change is yours to commit\n", path)
+	if strings.HasPrefix(edit.cmdName, "profiles ") && edited.Dotfiles != nil {
+		fmt.Fprintf(review, "Chezmoi keeps its own copy of the profiles; refresh it with:\n  %s\n", doctor.ChezmoiRefresh(edited.ID, r.Profiles))
+	}
 	if nothingToRun(p) {
 		lock.Release()
 		if opts.json {

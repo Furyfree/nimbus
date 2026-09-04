@@ -11,7 +11,8 @@ configuration below the home directory.
 The first target is Fedora 44 on x86_64. Nimbus does not initially install the
 operating system, repartition disks, or configure full-disk encryption.
 
-Nimbus is at Phase 4 of its roadmap: `nimbus sync` with receipts.
+Nimbus is at Phase 5 of its roadmap: bootstrap, `nimbus init`, and the
+Chezmoi handoff.
 
 ## Repository model
 
@@ -65,18 +66,21 @@ just check
 ~~~
 
 It runs `gofmt`, `go vet`, `go test`, `git diff --check`, and markdownlint.
-`just validate` runs `nimbus validate` against this checkout, and `just build`
-produces a static `nimbus` binary that runs on any x86_64 Linux.
+`just validate` runs `nimbus validate` against this checkout, `just build`
+produces a static `nimbus` binary that runs on any x86_64 Linux, and
+`just vm-push` copies that binary and the definitions to the drill VM.
 
-The delivered commands are `sync`, `validate`, `doctor`, `status`, `managed`,
-`unmanaged`, `why`, the `profiles`, `components`, and `packages` groups, and
-`version`. `sync` is the one command that changes the system: it shows what it
-will do, asks once, prepares the declared sources, installs and removes what
-the definitions say, upgrades the system, verifies, records receipts under
-`/var/lib/nimbus`, and reports what differed from the plan. `sync -p` shows
-the plan and changes nothing, `-y` skips the question, `-n` leaves out the
-system upgrade, and `-r` also removes unmanaged packages. The `packages`,
-`profiles`, and `components` edit commands change the machine manifest and
-then run the same sync for it. Everything else is read-only: `validate`
-checks the definitions, `doctor` inspects the host, and the views list what
-Nimbus manages. The first VM drills are recorded in TASKS.md.
+The delivered commands are `init`, `sync`, `validate`, `doctor`, `status`,
+`managed`, `unmanaged`, `why`, the `profiles`, `components`, and `packages`
+groups, and `version`. `sync` is the one command that changes the system: it
+shows what it will do, asks once, prepares the declared sources, installs and
+removes what the definitions say, upgrades the system, verifies, records
+receipts under `/var/lib/nimbus`, and reports what differed from the plan.
+`init` is the first run: it picks or describes the machine, writes the selector,
+syncs, and hands off to Chezmoi once; `install.sh` gets a fresh Fedora there.
+`sync -p` shows the plan and changes nothing, `-y` skips the question, `-n`
+leaves out the system upgrade, and `-r` also removes unmanaged packages. The
+`packages`, `profiles`, and `components` edit commands change the machine
+manifest and then run the same sync for it. Everything else is read-only:
+`validate` checks the definitions, `doctor` inspects the host, and the views
+list what Nimbus manages. The first VM drills are recorded in TASKS.md.

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ import (
 // Operation kinds, actions, and risk classes.
 const (
 	KindDNFConfig     = "dnf-config"
+	KindUser          = "user" // a user-scope tool: installer, runtimes, crate
 	KindRepository    = "repository"
 	KindPackage       = "package"
 	KindFlatpakRemote = "flatpak-remote"
@@ -146,6 +148,7 @@ func Build(in Inputs) (*Plan, error) {
 	p.Operations = append(p.Operations, b.repositories()...)
 	p.Operations = append(p.Operations, b.packages()...)
 	p.Operations = append(p.Operations, b.flatpaks()...)
+	p.Operations = append(p.Operations, b.userTools()...)
 	p.Operations = append(p.Operations, b.ownedRemovals()...)
 	p.Prune = b.prune()
 	if in.Prune && (in.Applied == nil || in.Applied.Baseline == nil) {
@@ -661,7 +664,7 @@ func (b *builder) packages() []Operation {
 	var adopt, pending, blocked []Operation
 	var install []definitions.ResolvedPackage
 	for _, p := range b.in.Resolved.Packages {
-		if p.Prefix == definitions.PrefixFlatpak {
+		if p.Prefix == definitions.PrefixFlatpak || p.Prefix == definitions.PrefixCargo {
 			continue
 		}
 		if inst, ok := b.installed[p.Name]; ok {
@@ -1158,4 +1161,108 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// InstallerScript stands for the downloaded installer in a plan step; apply
+// writes the script to its stage directory and fills the path in. HomeDir
+// stands for the home directory in a declared install command.
+const (
+	InstallerScript = "<installer script>"
+	HomeDir         = "<home>"
+	AfterHandoff    = "chezmoi"
+)
+
+// userTools plans the user-scope steps: a maker's installer, the command
+// that installs its runtimes once Chezmoi has written their configuration,
+// and the crates cargo install builds with the Rust runtime. They run as the
+// user, never through sudo, and write no receipt: presence is the record.
+func (b *builder) userTools() []Operation {
+	var ops []Operation
+	if !b.in.Facts.User.Known() {
+		// The desired tools are not dropped silently: one blocked
+		// operation says why they cannot be planned.
+		if len(b.in.Resolved.Installers) > 0 || b.hasPrefix(definitions.PrefixCargo) {
+			ops = append(ops, Operation{ID: "user:tools", Kind: KindUser, Action: ActionInstall, Risk: RiskLow,
+				Summary: "plan the user-scope tools", Blocked: "the user-scope tool state is unknown: " + b.in.Facts.User.Error})
+		}
+		return ops
+	}
+	u := b.in.Facts.User.Value
+	var runtimeOps []string
+	for _, in := range b.in.Resolved.Installers {
+		id := "user:" + in.Component
+		binary := b.userFile(u.Home, in.Installer.Binary)
+		op := Operation{ID: id, Kind: KindUser, Risk: RiskLow, Paths: in.Paths}
+		if binary {
+			op.Action, op.Summary = ActionKeep, fmt.Sprintf("%s is installed at ~/%s", in.Component, in.Installer.Binary)
+		} else {
+			op.Action, op.Summary = ActionInstall, fmt.Sprintf("install %s from %s as the user", in.Component, in.Installer.URL)
+			op.Steps = []Step{
+				{Description: "download " + in.Installer.URL + " to the stage directory and show its sha256"},
+				{Description: "run the installer as the user", Argv: []string{"sh", InstallerScript}},
+				{Description: "verify ~/" + in.Installer.Binary + " exists"},
+			}
+		}
+		ops = append(ops, op)
+		if len(in.Installer.Install) == 0 {
+			continue
+		}
+		rt := Operation{ID: id + ":install", Kind: KindUser, Action: ActionInstall, Risk: RiskLow, Paths: in.Paths,
+			Summary: fmt.Sprintf("install the %s runtimes declared in ~/%s", in.Component, in.Installer.Config),
+			Steps:   []Step{{Description: "run as the user, repeatable", Argv: append([]string(nil), in.Installer.Install...)}}}
+		switch {
+		case !binary:
+			rt.After = id
+		case !b.userFile(u.Home, in.Installer.Config):
+			rt.After = AfterHandoff
+			rt.Notes = append(rt.Notes, fmt.Sprintf("~/%s does not exist yet; the Chezmoi handoff writes it", in.Installer.Config))
+		}
+		runtimeOps = append(runtimeOps, rt.ID)
+		ops = append(ops, rt)
+	}
+	installed := map[string]bool{}
+	for _, crate := range u.Crates {
+		installed[crate] = true
+	}
+	for _, p := range b.in.Resolved.Packages {
+		if p.Prefix != definitions.PrefixCargo {
+			continue
+		}
+		op := Operation{ID: "package:" + p.Canonical, Kind: KindUser, Risk: RiskLow, Paths: p.Paths}
+		switch {
+		case installed[p.Name]:
+			op.Action, op.Summary = ActionKeep, "crate "+p.Name+" is installed"
+		default:
+			op.Action, op.Summary = ActionInstall, "cargo install "+p.Name+" as the user"
+			op.Steps = []Step{{Description: "build and install the crate", Argv: []string{HomeDir + "/.cargo/bin/cargo", "install", p.Name}}}
+			if !u.Cargo {
+				if len(runtimeOps) > 0 {
+					op.After = runtimeOps[0]
+					op.Notes = append(op.Notes, "cargo comes with the Rust runtime Mise installs")
+				} else {
+					op.Blocked = "cargo is not installed and no component installs a Rust runtime"
+				}
+			}
+		}
+		ops = append(ops, op)
+	}
+	return ops
+}
+
+// hasPrefix reports whether any desired package uses the prefix.
+func (b *builder) hasPrefix(prefix string) bool {
+	for _, p := range b.in.Resolved.Packages {
+		if p.Prefix == prefix {
+			return true
+		}
+	}
+	return false
+}
+
+// userFile reports whether a file relative to the home directory exists,
+// read through the source so a test can say what the home holds.
+func (b *builder) userFile(home, rel string) bool {
+	path := filepath.Join(home, rel)
+	names, err := b.in.Source.ReadDir(filepath.Dir(path))
+	return err == nil && contains(names, filepath.Base(path))
 }

@@ -1,0 +1,8 @@
+# gitleaks configuration for the history scan before the repository goes
+# public. Repository signing-key fingerprints are public identifiers, not
+# secrets; the fixtures carry the same 40-hex-digit form as nimbus.toml.
+[extend]
+useDefault = true
+
+[allowlist]
+regexes = ["^[0-9A-F]{40}$"]

@@ -160,7 +160,7 @@ fedora = ["44"]
 min_engine = "0.1.0"
 
 [dnf]
-max_parallel_downloads = 10
+max_parallel_downloads = 20
 fastestmirror = true
 defaultyes = true
 
@@ -211,7 +211,7 @@ the [SECURITY.md](SECURITY.md) order can shadow Fedora, and distinct for every
 repository in that order, since DNF breaks a tie by version and a later
 source could then shadow an earlier one. The stored key file is
 checked for its armored public-key form at validation; its fingerprint is
-verified when the key is imported during planning.
+verified when sync imports the key.
 
 The `[dnf]` table holds libdnf5 `[main]` options as numbers, booleans, or
 strings. Nimbus renders it, keys sorted, into
@@ -462,8 +462,15 @@ One provider owns an installed executable lifecycle. Nimbus manages
 system-scoped Flatpaks from Flathub. User-scope tools follow the
 [SECURITY.md](SECURITY.md) source order: Nimbus runs a maker's installer
 script, `cargo install`, or `mise install` as the normal user, without sudo,
-as a plan step. Runtimes declared in `~/.config/mise/config.toml`
-are installed by Mise after Chezmoi has written that file; Chezmoi owns the
+as a plan step. A component declares a maker's installer in an `[installer]`
+table: the `url` of the script, the `binary` it leaves relative to the home
+directory, and optionally the `config` file the Chezmoi handoff writes and the
+`install` command to run once it exists, with `<home>` standing for the home
+directory. A crate is a package reference with the reserved `cargo:` prefix;
+it waits for `~/.cargo/bin/cargo`, which the Rust runtime provides, and is
+verified through `cargo install --list`. Runtimes declared in
+`~/.config/mise/config.toml` are installed by Mise after Chezmoi has written
+that file; Chezmoi owns the
 file, Mise owns the runtimes, and Nimbus plans the `mise install` step and
 reports runtimes that are missing. User-scope steps are safe to repeat and
 write no receipt; verification is the presence of the tool or runtime. Their
@@ -663,7 +670,9 @@ exist the plan is exact, with versions, dependencies, and download size. On a
 fresh host the sources do not exist yet, so the plan names the packages and
 DNF prints the exact transaction as it starts. Sudo is primed once after the
 answer and its credential is renewed while sync runs, so the password is
-asked once. Execution then prepares the declared sources, each declared in
+asked once; a run that holds only user-scope steps, or whose every operation
+waits for the Chezmoi handoff, asks for nothing and says what it waits for.
+Execution then prepares the declared sources, each declared in
 `nimbus.toml` with its pinned key: the DNF drop-in, the repositories and their
 duplicates, the Flatpak remote when `flatpak` is present, and a metadata
 refresh when a DNF repository changed. It runs the native commands with their
@@ -698,7 +707,9 @@ internal privileged action:
 - atomically record the approved root-owned state and receipts
 
 They accept only staged data bound to the plan digest. Nimbus has no
-general privileged executor, root daemon, helper service, or sudo keepalive.
+general privileged executor, root daemon, or helper service. Sync primes the
+sudo credential once after the answer and renews it only while that run
+lasts; nothing keeps it alive afterwards.
 
 Only one mutating Nimbus operation may run at a time. Locks identify the
 operation and process and are never removed solely because they are old. The
@@ -811,7 +822,7 @@ nimbus init --checkout ~/.local/share/nimbus
 ~~~
 
 Neither installation script installs Chezmoi, applies workstation resources,
-or duplicates Nimbus planning. The reviewed first Nimbus apply installs
+or duplicates Nimbus planning. The reviewed first Nimbus sync installs
 Chezmoi when desired, after which init may perform the one permitted Chezmoi
 initialization. Git and repository resources installed during bootstrap may be
 adopted when they belong to desired state. The running Nimbus engine remains a
@@ -826,18 +837,34 @@ checkout.
 
 nimbus init:
 
-1. validates the engine and checkout compatibility
-2. lists tracked machine manifests and selects one
-3. for a new machine, proposes hardware components from DMI and PCI facts and
-   includes the accepted selection in the reviewed manifest
-4. writes ~/.config/nimbus/config.toml and any reviewed new manifest
-5. resolves and inspects the selected system
-6. shows the complete system plan
-7. applies only after approval
-8. initializes Chezmoi when selected and its prerequisites are available
-9. runs the user-scope steps that depend on the Chezmoi-written
-   configuration, such as `mise install` and the Cargo tools
-10. reports direct Chezmoi and remaining manual steps
+1. validates the engine and checkout compatibility and reads the checkout's
+   Git origin, which becomes the selector's approved origin
+2. reads the hardware: the DMI product and board names, the chassis kind,
+   and the display adapters by PCI vendor and device
+3. asks which machine this is, listing the tracked manifests with the one
+   whose declared `hardware` appears in the DMI names pre-selected, plus
+   "new"; `--machine ID` answers without the menu, and an existing selector
+   for the same checkout is reused
+4. for a new machine, given as `--new ID`, asks for its profiles, its
+   components with the ones the hardware detection rules propose
+   pre-selected, and its dotfiles repository, defaulting to the one every
+   tracked manifest shares; `--dotfiles URL` and `--no-dotfiles` answer the
+   last question; it then writes `machines/<id>.toml` with the DMI product
+   as `hardware` and leaves the Git change to the user
+5. writes ~/.config/nimbus/config.toml
+6. runs `nimbus sync` for the machine, which shows the plan and asks once;
+   `-y` answers yes
+7. performs the one Chezmoi initialization when the manifest names a
+   dotfiles repository and Chezmoi is installed and not initialized yet;
+   an initialized Chezmoi is left alone and the refresh command printed
+8. runs `nimbus sync` once more without asking, for the user-scope steps
+   that waited for the Chezmoi-written configuration
+
+A machine manifest may carry `hardware`, a substring of the DMI product or
+board name, and a component may carry a `[detect]` table with `chassis`,
+"laptop" or "desktop", or `display_vendor`, the PCI vendor ID of a display
+adapter. Detection proposes; it never decides, and resolution never inspects
+hardware.
 
 Fresh installation and reinstallation use the same tracked machine manifest.
 Creating a new machine writes a reviewed manifest to the Nimbus checkout and
@@ -881,24 +908,24 @@ selected by profile and never implies Nimbus. Hardware facts and secrets do not
 cross the handoff. The handoff keys are documented in the dotfiles repository's
 `PROFILES.md`.
 
-When the development profile is selected, apply installs Mise before the
+When the development profile is selected, sync installs Mise before the
 handoff: it downloads the maker's installer from `https://mise.run` to a
 file, shows the digest, runs that file as the normal user, and verifies
 `~/.local/bin/mise`. Chezmoi initialization then writes
 `~/.config/mise/config.toml`, which carries `auto_update = true` in its
-settings; Nimbus never edits that file. After the handoff, apply runs the
+settings; Nimbus never edits that file. After the handoff, sync runs the
 user-scope steps that depend on it:
 
 ~~~sh
-MISE_SYSTEM_DEPS=warn mise -C "$HOME" install
-cargo install <crate>
+MISE_SYSTEM_DEPS=warn ~/.local/bin/mise -C "$HOME" install
+~/.cargo/bin/cargo install <crate>
 ~~~
 
 Each step runs as the normal user without sudo and appears in the reviewed
 plan. `MISE_SYSTEM_DEPS=warn` keeps Mise from taking over system-package
 installation: Nimbus owns selected system dependencies, Chezmoi owns the
 configuration file, and Mise owns runtime installation. When a runtime or a
-Cargo tool is later missing, status and plan report it and apply reinstalls
+Cargo tool is later missing, status and plan report it and sync reinstalls
 it through the same command. The dotfiles repository carries no Mise install
 script.
 

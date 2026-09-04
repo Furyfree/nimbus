@@ -3,8 +3,10 @@ package facts
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -132,6 +134,35 @@ func normalizeRepo(v string) string {
 		return strings.TrimSuffix(inner, ")")
 	}
 	return v
+}
+
+// parseCargoList reads cargo install --list: a crate heads each block as
+// "name vX.Y.Z:" at the start of a line, its binaries indented below.
+func parseCargoList(out []byte) []string {
+	var crates []string
+	for _, line := range strings.Split(string(out), "\n") {
+		if line == "" || line[0] == ' ' || line[0] == '\t' {
+			continue
+		}
+		name, _, _ := strings.Cut(line, " ")
+		crates = append(crates, name)
+	}
+	sort.Strings(crates)
+	return crates
+}
+
+// parseChezmoiData reads the keys the Nimbus handoff stores; the template
+// keeps them at the top level of Chezmoi's data.
+func parseChezmoiData(out []byte) (Chezmoi, error) {
+	var data struct {
+		Machine         string   `json:"Machine"`
+		ManagedByNimbus bool     `json:"ManagedByNimbus"`
+		Profiles        []string `json:"Profiles"`
+	}
+	if err := json.Unmarshal(out, &data); err != nil {
+		return Chezmoi{Initialized: true}, fmt.Errorf("chezmoi data: %w", err)
+	}
+	return Chezmoi{Initialized: true, Machine: data.Machine, ManagedByNimbus: data.ManagedByNimbus, Profiles: data.Profiles}, nil
 }
 
 func normalizeBool(v string) string {

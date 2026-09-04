@@ -772,7 +772,7 @@ func TestNeededUpgradesAreAcceptedAndNoted(t *testing.T) {
 func TestDNFDropInIsPlannedFirstAndVerifiedWhole(t *testing.T) {
 	c, r := repository(t)
 	rendered := DNFDropIn(c.Definitions())
-	if !strings.HasPrefix(rendered, "# Written by Nimbus") || !strings.Contains(rendered, "[main]\ndefaultyes=True\nfastestmirror=True\nmax_parallel_downloads=10\n") {
+	if !strings.HasPrefix(rendered, "# Written by Nimbus") || !strings.Contains(rendered, "[main]\ndefaultyes=True\nfastestmirror=True\nmax_parallel_downloads=20\n") {
 		t.Fatalf("rendered drop-in:\n%s", rendered)
 	}
 	build := func(have string, managed bool) *Operation {
@@ -910,5 +910,65 @@ func TestAnotherSourceIsNotedOnAdoptionAndKeep(t *testing.T) {
 	}
 	if steps := repositorySteps("hyprland-copr", c.Definitions().Repositories["hyprland-copr"]); steps[1].Argv[0] != "rpm" || steps[1].Argv[1] != "--import" || !steps[1].Privileged {
 		t.Fatalf("the COPR key must be imported before the enable: %+v", steps)
+	}
+}
+
+func TestUserToolsArePlannedAsTheUserInOrder(t *testing.T) {
+	c, r := repository(t)
+	src, f := readyHost(t, c)
+	home := "/home/tester"
+	f.User = facts.Section[facts.User]{Value: facts.User{Home: home, Cargo: false, Crates: []string{}}}
+	in := Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src}
+	// A fresh home: Mise is installed first; the runtimes wait for the
+	// Chezmoi handoff; the crates wait for the Rust runtime.
+	p := answerInstall(t, src, in, nil)
+	if op := find(p, "user:mise"); op == nil || op.Action != ActionInstall || op.Steps[1].Argv[0] != "sh" || op.Steps[1].Argv[1] != InstallerScript || op.Steps[1].Privileged {
+		t.Fatalf("mise installer = %+v", op)
+	}
+	if op := find(p, "user:mise:install"); op == nil || op.After != "user:mise" {
+		t.Fatalf("runtimes = %+v", op)
+	}
+	if op := find(p, "package:cargo:sheldon"); op == nil || op.After != "user:mise:install" || len(op.Notes) != 1 {
+		t.Fatalf("crate = %+v", op)
+	}
+	// Mise present, config not written yet: the runtimes wait for Chezmoi.
+	src.Dirs[home+"/.local/bin"] = []string{"mise"}
+	p = answerInstall(t, src, in, nil)
+	if op := find(p, "user:mise"); op == nil || op.Action != ActionKeep {
+		t.Fatalf("mise present = %+v", op)
+	}
+	if op := find(p, "user:mise:install"); op == nil || op.After != AfterHandoff || len(op.Notes) != 1 {
+		t.Fatalf("runtimes before the handoff = %+v", op)
+	}
+	// Config written and cargo present: everything runs, as the user.
+	src.Dirs[home+"/.config/mise"] = []string{"config.toml"}
+	f.User.Value.Cargo, f.User.Value.Crates = true, []string{"sheldon"}
+	p = answerInstall(t, src, in, nil)
+	if op := find(p, "user:mise:install"); op == nil || op.After != "" || strings.Join(op.Steps[0].Argv, " ") != "env MISE_SYSTEM_DEPS=warn <home>/.local/bin/mise -C <home> install" || op.Steps[0].Privileged {
+		t.Fatalf("runtimes = %+v", op)
+	}
+	if op := find(p, "package:cargo:sheldon"); op == nil || op.Action != ActionKeep {
+		t.Fatalf("installed crate = %+v", op)
+	}
+	if op := find(p, "package:cargo:typst-cli"); op == nil || op.After != "" || strings.Join(op.Steps[0].Argv, " ") != "<home>/.cargo/bin/cargo install typst-cli" {
+		t.Fatalf("missing crate = %+v", op)
+	}
+	for _, op := range p.Operations {
+		if op.Kind == KindUser {
+			for _, st := range op.Steps {
+				if st.Privileged {
+					t.Fatalf("user-scope step marked privileged: %+v", op)
+				}
+			}
+		}
+	}
+	// Unknown user-scope state blocks instead of dropping the tools.
+	f.User = facts.Section[facts.User]{Error: "cargo install --list: broken"}
+	p = answerInstall(t, src, in, nil)
+	if op := find(p, "user:tools"); op == nil || op.Blocked == "" || !strings.Contains(op.Blocked, "broken") || p.Complete {
+		t.Fatalf("unknown user state = %+v complete %v", op, p.Complete)
+	}
+	if find(p, "user:mise") != nil || find(p, "package:cargo:sheldon") != nil {
+		t.Fatal("user tools planned without their facts")
 	}
 }

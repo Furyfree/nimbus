@@ -23,7 +23,45 @@ type Facts struct {
 	// DNFDropIn is the content of Nimbus's libdnf5 drop-in, empty when the
 	// file is absent.
 	DNFDropIn Section[string]   `json:"dnf_drop_in"`
+	Hardware  Section[Hardware] `json:"hardware"`
+	Chezmoi   Section[Chezmoi]  `json:"chezmoi"`
+	User      Section[User]     `json:"user"`
 	Commands  map[string]string `json:"commands"`
+}
+
+// User is the user-scope tool state: the home directory, whether Cargo is
+// present, and the crates it has installed.
+type User struct {
+	Home   string   `json:"home"`
+	Cargo  bool     `json:"cargo"`
+	Crates []string `json:"crates"`
+}
+
+// Chezmoi is the state of the user's Chezmoi initialization, read through
+// its own data output: whether it exists, and the machine and profiles it
+// stored at initialization.
+type Chezmoi struct {
+	Initialized     bool     `json:"initialized"`
+	Machine         string   `json:"machine,omitempty"`
+	ManagedByNimbus bool     `json:"managed_by_nimbus,omitempty"`
+	Profiles        []string `json:"profiles,omitempty"`
+}
+
+// Hardware is the machine identity from DMI and the display adapters from
+// PCI: what init uses to propose a tracked machine and its components.
+type Hardware struct {
+	Product string `json:"product"` // DMI product name
+	Board   string `json:"board"`   // DMI board name
+	// Chassis is "laptop" or "desktop" from the SMBIOS chassis type, or
+	// empty when the type says neither.
+	Chassis string      `json:"chassis"`
+	Display []PCIDevice `json:"display"`
+}
+
+// PCIDevice is one display-class PCI device by vendor and device ID.
+type PCIDevice struct {
+	Vendor string `json:"vendor"`
+	Device string `json:"device"`
 }
 
 // Platform is the operating system identity.
@@ -112,3 +150,7 @@ const (
 
 // RequiredCommands are the native tools the engine needs on the host.
 var RequiredCommands = []string{"dnf5", "rpm", "flatpak", "systemctl", "git"}
+
+// OptionalCommands are tools the engine drives when present; their absence
+// is a state, not a failure. Both lists are looked up into Facts.Commands.
+var OptionalCommands = []string{"chezmoi"}

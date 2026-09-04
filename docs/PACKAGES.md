@@ -124,7 +124,8 @@ order. This list feeds the definitions and shrinks as they land.
 
 ## CLI
 
-- Mise (`user: installer from https://mise.run`, before the Chezmoi handoff)
+- Mise (`user: installer from https://mise.run`, before the Chezmoi handoff;
+  declared as the `mise` component)
   - Auto-update (`auto_update = true` in the Chezmoi-managed Mise config)
   - Runtimes (`user: mise install`, after Chezmoi has written
     `~/.config/mise/config.toml`)
@@ -135,7 +136,8 @@ order. This list feeds the definitions and shrinks as they land.
     - markdownlint-cli (`Mise/npm`)
     - gopls, golangci-lint (`Mise/Go`)
     - lazydocker (`Mise/Go: github.com/jesseduffield/lazydocker`)
-- Cargo tools (`user: cargo install`, after the Rust runtime)
+- Cargo tools (`user: cargo install`, after the Rust runtime; declared as
+  `cargo:` references in the development profile)
   - Caligula (`caligula`)
   - Typst (`typst-cli`)
   - Tinymist (`tinymist`)

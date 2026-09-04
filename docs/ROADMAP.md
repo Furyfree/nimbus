@@ -7,7 +7,7 @@ lives in [SPEC.md](SPEC.md). Current checkboxes and evidence live in
 [DECISIONS.md](DECISIONS.md); this roadmap places the gates that affect each
 phase.
 
-Current phase: **1. Configuration resolver**.
+Current phase: **5. Bootstrap, initialization, and Chezmoi handoff**.
 
 ## Principles
 
@@ -250,8 +250,8 @@ Nimbus-managed packages; eligible unmanaged packages remain the
 responsibility of `sync --prune`. `profiles add|remove` and
 `components add|remove` edit the manifest's selection lists through the same
 diff, plan, question, and sync path; a
-profile change prints the direct Chezmoi re-initialization command once
-Phase 5 exists. Nimbus leaves every manifest edit as an uncommitted Git change.
+profile change prints the direct Chezmoi re-initialization command. Nimbus
+leaves every manifest edit as an uncommitted Git change.
 
 Bootstrap packages retain correct DNF install reasons. Removal is permitted
 only from the lifecycle recorded in the receipt.
@@ -296,22 +296,25 @@ compatible Nimbus RPM, and invokes `nimbus init --checkout`.
 
 Neither script updates an existing checkout, provisions the workstation, or
 handles Chezmoi. Chezmoi is an ordinary Nimbus-managed system package installed
-by the reviewed first apply. The engine remains directly DNF-owned and checkout
+by the reviewed first sync. The engine remains directly DNF-owned and checkout
 updates remain direct user Git operations; Nimbus has no self-update path.
 
-Q-006 and Q-007 are resolved. For the development profile, apply downloads
+Q-006 and Q-007 are resolved. For the development profile, sync downloads
 the official Mise installer, shows its digest, runs it as the normal user
 before the handoff, and verifies the user-owned binary. After Chezmoi has
-written the Mise configuration, which carries `auto_update = true`, apply
-runs `mise install` under
-`MISE_SYSTEM_DEPS=warn` and the declared `cargo install` steps, again as the
-user. Nimbus installs selected system dependencies itself and reinstalls a
-missing runtime or Cargo tool through the same steps on the next apply.
+written the Mise configuration, which carries `auto_update = true`, sync
+runs `mise install` under `MISE_SYSTEM_DEPS=warn` and the declared
+`cargo install` steps, again as the user. Nimbus installs selected system
+dependencies itself and reinstalls a missing runtime or Cargo tool through
+the same steps on the next sync.
 
-nimbus init writes only the local selector and a reviewed new machine manifest
-when requested. For a new machine it inspects DMI and PCI facts, proposes the
-known hardware components, and writes only the accepted IDs into that manifest.
-Existing tracked manifests are loaded unchanged. The first detector fixtures
+nimbus init writes only the local selector and a new machine manifest when
+requested. It asks which machine this is, with the tracked manifest whose
+`hardware` identity the DMI names contain pre-selected. For a new machine it
+proposes the components whose `[detect]` rules match the chassis kind and
+the display adapters, asks for profiles and the dotfiles repository, and
+writes only the accepted answers into that manifest. Existing tracked
+manifests are loaded unchanged. The first detector fixtures
 cover the MSI Z690 desktop with Intel and NVIDIA graphics and the HP EliteBook X
 G1a with AMD graphics, including the `ddcutil` and `brightnessctl` split. The
 handoff passes `machine`, `managed_by_nimbus`, and the ordered profile IDs
@@ -335,7 +338,7 @@ attach only the checked-out child script to `/dev/tty`, and stop on an invalid
 existing target. A failed installation leaves native DNF state and the checkout
 independently recoverable. A failed initialization leaves the system usable and
 reports direct Git and Chezmoi recovery. A failed user-scope step leaves the
-plan drifted and is retried by the next apply; nothing below home has a
+plan drifted and is retried by the next sync; nothing below home has a
 recovery point. Removing Nimbus must leave Chezmoi and Mise usable.
 
 ### Validation and exit criteria

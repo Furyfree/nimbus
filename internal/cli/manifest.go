@@ -23,7 +23,11 @@ func renderManifest(existing []byte, m *definitions.Machine) []byte {
 		}
 		break
 	}
-	fmt.Fprintf(&b, "schema = %d\nid = %q\n\n", m.Schema, m.ID)
+	fmt.Fprintf(&b, "schema = %d\nid = %q\n", m.Schema, m.ID)
+	if m.Hardware != "" {
+		fmt.Fprintf(&b, "hardware = %q\n", m.Hardware)
+	}
+	b.WriteString("\n")
 	list := func(name string, items []string) {
 		if len(items) == 0 {
 			fmt.Fprintf(&b, "%s = []\n\n", name)

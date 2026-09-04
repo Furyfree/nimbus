@@ -37,17 +37,25 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 	}
 	b.WriteString("\n")
 
-	var sources, problems, notes []string
+	var sources, problems, notes, userTools []string
 	var installTx *plan.Operation
 	var pendingNames, flatpaks, removals []string
 	adopted, kept := 0, 0
+	noted := map[string]bool{}
 	for i := range p.Operations {
 		op := &p.Operations[i]
 		if op.Blocked != "" {
 			problems = append(problems, op.Summary+": "+op.Blocked)
 			continue
 		}
-		notes = append(notes, op.Notes...)
+		// The same note from several operations, such as every crate
+		// waiting for the Rust runtime, is shown once.
+		for _, n := range op.Notes {
+			if !noted[n] {
+				noted[n] = true
+				notes = append(notes, n)
+			}
+		}
 		switch op.Action {
 		case plan.ActionKeep:
 			kept++
@@ -72,6 +80,12 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 			pendingNames = append(pendingNames, plan.PackageName(op.ID))
 		case op.Kind == plan.KindFlatpak && op.Action == plan.ActionInstall:
 			flatpaks = append(flatpaks, strings.TrimPrefix(op.ID, "flatpak:"))
+		case op.Kind == plan.KindUser:
+			line := op.Summary
+			if op.After != "" {
+				line += " (after " + describeAfter(p, op.After) + ")"
+			}
+			userTools = append(userTools, line)
 		case op.Action == plan.ActionRemove || op.Action == plan.ActionPrune || op.Action == plan.ActionRetire:
 			removals = append(removals, op.Summary)
 			if op.Transaction != nil {
@@ -136,6 +150,12 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 		sort.Strings(flatpaks)
 		writeWrapped(&b, fmt.Sprintf("\ninstall %d Flatpaks: ", len(flatpaks)), flatpaks, ", ", ",", "  ")
 	}
+	if len(userTools) > 0 {
+		b.WriteString("\nuser tools, as the user without sudo:\n")
+		for _, line := range userTools {
+			writeWrapped(&b, "  ", strings.Fields(line), " ", "", "    ")
+		}
+	}
 	if len(removals) > 0 {
 		b.WriteString("\n")
 		for _, r := range removals {
@@ -176,6 +196,22 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 		b.WriteString("incomplete: fix the problems above\n")
 	}
 	return b.Bytes()
+}
+
+// describeAfter names what an operation waits for in the plan's own words:
+// the Chezmoi handoff, a component's runtimes, a component's installer, or
+// the operation ID when it is none of those.
+func describeAfter(p *plan.Plan, after string) string {
+	if after == plan.AfterHandoff {
+		return "the Chezmoi handoff"
+	}
+	if rest, ok := strings.CutPrefix(after, "user:"); ok {
+		if component, ok := strings.CutSuffix(rest, ":install"); ok {
+			return "the " + component + " runtimes"
+		}
+		return rest + " is installed"
+	}
+	return after
 }
 
 // writeTransactionInto renders a removal preview's rows as lines of the

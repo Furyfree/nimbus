@@ -41,8 +41,11 @@ type Repository struct {
 
 // Machine is machines/<id>.toml.
 type Machine struct {
-	Schema            int       `toml:"schema"`
-	ID                string    `toml:"id"`
+	Schema int    `toml:"schema"`
+	ID     string `toml:"id"`
+	// Hardware is a substring of the DMI product or board name that
+	// identifies this machine, so init can propose it on that hardware.
+	Hardware          string    `toml:"hardware"`
 	Profiles          []string  `toml:"profiles"`
 	Components        []string  `toml:"components"`
 	Packages          []string  `toml:"packages"`
@@ -72,6 +75,29 @@ type Component struct {
 	Packages  []string   `toml:"packages"`
 	Removes   []string   `toml:"removes"`
 	Files     []FileDecl `toml:"files"`
+	// Detect says which hardware makes init propose this component.
+	Detect *Detect `toml:"detect"`
+	// Installer is a user-scope tool the maker's installer script places
+	// below the home directory, such as Mise.
+	Installer *Installer `toml:"installer"`
+}
+
+// Installer describes a maker's installer script run as the user: its URL,
+// the binary it leaves relative to the home directory, and optionally the
+// command run once the Chezmoi-written config exists, such as mise install.
+// "<home>" in the command stands for the home directory.
+type Installer struct {
+	URL     string   `toml:"url"`
+	Binary  string   `toml:"binary"`
+	Config  string   `toml:"config"`
+	Install []string `toml:"install"`
+}
+
+// Detect is a hardware rule: the chassis kind, "laptop" or "desktop", or
+// the PCI vendor ID of a display adapter, such as "1002" for AMD.
+type Detect struct {
+	Chassis       string `toml:"chassis"`
+	DisplayVendor string `toml:"display_vendor"`
 }
 
 // FileDecl is one generic system file below /etc. Source is relative to
