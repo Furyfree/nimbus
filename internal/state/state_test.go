@@ -111,3 +111,24 @@ func TestFileNameIsSafe(t *testing.T) {
 		t.Fatal(FileName("a/b:c d"))
 	}
 }
+
+func TestNativeIdentityStateIsVersionedAndLegacyRemainsReadable(t *testing.T) {
+	root := t.TempDir()
+	for _, schema := range []int{1, ReceiptSchema} {
+		receipt := Receipt{Schema: schema, Resource: "package:dnf:demo", Provider: "dnf", Package: "demo.i686", Operation: "install", PlanDigest: "digest", Verified: true}
+		if schema == 1 {
+			receipt.Package = ""
+		}
+		stage := &Stage{Schema: Schema, PlanDigest: "digest", Receipts: []Receipt{receipt}}
+		if err := Record(root, "digest", stage); err != nil {
+			t.Fatal(err)
+		}
+		got, err := Read(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r := got.Receipts[receipt.Resource]; r.Schema != schema || r.Package != receipt.Package {
+			t.Fatalf("receipt lost identity: %+v", r)
+		}
+	}
+}

@@ -18,11 +18,11 @@ func TestOwnershipViews(t *testing.T) {
 		t.Fatalf("managed before any apply lists adoptable packages: %d\n%s", code, out)
 	}
 	code, out, _ = run(t, append([]string{"unmanaged"}, base...)...)
-	if code != ExitOK || !strings.Contains(out, "unmanaged  dnf:gzip 1.14-2.fc44") || strings.Contains(out, "dnf5-plugins") || !strings.Contains(out, "unmanaged  dnf:bash") {
+	if code != ExitOK || !strings.Contains(out, "unmanaged  dnf:gzip.x86_64 1.14-2.fc44") || strings.Contains(out, "dnf5-plugins") || !strings.Contains(out, "unmanaged  dnf:bash.x86_64") {
 		t.Fatalf("unmanaged: %d\n%s", code, out)
 	}
 	code, out, _ = run(t, append([]string{"packages", "installed", "z"}, base...)...)
-	if code != ExitOK || !strings.Contains(out, "unmanaged  dnf:bzip2") || !strings.Contains(out, "unmanaged  dnf:gzip ") || strings.Contains(out, "bash") {
+	if code != ExitOK || !strings.Contains(out, "unmanaged  dnf:bzip2.x86_64") || !strings.Contains(out, "unmanaged  dnf:gzip.x86_64 ") || strings.Contains(out, "bash") {
 		t.Fatalf("packages installed z: %d\n%s", code, out)
 	}
 	code, out, _ = run(t, append([]string{"packages", "installed", "--json"}, base...)...)
@@ -92,7 +92,7 @@ func TestViewsReadReceiptsAndBaseline(t *testing.T) {
 	if _, out, _ := run(t, append([]string{"unmanaged"}, base...)...); strings.Contains(out, "gzip") {
 		t.Fatalf("baseline package listed without --all:\n%s", out)
 	}
-	if _, out, _ := run(t, append([]string{"unmanaged", "--all"}, base...)...); !strings.Contains(out, "pre-existing dnf:gzip") {
+	if _, out, _ := run(t, append([]string{"unmanaged", "--all"}, base...)...); !strings.Contains(out, "pre-existing dnf:gzip.x86_64") {
 		t.Fatalf("--all lacks the pre-existing marker:\n%s", out)
 	}
 }

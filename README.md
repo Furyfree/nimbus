@@ -35,8 +35,10 @@ exact definition commit and tree digest.
 The separate dotfiles repository contains Chezmoi source state only and works
 without Nimbus on every platform. Nimbus may perform the explicit first Chezmoi
 initialization, passing the machine ID, a managed-by-Nimbus flag, and the
-selected profiles; normal diff, apply, edit, and update operations remain
-direct Chezmoi commands.
+selected profiles. On Linux and macOS, a full Chezmoi apply writes user
+configuration and invokes Mise to install its declared runtimes and tools.
+Standalone use requires Mise already installed; normal diff, apply, edit, and
+update operations remain direct Chezmoi commands.
 
 ## Project documents
 
@@ -77,10 +79,16 @@ shows what it will do, asks once, prepares the declared sources, installs and
 removes what the definitions say, upgrades the system, verifies, records
 receipts under `/var/lib/nimbus`, and reports what differed from the plan.
 `init` is the first run: it picks or describes the machine, writes the selector,
-syncs, and hands off to Chezmoi once; `install.sh` gets a fresh Fedora there.
+syncs, then initializes and applies Chezmoi, including its user-tool installs.
+`install.sh` gets a fresh Fedora there using public HTTPS clones.
 `sync -p` shows the plan and changes nothing, `-y` skips the question, `-n`
 leaves out the system upgrade, and `-r` also removes unmanaged packages. The
 `packages`, `profiles`, and `components` edit commands change the machine
-manifest and then run the same sync for it. Everything else is read-only:
+manifest and then run the same sync for it. `nimbus dotfiles diff`, `apply`,
+and `update` delegate to Chezmoi; apply includes its user-tool installs, and
+update explicitly pulls and applies the source. Ordinary sync leaves those
+installs to Chezmoi.
+Failures end with a summary of completed, failed, and skipped work.
+The remaining commands are read-only:
 `validate` checks the definitions, `doctor` inspects the host, and the views
 list what Nimbus manages. The first VM drills are recorded in TASKS.md.

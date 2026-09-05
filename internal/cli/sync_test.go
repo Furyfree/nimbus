@@ -47,7 +47,7 @@ func TestSyncAsksOnceAndDeclinesCleanly(t *testing.T) {
 	approver = func(_ io.Reader, _ io.Writer, _ string) bool { return false }
 	t.Cleanup(func() { approver = saved })
 	code, out, errOut := run(t, "sync", "-n", "--checkout", root, "--machine", "laptop")
-	if code != ExitFailure || !strings.Contains(errOut, "not applied") {
+	if code != ExitFailure || !strings.Contains(out, "not applied") {
 		t.Fatalf("declined prompt: %d %q", code, errOut)
 	}
 	// The plan is on screen before the question, in installer terms.
@@ -67,7 +67,7 @@ func TestSyncIncompletePlanIsRefused(t *testing.T) {
 	withForeignTerra(t, src) // Terra's own file is not Nimbus's, so its repository blocks
 	withSource(t, src)
 	code, out, errOut := run(t, "sync", "-y", "-n", "--checkout", root, "--machine", "laptop")
-	if code != ExitFailure || !strings.Contains(errOut, "problems") || !strings.Contains(out, "problems:") || !strings.Contains(out, "terra.repo") {
+	if code != ExitFailure || !strings.Contains(out, "problems") || !strings.Contains(out, "problems:") || !strings.Contains(out, "terra.repo") {
 		t.Fatalf("incomplete: %d %q\n%s", code, errOut, out)
 	}
 }
@@ -79,7 +79,7 @@ func TestSyncStopsAtTheFirstFailedOperation(t *testing.T) {
 	answerLaptopInstall(t, src, root)
 	withSource(t, src)
 	code, out, _ := run(t, "sync", "-y", "-n", "--checkout", root, "--machine", "laptop")
-	if code != ExitFailure || !strings.Contains(out, "plan for laptop") || !strings.Contains(out, "sync stopped at repository:brave") || !strings.Contains(out, "network is not available") {
+	if code != ExitFailure || !strings.Contains(out, "plan for laptop") || !strings.Contains(out, "failed     repository:brave") || !strings.Contains(out, "network is not available") {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
 	// The drop-in was adopted before brave failed, so state exists; the
@@ -139,8 +139,8 @@ func TestSyncStopsWhenThePlanChangesWhileTheQuestionIsOpen(t *testing.T) {
 		return true
 	}
 	t.Cleanup(func() { approver = saved })
-	code, _, errOut := run(t, "sync", "-n", "--checkout", root, "--machine", "laptop")
-	if code != ExitFailure || !strings.Contains(errOut, "changed while the question was open") {
+	code, out, errOut := run(t, "sync", "-n", "--checkout", root, "--machine", "laptop")
+	if code != ExitFailure || !strings.Contains(out, "changed while the question was open") {
 		t.Fatalf("stale plan ran: %d %q", code, errOut)
 	}
 }

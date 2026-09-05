@@ -37,6 +37,7 @@ one way: `cli` uses `definitions`, `facts`, `doctor`, `plan`, `apply`,
 `state`, `selector`, and `version`; `doctor` uses `facts`; `plan` uses
 `definitions`, `facts`, and `state`; `apply` uses `plan`, `facts`, and
 `state`;
+`version` reads supported receipt and baseline schemas from `state`;
 `facts` uses `selector` for the origin read; `definitions` uses `version`
 for the engine check; nothing imports `cli`, and `facts` never imports
 `definitions`, so observed state cannot leak into desired state.
@@ -104,13 +105,13 @@ plan.Build(inputs)      -> sources to prepare, packages to adopt or install,
                            declared removals, Flatpaks, prune candidates,
                            update information, digest
 render, Proceed? [Y/n]  -> --plan stops here; -y or --json skips the question
-lock, plan again        -> the digest must equal the one answered
+lock, reload, plan again -> reread definitions and selection; verify approval
 apply.Run(sources)      -> DNF drop-in, repositories, Flatpak remote; refresh
 apply.Run(plan)         -> per operation: native steps through Source with
                            their output on the terminal, verification by
                            re-inspection, receipts through `internal record`
 apply.Upgrade           -> dnf5 upgrade, flatpak update (unless -n)
-report                  -> operations applied, differences from the plan
+report                  -> succeeded, failed, skipped; observed differences
 ~~~
 
 The planner asks DNF for its own view of each transaction with
@@ -134,7 +135,11 @@ install is one `dnf5 install`; afterwards the installed set is compared
 with the preview and the differences are reported, not refused. Receipts go
 through the hidden `nimbus internal record` action, which validates the
 stage against the plan digest and writes atomically below `/var/lib/nimbus`;
-it is the one privileged action of this phase. The selection commands edit a
+it is the one privileged action of this phase. DNF receipts also record the
+native name and architecture separately from the requested package reference;
+ambiguous legacy ownership blocks removal. Every DNF transaction, including
+removal and upgrade, compares the installed set before and after execution.
+The selection commands edit a
 manifest in memory, validate and plan it, show the diff and plan, ask once,
 and then write the file and sync without system updates.
 
@@ -144,6 +149,8 @@ and then write the file and sync without system updates.
   connection except `sync` without `--plan`, whose first step is the
   metadata refresh, and the commands that lead into it: `init` writes the
   selector and a new manifest, the selection commands write the manifest.
+  Explicit `dotfiles apply` and `dotfiles update` delegate user mutations to
+  Chezmoi; `dotfiles diff` only inspects local state.
   `definitions` and `selector` run no command at all;
   `facts` and `plan` run native read-only commands only through `Source`,
   so a test can see every one of them. Tests run the loader against a
@@ -158,9 +165,9 @@ and then write the file and sync without system updates.
 - **Strict data, small types.** Files carry only the fields current
   definitions use; a new field enters the schema together with a definition
   and a fixture that exercise it.
-- **Thin command layer.** `cli` holds no logic beyond argument handling and
-  rendering, so the same resolver serves tests, later commands, and the
-  dashboard.
+- **Command orchestration.** `cli` owns approval, locking, stage ordering, and
+  summaries. Resolution, facts, planning, and native execution remain in their
+  respective packages and can be tested independently.
 
 ## Data model
 
@@ -180,10 +187,11 @@ facts.Inspect(Source).Hardware -> DMI names, chassis kind, display adapters
 plan.MatchMachine, pick one    -> a tracked manifest, or --new with the dialog:
 plan.ProposeComponents            profiles, components pre-selected by the
                                   detection rules, the dotfiles repository
-renderManifest, selector.Write -> machines/<id>.toml, ~/.config/nimbus/config.toml
-runSyncWith                    -> the first sync, one question
-chezmoiHandoff                 -> chezmoi init with the prompt flags, once
-runSyncWith(yes)               -> the user-scope steps that waited for it
+validate, lock, write           -> manifest and selector, lock held through init
+runSyncWith                    -> first sync, one question, defer dependent tools
+chezmoiHandoff                 -> init, then apply local source and its tools
+runSyncWith(userOnly)          -> only explicit Nimbus tool declarations, if any
+report                        -> stage outcomes and retry information
 ~~~
 
 `install.sh` and `bootstrap` are the shell in front of this: the first
@@ -195,7 +203,14 @@ part of `just check`.
 User-scope tools are planned by `plan.userTools` from `Resolved.Installers`
 and the `cargo:` references, executed by `apply.userTool` as the user through
 `Source.Stream`, and verified by presence: the installer's binary, or the
-crate in `cargo install --list`. They write no receipt.
+crate in `cargo install --list`. They write no receipt. The tracked development
+profile uses Mise's Cargo backend instead: Chezmoi owns its native config
+fragment and invokes `mise install` from an after-apply script. The Mise
+component installs the binary and build prerequisites through the common
+profile. No tracked manifest needs a second Nimbus
+user pass, and ordinary sync never invokes this dotfiles installation. Init
+reports Chezmoi and its tool installations together as the dotfiles and tools
+stage, preserving native output and failure status.
 
 ## Where later phases attach
 

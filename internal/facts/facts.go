@@ -93,15 +93,17 @@ func (p Package) EVR() string {
 
 // Repository is one section of a file below /etc/yum.repos.d.
 type Repository struct {
-	ID       string `json:"id"`
-	File     string `json:"file"`
-	Name     string `json:"name"`
-	Enabled  bool   `json:"enabled"`
-	GPGCheck string `json:"gpgcheck"` // "1", "0", or "" when unset
-	GPGKey   string `json:"gpgkey"`
-	Priority string `json:"priority"`
-	BaseURL  string `json:"baseurl,omitempty"`
-	Metalink string `json:"metalink,omitempty"`
+	ID              string   `json:"id"`
+	File            string   `json:"file"`
+	Name            string   `json:"name"`
+	Enabled         bool     `json:"enabled"`
+	GPGCheck        string   `json:"gpgcheck"` // "1", "0", or "" when unset
+	GPGKey          string   `json:"gpgkey"`
+	KeyFingerprints []string `json:"key_fingerprints,omitempty"`
+	KeyError        string   `json:"key_error,omitempty"`
+	Priority        string   `json:"priority"`
+	BaseURL         string   `json:"baseurl,omitempty"`
+	Metalink        string   `json:"metalink,omitempty"`
 	// Options is every key of the section as written in its file, so a
 	// file Nimbus owns can be compared whole with what Nimbus would write.
 	Options map[string]string `json:"options,omitempty"`
@@ -118,8 +120,11 @@ type Flatpak struct {
 
 // FlatpakRemote is one system remote.
 type FlatpakRemote struct {
-	Name string `json:"name"`
-	URL  string `json:"url"`
+	Name            string   `json:"name"`
+	URL             string   `json:"url"`
+	GPGVerify       bool     `json:"gpg_verify"`
+	KeyFingerprints []string `json:"key_fingerprints,omitempty"`
+	KeyError        string   `json:"key_error,omitempty"`
 }
 
 // FlatpakApp is one system application.

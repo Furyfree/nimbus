@@ -121,7 +121,10 @@ revalidate it against the active documents before reuse.
   `$HOME` except the selector, works without Nimbus on Linux, macOS, and
   Windows, and gates only Nimbus-calling targets on `managed_by_nimbus`. Its
   `PROFILES.md` owns the handoff prompt keys. Do not add a machine manifest,
-  package list, or component graph there.
+  system package list, or component graph there. Chezmoi owns the native Mise
+  configuration, including its Cargo tool list, and invokes `mise install`
+  after applying it. Dotfiles scripts never install system packages or escalate
+  privileges.
 - `~/git/docs` is history and earlier Nimbus designs, not a source of truth.
 - `~/git/niriland` is a reference configuration. Never import it wholesale.
 

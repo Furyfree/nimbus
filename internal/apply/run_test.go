@@ -69,7 +69,7 @@ func (s *scripted) Run(name string, args ...string) ([]byte, error) {
 	case name == "uname":
 		return []byte("x86_64\n"), nil
 	case name == "gpg":
-		return []byte("fpr:::::::::" + s.fpr + ":\n"), nil
+		return []byte("pub:::::::::\nfpr:::::::::" + s.fpr + ":\n"), nil
 	case name == "flatpak" && args[0] == "remotes":
 		var b strings.Builder
 		for _, r := range s.remotes {
@@ -121,8 +121,9 @@ func (s *scripted) privileged(argv []string) ([]byte, error) {
 	case argv[0] == "dnf5" && argv[1] == "config-manager" && argv[2] == "setopt":
 		var override string
 		for _, a := range argv[3:] {
-			if id, value, ok := strings.Cut(a, ".enabled="); ok {
-				override += "[" + id + "]\nenabled=" + value + "\n"
+			option, value, ok := strings.Cut(a, "=")
+			if dot := strings.LastIndexByte(option, '.'); ok && dot > 0 {
+				override += "[" + option[:dot] + "]\n" + option[dot+1:] + "=" + value + "\n"
 			}
 		}
 		if override != "" {
@@ -149,6 +150,7 @@ func (s *scripted) privileged(argv []string) ([]byte, error) {
 		s.Files[filepath.Join(facts.RepoDir, "nimbus-terra.repo")] = []byte(file)
 	case argv[0] == "flatpak" && argv[1] == "remote-add":
 		s.remotes = append(s.remotes, argv[5])
+		s.Files[filepath.Join(facts.FlatpakRepoPath, "config")] = []byte("[remote \"" + argv[5] + "\"]\ngpg-verify=true\n")
 	case argv[0] == "flatpak" && argv[1] == "install":
 		s.apps = append(s.apps, argv[5])
 	}
@@ -239,7 +241,7 @@ func TestRunExecutesVerifiesAndRecords(t *testing.T) {
 	for _, want := range []string{
 		"sudo install -m 0644 ", "sudo rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-nimbus-terra", "sudo dnf5 config-manager addrepo --id=nimbus-terra",
 		"sudo flatpak remote-add --if-not-exists --system --from flathub ", "sudo dnf5 -y install ripgrep",
-		"sudo flatpak install --system --noninteractive flathub com.spotify.Client", "gpg --batch --show-keys --with-colons ",
+		"sudo flatpak install --system --noninteractive flathub com.spotify.Client", "gpg --no-options --homedir /dev/null ",
 	} {
 		if !src.ran(want) {
 			t.Errorf("did not run %q\n%s", want, strings.Join(src.log, "\n"))
@@ -258,7 +260,7 @@ func TestRunExecutesVerifiesAndRecords(t *testing.T) {
 	if a.Receipts["package:dnf:bash"].Operation != "adopt" || a.Receipts["package:dnf:ripgrep"].Operation != "install" || !strings.HasPrefix(a.Receipts["package:dnf:ripgrep"].Intended, "installed ") {
 		t.Fatalf("operations = %+v", a.Receipts)
 	}
-	if a.Baseline == nil || !a.InBaseline("coreutils") || a.InBaseline("ripgrep") {
+	if a.Baseline == nil || !a.InBaseline("coreutils.x86_64") || a.InBaseline("ripgrep.x86_64") {
 		t.Fatalf("baseline = %+v", a.Baseline)
 	}
 }
@@ -272,7 +274,7 @@ func TestDifferencesFromThePreviewAreReportedNotRefused(t *testing.T) {
 	r := Run(samplePlan(t), options(t, src, root))
 	// The fake reports every installed package as 1-1.fc44, so ripgrep's
 	// version differs from its preview as well; both are reported.
-	if r.Error != "" || len(r.Differences) != 2 || r.Differences[0] != "DNF also installed surprise 1-1.fc44 (fedora)" || !strings.Contains(r.Differences[1], "ripgrep was installed as 1-1.fc44, the preview showed 0:15.2.0-1.fc44") {
+	if r.Error != "" || len(r.Differences) != 2 || r.Differences[0] != "DNF also installed surprise.x86_64 1-1.fc44" || !strings.Contains(r.Differences[1], "ripgrep.x86_64 is 1-1.fc44 after DNF; the preview expected 15.2.0-1.fc44") {
 		t.Fatalf("result = %+v", r)
 	}
 	src = newScripted()
@@ -483,21 +485,21 @@ func TestUpgradeRunsTheNativeUpdatersWithVisibleOutput(t *testing.T) {
 	src := newScripted()
 	src.privilegedNoop = true
 	opts := options(t, src, t.TempDir())
-	if err := Upgrade(opts, opts.Root); err != nil {
-		t.Fatal(err)
+	if result := Upgrade(opts, opts.Root); result.Error != "" {
+		t.Fatal(result.Error)
 	}
 	if !src.ran("sudo dnf5 -y upgrade") || src.ran("sudo flatpak update") {
 		t.Fatalf("without flatpak on PATH only DNF upgrades:\n%s", strings.Join(src.log, "\n"))
 	}
 	src.Paths["flatpak"] = "/usr/bin/flatpak"
-	if err := Upgrade(opts, opts.Root); err != nil {
-		t.Fatal(err)
+	if result := Upgrade(opts, opts.Root); result.Error != "" {
+		t.Fatal(result.Error)
 	}
 	if !src.ran("sudo flatpak update --system --noninteractive") {
 		t.Fatalf("flatpak update missing:\n%s", strings.Join(src.log, "\n"))
 	}
 	src.fail["sudo dnf5 -y upgrade"] = "exit status 1"
-	if err := Upgrade(opts, opts.Root); err == nil {
+	if result := Upgrade(opts, opts.Root); result.Error == "" {
 		t.Fatal("a failed dnf5 upgrade was not reported")
 	}
 }
@@ -520,10 +522,10 @@ func TestBaselineIsTheSnapshotBeforeTheRunNotAfter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.Baseline == nil || !a.InBaseline("bash") {
+	if a.Baseline == nil || !a.InBaseline("bash.x86_64") {
 		t.Fatalf("baseline = %+v", a.Baseline)
 	}
-	if a.InBaseline("ripgrep") || a.InBaseline("libfoo") {
+	if a.InBaseline("ripgrep.x86_64") || a.InBaseline("libfoo.x86_64") {
 		t.Fatalf("packages installed by the run are in the baseline: %v", a.Baseline.Packages)
 	}
 }

@@ -49,8 +49,11 @@ func readyRepositories(t *testing.T, src *facts.FakeSource, root string) {
 	}
 	for id, r := range c.Definitions().Repositories {
 		if r.Kind == "flatpak" {
+			src.Files[filepath.Join(facts.FlatpakRepoPath, "config")] = []byte("[remote \"" + id + "\"]\ngpg-verify=true\n")
+			src.Commands[facts.Key("gpg", facts.KeyInspectArgs(filepath.Join(facts.FlatpakRepoPath, id+".trustedkeys.gpg"))...)] = []byte("pub:::::::::\nfpr:::::::::" + definitions.NormalizeFingerprint(r.Key) + ":\n")
 			continue
 		}
+		src.Commands[facts.Key("gpg", facts.KeyInspectArgs(plan.KeyPath(id))...)] = []byte("pub:::::::::\nfpr:::::::::" + definitions.NormalizeFingerprint(r.Key) + ":\n")
 		var b strings.Builder
 		if r.Kind == "dnf" && r.ReleasePackage == "" {
 			fmt.Fprintf(&b, "[nimbus-%s]\n", id)
@@ -59,7 +62,7 @@ func readyRepositories(t *testing.T, src *facts.FakeSource, root string) {
 			}
 		} else {
 			for _, host := range plan.DNFRepoIDs(id, r) {
-				fmt.Fprintf(&b, "[%s]\nenabled=1\ngpgcheck=1\npriority=%d\n", host, *r.Priority)
+				fmt.Fprintf(&b, "[%s]\nenabled=1\ngpgcheck=1\npriority=%d\ngpgkey=file://%s\n", host, *r.Priority, plan.KeyPath(id))
 			}
 		}
 		name := "nimbus-" + id + ".repo"

@@ -98,7 +98,7 @@ func newRoot() (*cobra.Command, *options) {
 		return cmd.Root().Help()
 	}})
 	root.SetUsageTemplate(strings.Replace(root.UsageTemplate(), `(or .IsAvailableCommand (eq .Name "help"))`, `.IsAvailableCommand`, 1))
-	root.AddCommand(newInternal(), newComponents(opts), newDoctor(opts), newInit(opts), newManaged(opts), newPackages(opts), newProfiles(opts), newStatus(opts), newSync(opts), newUnmanaged(opts), newValidate(opts), newVersion(opts), newWhy(opts))
+	root.AddCommand(newInternal(), newComponents(opts), newDoctor(opts), newDotfiles(opts), newInit(opts), newManaged(opts), newPackages(opts), newProfiles(opts), newStatus(opts), newSync(opts), newUnmanaged(opts), newValidate(opts), newVersion(opts), newWhy(opts))
 	return root, opts
 }
 

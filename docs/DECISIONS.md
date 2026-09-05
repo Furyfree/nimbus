@@ -626,6 +626,72 @@ is missing. Rejected: a separate user-scope provider package, because two
 operation shapes did not justify one; and receipts for user tools, because
 their removal is explicit and their presence is the record.
 
+#### D-031: Complete installation and explicit dotfiles commands
+
+Decided 2026-09-05 after the repository audit. Init must apply Chezmoi before
+running the user tools that need its configuration. Initializing its source
+alone leaves installation unfinished. Init holds the operation lock through
+selection and all stages, reports completed, failed, and skipped work, and
+exits unsuccessfully when a required stage is incomplete. Independent user
+tools can continue after another fails; failed dependencies remain skipped.
+Successful native work remains available to the next retry.
+
+`nimbus dotfiles diff`, `apply`, and `update` delegate to Chezmoi. Update is an
+explicit request for Chezmoi's native Git pull and apply, including its own
+conflict handling; ordinary sync does not fetch or apply dotfiles. This amends
+the earlier manual-only apply boundary. Nimbus and dotfiles are intended to be
+public so fresh HTTPS clones need no authentication. Publishing existing
+repositories remains a separate owner action; secret-provider access remains
+separate from repository access.
+
+The audit also fixes approval input reloads, EOF handling, unsupported-platform
+mutation, native RPM architecture identity, and before/after reporting for all
+DNF transactions. Repository pins must match active trust, including sources
+already present. A new maker key needs a reviewed definition change. Existing
+Flatpak trust that cannot safely be replaced blocks for explicit native repair;
+there is no automatic key-rotation framework.
+
+#### D-032: Chezmoi owns the Cargo tool list through Mise
+
+Decided 2026-09-05. The seven development Cargo tools move from Nimbus profile
+references to Chezmoi's Linux `~/.config/mise/conf.d/cargo.toml`. Mise's native
+Cargo backend installs them alongside the configured runtimes in the existing
+post-handoff `mise install` step. This amends D-030's ownership of the tracked
+tool list; the engine's direct `cargo:` references remain supported.
+
+Native Cargo configuration has no declarative install list. A Mise fragment
+uses an existing native format and lifecycle without adding a Nimbus resolver.
+`cargo.binstall = false` preserves source builds. Mise owns these installs and
+updates; `cargo-update` remains available for separately installed Cargo tools.
+Existing `~/.cargo/bin` tools remain untouched, so migrating their binaries or
+removing possible PATH conflicts is a separate explicit action.
+
+#### D-033: Chezmoi invokes installation for its declared user tools
+
+Decided 2026-09-05. Chezmoi owns both native Mise tool configuration and
+invoking `mise install` after applying it. This amends D-017, D-030, D-031,
+and D-032: Nimbus installs the Mise binary and system dependencies, then
+hands off to Chezmoi. The tracked manifests no longer need a second Nimbus
+user-tool pass. Ordinary sync does not apply dotfiles or install their tools.
+The common profile selects Mise and its existing build prerequisites because
+the dotfiles tool configuration also applies without the development profile.
+The engine retains direct Cargo references and optional installer commands
+for explicitly Nimbus-owned user tools.
+
+One after script runs on every full Linux or macOS apply, without a
+`managed_by_nimbus` gate. Unlike an onchange script, it restores a deleted
+tool even when configuration is unchanged. Windows renders no action, matching
+its Mise configuration exclusion. Standalone use requires existing Mise;
+missing Mise or a native installation failure fails apply visibly. Nimbus
+reports this as one dotfiles and tools stage with individual native output.
+Read-only diff and preview do not install tools.
+
+The invocation uses `MISE_SYSTEM_DEPS=warn` and `MISE_AUTO_UPDATE=false`.
+Dotfiles scripts may install declared user tools but never system packages or
+privileged resources. Upgrades remain explicit. Application configuration
+alone is not an installation declaration. This keeps standalone Chezmoi apply
+complete without duplicating tool ownership in Nimbus.
+
 ### Resolved questions
 
 #### Q-018: Should the Fedora base be extracted live instead of listed? (resolved)

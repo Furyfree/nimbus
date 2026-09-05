@@ -23,6 +23,8 @@ import (
 // Options are everything the executor needs beyond the plan. Every side
 // effect goes through one of these so tests replace them.
 type Options struct {
+	UpgradePreview *plan.Transaction
+
 	Source facts.Source
 	// Fetch downloads a URL. Apply is the one command allowed to reach the
 	// network for keys, release packages, and remote definitions.
@@ -51,13 +53,20 @@ type Options struct {
 	Now         func() time.Time
 }
 
-// Result reports what ran. A failure stops the run; receipts of completed
-// operations stay.
+// Failure identifies one unsuccessful operation.
+type Failure struct {
+	ID    string `json:"id"`
+	Error string `json:"error"`
+}
+
+// Result preserves completed work and every failure. Independent user tools
+// continue after a failure; a system operation failure stops the run.
 type Result struct {
-	Executed []string `json:"executed"`
-	Pending  []string `json:"pending"`
-	Failed   string   `json:"failed,omitempty"`
-	Error    string   `json:"error,omitempty"`
+	Failures []Failure `json:"failures,omitempty"`
+	Executed []string  `json:"executed"`
+	Pending  []string  `json:"pending"`
+	Failed   string    `json:"failed,omitempty"`
+	Error    string    `json:"error,omitempty"`
 	// Differences lists what a DNF transaction did beyond or instead of
 	// its preview: a package the preview did not name, one it named that
 	// did not happen, or another version than shown.
@@ -94,23 +103,29 @@ func Run(p *plan.Plan, opts Options) *Result {
 		}
 		fmt.Fprintf(ex.opts.Out, "-> %s\n", op.Summary)
 		receipts, remove, err := ex.execute(op)
-		if err != nil {
-			r.Failed = op.ID
-			r.Error = err.Error()
-			fmt.Fprintf(ex.opts.Out, "   failed: %v\n", err)
-			return r
-		}
 		r.Differences = append(r.Differences, ex.differences...)
 		ex.differences = nil
+		if err != nil {
+			r.Failures = append(r.Failures, Failure{ID: op.ID, Error: err.Error()})
+			if r.Error == "" {
+				r.Failed, r.Error = op.ID, err.Error()
+			}
+			fmt.Fprintf(ex.opts.Out, "   failed: %v\n", err)
+			if op.Kind == plan.KindUser {
+				continue
+			}
+			return r
+		}
 		st := &state.Stage{Schema: state.Schema, PlanDigest: p.Digest, Receipts: receipts, Remove: remove, Time: ex.opts.Now().UTC()}
 		if ex.opts.FirstApply && !ex.baselineDone {
-			st.Baseline = &state.Baseline{Schema: state.Schema, Recorded: st.Time, Packages: ex.baseline()}
+			st.Baseline = &state.Baseline{Schema: state.BaselineSchema, Recorded: st.Time, Packages: ex.baseline()}
 			ex.baselineDone = true
 		}
 		if len(receipts) > 0 || len(remove) > 0 || st.Baseline != nil {
 			if err := ex.opts.Record(p.Digest, st); err != nil {
 				r.Failed = op.ID
 				r.Error = "record receipt: " + err.Error()
+				r.Failures = append(r.Failures, Failure{ID: op.ID, Error: r.Error})
 				return r
 			}
 		}
@@ -133,16 +148,15 @@ func (ex *executor) snapshotPackages() error {
 	if err != nil {
 		return err
 	}
-	for _, p := range pkgs {
-		ex.seen[p.Name] = p
-	}
+	ex.seen = facts.PackageMap(pkgs)
 	// The baseline is what existed before this run, frozen here: a
 	// transaction later in the run updates seen, never before.
 	ex.before = make([]string, 0, len(ex.seen))
-	for name := range ex.seen {
-		ex.before = append(ex.before, name)
+	for _, p := range ex.seen {
+		ex.before = append(ex.before, p.ID())
 	}
 	sort.Strings(ex.before)
+	ex.before = slices.Compact(ex.before)
 	return nil
 }
 
@@ -173,7 +187,7 @@ func (ex *executor) sudo(argv ...string) error {
 }
 
 func (ex *executor) receipt(op plan.Operation, provider, previous, intended, verification string) state.Receipt {
-	return state.Receipt{Schema: state.Schema, Engine: ex.opts.Engine, Definitions: ex.opts.Definitions, Machine: ex.p.Machine,
+	return state.Receipt{Schema: state.ReceiptSchema, Engine: ex.opts.Engine, Definitions: ex.opts.Definitions, Machine: ex.p.Machine,
 		Resource: op.ID, Provider: provider, Paths: op.Paths, Previous: previous, Intended: intended, Operation: op.Action,
 		PlanDigest: ex.p.Digest, Verified: true, Verification: verification, Timestamp: ex.opts.Now().UTC()}
 }
@@ -198,11 +212,16 @@ func (ex *executor) execute(op plan.Operation) (receipts []state.Receipt, remove
 		return nil, []string{op.ID}, nil
 	case op.Kind == plan.KindPackage && op.Action == plan.ActionAdopt:
 		name := op.ID[strings.LastIndexByte(op.ID, ':')+1:]
-		inst, ok := ex.seen[name]
+		if resolved := op.Resolved[name]; resolved != "" {
+			name = resolved
+		}
+		inst, ok := facts.FindPackage(packageValues(ex.seen), name)
 		if !ok {
 			return nil, nil, fmt.Errorf("%s is no longer installed", name)
 		}
-		return []state.Receipt{ex.receipt(op, "dnf", "installed "+inst.EVR()+" ("+inst.FromRepo+")", "installed", "dnf5 repoquery --installed lists it")}, nil, nil
+		r := ex.receipt(op, "dnf", "installed "+inst.EVR()+" ("+inst.FromRepo+")", "installed", "dnf5 repoquery --installed lists it")
+		r.Package = inst.ID()
+		return []state.Receipt{r}, nil, nil
 	case op.ID == "packages:install":
 		return ex.installTransaction(op)
 	case op.Kind == plan.KindPackage && (op.Action == plan.ActionRemove || op.Action == plan.ActionPrune):
@@ -216,17 +235,25 @@ func (ex *executor) execute(op plan.Operation) (receipts []state.Receipt, remove
 // fingerprint runs gpg over a key file through Source and returns the
 // primary fingerprint.
 func (ex *executor) fingerprint(path string) (string, error) {
-	out, err := ex.opts.Source.Run("gpg", "--batch", "--show-keys", "--with-colons", path)
+	keys, err := facts.KeyFingerprints(ex.opts.Source, path)
 	if err != nil {
 		return "", fmt.Errorf("gpg: %w", err)
 	}
-	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.Split(line, ":")
-		if len(fields) > 9 && fields[0] == "fpr" {
-			return strings.ToUpper(fields[9]), nil
+	if len(keys) != 1 {
+		return "", fmt.Errorf("key file has %d primary keys; exactly the declared key is required", len(keys))
+	}
+	return keys[0], nil
+}
+
+// verifiesKey distinguishes a complete key reconciliation from a repair
+// limited to already verified repository options.
+func verifiesKey(op plan.Operation) bool {
+	for _, step := range op.Steps {
+		if len(step.Argv) > 0 && step.Argv[0] == "gpg" {
+			return true
 		}
 	}
-	return "", errors.New("gpg printed no fingerprint")
+	return false
 }
 
 // verifiedKey writes key material to the stage and checks its fingerprint.
@@ -347,11 +374,11 @@ func (ex *executor) repository(op plan.Operation) ([]state.Receipt, []string, er
 		}
 		return nil, nil, fmt.Errorf("verification: repository %s is not as declared after the operation: %s", id, reason)
 	}
-	return []state.Receipt{ex.receipt(op, "repository", "absent", "enabled with key "+definitions.NormalizeFingerprint(r.Key), "repository present, enabled, signature checking on, priority as declared")}, nil, nil
+	return []state.Receipt{ex.receipt(op, "repository", "absent", "enabled with key "+definitions.NormalizeFingerprint(r.Key), "repository enabled, signature checking on, local key fingerprint and priority as declared")}, nil, nil
 }
 
 func (ex *executor) enableBaseURL(id string, r definitions.Repository, op plan.Operation) error {
-	if op.Action == plan.ActionRepair {
+	if op.Action == plan.ActionRepair && !verifiesKey(op) {
 		// The plan shows exactly which steps the repair needs: a rewrite
 		// of the owned file, an override, or both; the duplicate override
 		// runs afterwards with the other kinds.
@@ -388,11 +415,17 @@ func (ex *executor) enableBaseURL(id string, r definitions.Repository, op plan.O
 	if err := ex.sudo("rpm", "--import", plan.KeyPath(id)); err != nil {
 		return err
 	}
-	return ex.sudo(plan.AddRepoStep(id, r, false).Argv...)
+	if err := ex.sudo(plan.AddRepoStep(id, r, op.Action == plan.ActionRepair).Argv...); err != nil {
+		return err
+	}
+	if op.Action == plan.ActionRepair {
+		return ex.sudo(plan.PrioritySteps(id, r)[0].Argv...)
+	}
+	return nil
 }
 
 func (ex *executor) enableReleasePackage(id string, r definitions.Repository, op plan.Operation) error {
-	if op.Action == plan.ActionRepair {
+	if op.Action == plan.ActionRepair && !verifiesKey(op) {
 		return ex.sudo(plan.PrioritySteps(id, r)[0].Argv...)
 	}
 	data, err := ex.opts.Fetch(r.ReleasePackage)
@@ -424,17 +457,22 @@ func (ex *executor) enableReleasePackage(id string, r definitions.Repository, op
 	if key == "" {
 		return fmt.Errorf("no key in %s has the declared fingerprint %s", r.ReleasePackage, definitions.NormalizeFingerprint(r.Key))
 	}
-	if err := ex.sudo("rpm", "--import", key); err != nil {
+	if err := ex.sudo("install", "-m", "0644", key, plan.KeyPath(id)); err != nil {
 		return err
 	}
-	if err := ex.sudo("dnf5", "install", "-y", rpm); err != nil {
+	if err := ex.sudo("rpm", "--import", plan.KeyPath(id)); err != nil {
 		return err
+	}
+	if op.Action != plan.ActionRepair {
+		if _, err := ex.packageTransaction([]string{"dnf5", "install", "-y", rpm}, nil); err != nil {
+			return err
+		}
 	}
 	return ex.sudo(plan.PrioritySteps(id, r)[0].Argv...)
 }
 
 func (ex *executor) enableCOPR(id string, r definitions.Repository, op plan.Operation) error {
-	if op.Action == plan.ActionRepair {
+	if op.Action == plan.ActionRepair && !verifiesKey(op) {
 		return ex.sudo(plan.PrioritySteps(id, r)[0].Argv...)
 	}
 	data, err := ex.opts.Fetch("https://download.copr.fedorainfracloud.org/results/" + r.Project + "/pubkey.gpg")
@@ -445,11 +483,16 @@ func (ex *executor) enableCOPR(id string, r definitions.Repository, op plan.Oper
 	if err != nil {
 		return err
 	}
-	if err := ex.sudo("rpm", "--import", key); err != nil {
+	if err := ex.sudo("install", "-m", "0644", key, plan.KeyPath(id)); err != nil {
 		return err
 	}
-	if err := ex.sudo("dnf5", "copr", "enable", "-y", r.Project); err != nil {
+	if err := ex.sudo("rpm", "--import", plan.KeyPath(id)); err != nil {
 		return err
+	}
+	if op.Action != plan.ActionRepair {
+		if err := ex.sudo("dnf5", "copr", "enable", "-y", r.Project); err != nil {
+			return err
+		}
 	}
 	return ex.sudo(plan.PrioritySteps(id, r)[0].Argv...)
 }
@@ -503,7 +546,19 @@ func (ex *executor) flatpakRemote(op plan.Operation) ([]state.Receipt, []string,
 	}
 	for _, remote := range f.Flatpak.Value.Remotes {
 		if remote.Name == id {
-			return []state.Receipt{ex.receipt(op, "flatpak-remote", "absent", "present with key "+definitions.NormalizeFingerprint(r.Key), "flatpak remotes lists it")}, nil, nil
+			if reason := plan.FlatpakKeyDrift(r, remote); reason != "" {
+				return nil, nil, fmt.Errorf("verification: remote %s: %s", id, reason)
+			}
+			url := ""
+			for _, line := range strings.Split(string(data), "\n") {
+				if value, ok := strings.CutPrefix(line, "Url="); ok {
+					url = strings.TrimSpace(value)
+				}
+			}
+			if url == "" || strings.TrimSuffix(remote.URL, "/") != strings.TrimSuffix(url, "/") {
+				return nil, nil, fmt.Errorf("verification: remote %s URL differs from the verified remote definition", id)
+			}
+			return []state.Receipt{ex.receipt(op, "flatpak-remote", "absent", "present with key "+definitions.NormalizeFingerprint(r.Key), "remote URL, signature checking and installed key match")}, nil, nil
 		}
 	}
 	return nil, nil, fmt.Errorf("verification: remote %s is not present after the operation", id)
@@ -511,94 +566,138 @@ func (ex *executor) flatpakRemote(op plan.Operation) ([]state.Receipt, []string,
 
 // --- packages --------------------------------------------------------------
 
-// storedTransaction mirrors DNF5's transaction.json.
+func packageValues(packages map[string]facts.Package) []facts.Package {
+	out := make([]facts.Package, 0, len(packages))
+	for _, p := range packages {
+		out = append(out, p)
+	}
+	return out
+}
+
+// packageTransaction always inspects the result, including a native failure
+// after partial work. Unknown verification never becomes an empty success.
+func (ex *executor) packageTransaction(argv []string, tx *plan.Transaction) ([]facts.Package, error) {
+	nativeErr := ex.sudo(argv...)
+	installed, verifyErr := ex.installed()
+	if verifyErr != nil {
+		ex.differences = append(ex.differences, "DNF verification incomplete: "+verifyErr.Error())
+		return nil, errors.Join(nativeErr, fmt.Errorf("verification: %w", verifyErr))
+	}
+	after := facts.PackageMap(installed)
+	ex.differences = append(ex.differences, transactionDifferences(tx, ex.seen, after)...)
+	ex.seen = after
+	return installed, nativeErr
+}
+
 func (ex *executor) installTransaction(op plan.Operation) ([]state.Receipt, []string, error) {
 	if op.Transaction == nil || len(op.Steps) < 1 {
 		return nil, nil, errors.New("the install operation carries no previewed transaction")
 	}
-	if err := ex.sudo(op.Steps[0].Argv...); err != nil {
-		return nil, nil, err
-	}
-	installed, err := ex.installed()
+	installed, err := ex.packageTransaction(op.Steps[0].Argv, op.Transaction)
 	if err != nil {
 		return nil, nil, err
 	}
-	have := map[string]facts.Package{}
-	for _, p := range installed {
-		have[p.Name] = p
-	}
 	var receipts []state.Receipt
 	for _, canonical := range op.Items {
-		name := canonical[strings.LastIndexByte(canonical, ':')+1:]
-		if resolved, ok := op.Resolved[name]; ok {
+		name := plan.PackageName(canonical)
+		if resolved := op.Resolved[name]; resolved != "" {
 			name = resolved
 		}
-		inst, ok := have[name]
+		inst, ok := facts.FindPackage(installed, name)
 		if !ok {
 			return nil, nil, fmt.Errorf("verification: %s is not installed after the transaction", name)
 		}
 		sub := plan.Operation{ID: "package:" + canonical, Action: plan.ActionInstall, Paths: pathsFor(ex.p, "package:"+canonical)}
-		receipts = append(receipts, ex.receipt(sub, "dnf", "absent", "installed "+name+" "+inst.EVR(), "dnf5 repoquery --installed lists "+name+" "+inst.EVR()))
-	}
-	ex.differences = transactionDifferences(op.Transaction, ex.seen, have)
-	for _, p := range installed {
-		ex.seen[p.Name] = p
-	}
-	for name := range ex.seen {
-		if _, ok := have[name]; !ok {
-			delete(ex.seen, name)
-		}
+		r := ex.receipt(sub, "dnf", "absent", "installed "+inst.ID()+" "+inst.EVR(), "dnf5 repoquery --installed lists "+inst.ID()+" "+inst.EVR())
+		r.Package = inst.ID()
+		receipts = append(receipts, r)
 	}
 	return receipts, nil, nil
 }
 
-// transactionDifferences compares what a transaction changed, the installed
-// set before against after, with what its preview showed. It is a report
-// for the owner, not a check that stops anything: DNF resolved again at
-// install time, and this says where that resolution differed.
+// transactionDifferences compares complete RPM sets, retaining both multilib
+// architectures and simultaneous installonly versions. A preview describes
+// changes to the initial set; every other package must remain as observed.
 func transactionDifferences(tx *plan.Transaction, before, after map[string]facts.Package) []string {
-	previewed := map[string]plan.TxPackage{}
-	for _, row := range tx.Packages {
-		if row.Section != plan.SectionReplaced {
-			previewed[row.Name] = row
+	before = facts.PackageMap(packageValues(before))
+	after = facts.PackageMap(packageValues(after))
+	expected := facts.PackageMap(packageValues(before))
+	shown := map[string]bool{}
+	if tx != nil {
+		for _, row := range tx.Packages {
+			id := facts.PackageID(row.Name, row.Arch)
+			shown[id] = true
+			if strings.HasPrefix(row.Section, "removing") || row.Section == plan.SectionReplaced {
+				delete(expected, id+" "+strings.TrimPrefix(row.EVR, "0:"))
+				continue
+			}
+			// Upgrade and downgrade replace the installed version. Explicit
+			// replacing rows also cover obsoletes and installonly changes.
+			if row.Section == "upgrading" || row.Section == "downgrading" {
+				for key, p := range expected {
+					if p.ID() == id {
+						delete(expected, key)
+					}
+				}
+			}
+			version, release, _ := strings.Cut(strings.TrimPrefix(row.EVR, "0:"), "-")
+			epoch := ""
+			if e, v, ok := strings.Cut(version, ":"); ok {
+				epoch, version = e, v
+			}
+			p := facts.Package{Name: row.Name, Arch: row.Arch, Epoch: epoch, Version: version, Release: release, FromRepo: row.Repository}
+			expected[id+" "+p.EVR()] = p
 		}
+	}
+	ids := map[string]bool{}
+	for _, set := range []map[string]facts.Package{before, expected, after} {
+		for _, p := range set {
+			ids[p.ID()] = true
+		}
+	}
+	versions := func(set map[string]facts.Package, id string) []string {
+		var out []string
+		for _, p := range set {
+			if p.ID() == id {
+				out = append(out, p.EVR())
+			}
+		}
+		sort.Strings(out)
+		return out
 	}
 	var diffs []string
-	names := map[string]bool{}
-	for n := range before {
-		names[n] = true
-	}
-	for n := range after {
-		names[n] = true
-	}
-	for _, name := range sortedNames(names) {
-		was, had := before[name]
-		now, has := after[name]
-		row, shown := previewed[name]
+	for _, id := range sortedNames(ids) {
+		want, got := versions(expected, id), versions(after, id)
+		if slices.Equal(want, got) {
+			continue
+		}
+		was := versions(before, id)
 		switch {
-		case had && has && was.EVR() == now.EVR():
-			// A previewed removal that did not happen is reported below.
-			if shown && (strings.HasPrefix(row.Section, "upgrading") || strings.HasPrefix(row.Section, "downgrading")) {
-				diffs = append(diffs, fmt.Sprintf("%s was previewed for %s but is unchanged", name, row.Section))
+		case !shown[id] && len(was) == 0:
+			diffs = append(diffs, fmt.Sprintf("DNF also installed %s %s", id, strings.Join(got, ", ")))
+		case !shown[id] && len(got) == 0:
+			diffs = append(diffs, fmt.Sprintf("DNF also removed %s %s", id, strings.Join(was, ", ")))
+		case !shown[id]:
+			diffs = append(diffs, fmt.Sprintf("DNF also changed %s from %s to %s", id, strings.Join(was, ", "), strings.Join(got, ", ")))
+		default:
+			show := func(v []string) string {
+				if len(v) == 0 {
+					return "absent"
+				}
+				return strings.Join(v, ", ")
 			}
-		case !had && has && !shown:
-			diffs = append(diffs, fmt.Sprintf("DNF also installed %s %s (%s)", name, now.EVR(), now.FromRepo))
-		case !had && has && strings.TrimPrefix(row.EVR, "0:") != strings.TrimPrefix(now.EVR(), "0:"):
-			diffs = append(diffs, fmt.Sprintf("%s was installed as %s, the preview showed %s", name, now.EVR(), row.EVR))
-		case had && !has && !shown:
-			diffs = append(diffs, fmt.Sprintf("DNF also removed %s %s", name, was.EVR()))
-		case had && has && !shown:
-			diffs = append(diffs, fmt.Sprintf("DNF also changed %s from %s to %s", name, was.EVR(), now.EVR()))
+			diffs = append(diffs, fmt.Sprintf("%s is %s after DNF; the preview expected %s", id, show(got), show(want)))
 		}
 	}
-	for name, row := range previewed {
-		_, had := before[name]
-		_, has := after[name]
-		if strings.HasPrefix(row.Section, "installing") && !has {
-			diffs = append(diffs, fmt.Sprintf("%s was previewed for installation but is not installed", name))
-		}
-		if strings.HasPrefix(row.Section, "removing") && had && has {
-			diffs = append(diffs, fmt.Sprintf("%s was previewed for removal but is still installed", name))
+	if tx != nil {
+		for _, row := range tx.Packages {
+			if strings.HasPrefix(row.Section, "removing") || row.Section == plan.SectionReplaced || row.Repository == "" {
+				continue
+			}
+			id := facts.PackageID(row.Name, row.Arch)
+			if p, ok := after[id+" "+strings.TrimPrefix(row.EVR, "0:")]; ok && p.FromRepo != row.Repository {
+				diffs = append(diffs, fmt.Sprintf("%s %s came from %s; the preview showed %s", id, p.EVR(), p.FromRepo, row.Repository))
+			}
 		}
 	}
 	sort.Strings(diffs)
@@ -624,24 +723,17 @@ func pathsFor(p *plan.Plan, id string) []string {
 }
 
 func (ex *executor) removeTransaction(op plan.Operation) ([]state.Receipt, []string, error) {
-	if len(op.Steps) == 0 {
-		return nil, nil, errors.New("the removal carries no command")
-	}
-	argv := op.Steps[0].Argv
-	if len(argv) < 4 {
+	if len(op.Steps) == 0 || len(op.Steps[0].Argv) < 4 {
 		return nil, nil, errors.New("the removal command names no packages")
 	}
-	names := argv[3:] // dnf5 -y remove <names>
-	if err := ex.sudo(argv...); err != nil {
-		return nil, nil, err
-	}
-	installed, err := ex.installed()
+	argv := op.Steps[0].Argv
+	installed, err := ex.packageTransaction(argv, op.Transaction)
 	if err != nil {
 		return nil, nil, err
 	}
-	for _, p := range installed {
-		if contains(names, p.Name) {
-			return nil, nil, fmt.Errorf("verification: %s is still installed after the removal", p.Name)
+	for _, name := range argv[3:] {
+		if p, ok := facts.FindPackage(installed, name); ok {
+			return nil, nil, fmt.Errorf("verification: %s is still installed after the removal", p.ID())
 		}
 	}
 	var remove []string
@@ -702,22 +794,82 @@ func contains(list []string, s string) bool {
 // with their output on the terminal: dnf5 upgrade, and flatpak update when
 // a Flatpak remote is declared and the tool is present. Upgrades change no
 // ownership, so they record no receipts.
-func Upgrade(opts Options, root definitions.Root) error {
+func Upgrade(opts Options, root definitions.Root) *Result {
+	r := &Result{}
 	ex := &executor{opts: opts}
 	if ex.opts.Out == nil {
 		ex.opts.Out = io.Discard
 	}
-	if err := ex.sudo("dnf5", "-y", "upgrade"); err != nil {
-		return err
+	if err := ex.snapshotPackages(); err != nil {
+		r.Failed, r.Error = "upgrade:dnf", "verification before upgrade: "+err.Error()
+		r.Failures = append(r.Failures, Failure{ID: r.Failed, Error: r.Error})
+		return r
 	}
-	for _, r := range root.Repositories {
-		if r.Kind == "flatpak" {
-			if _, err := opts.Source.LookPath("flatpak"); err == nil {
-				return ex.sudo("flatpak", "update", "--system", "--noninteractive")
+	_, err := ex.packageTransaction([]string{"dnf5", "-y", "upgrade"}, opts.UpgradePreview)
+	r.Differences = append(r.Differences, ex.differences...)
+	if err != nil {
+		r.Failed, r.Error = "upgrade:dnf", err.Error()
+		r.Failures = append(r.Failures, Failure{ID: r.Failed, Error: r.Error})
+	} else {
+		r.Executed = append(r.Executed, "upgrade:dnf")
+	}
+	for _, repo := range root.Repositories {
+		if repo.Kind != "flatpak" {
+			continue
+		}
+		if _, err := opts.Source.LookPath("flatpak"); err != nil {
+			r.Pending = append(r.Pending, "upgrade:flatpak")
+			break
+		}
+		before := facts.Inspect(opts.Source, "").Flatpak
+		if !before.Known() {
+			r.Failures = append(r.Failures, Failure{ID: "upgrade:flatpak", Error: "Flatpak verification before update: " + before.Error})
+			r.Pending = append(r.Pending, "upgrade:flatpak")
+			if r.Error == "" {
+				r.Failed, r.Error = "upgrade:flatpak", "Flatpak verification before update: "+before.Error
+			}
+			break
+		}
+		nativeErr := ex.sudo("flatpak", "update", "--system", "--noninteractive")
+		after := facts.Inspect(opts.Source, "").Flatpak
+		var verifyErr error
+		if !after.Known() {
+			verifyErr = errors.New("Flatpak verification incomplete: " + after.Error)
+			r.Differences = append(r.Differences, verifyErr.Error())
+		} else {
+			old := map[string]facts.FlatpakApp{}
+			for _, app := range before.Value.Apps {
+				old[app.ID] = app
+			}
+			for _, app := range after.Value.Apps {
+				previous, existed := old[app.ID]
+				if !existed || previous.Version != app.Version || previous.Origin != app.Origin {
+					r.Differences = append(r.Differences, fmt.Sprintf("Flatpak updated %s: %s (%s) -> %s (%s)", app.ID, previous.Version, previous.Origin, app.Version, app.Origin))
+				}
+				delete(old, app.ID)
+			}
+			removed := make([]string, 0, len(old))
+			for id := range old {
+				removed = append(removed, id)
+			}
+			sort.Strings(removed)
+			for _, id := range removed {
+				r.Differences = append(r.Differences, "Flatpak removed "+id)
 			}
 		}
+		if err := errors.Join(nativeErr, verifyErr); err != nil {
+			r.Failures = append(r.Failures, Failure{ID: "upgrade:flatpak", Error: err.Error()})
+			if r.Error == "" {
+				r.Failed, r.Error = "upgrade:flatpak", err.Error()
+			} else {
+				r.Error += "; Flatpak update: " + err.Error()
+			}
+		} else {
+			r.Executed = append(r.Executed, "upgrade:flatpak")
+		}
+		break
 	}
-	return nil
+	return r
 }
 
 // userTool runs a user-scope step as the user, with its output visible: a

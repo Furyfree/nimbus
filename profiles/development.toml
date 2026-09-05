@@ -1,28 +1,15 @@
-# Developer tooling, Docker, Nix, Mise with its runtimes, and the Cargo tools
-# built with the Rust runtime Mise provides.
+# Developer applications, Docker, and Nix. Common setup provides Mise and
+# build prerequisites; Chezmoi owns the runtime and Cargo tool configuration.
 schema = 1
 id = "development"
 
 packages = [
-  "gcc",
-  "gcc-c++",
-  "clang",
-  "cmake",
-  "ninja-build",
   "vscodium:codium",
   "terra:t3code",
   "chatgpt:chatgpt",
-  "cargo:caligula",
-  "cargo:typst-cli",
-  "cargo:tinymist",
-  "cargo:cargo-update",
-  "cargo:sheldon",
-  "cargo:resvg",
-  "cargo:vm-curator",
 ]
 
 components = [
   "docker",
   "nix",
-  "mise",
 ]

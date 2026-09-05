@@ -16,7 +16,8 @@ Phases 1 to 4 are merged. Phase 4's checklist is in the evidence section.
 - [x] `nimbus init`: validates the checkout, reads its origin, asks which
   machine with the matching one pre-selected, runs the new-machine dialog
   for `--new`, writes the manifest and the selector, syncs, hands off to
-  Chezmoi once, and syncs again for the user-scope steps.
+  Chezmoi once, and reports its configuration and tool installation together.
+  A second user-only pass runs only for explicit Nimbus-owned declarations.
 - [x] `install.sh` and `bootstrap`: platform and user checks, Git through
   DNF, clone or validate the checkout, the engine from the COPR, init with
   its input on the terminal; shellcheck runs in `just check` and CI.
@@ -27,10 +28,32 @@ Phases 1 to 4 are merged. Phase 4's checklist is in the evidence section.
 ### User scope
 
 - [x] `[installer]` on components and the `cargo:` prefix; the `mise`
-  component and the development profile's crates.
-- [x] Planned as the user: the installer with its digest shown, the runtimes
-  command after the Chezmoi-written config exists, `cargo install` after the
-  Rust runtime; verified by presence, no receipts.
+  component. The tracked development profile now delegates its Cargo tools to
+  Chezmoi's native Mise configuration instead of declaring duplicate crates.
+- [x] Planned as the user: the maker installer with its digest shown and
+  binary verified, no receipts. Chezmoi's after-script invokes Mise for the
+  configured runtimes and Cargo tools on each full apply; ordinary sync does
+  not install or repair those tools.
+- [x] Select Mise and its existing build prerequisites through the common
+  profile so a non-development machine can apply the global tool configuration.
+
+### Installer stabilization
+
+- [x] Apply Chezmoi during init, including its user-tool scripts; retain native
+  lifecycle commands through `dotfiles diff`, `apply`, and `update`. Script
+  failures fail the dotfiles-and-tools stage and remain retryable.
+- [x] Show completed, failed, and skipped work with reasons, including partial
+  native changes; fail the exit status for required incomplete work.
+- [x] Recheck approved selection and definitions, carry selection approval,
+  validate new manifests before writing, and hold init's lock through its run.
+- [x] Refuse empty EOF approval and unsupported or unknown platforms before
+  mutation.
+- [x] Preserve native RPM architecture identity and conservative legacy ownership;
+  compare install, removal, and upgrade transactions before and after execution.
+- [x] Verify actual active repository keys; reconcile DNF trust and refuse unsafe
+  existing Flatpak trust changes.
+- [x] Document public HTTPS bootstrap as the intended path. GitHub visibility
+  has not been changed by these local edits.
 
 ### Validation
 
@@ -44,13 +67,49 @@ Phases 1 to 4 are merged. Phase 4's checklist is in the evidence section.
 
 ### Outside this repository
 
-- [ ] Dotfiles repository, before this phase exits: delete `machines/` and its
-  symlink-selector README, add `Machine` and `ManagedByNimbus` prompts to
-  `.chezmoi.toml.tmpl`, drop the profile-choice validation so the list is
-  stored as sent, deploy every Linux config except Hyprland and Noctalia
-  unconditionally, and update PROFILES.md.
+- [x] Read the current dotfiles template and PROFILES.md: the three handoff
+  prompts and unvalidated stored profile list are present.
+- [x] Validate the populated dotfiles Mise configuration and Linux Cargo
+  fragment together. The owner's runtime selections now include Rust; the
+  seven Cargo tools moved to `home/dot_config/mise/conf.d/cargo.toml`.
+- [ ] Verify initial and refreshed Chezmoi prompts, apply, and user-tool
+  installation together in an isolated home and disposable Fedora VM.
+- [ ] Publish Nimbus and dotfiles through a separately authorized GitHub
+  visibility change after reviewing their content and history.
 
 ## Evidence
+
+- Chezmoi-owned installation, 2026-09-05: focused Nimbus tests cover a single
+  Chezmoi handoff, native tool failure and retry in init and dotfiles summaries,
+  and ordinary sync leaving dotfiles tools alone. The real common definitions
+  provide Mise without development. Dotfiles lifecycle fixtures run native
+  Chezmoi against a tiny temporary source and fake Mise: configs precede
+  installation, unchanged apply repairs a missing tool, errors propagate and
+  retry, missing prerequisites and root are refused, Windows renders no action,
+  and previews do not install. Real downloads and platform execution remain
+  part of the VM and native platform gates.
+- Cargo handoff, 2026-09-05: native `mise config ls --json` loads the main
+  configuration and all seven Cargo tools from the fragment in an isolated
+  home; `mise settings get cargo.binstall` returns false. Isolated Chezmoi
+  `managed`, `status`, `diff`, and `verify` pass for the rendered Mise targets;
+  platform checks exclude the Cargo fragment on macOS and Windows. Offline
+  `mise ls --json` cannot resolve uncached latest versions; downloads and real
+  installation remain part of the disposable VM gate.
+- Installer stabilization, 2026-09-05: focused tests cover Chezmoi apply
+  before Mise and Cargo, skipped dependencies and retry, unrelated Chezmoi
+  source or selection refusal, lock continuity, invalid manifests without
+  writes, changed definitions during approval, EOF without an answer, and
+  platform refusal before metadata refresh. Native package and key tests cover
+  multilib ownership, legacy migration, collateral and partial transactions,
+  active key replacement, bundled keys, and existing Flatpak trust.
+  `just check`, `just validate`, and `gitleaks dir --redact --no-banner .`
+  passed. No live installation, VM drill, commit, push, or visibility change
+  was performed.
+- Local CodeRabbit CLI 0.7.6 reviewed the tracked uncommitted diff once. Its two
+  minor findings were addressed: the dotfiles group in the public CLI list and
+  accepting an explicit final yes at EOF while refusing empty or whitespace-only
+  EOF. New untracked files and subsequent integration changes were reviewed by
+  the main agent and covered by focused checks.
 
 - Phase 5 drill, first run, 2026-09-04, on the restored VM with the `vm`
   manifest: `nimbus init --machine vm` wrote the selector, the first sync
@@ -243,21 +302,15 @@ Phases 1 to 4 are merged. Phase 4's checklist is in the evidence section.
 - The declared repository URLs for 1Password, Brave, VSCodium, and Terra are
   taken from the makers' documentation and the container's repository files;
   they are exercised only when Phase 3 planning reads them.
-- User-scope steps (Mise, Cargo, `mise install`) and services are not yet
-  schema fields, so PACKAGES.md still lists what the definitions cannot yet
-  express.
-- A `key_file` is checked only for its armored public-key form; Phase 3
-  verifies the fingerprint when the key is imported through the command
-  runner.
+- User-scope steps are implemented through `[installer]` and `cargo:` references.
+  Services remain a later phase.
+- Definition validation checks armored key-file form; planning checks observed
+  active trust and execution verifies downloaded or declared keys before import.
 - Development engine builds (`0.0.0-dev`) skip the `min_engine` comparison;
   release builds enforce it.
 
-- The dotfiles template change for Q-015 is outside this repository and
-  blocks only the Phase 5 handoff.
-- Key URLs and fingerprints for RPM Fusion, 1Password, Brave, VSCodium, the
-  Hyprland COPR, Flathub, and the owner's COPRs must be recorded in
-  nimbus.toml from the makers' published keys before those repositories are
-  used; Docker's, OpenAI's, and Terra's are already recorded.
+- The current repository declarations include their key URLs or files and pins.
+  Real native reconciliation and Flatpak repair still need disposable-VM drills.
 - A maker's installer script cannot be pinned to a version; Nimbus downloads
   it, shows the file's digest, and runs that file.
 - Exact DNF5 constraint and desktop-session update behavior remains deliberately
@@ -267,10 +320,10 @@ Phases 1 to 4 are merged. Phase 4's checklist is in the evidence section.
 
 ## Completion rule
 
-Complete the phase only when every checkbox passes, evidence is recorded, a
-representative DNF component and the selection commands complete and reverse
-safely in the disposable VM, and every mutation runs through the reviewed
-plan with a receipt.
+Complete the phase only when the required installation and validation tasks
+pass, the evidence is recorded, and a disposable Fedora VM reaches applied
+user configuration and the selected user tools. Native system ownership needs
+verified receipts; user tools retain their explicit no-receipt lifecycle.
+Public repository visibility is a separate publication action.
 
-Stop after the VM run is recorded and request separate authorization before
-starting bootstrap and initialization.
+Stop before starting the services and remaining system resources phase.

@@ -44,7 +44,7 @@ func TestInitPicksTheMatchingMachineWritesTheSelectorAndSyncs(t *testing.T) {
 	code, out, _ := run(t, "init", "--checkout", root, "-y")
 	// The sync that follows stops at the first repository, which needs the
 	// network; everything before it must have happened.
-	if code != ExitFailure || !strings.Contains(out, "hardware: HP EliteBook X G1a") || !strings.Contains(out, "selected laptop; selector written to") || !strings.Contains(out, "sync stopped at repository:brave") {
+	if code != ExitFailure || !strings.Contains(out, "hardware: HP EliteBook X G1a") || !strings.Contains(out, "selected laptop; selector written to") || !strings.Contains(out, "failed     repository:brave") {
 		t.Fatalf("init: %d\n%s", code, out)
 	}
 	if len(offered) != 4 || offered[0].ID != "desktop" || offered[1].ID != "laptop" || !offered[1].Selected || offered[3].ID != "new" || offered[3].Selected {
@@ -140,28 +140,33 @@ func TestChezmoiHandoffRunsOnceWithThePromptFlags(t *testing.T) {
 	var out strings.Builder
 	dotfiles := &definitions.Dotfiles{Repo: "https://github.com/Furyfree/dotfiles.git"}
 	// Without chezmoi the handoff waits for the next run.
-	if err := chezmoiHandoff(src, &out, "laptop", []string{"common", "development"}, dotfiles); err != nil || !strings.Contains(out.String(), "chezmoi is not installed yet") {
+	if err := chezmoiHandoff(src, &out, "laptop", []string{"common", "development"}, dotfiles); err == nil || !strings.Contains(err.Error(), "chezmoi is not installed yet") {
 		t.Fatalf("without chezmoi: %v\n%s", err, out.String())
 	}
 	src.Paths["chezmoi"] = "/usr/bin/chezmoi"
-	key := facts.Key("chezmoi", "init", "--promptString", "Machine=laptop", "--promptBool", "ManagedByNimbus=true", "--promptMultichoice", "Profiles=common/development", dotfiles.Repo)
+	key := facts.Key("chezmoi", "init", "--promptString", "Machine=laptop", "--promptBool", "ManagedByNimbus=true", "--promptMultichoice", "Profiles=common/development", "--", dotfiles.Repo)
 	src.Commands[key] = nil
+	src.Commands[facts.Key("chezmoi", "apply")] = nil
+	src.Commands["chezmoi source-path"] = []byte(home)
+	src.Commands[facts.Key("git", facts.GitArgs(home, "config", "--get", "remote.origin.url")...)] = []byte(dotfiles.Repo)
+	src.Commands[facts.Key("chezmoi", facts.ChezmoiDataArgs...)] = []byte(`{"Machine":"laptop","ManagedByNimbus":true,"Profiles":["common","development"]}`)
 	// The empty directory a failed clone left behind does not count as
 	// initialized; the handoff runs again.
 	src.Dirs[filepath.Join(home, ".local", "share", "chezmoi")] = []string{}
 	out.Reset()
-	if err := chezmoiHandoff(src, &out, "laptop", []string{"common", "development"}, dotfiles); err != nil || !strings.Contains(out.String(), "chezmoi diff") {
+	if err := chezmoiHandoff(src, &out, "laptop", []string{"common", "development"}, dotfiles); err != nil || !strings.Contains(out.String(), "$ chezmoi apply") {
 		t.Fatalf("handoff: %v\n%s", err, out.String())
 	}
 	// Initialized already: only the refresh command is printed.
 	src.Dirs[filepath.Join(home, ".local", "share", "chezmoi")] = []string{".git"}
 	delete(src.Commands, key)
+	src.Commands[facts.Key("chezmoi", facts.ChezmoiDataArgs...)] = []byte(`{"Machine":"laptop","ManagedByNimbus":true,"Profiles":["common"]}`)
 	out.Reset()
 	if err := chezmoiHandoff(src, &out, "laptop", []string{"common"}, dotfiles); err != nil || !strings.Contains(out.String(), "chezmoi init --prompt --promptString Machine=laptop") {
 		t.Fatalf("initialized: %v\n%s", err, out.String())
 	}
 	out.Reset()
-	if err := chezmoiHandoff(src, &out, "vm", nil, nil); err != nil || !strings.Contains(out.String(), "stays pending") {
+	if err := chezmoiHandoff(src, &out, "vm", nil, nil); err != nil || !strings.Contains(out.String(), "dotfiles skipped") {
 		t.Fatalf("no dotfiles: %v\n%s", err, out.String())
 	}
 }

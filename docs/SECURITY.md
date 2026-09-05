@@ -52,18 +52,25 @@ Rules:
   post-install script would add that repository; Nimbus declares it directly
   and installs `chatgpt` from it so DNF owns the updates.
 - User-scope maker channels are the Mise, Zed, and Herdr installer scripts,
-  `cargo install`, and `mise install`. Nimbus runs them as the normal user,
-  never as root, as steps of the plan. A maker's script cannot be
+  `cargo install`, and `mise install`. Nimbus runs its selected installers
+  as the normal user, never as root, as steps of the plan. Chezmoi invokes
+  Mise for its own tool declarations after writing user configuration.
+  A maker's script cannot be
   pinned to a version, so Nimbus downloads it to a file, shows the URL and
   the digest of that file, and runs exactly that file after approval; it
-  never pipes a download into a shell. Mise installs Rust, so Cargo steps
-  follow the Mise runtime step. The maker owns later updates: Mise's
-  `auto_update = true` in its Chezmoi-managed config, Zed's own updater, and
-  Topgrade for Herdr, Cargo, and Mise runtimes. Removal is explicit and shown
+  never pipes a download into a shell. Mise installs Rust and the tracked
+  Cargo tools through its Cargo backend with `cargo.binstall = false`, keeping
+  source builds and one Mise-owned lifecycle. Chezmoi invokes installation
+  with `MISE_SYSTEM_DEPS=warn` and `MISE_AUTO_UPDATE=false`, so apply neither
+  installs system dependencies nor incidentally updates the Mise binary.
+  Missing Mise or failed installs fail apply; dotfiles scripts never bootstrap
+  system packages or escalate privileges. The maker owns later updates:
+  Mise's `auto_update = true` in its Chezmoi-managed config, Zed's own updater,
+  and Topgrade for Herdr, Cargo, and Mise tools. Removal is explicit and shown
   in the plan: `cargo uninstall`, `mise implode`, and `zed --uninstall`.
 - Cargo counts as the maker's channel, so Sheldon, VM Curator, Typst,
   Tinymist, Caligula, `cargo-update`, and Yazi's `resvg` helper stay on
-  Cargo although Terra packages some of them. The owner's recorded
+  Cargo through Mise although Terra packages some of them. The owner's recorded
   exception: Nimbus installs Terra's `topgrade` so the tool that drives the
   user-scope update phase is not replaced by that phase.
 - Flathub is permitted, not preferred. The owner chooses native RPMs where an
@@ -172,8 +179,9 @@ Rules:
 - Nimbus itself makes no network calls except through DNF, Flatpak, digest-
   pinned container image pulls, the user-scope maker channels named above,
   the one clone of the approved origin by `install.sh`, the metadata
-  refresh at the start of `nimbus sync`, and the one explicit Chezmoi
-  initialization.
+  refresh at the start of `nimbus sync`, and explicit Chezmoi initialization,
+  apply, or update. Chezmoi apply may download its declared user tools through
+  Mise; update also uses its native Git transport.
 
 ## Privilege
 
@@ -222,7 +230,9 @@ Rules:
   snapshots do not cover home-directory tools.
 - User-scope tools may update themselves on the maker's schedule. Mise's
   accepted global setting is `auto_update = true`; it replaces only the
-  user-owned Mise binary. Zed updates itself the same way. This is accepted
+  user-owned Mise binary. Chezmoi overrides it to false during apply, keeping
+  its installation step separate from updates. Zed updates itself the same
+  way. This is accepted
   because neither can reach the system layer.
 - Firmware updates go through `fwupd` as a reviewed manual task.
 - Fedora release upgrades are Fedora's native workflow, not Nimbus's.

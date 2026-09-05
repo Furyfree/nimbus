@@ -2,12 +2,18 @@ package cli
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
+	"time"
+
+	"github.com/Furyfree/nimbus/internal/apply"
 
 	"github.com/spf13/cobra"
 
@@ -48,12 +54,12 @@ func newInit(opts *options) *cobra.Command {
 	var f initFlags
 	cmd := &cobra.Command{
 		Use:   "init [--checkout DIR] [--machine ID | --new ID] [--dotfiles URL | --no-dotfiles] [-y]",
-		Short: "Select the machine, write the selector, sync, and hand off to Chezmoi",
+		Short: "Select the machine, write the selector, sync, apply dotfiles, and install user tools",
 		Long: `Init is the first run on a machine. It validates the checkout, asks which
 tracked machine this is or describes a new one from the hardware it detects,
 writes the selector at ~/.config/nimbus/config.toml, runs the first sync, and
-performs the one Chezmoi initialization when the manifest names a dotfiles
-repository. It is rerunnable: an existing selector for the same checkout is
+initializes Chezmoi when needed, applies its local source, and installs the
+selected user tools when the manifest names a dotfiles repository. It is rerunnable: an existing selector for the same checkout is
 reused.
 
   --checkout DIR   the Nimbus checkout (default ` + DefaultCheckout + `)
@@ -76,7 +82,7 @@ reused.
 	return cmd
 }
 
-func runInit(cmd *cobra.Command, opts *options, f initFlags) error {
+func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	out, in := cmd.OutOrStdout(), cmd.InOrStdin()
 	if opts.json {
 		return usageError{errors.New("init is interactive; it has no JSON form")}
@@ -87,6 +93,17 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) error {
 	if f.dotfiles != "" && f.noDotfiles {
 		return usageError{errors.New("--dotfiles and --no-dotfiles exclude each other")}
 	}
+	steps := []runStep{{Name: "selection", Status: "skipped"}, {Name: "system installation", Status: "skipped"}, {Name: "dotfiles and tools", Status: "skipped"}}
+	active := 0
+	defer func() {
+		if retErr != nil && steps[active].Status != "failed" {
+			steps[active].Status = "failed"
+			if !errors.Is(retErr, reported{}) {
+				steps[active].Detail = retErr.Error()
+			}
+		}
+		renderRunSummary(out, "init", steps)
+	}()
 	checkout := f.checkout
 	if checkout == "" {
 		home, err := os.UserHomeDir()
@@ -112,6 +129,10 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) error {
 		return err
 	}
 	src := newSource()
+	if err := facts.CheckPlatform(src, c.Definitions().Compatibility.Fedora); err != nil {
+		return err
+	}
+	originalDigest := c.Digest()
 	hw := facts.Inspect(src, root).Hardware
 	if hw.Known() {
 		fmt.Fprintf(out, "hardware: %s\n", describeHardware(hw.Value))
@@ -123,6 +144,8 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) error {
 		return err
 	}
 	machine := f.machine
+	var newManifest []byte
+	var newManifestPath string
 	if f.newMachine != "" {
 		m, err := newMachineDialog(in, out, c, hw.Value, f)
 		if err != nil {
@@ -133,12 +156,13 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) error {
 			return fmt.Errorf("machine %s already exists at %s; pick it with --machine or choose another ID", m.ID, path)
 		}
 		header := fmt.Sprintf("# %s: %s.\n", m.ID, describeHardware(hw.Value))
-		if err := writeManifest(path, renderManifest([]byte(header), m)); err != nil {
-			return err
-		}
-		fmt.Fprintf(out, "wrote %s; the Git change is yours to commit\n", path)
-		if c, err = loadCheckout(root); err != nil {
-			return fmt.Errorf("the new manifest does not validate: %w", err)
+		newManifest = renderManifest([]byte(header), m)
+		newManifestPath = path
+		c.Machines[m.ID] = m
+		c.Entries = append(c.Entries, definitions.Entry{Path: "machines/" + m.ID + ".toml", Mode: 0o100644, Content: append(append([]byte(nil), newManifest...), '\n')})
+		sort.Slice(c.Entries, func(i, j int) bool { return c.Entries[i].Path < c.Entries[j].Path })
+		if errs := definitions.Validate(c); len(errs) > 0 {
+			return fmt.Errorf("the new manifest does not validate: %s", errs[0])
 		}
 		machine = m.ID
 	}
@@ -160,36 +184,90 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) error {
 	if _, ok := c.Machines[machine]; !ok {
 		return fmt.Errorf("machine %s is not tracked in %s", machine, root)
 	}
+	r, rerrs := definitions.Resolve(c, machine)
+	if len(rerrs) > 0 {
+		return rerrs[0]
+	}
+	// Only explicit Nimbus declarations need a second pass. Chezmoi owns
+	// the tracked Mise tool installation within its apply stage.
+	deferredTools := false
+	for _, pkg := range r.Packages {
+		deferredTools = deferredTools || pkg.Prefix == definitions.PrefixCargo
+	}
+	for _, installer := range r.Installers {
+		deferredTools = deferredTools || len(installer.Installer.Install) > 0
+	}
+	if deferredTools {
+		steps = append(steps, runStep{Name: "remaining Nimbus user tools", Status: "skipped"})
+	}
+	lockPath, err := apply.LockPath()
+	if err != nil {
+		return err
+	}
+	lock, err := apply.Acquire(lockPath, apply.LockInfo{Command: "init", PID: os.Getpid(), Started: time.Now().UTC()})
+	if err != nil {
+		return err
+	}
+	defer lock.Release()
+	fresh, err := loadCheckout(root)
+	if err != nil {
+		return err
+	}
+	if fresh.Digest() != originalDigest {
+		return errors.New("definitions changed during machine selection; run init again")
+	}
+	if newManifestPath != "" {
+		if err := writeManifest(newManifestPath, newManifest); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "wrote %s; the Git change is yours to commit\n", newManifestPath)
+	}
 	if err := selector.Write(selectorPath, &selector.Selector{Schema: selector.CurrentSchema, Checkout: root, Machine: machine, Origin: origin}); err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "selected %s; selector written to %s\n\n", machine, selectorPath)
 
-	// The first sync, then the one Chezmoi initialization.
-	if err := runSyncWith(cmd, opts, machineFlags{checkout: root, machine: machine}, syncFlags{yes: f.yes}, nil); err != nil {
-		return err
-	}
+	steps[0].Status = "succeeded"
 	m := c.Machines[machine]
-	r, rerrs := definitions.Resolve(c, machine)
-	if len(rerrs) > 0 {
-		return rerrs[0]
+	if m.Dotfiles != nil {
+		fmt.Fprintf(out, "Installation will initialize Chezmoi from %s if needed, then run chezmoi apply, including its declared user-tool installation scripts.\n", m.Dotfiles.Repo)
+	} else {
+		steps[2].Detail = "no dotfiles repository declared"
 	}
-	fmt.Fprintln(out)
-	// A failed handoff leaves the system usable: it is reported with the
-	// command to retry, and the rest of init still runs.
-	handoffErr := chezmoiHandoff(src, out, machine, r.Profiles, m.Dotfiles)
-	if handoffErr != nil {
-		fmt.Fprintf(out, "the Chezmoi handoff did not complete: %v\nrun nimbus init again once the repository is reachable\n", handoffErr)
-	}
-	// The user-scope steps that waited for the Chezmoi-written files run
-	// now, under the answer already given.
-	fmt.Fprintln(out)
-	if err := runSyncWith(cmd, opts, machineFlags{checkout: root, machine: machine}, syncFlags{yes: true, noUpgrade: true}, nil); err != nil {
+	active = 1
+	flags := machineFlags{checkout: root, machine: machine}
+	if err := runSyncWith(cmd, opts, flags, syncFlags{yes: f.yes, deferUser: true}, lock); err != nil {
+		for i := 2; i < len(steps); i++ {
+			steps[i].Detail = "system installation did not complete"
+		}
 		return err
 	}
-	if handoffErr != nil {
-		return reported{}
+	steps[1].Status = "succeeded"
+	fresh, err = loadCheckout(root)
+	if err != nil {
+		return err
 	}
+	if fresh.Digest() != c.Digest() {
+		return errors.New("definitions changed during initialization; run init again")
+	}
+	active = 2
+	if m.Dotfiles != nil {
+		if err := chezmoiHandoff(src, out, machine, r.Profiles, m.Dotfiles); err != nil {
+			if deferredTools {
+				steps[3].Detail = "dotfiles or tool installation failed; run nimbus init again after fixing the reported error"
+			}
+			return err
+		}
+		steps[2].Status = "succeeded"
+	}
+	if !deferredTools {
+		return nil
+	}
+	active = 3
+	if err := runSyncWith(cmd, opts, flags, syncFlags{yes: true, noUpgrade: true, userOnly: true, definitionsDigest: c.Digest()}, lock); err != nil {
+		return err
+	}
+	steps[3].Status = "succeeded"
 	return nil
 }
 
@@ -318,35 +396,69 @@ func sharedDotfiles(c *definitions.Checkout) string {
 	return ""
 }
 
-// chezmoiHandoff performs the one permitted Chezmoi initialization, as the
-// user, with the machine, the Nimbus flag, and the profiles passed through
-// Chezmoi's prompt flags. An initialized Chezmoi is left alone and the
-// refresh command is printed instead.
+// chezmoiHandoff initializes a missing source, then applies its local state.
+// Chezmoi owns conflict handling and secrets; Nimbus never forces overwrites.
 func chezmoiHandoff(src facts.Source, out io.Writer, machine string, profiles []string, dotfiles *definitions.Dotfiles) error {
 	if dotfiles == nil {
-		fmt.Fprintln(out, "no dotfiles repository is declared for this machine; the Chezmoi handoff stays pending")
+		fmt.Fprintln(out, "no dotfiles repository is declared; dotfiles skipped")
 		return nil
 	}
+	wantOrigin, err := selector.NormalizeOrigin(dotfiles.Repo)
+	if err != nil {
+		return fmt.Errorf("dotfiles repository must be an explicit Git URL: %w", err)
+	}
 	if _, err := src.LookPath("chezmoi"); err != nil {
-		fmt.Fprintln(out, "chezmoi is not installed yet; run nimbus init again after the next sync for the handoff")
-		return nil
+		return errors.New("chezmoi is not installed yet; run nimbus init again after fixing the system installation")
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
 	}
 	flags := []string{"--promptString", "Machine=" + machine, "--promptBool", "ManagedByNimbus=true", "--promptMultichoice", "Profiles=" + strings.Join(profiles, "/")}
-	if facts.ChezmoiInitialized(src, home) {
-		fmt.Fprintln(out, "Chezmoi is already initialized; to refresh its answers run:")
-		fmt.Fprintf(out, "  chezmoi init --prompt %s\n", strings.Join(flags, " "))
-		return nil
+	if !facts.ChezmoiInitialized(src, home) {
+		argv := append([]string{"init"}, append(flags, "--", dotfiles.Repo)...)
+		fmt.Fprintf(out, "-> initialize Chezmoi from %s\n   $ chezmoi %s\n", dotfiles.Repo, strings.Join(argv, " "))
+		if err := src.Stream(out, out, "chezmoi", argv...); err != nil {
+			return fmt.Errorf("chezmoi init: %w", err)
+		}
+	} else {
+		fmt.Fprintln(out, "Chezmoi is already initialized; applying its existing local source")
+		fmt.Fprintf(out, "to refresh its answers: chezmoi init --prompt %s\n", strings.Join(flags, " "))
 	}
-	argv := append([]string{"init"}, append(flags, dotfiles.Repo)...)
-	fmt.Fprintf(out, "-> initialize Chezmoi from %s\n   $ chezmoi %s\n", dotfiles.Repo, strings.Join(argv, " "))
-	if err := src.Stream(out, out, "chezmoi", argv...); err != nil {
-		return fmt.Errorf("chezmoi init: %w", err)
+	sourcePath, err := src.Run("chezmoi", "source-path")
+	if err != nil {
+		return fmt.Errorf("read Chezmoi source path: %w", err)
 	}
-	fmt.Fprintln(out, "Chezmoi is initialized. Review and apply the user configuration yourself:")
-	fmt.Fprintln(out, "  chezmoi diff\n  chezmoi apply")
+	root := strings.TrimSpace(string(sourcePath))
+	if !filepath.IsAbs(root) {
+		return errors.New("Chezmoi returned no absolute source path")
+	}
+	origin, err := src.Run("git", facts.GitArgs(root, "config", "--get", "remote.origin.url")...)
+	if err != nil {
+		return fmt.Errorf("read Chezmoi source origin: %w", err)
+	}
+	actualOrigin, err := selector.NormalizeOrigin(strings.TrimSpace(string(origin)))
+	if err != nil || actualOrigin != wantOrigin {
+		return errors.New("the existing Chezmoi source does not match the declared dotfiles repository; inspect it before retrying")
+	}
+	data, err := src.Run("chezmoi", facts.ChezmoiDataArgs...)
+	if err != nil {
+		return fmt.Errorf("read Chezmoi selection: %w", err)
+	}
+	var selection struct {
+		Machine         string
+		ManagedByNimbus bool
+		Profiles        []string
+	}
+	if err := json.Unmarshal(data, &selection); err != nil {
+		return fmt.Errorf("read Chezmoi selection: %w", err)
+	}
+	if selection.Machine != machine || !selection.ManagedByNimbus || !slices.Equal(sortedCopy(selection.Profiles), sortedCopy(profiles)) {
+		return fmt.Errorf("Chezmoi's stored selection differs; refresh it before retrying: chezmoi init --prompt %s", strings.Join(flags, " "))
+	}
+	fmt.Fprintln(out, "-> apply user configuration and install its declared tools\n   $ chezmoi apply")
+	if err := src.Stream(out, out, "chezmoi", "apply"); err != nil {
+		return fmt.Errorf("chezmoi apply: %w", err)
+	}
 	return nil
 }

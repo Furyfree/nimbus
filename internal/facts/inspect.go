@@ -240,7 +240,10 @@ func repositories(src Source) ([]Repository, error) {
 		}
 		for _, o := range parseRepoFile(name, data) {
 			for i := range repos {
-				if repos[i].ID == o.ID {
+				if match, _ := filepath.Match(o.ID, repos[i].ID); match {
+					if _, ok := o.Options["gpgkey"]; ok {
+						repos[i].GPGKey = o.GPGKey
+					}
 					if o.Priority != "" {
 						repos[i].Priority = o.Priority
 					}
@@ -253,6 +256,11 @@ func repositories(src Source) ([]Repository, error) {
 					repos[i].Overrides = append(repos[i].Overrides, name)
 				}
 			}
+		}
+	}
+	for i := range repos {
+		if repos[i].Enabled {
+			repos[i].KeyFingerprints, repos[i].KeyError = repositoryKeys(src, repos[i].GPGKey)
 		}
 	}
 	return repos, nil
@@ -269,7 +277,9 @@ func flatpak(src Source) (Flatpak, error) {
 		return f, err
 	}
 	for _, r := range rows {
-		f.Remotes = append(f.Remotes, FlatpakRemote{Name: r[0], URL: r[1]})
+		remote := FlatpakRemote{Name: r[0], URL: r[1]}
+		inspectRemoteTrust(src, &remote)
+		f.Remotes = append(f.Remotes, remote)
 	}
 	out, err = src.Run("flatpak", "list", "--system", "--app", "--columns=application,version,origin")
 	if err != nil {

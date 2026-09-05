@@ -12,7 +12,16 @@ say() { printf '%s\n' "$*"; }
 fail() { printf 'bootstrap: %s\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" -ne 0 ] || fail "run as the normal user, not root"
+# shellcheck disable=SC1091
+. /etc/os-release 2>/dev/null || fail "/etc/os-release is missing"
+[ "${ID:-}" = "fedora" ] && [ "${VERSION_ID:-}" = "44" ] && [ "$(uname -m)" = "x86_64" ] || fail "Nimbus supports Fedora 44 on x86_64"
 [ -f "${CHECKOUT}/nimbus.toml" ] || fail "${CHECKOUT} holds no nimbus.toml"
+
+if ! command -v gpg >/dev/null 2>&1; then
+  say "GnuPG is required to verify repository signing keys:"
+  say "  sudo dnf5 -y install gnupg2"
+  sudo dnf5 -y install gnupg2
+fi
 
 if command -v nimbus >/dev/null 2>&1; then
   say "nimbus is already installed: $(nimbus version)"

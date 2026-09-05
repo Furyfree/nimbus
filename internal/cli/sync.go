@@ -84,7 +84,10 @@ var (
 	approver = func(in io.Reader, out io.Writer, _ string) bool {
 		fmt.Fprint(out, "Proceed? [Y/n] ")
 		reader := bufio.NewReader(in)
-		line, _ := reader.ReadString('\n')
+		line, err := reader.ReadString('\n')
+		if err != nil && !(errors.Is(err, io.EOF) && strings.TrimSpace(line) != "") {
+			return false
+		}
 		answer := strings.TrimSpace(strings.ToLower(line))
 		return answer == "" || answer == "y" || answer == "yes"
 	}
@@ -92,6 +95,9 @@ var (
 
 type syncFlags struct {
 	plan, yes, noUpgrade, prune bool
+	deferUser, userOnly         bool
+	approvedDigest              string
+	definitionsDigest           string
 }
 
 func newSync(opts *options) *cobra.Command {
@@ -126,12 +132,14 @@ end it reports what differed from the plan and records receipts under
 }
 
 type syncResult struct {
-	Digest      string   `json:"digest"`
-	Executed    []string `json:"executed"`
-	Differences []string `json:"differences"`
-	Upgraded    bool     `json:"upgraded"`
-	Failed      string   `json:"failed,omitempty"`
-	Error       string   `json:"error,omitempty"`
+	Digest      string          `json:"digest"`
+	Executed    []string        `json:"executed"`
+	Differences []string        `json:"differences"`
+	Upgraded    bool            `json:"upgraded"`
+	Failed      string          `json:"failed,omitempty"`
+	Error       string          `json:"error,omitempty"`
+	Steps       []runStep       `json:"steps"`
+	Failures    []apply.Failure `json:"failures,omitempty"`
 }
 
 func runSync(cmd *cobra.Command, opts *options, flags machineFlags, sf syncFlags) error {
@@ -140,9 +148,60 @@ func runSync(cmd *cobra.Command, opts *options, flags machineFlags, sf syncFlags
 
 // runSyncWith runs sync: refresh, plan, ask once, prepare sources, install,
 // upgrade, report. A lock already held by the caller (the selection
-// commands hold it across the manifest write) is reused and released here.
-func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncFlags, held *apply.Lock) error {
+// commands hold it across the manifest write) remains owned by the caller.
+func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncFlags, held *apply.Lock) (retErr error) {
 	out := cmd.OutOrStdout()
+	result := syncResult{Executed: []string{}, Differences: []string{}}
+	phase := "preflight"
+	var currentPlan *plan.Plan
+	if !sf.plan {
+		defer func() {
+			if retErr != nil && result.Error == "" {
+				result.Failed, result.Error = phase, retErr.Error()
+			}
+			for _, id := range result.Executed {
+				result.Steps = append(result.Steps, runStep{Name: id, Status: "succeeded"})
+			}
+			failedIDs := map[string]bool{}
+			for _, failure := range result.Failures {
+				failedIDs[failure.ID] = true
+				result.Steps = append(result.Steps, runStep{Name: failure.ID, Status: "failed", Detail: failure.Error})
+			}
+			if result.Error != "" && !failedIDs[result.Failed] {
+				failedIDs[result.Failed] = true
+				result.Steps = append(result.Steps, runStep{Name: result.Failed, Status: "failed", Detail: result.Error})
+			}
+			if currentPlan != nil {
+				for _, op := range syncOperations(currentPlan, sf).Operations {
+					if op.Action == plan.ActionKeep || contains(result.Executed, op.ID) || failedIDs[op.ID] {
+						continue
+					}
+					detail := "an earlier stage did not complete"
+					if op.After != "" {
+						detail = "waiting for " + describeAfter(currentPlan, op.After)
+					}
+					result.Steps = append(result.Steps, runStep{Name: op.ID, Status: "skipped", Detail: detail})
+				}
+			}
+			if opts.json {
+				if err := writeJSON(out, result, nil); err != nil {
+					retErr = err
+					return
+				}
+			} else {
+				renderRunSummary(out, "sync", result.Steps)
+				if len(result.Differences) > 0 {
+					fmt.Fprintln(out, "differences from the plan:")
+					for _, d := range result.Differences {
+						fmt.Fprintf(out, "  %s\n", d)
+					}
+				}
+			}
+			if retErr != nil {
+				retErr = reported{}
+			}
+		}()
+	}
 	// Native tools print their progress to the terminal; in JSON mode that
 	// goes to stderr so stdout stays one envelope.
 	errOut := cmd.ErrOrStderr()
@@ -151,28 +210,34 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 		execOut = errOut
 		sf.yes = true
 	}
-	defer func() {
-		if held != nil {
-			held.Release()
-		}
-	}()
 	s, err := loadSelected(flags)
 	if err != nil {
 		return err
 	}
 	src := newSource()
+	if !sf.plan {
+		if err := facts.CheckPlatform(src, s.Checkout.Definitions().Compatibility.Fedora); err != nil {
+			return err
+		}
+	}
+	if sf.definitionsDigest != "" && s.Checkout.Digest() != sf.definitionsDigest {
+		return errors.New("definitions changed during initialization; run init again")
+	}
 	// The run refreshes metadata first so the plan and the upgrade are
 	// exact; the cache is the user's and needs no privilege. Plan-only
 	// reads the cache as it is and touches nothing.
-	if !sf.plan {
+	if !sf.plan && sf.approvedDigest == "" && !sf.userOnly {
 		if _, err := src.Run("dnf5", "makecache"); err != nil {
 			fmt.Fprintf(errOut, "metadata not refreshed: %v\n", err)
+			result.Steps = append(result.Steps, runStep{Name: "metadata refresh", Status: "warning", Detail: err.Error() + "; using cached metadata"})
 		}
 	}
 	p, applied, err := planWithState(s, src, sf.prune)
 	if err != nil {
 		return err
 	}
+	currentPlan = p
+	result.Digest = p.Digest
 	if sf.plan {
 		if opts.json {
 			if err := writeJSON(out, p, nil); err != nil {
@@ -187,27 +252,36 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 		}
 		return nil
 	}
+	if sf.approvedDigest != "" && p.Digest != sf.approvedDigest {
+		return errors.New("the approved plan changed; run the command again")
+	}
 	if !p.Complete {
 		if !opts.json {
 			out.Write(renderPlan(p, sf.prune, !sf.noUpgrade))
 		}
 		return errors.New("the plan has problems; see above")
 	}
-	if nothingToRun(p) && sf.noUpgrade {
+	if nothingToRun(syncOperations(p, sf)) && sf.noUpgrade {
 		if opts.json {
-			return writeJSON(out, syncResult{Digest: p.Digest, Executed: []string{}, Differences: []string{}}, nil)
+			return nil
 		}
 		fmt.Fprintln(out, "nothing to do; the system matches the definitions")
 		return nil
 	}
 	// Everything left waits for something outside this run, such as the
 	// Chezmoi handoff: say so and touch nothing, sudo included.
-	if runnable(p) == 0 && sf.noUpgrade {
+	if runnable(syncOperations(p, sf)) == 0 && sf.noUpgrade {
 		if opts.json {
-			return writeJSON(out, syncResult{Digest: p.Digest, Executed: []string{}, Differences: []string{}}, nil)
+			if !sf.deferUser && !nothingToRun(syncOperations(p, sf)) {
+				return errors.New(waitingLine(p))
+			}
+			return nil
 		}
 		out.Write(renderPlan(p, sf.prune, false))
 		fmt.Fprintln(out, "\n"+waitingLine(p))
+		if !sf.deferUser {
+			return errors.New(waitingLine(p))
+		}
 		return nil
 	}
 	// One decision, at the start: the plan as it is known now. On a fresh
@@ -230,53 +304,65 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			return err
 		}
 	}
-	held = nil
-	defer lock.Release()
+	if held == nil {
+		defer lock.Release()
+	}
 	// Another Nimbus run may have finished while the question was open;
 	// the plan answered must still be the plan that runs.
-	if fresh, _, err := planWithState(s, src, sf.prune); err != nil {
+	freshSelection, err := loadSelected(flags)
+	if err != nil {
+		return fmt.Errorf("reload approved definitions: %w", err)
+	}
+	if freshSelection.Root != s.Root || freshSelection.Resolved.Machine != s.Resolved.Machine {
+		return errors.New("the selection changed while the question was open; run sync again")
+	}
+	if fresh, _, err := planWithState(freshSelection, src, sf.prune); err != nil {
 		return err
 	} else if fresh.Digest != p.Digest {
 		return errors.New("the system changed while the question was open and the plan with it; run sync again")
 	}
+	if err := facts.CheckPlatform(src, freshSelection.Checkout.Definitions().Compatibility.Fedora); err != nil {
+		return err
+	}
+	s = freshSelection
 	stage := filepath.Join(filepath.Dir(lockPath), "stage")
 	if err := os.MkdirAll(stage, 0o700); err != nil {
 		return err
 	}
 	// User-scope steps run without sudo; the credential is primed only when
 	// a privileged command, a receipt, or the upgrade will need it.
-	if needsSudo(p, sf.noUpgrade, applied.Present) {
+	if !sf.userOnly && needsSudo(syncOperations(p, sf), sf.noUpgrade, applied.Present) {
 		stopSudo, err := sudoKeepalive(src, execOut, errOut)
 		if err != nil {
 			return err
 		}
 		defer stopSudo()
 	}
+	var upgradePreview *plan.Transaction
+	if p.Updates.Unavailable == "" {
+		upgradePreview = &plan.Transaction{}
+		for _, row := range p.Updates.Available {
+			upgradePreview.Packages = append(upgradePreview.Packages, plan.TxPackage{Name: row.Name, Arch: row.Arch, EVR: row.EVR, Repository: row.Repository, Section: "upgrading"})
+		}
+	}
 	options := func(p *plan.Plan) apply.Options {
 		return apply.Options{
 			Source: src, Fetch: newFetcher(), Record: newRecorder(src, stage), Keys: apply.ExtractKeysWithRPM2Archive(src),
-			Stage: stage, Checkout: s.Checkout, Root: s.Checkout.Definitions(), FirstApply: !applied.Present,
+			Stage: stage, Checkout: s.Checkout, Root: s.Checkout.Definitions(), FirstApply: !applied.Present && !sf.userOnly,
 			Engine: version.Engine, Definitions: state.Definitions{Origin: p.Checkout.Origin, Commit: p.Checkout.Commit, Dirty: p.Checkout.Dirty, Digest: p.Definitions},
-			Out: execOut, ErrOut: errOut,
+			Out: execOut, ErrOut: errOut, UpgradePreview: upgradePreview,
 		}
 	}
-	result := syncResult{Digest: p.Digest, Differences: []string{}}
 	fail := func(failed, msg string) error {
 		result.Failed, result.Error = failed, msg
-		if opts.json {
-			if err := writeJSON(out, result, nil); err != nil {
-				return err
-			}
-			return reported{}
-		}
-		fmt.Fprintf(out, "sync stopped at %s: %s\n", failed, msg)
 		return reported{}
 	}
 	// Sources first, so the transactions that follow resolve against them;
 	// then whatever the plan holds, in passes until nothing waits.
+	phase = "apply"
 	for pass := 0; pass < 4; pass++ {
 		if pass > 0 {
-			if p, applied, err = planWithState(s, src, sf.prune); err != nil {
+			if p, applied, err = replanUnchanged(s, flags, src, sf.prune); err != nil {
 				return err
 			}
 			if !p.Complete {
@@ -289,10 +375,16 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 				break
 			}
 		}
+		currentPlan = p
 		prep := sourceOperations(p)
+		if sf.userOnly {
+			prep = nil
+		}
 		if len(prep) > 0 {
 			r := apply.Run(&plan.Plan{Machine: p.Machine, Definitions: p.Definitions, Checkout: p.Checkout, Complete: true, Digest: p.Digest, Operations: prep}, options(p))
 			result.Executed = append(result.Executed, r.Executed...)
+			result.Differences = append(result.Differences, r.Differences...)
+			result.Failures = append(result.Failures, r.Failures...)
 			if r.Error != "" {
 				return fail(r.Failed, r.Error)
 			}
@@ -302,7 +394,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 					return fmt.Errorf("refresh metadata: %w", err)
 				}
 			}
-			if p, applied, err = planWithState(s, src, sf.prune); err != nil {
+			if p, applied, err = replanUnchanged(s, flags, src, sf.prune); err != nil {
 				return err
 			}
 			if !p.Complete {
@@ -312,43 +404,75 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 				return errors.New("the plan has problems; see above")
 			}
 		}
-		r := apply.Run(p, options(p))
+		currentPlan = p
+		executable := syncOperations(p, sf)
+		for i := range executable.Operations {
+			if executable.Operations[i].Kind == plan.KindUser && contains(result.Executed, executable.Operations[i].ID) {
+				executable.Operations[i].Action = plan.ActionKeep
+			}
+		}
+		r := apply.Run(executable, options(p))
 		result.Executed = append(result.Executed, r.Executed...)
 		result.Differences = append(result.Differences, r.Differences...)
+		result.Failures = append(result.Failures, r.Failures...)
 		if r.Error != "" {
-			return fail(r.Failed, r.Error)
+			result.Failed, result.Error = r.Failed, r.Error
+			if !onlyUserFailures(r, p) {
+				return reported{}
+			}
+			break
 		}
 		if len(r.Pending) == 0 || len(r.Executed) == 0 {
 			break
 		}
 	}
 	if !sf.noUpgrade {
+		phase = "upgrade"
 		fmt.Fprintln(execOut, "-> upgrade the system")
-		if err := apply.Upgrade(options(p), s.Checkout.Definitions()); err != nil {
-			return fail("upgrade", err.Error())
+		r := apply.Upgrade(options(p), s.Checkout.Definitions())
+		result.Executed = append(result.Executed, r.Executed...)
+		result.Differences = append(result.Differences, r.Differences...)
+		result.Failures = append(result.Failures, r.Failures...)
+		if r.Error != "" {
+			return fail(r.Failed, r.Error)
 		}
 		result.Upgraded = true
 	}
-	if opts.json {
-		return writeJSON(out, result, nil)
+	if result.Error != "" {
+		return reported{}
 	}
-	if len(result.Executed) == 0 {
-		fmt.Fprintln(out, "done: nothing applied")
-	} else {
-		fmt.Fprintf(out, "done: %d operations applied; receipts recorded under %s\n", len(result.Executed), stateRoot)
-	}
-	if w := waitingLine(p); w != "" {
-		fmt.Fprintln(out, w)
-	}
-	if len(result.Differences) == 0 {
-		fmt.Fprintln(out, "differences from the plan: none")
-	} else {
-		fmt.Fprintln(out, "differences from the plan:")
-		for _, d := range result.Differences {
-			fmt.Fprintf(out, "  %s\n", d)
+	for _, op := range syncOperations(p, sf).Operations {
+		if op.After != "" && op.Action != plan.ActionKeep && !contains(result.Executed, op.ID) {
+			return fail("dependencies", waitingLine(syncOperations(p, sf)))
 		}
 	}
 	return nil
+}
+
+// replanUnchanged refreshes facts while requiring the approved definitions
+// and selection to remain unchanged for the entire run.
+func replanUnchanged(s *selected, flags machineFlags, src facts.Source, prune bool) (*plan.Plan, *state.Applied, error) {
+	fresh, err := loadSelected(flags)
+	if err != nil {
+		return nil, nil, err
+	}
+	if fresh.Root != s.Root || fresh.Resolved.Machine != s.Resolved.Machine || fresh.Checkout.Digest() != s.Checkout.Digest() {
+		return nil, nil, errors.New("definitions or selection changed during sync; run sync again")
+	}
+	return planWithState(fresh, src, prune)
+}
+
+func syncOperations(p *plan.Plan, sf syncFlags) *plan.Plan {
+	copy := *p
+	copy.Operations = nil
+	for _, op := range p.Operations {
+		dependentUser := op.Kind == plan.KindUser && (strings.HasPrefix(op.ID, "package:cargo:") || strings.HasSuffix(op.ID, ":install"))
+		if sf.deferUser && dependentUser || sf.userOnly && op.Kind != plan.KindUser {
+			continue
+		}
+		copy.Operations = append(copy.Operations, op)
+	}
+	return &copy
 }
 
 // sourceOperations are the runnable operations that prepare package
@@ -445,4 +569,23 @@ func planWithState(s *selected, src facts.Source, prune bool) (*plan.Plan, *stat
 		return nil, nil, err
 	}
 	return p, applied, nil
+}
+
+func onlyUserFailures(r *apply.Result, p *plan.Plan) bool {
+	if len(r.Failures) == 0 {
+		return false
+	}
+	for _, failure := range r.Failures {
+		user := false
+		for _, op := range p.Operations {
+			if op.ID == failure.ID && op.Kind == plan.KindUser {
+				user = true
+				break
+			}
+		}
+		if !user {
+			return false
+		}
+	}
+	return true
 }
