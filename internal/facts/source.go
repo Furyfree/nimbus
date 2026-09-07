@@ -40,17 +40,23 @@ type ExecSource struct{}
 // non-zero exit the captured stdout is still returned with the error, since
 // tools such as systemctl report state that way.
 func (ExecSource) Run(name string, args ...string) ([]byte, error) {
+	return (ExecSource{}).RunLogged(io.Discard, name, args...)
+}
+
+// RunLogged also copies both output streams to a caller-owned diagnostic
+// sink. Only the mutating installer opts in, for non-secret native commands.
+func (ExecSource) RunLogged(log io.Writer, name string, args ...string) ([]byte, error) {
 	cmd := exec.Command(name, args...)
 	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	cmd.Stdout = io.MultiWriter(&stdout, log)
+	cmd.Stderr = io.MultiWriter(&stderr, log)
 	if err := cmd.Run(); err != nil {
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
-			msg = err.Error()
+			return stdout.Bytes(), fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
 		}
-		return stdout.Bytes(), fmt.Errorf("%s %s: %s", name, strings.Join(args, " "), msg)
+		return stdout.Bytes(), fmt.Errorf("%s %s: %s: %w", name, strings.Join(args, " "), msg, err)
 	}
 	return stdout.Bytes(), nil
 }

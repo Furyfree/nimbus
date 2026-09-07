@@ -188,7 +188,8 @@ plan.MatchMachine, pick one    -> a tracked manifest, or --new with the dialog:
 plan.ProposeComponents            profiles, components pre-selected by the
                                   detection rules, the dotfiles repository
 validate, lock, write           -> manifest and selector, lock held through init
-runSyncWith                    -> first sync, one question, defer dependent tools
+runSyncWith                    -> first sync, one question, defer dependent
+tools
 chezmoiHandoff                 -> init, then apply local source and its tools
 runSyncWith(userOnly)          -> only explicit Nimbus tool declarations, if any
 report                        -> stage outcomes and retry information
@@ -201,12 +202,20 @@ runs init with an existing verified engine. When `/usr/bin/nimbus` is absent,
 it checks the reviewed key and fingerprint, downloads and verifies the RPM,
 and installs it through DNF. Missing trust material blocks a fresh installation.
 Both scripts are shellcheck-clean and part of `just check`.
+The shell owns bootstrap logging and its bounded sudo session, supervising
+init without piping the terminal. `cli/install_log.go` attaches a private
+logger only inside init; its source wrapper records command lifecycle and
+safe package output. Chezmoi output stays on the original terminal, while
+the dotfiles Mise hook writes a separate log in the same run directory.
+The normal inspection source has no logging side effects. Repository
+reconciliation reuses trusted planning and apply verification, permitting
+only native duplicate-provider overrides after package transactions.
 
 User-scope tools are planned by `plan.userTools` from `Resolved.Installers`
 and the `cargo:` references, executed by `apply.userTool` as the user through
 `Source.Stream`, and verified by presence: the installer's binary, or the
 crate in `cargo install --list`. They write no receipt. The tracked development
-profile uses Mise's Cargo backend instead: Chezmoi owns its native config
+profile uses Mise's release backends instead: Chezmoi owns its native config
 fragment and invokes `mise install` from an after-apply script. The Mise
 component installs the binary and build prerequisites through the common
 profile. No tracked manifest needs a second Nimbus

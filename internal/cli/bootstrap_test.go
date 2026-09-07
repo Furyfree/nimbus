@@ -17,8 +17,7 @@ func TestBootstrapCOPR(t *testing.T) {
 	}{
 		{"install", "", "init --checkout", true},
 		{"existing engine", "existing", "init --checkout", false},
-		{"GnuPG refusal", "gpg-refused", "GnuPG installation declined", false},
-		{"GnuPG EOF", "gpg-eof", "GnuPG installation declined", false},
+		{"GnuPG prerequisite", "gpg-install", "init --checkout", true},
 		{"missing key", "missing-key", "public key is not available", false},
 		{"wrong key", "wrong-key", "fingerprint mismatch", false},
 		{"malformed pin", "bad-pin", "invalid COPR signing-key fingerprint", false},
@@ -44,7 +43,7 @@ func TestBootstrapCOPR(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			for _, name := range []string{"bash", "dirname", "cat", "cp", "rm", "mkdir", "mktemp", "awk", "gpg", "cmp", "chmod", "install"} {
+			for _, name := range []string{"bash", "dirname", "cat", "cp", "rm", "mkdir", "mktemp", "awk", "gpg", "cmp", "chmod", "install", "date", "find", "sort", "tee", "rmdir", "sleep", "sha256sum", "ln"} {
 				path, err := exec.LookPath(name)
 				if err != nil {
 					t.Skipf("bootstrap test requires %s", name)
@@ -64,7 +63,11 @@ func TestBootstrapCOPR(t *testing.T) {
 			write("engine", "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"$TRACE\"\nprintf '%s\\n' \"$*\"\n", 0700)
 			write("preserve", "unrelated file", 0600)
 			write("bin/id", "#!/usr/bin/env bash\necho 1000\n", 0700)
-			write("bin/stat", "#!/usr/bin/env bash\necho 0\n", 0700)
+			stat, err := exec.LookPath("stat")
+			if err != nil {
+				t.Fatal(err)
+			}
+			write("bin/stat", "#!/usr/bin/env bash\nif [ \"$2\" = %u ]; then echo 0; else exec "+stat+" \"$@\"; fi\n", 0700)
 			write("bin/uname", "#!/usr/bin/env bash\necho x86_64\n", 0700)
 			write("bin/dnf5", `#!/usr/bin/env bash
 printf 'download %s\n' "$*" >> "$TRACE"
@@ -85,9 +88,11 @@ else echo 'nimbus x86_64'; fi
 			write("bin/sudo", `#!/usr/bin/env bash
 printf 'sudo %s\n' "$*" >> "$TRACE"
 case "$1" in
+  -n|-v) exit 0 ;;
   install) shift; exec install "$@" ;;
   rpmkeys) exit 0 ;;
   dnf5)
+    if [[ "$*" == *gnupg2* ]]; then ln -s "$REAL_GPG" "$ROOT/bin/gpg"; exit; fi
     if [ "$FAILURE" = install ]; then echo 'installation failed' >&2; exit 1; fi
     cp "$ROOT/engine" "$ROOT/bin/nimbus"
     chmod 700 "$ROOT/bin/nimbus" ;;
@@ -105,8 +110,13 @@ esac
 				"/etc/yum.repos.d/nimbus-engine.repo", filepath.Join(root, "etc/repo"),
 			).Replace(string(data))
 			write("bootstrap", text, 0700)
+			library, err := os.ReadFile(filepath.Join(repoRoot(t), "install.sh"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			write("install.sh", string(library), 0700)
 			switch tc.failure {
-			case "gpg-refused", "gpg-eof":
+			case "gpg-install":
 				if err := os.Remove(filepath.Join(bin, "gpg")); err != nil {
 					t.Fatal(err)
 				}
@@ -134,23 +144,36 @@ esac
 				write("bin/nimbus", "#!/usr/bin/env bash\nexit 99\n", 0700)
 				write("bootstrap", strings.ReplaceAll(text, "ENGINE="+filepath.Join(bin, "nimbus"), "ENGINE="+filepath.Join(root, "other-nimbus")), 0700)
 			}
-			cmd := exec.Command(filepath.Join(bin, "bash"), filepath.Join(root, "bootstrap"), "--machine", "vm")
-			cmd.Env = []string{"PATH=" + bin, "HOME=" + root, "TMPDIR=" + filepath.Join(root, "tmp"), "ROOT=" + root, "TRACE=" + filepath.Join(root, "trace"), "FAILURE=" + tc.failure, "LC_ALL=C", "work=" + filepath.Join(root, "preserve")}
-			if tc.failure == "gpg-refused" {
-				cmd.Stdin = strings.NewReader("n\n")
-			}
+			cmd := exec.Command(filepath.Join(bin, "bash"), filepath.Join(root, "bootstrap"), "--machine", "vm", "--onepassword-ssh")
+			cmd.Env = []string{"PATH=" + bin, "HOME=" + root, "TMPDIR=" + filepath.Join(root, "tmp"), "ROOT=" + root, "TRACE=" + filepath.Join(root, "trace"), "FAILURE=" + tc.failure, "LC_ALL=C", "REAL_GPG=" + mustLookPath(t, "gpg"), "work=" + filepath.Join(root, "preserve")}
 			output, err := cmd.CombinedOutput()
-			success := tc.failure == "" || tc.failure == "existing"
+			success := tc.failure == "" || tc.failure == "existing" || tc.failure == "gpg-install"
 			if (err == nil) != success || !strings.Contains(string(output), tc.want) {
 				t.Fatalf("bootstrap: %v\n%s", err, output)
 			}
+			if success && !strings.Contains(string(output), "--machine vm --onepassword-ssh") {
+				t.Fatal("installer arguments were not forwarded")
+			}
 			trace, _ := os.ReadFile(filepath.Join(root, "trace"))
-			if strings.Contains(string(trace), "sudo ") != tc.mutates {
+			if tc.failure == "shadow" || tc.failure == "missing-key" || tc.failure == "bad-pin" {
+				if strings.Contains(string(trace), "sudo ") {
+					t.Fatalf("early rejection requested privilege: %s", trace)
+				}
+				logs, err := filepath.Glob(filepath.Join(root, ".local/state/nimbus/install/run-*/bootstrap.log"))
+				if err != nil || len(logs) != 1 {
+					t.Fatalf("early rejection missing log: %v %v", logs, err)
+				}
+				data, err := os.ReadFile(logs[0])
+				if err != nil || !strings.Contains(string(data), tc.want) {
+					t.Fatalf("early rejection not recorded: %v %s", err, data)
+				}
+			}
+			if strings.Contains(string(trace), "sudo dnf5 ") != tc.mutates {
 				t.Fatalf("unexpected mutations: %s", trace)
 			}
 			if tc.mutates {
 				verification := strings.Index(string(trace), "--checksig")
-				mutation := strings.Index(string(trace), "sudo ")
+				mutation := strings.Index(string(trace), "sudo install ")
 				if verification < 0 || verification > mutation || !strings.Contains(string(trace), "_pkgverify_level all") {
 					t.Fatalf("mutation preceded required signature verification: %s", trace)
 				}
@@ -167,4 +190,13 @@ esac
 			}
 		})
 	}
+}
+
+func mustLookPath(t *testing.T, name string) string {
+	t.Helper()
+	path, err := exec.LookPath(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

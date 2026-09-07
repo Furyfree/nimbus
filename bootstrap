@@ -7,8 +7,10 @@ set -euo pipefail
 
 CHECKOUT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
-say() { printf '%s\n' "$*"; }
-fail() { printf 'bootstrap: %s\n' "$*" >&2; exit 1; }
+# shellcheck source=install.sh
+. "${CHECKOUT}/install.sh"
+installer_arguments "$@"
+work=""
 
 [ "$(id -u)" -ne 0 ] || fail "run as the normal user, not root"
 # shellcheck disable=SC1091
@@ -16,6 +18,7 @@ fail() { printf 'bootstrap: %s\n' "$*" >&2; exit 1; }
 if [ "${ID:-}" != "fedora" ] || [ "${VERSION_ID:-}" != "44" ] || [ "$(uname -m)" != "x86_64" ]; then
   fail "Nimbus supports Fedora 44 on x86_64"
 fi
+installer_session
 [ -f "${CHECKOUT}/nimbus.toml" ] || fail "${CHECKOUT} holds no nimbus.toml"
 
 ENGINE=/usr/bin/nimbus
@@ -24,7 +27,6 @@ PIN_SOURCE="${CHECKOUT}/system/keys/nimbus.fingerprint"
 KEY_TARGET=/etc/pki/rpm-gpg/RPM-GPG-KEY-nimbus
 REPO_TARGET=/etc/yum.repos.d/nimbus-engine.repo
 REPO_URL=https://download.copr.fedorainfracloud.org/results/furyfree/nimbus/fedora-44-x86_64/
-work=""
 
 if command -v nimbus >/dev/null 2>&1 && [ "$(command -v nimbus)" != "${ENGINE}" ]; then
   fail "another nimbus shadows ${ENGINE} on PATH; move it aside before retrying"
@@ -43,20 +45,14 @@ if [ ! -x "${ENGINE}" ]; then
   [[ "${PIN}" =~ ^[0-9A-F]{40}$ ]] || fail "invalid COPR signing-key fingerprint"
 fi
 
+installer_sudo
 if ! command -v gpg >/dev/null 2>&1; then
-  say "GnuPG is required to verify repository signing keys:"
-  say "  sudo dnf5 -y install gnupg2"
-  read -r -p "Install GnuPG? [y/N] " answer || fail "GnuPG installation declined"
-  case "${answer}" in
-    y|Y|yes|YES) ;;
-    *) fail "GnuPG installation declined" ;;
-  esac
-  sudo dnf5 -y install gnupg2
+  say "GnuPG is required to verify repository signing keys: sudo dnf5 -y install gnupg2"
+  installer_run sudo dnf5 -y install gnupg2
 fi
 
 if [ ! -x "${ENGINE}" ]; then
   work="$(mktemp -d)"
-  trap 'rm -rf -- "${work}"' EXIT
   mkdir -m 700 "${work}/gnupg" "${work}/rpmdb" "${work}/repos" "${work}/packages"
   cp -- "${KEY_SOURCE}" "${work}/key.asc"
   key_info="$(gpg --batch --no-options --homedir "${work}/gnupg" --with-colons --show-keys "${work}/key.asc")" || fail "cannot inspect the COPR signing key"
@@ -94,7 +90,7 @@ EOF
   say "Downloading the Nimbus engine from furyfree/nimbus for Fedora 44 x86_64."
   # Download only the engine from an isolated source configuration. Dependencies
   # are resolved by the final native DNF transaction against the host's sources.
-  dnf5 --setopt="reposdir=${work}/repos" --setopt="cachedir=${work}/cache" \
+  installer_run dnf5 --setopt="reposdir=${work}/repos" --setopt="cachedir=${work}/cache" \
     --setopt="nimbus-engine.gpgkey=file://${work}/key.asc" \
     download --arch=x86_64 --destdir="${work}/packages" nimbus
   shopt -s nullglob
@@ -103,17 +99,18 @@ EOF
   package="${packages[0]}"
   # An isolated RPM keyring binds the signature to this key, rather than any
   # unrelated key already trusted by the system. Require signature AND digests.
-  rpmkeys --dbpath "${work}/rpmdb" --define '_keyring rpmdb' --import "${work}/key.asc"
-  rpmkeys --dbpath "${work}/rpmdb" --define '_keyring rpmdb' \
+  installer_run rpmkeys --dbpath "${work}/rpmdb" --define '_keyring rpmdb' --import "${work}/key.asc"
+  installer_run rpmkeys --dbpath "${work}/rpmdb" --define '_keyring rpmdb' \
     --define '_pkgverify_level all' --checksig "${package}" || fail "Nimbus RPM signature verification failed"
   identity="$(rpm -qp --qf '%{NAME} %{ARCH}' "${package}")"
   [ "${identity}" = 'nimbus x86_64' ] || fail "unexpected RPM identity: ${identity}"
+  installer_run sha256sum "${package}"
   say "Verified Nimbus RPM against COPR key ${PIN}."
-  say "Installing ${KEY_TARGET} and ${REPO_TARGET}; DNF will show the package transaction for approval."
-  sudo install -m 0644 -- "${work}/key.asc" "${KEY_TARGET}"
-  sudo install -m 0644 -- "${work}/repos/nimbus-engine.repo" "${REPO_TARGET}"
-  sudo rpmkeys --import "${KEY_TARGET}"
-  sudo dnf5 --setopt=localpkg_gpgcheck=1 install "${package}"
+  say "Installing ${KEY_TARGET}, ${REPO_TARGET}, and the verified Nimbus engine. The workstation plan follows."
+  installer_run sudo install -m 0644 -- "${work}/key.asc" "${KEY_TARGET}"
+  installer_run sudo install -m 0644 -- "${work}/repos/nimbus-engine.repo" "${REPO_TARGET}"
+  installer_run sudo rpmkeys --import "${KEY_TARGET}"
+  installer_run sudo dnf5 -y --setopt=localpkg_gpgcheck=1 install "${package}"
   [ -x "${ENGINE}" ] || fail "DNF completed without installing ${ENGINE}"
 fi
 
@@ -121,12 +118,14 @@ fi
 [ "$(command -v nimbus)" = "${ENGINE}" ] || fail "another nimbus shadows ${ENGINE} on PATH; move it aside before retrying"
 say "nimbus is installed: $("${ENGINE}" version)"
 if ! report="$("${ENGINE}" validate --checkout "${CHECKOUT}" 2>&1)"; then
+  installer_event "${report}"
   printf '%s\n' "${report}" >&2
   fail "the checkout does not validate with this engine"
 fi
-# Release temporary files before exec; EXIT traps do not run after exec.
+installer_event "${report}"
+# Release downloaded packages before starting the interactive engine.
 if [ -n "${work:-}" ]; then
   rm -rf -- "${work}"
-  trap - EXIT
+  work=""
 fi
-exec "${ENGINE}" init --checkout "${CHECKOUT}" "$@"
+installer_handoff "${ENGINE}" init --checkout "${CHECKOUT}" "$@"

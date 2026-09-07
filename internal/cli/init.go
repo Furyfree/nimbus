@@ -47,7 +47,7 @@ const DefaultCheckout = "~/.local/share/nimbus"
 
 type initFlags struct {
 	checkout, machine, newMachine, dotfiles string
-	noDotfiles, yes                         bool
+	noDotfiles, yes, onePasswordSSH         bool
 }
 
 func newInit(opts *options) *cobra.Command {
@@ -78,6 +78,7 @@ reused.
 	cmd.Flags().StringVar(&f.newMachine, "new", "", "describe a new machine with this ID")
 	cmd.Flags().StringVar(&f.dotfiles, "dotfiles", "", "the dotfiles repository for a new machine")
 	cmd.Flags().BoolVar(&f.noDotfiles, "no-dotfiles", false, "a new machine without a Chezmoi handoff")
+	cmd.Flags().BoolVar(&f.onePasswordSSH, "onepassword-ssh", false, "enable 1Password SSH integration during initial Chezmoi setup")
 	cmd.Flags().BoolVarP(&f.yes, "yes", "y", false, "answer the sync question with yes")
 	return cmd
 }
@@ -90,25 +91,15 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	if f.machine != "" && f.newMachine != "" {
 		return usageError{errors.New("--machine and --new exclude each other")}
 	}
+	if f.onePasswordSSH && f.noDotfiles {
+		return usageError{errors.New("--onepassword-ssh and --no-dotfiles exclude each other")}
+	}
 	if f.dotfiles != "" && f.noDotfiles {
 		return usageError{errors.New("--dotfiles and --no-dotfiles exclude each other")}
 	}
 	if f.newMachine == "" && (f.dotfiles != "" || f.noDotfiles) {
 		return usageError{errors.New("--dotfiles and --no-dotfiles require --new; tracked machines use their manifest")}
 	}
-	steps := []runStep{{Name: "selection", Status: "skipped"}, {Name: "system installation", Status: "skipped"}, {Name: "dotfiles and tools", Status: "skipped"}}
-	notes := &setupNoteWriter{out: out}
-	active := 0
-	defer func() {
-		if retErr != nil && steps[active].Status != "failed" {
-			steps[active].Status = "failed"
-			if !errors.Is(retErr, reported{}) {
-				steps[active].Detail = retErr.Error()
-			}
-		}
-		renderRunSummary(out, "init", steps)
-		notes.render(out)
-	}()
 	checkout := f.checkout
 	if checkout == "" {
 		home, err := os.UserHomeDir()
@@ -137,6 +128,54 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	if err := facts.CheckPlatform(src, c.Definitions().Compatibility.Fedora); err != nil {
 		return err
 	}
+	log, err := openInstallLog()
+	if err != nil {
+		return fmt.Errorf("start installation log: %w", err)
+	}
+	fmt.Fprintf(out, "Installation logs: %s\n", log.dir)
+	previousLog := opts.installLog
+	opts.installLog = log
+	oldOut, oldErr := cmd.OutOrStdout(), cmd.ErrOrStderr()
+	cmd.SetOut(installWriter{oldOut, log})
+	cmd.SetErr(installWriter{oldErr, log})
+	out = cmd.OutOrStdout()
+	oldEnv, hadEnv := os.LookupEnv("NIMBUS_INSTALL_LOG_DIR")
+	if err := os.Setenv("NIMBUS_INSTALL_LOG_DIR", log.dir); err != nil {
+		log.finish(err)
+		return err
+	}
+	defer func() {
+		if hadEnv {
+			_ = os.Setenv("NIMBUS_INSTALL_LOG_DIR", oldEnv)
+		} else {
+			_ = os.Unsetenv("NIMBUS_INSTALL_LOG_DIR")
+		}
+		opts.installLog = previousLog
+		cmd.SetOut(oldOut)
+		cmd.SetErr(oldErr)
+		fmt.Fprintf(oldOut, "Installation time: %s; logs: %s\n", time.Since(log.started).Round(time.Second), log.dir)
+		if err := log.finish(retErr); err != nil {
+			fmt.Fprintf(oldErr, "installation logging failed: %v\n", err)
+			retErr = errors.Join(retErr, err)
+		}
+	}()
+	src = installSource{src, log, oldErr}
+	stageStarted := time.Now()
+	steps := []runStep{{Name: "selection", Status: "skipped"}, {Name: "system installation", Status: "skipped"}, {Name: "dotfiles and tools", Status: "skipped"}}
+	notes := &setupNoteWriter{out: oldOut}
+	active := 0
+	defer func() {
+		if retErr != nil && steps[active].Status != "failed" {
+			steps[active].Status = "failed"
+			if !errors.Is(retErr, reported{}) {
+				steps[active].Detail = retErr.Error()
+			}
+		}
+		steps[active].DurationMS = time.Since(stageStarted).Milliseconds()
+		log.event("stage end name=%s status=%s elapsed_ms=%d", steps[active].Name, steps[active].Status, steps[active].DurationMS)
+		renderRunSummary(out, "init", steps)
+		notes.render(out)
+	}()
 	originalDigest := c.Digest()
 	hw := facts.Inspect(src, root).Hardware
 	if hw.Known() {
@@ -195,6 +234,9 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 		if machine == "new" {
 			return usageError{errors.New("describe the new machine with --new ID; the dialog then asks the rest")}
 		}
+	}
+	if f.onePasswordSSH && c.Machines[machine] != nil && c.Machines[machine].Dotfiles == nil {
+		return usageError{errors.New("--onepassword-ssh requires a machine with dotfiles")}
 	}
 	if _, ok := c.Machines[machine]; !ok {
 		return fmt.Errorf("machine %s is not tracked in %s", machine, root)
@@ -258,12 +300,16 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	fmt.Fprintf(out, "selected %s; selector written to %s\n\n", machine, selectorPath)
 
 	steps[0].Status = "succeeded"
+	log.event("selection machine=%s profiles=%s definitions=%s", machine, strings.Join(r.Profiles, ","), c.Digest())
 	m := c.Machines[machine]
 	if m.Dotfiles != nil {
 		fmt.Fprintf(out, "Installation will initialize Chezmoi from %s if needed, then run chezmoi apply, including its declared user-tool installation scripts.\n", m.Dotfiles.Repo)
 	} else {
 		steps[2].Detail = "no dotfiles repository declared"
 	}
+	steps[0].DurationMS = time.Since(stageStarted).Milliseconds()
+	log.event("stage end name=selection elapsed_ms=%d", steps[0].DurationMS)
+	stageStarted = time.Now()
 	active = 1
 	flags := machineFlags{checkout: root, machine: machine}
 	if err := runSyncWith(cmd, opts, flags, syncFlags{yes: f.yes, deferUser: true}, lock); err != nil {
@@ -273,6 +319,8 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 		return err
 	}
 	steps[1].Status = "succeeded"
+	steps[1].DurationMS = time.Since(stageStarted).Milliseconds()
+	log.event("stage end name=system-installation elapsed_ms=%d", steps[1].DurationMS)
 	fresh, err = loadCheckout(root)
 	if err != nil {
 		return err
@@ -280,9 +328,10 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	if fresh.Digest() != c.Digest() {
 		return errors.New("definitions changed during initialization; run init again")
 	}
+	stageStarted = time.Now()
 	active = 2
 	if m.Dotfiles != nil {
-		if err := chezmoiHandoff(src, notes, machine, r.Profiles, m.Dotfiles); err != nil {
+		if err := chezmoiHandoff(src, notes, machine, r.Profiles, m.Dotfiles, f.onePasswordSSH); err != nil {
 			if deferredTools {
 				steps[3].Detail = "dotfiles or tool installation failed; run nimbus init again after fixing the reported error"
 			}
@@ -293,6 +342,9 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	if !deferredTools {
 		return nil
 	}
+	steps[2].DurationMS = time.Since(stageStarted).Milliseconds()
+	log.event("stage end name=dotfiles-and-tools elapsed_ms=%d", steps[2].DurationMS)
+	stageStarted = time.Now()
 	active = 3
 	if err := runSyncWith(cmd, opts, flags, syncFlags{yes: true, noUpgrade: true, userOnly: true, definitionsDigest: c.Digest()}, lock); err != nil {
 		return err
@@ -428,7 +480,7 @@ func sharedDotfiles(c *definitions.Checkout) string {
 
 // chezmoiHandoff initializes a missing source, then applies its local state.
 // Chezmoi owns conflict handling and secrets; Nimbus never forces overwrites.
-func chezmoiHandoff(src facts.Source, out io.Writer, machine string, profiles []string, dotfiles *definitions.Dotfiles) error {
+func chezmoiHandoff(src facts.Source, out io.Writer, machine string, profiles []string, dotfiles *definitions.Dotfiles, onePasswordSSH bool) error {
 	if dotfiles == nil {
 		fmt.Fprintln(out, "no dotfiles repository is declared; dotfiles skipped")
 		return nil
@@ -446,6 +498,7 @@ func chezmoiHandoff(src facts.Source, out io.Writer, machine string, profiles []
 	}
 	flags := []string{"--promptString", "Machine=" + machine, "--promptBool", "ManagedByNimbus=true", "--promptMultichoice", "Profiles=" + strings.Join(profiles, "/")}
 	if !facts.ChezmoiInitialized(src, home) {
+		flags = append(flags, "--promptBool", fmt.Sprintf("Enable 1Password SSH integration=%t", onePasswordSSH))
 		argv := append([]string{"init"}, append(flags, "--", dotfiles.Repo)...)
 		fmt.Fprintf(out, "-> initialize Chezmoi from %s\n   $ chezmoi %s\n", dotfiles.Repo, strings.Join(argv, " "))
 		if err := src.Stream(out, out, "chezmoi", argv...); err != nil {
@@ -470,6 +523,9 @@ func chezmoiHandoff(src facts.Source, out io.Writer, machine string, profiles []
 	if err != nil || actualOrigin != wantOrigin {
 		return errors.New("the existing Chezmoi source does not match the declared dotfiles repository; inspect it before retrying")
 	}
+	if logged, ok := src.(installSource); ok {
+		logged.log.checkoutIdentity(logged.Source, "dotfiles", root, actualOrigin)
+	}
 	data, err := src.Run("chezmoi", facts.ChezmoiDataArgs...)
 	if err != nil {
 		return fmt.Errorf("read Chezmoi selection: %w", err)
@@ -480,6 +536,9 @@ func chezmoiHandoff(src facts.Source, out io.Writer, machine string, profiles []
 	}
 	if selection.Machine != machine || !selection.ManagedByNimbus || !slices.Equal(sortedCopy(selection.Profiles), sortedCopy(profiles)) {
 		return fmt.Errorf("Chezmoi's stored selection differs; refresh it before retrying: %s", doctor.ChezmoiRefresh(machine, profiles, selection.OnePasswordSSH))
+	}
+	if onePasswordSSH && !selection.OnePasswordSSH {
+		return fmt.Errorf("the existing Chezmoi configuration has 1Password SSH disabled; enable it explicitly with: %s", doctor.ChezmoiRefresh(machine, profiles, true))
 	}
 	fmt.Fprintf(out, "Setup note: To change your Chezmoi answers, run: %s\n", doctor.ChezmoiRefresh(machine, profiles, selection.OnePasswordSSH))
 	fmt.Fprintln(out, "-> apply user configuration and install its declared tools\n   $ chezmoi apply")

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -112,6 +113,7 @@ func (s *installerSource) Stream(out, errOut io.Writer, name string, args ...str
 	}
 	home := os.Getenv("HOME")
 	if key == "chezmoi apply" && s.failApply {
+		fmt.Fprintln(out, "FAKE-RENDERED-SECRET")
 		return errors.New("required secret unavailable")
 	}
 	if name == filepath.Join(home, ".cargo/bin/cargo") {
@@ -158,7 +160,7 @@ func installerFixture(t *testing.T) (string, *installerSource) {
 	src.Commands["dnf5 makecache"] = nil
 	src.Commands["dnf5 --cacheonly check-upgrade"] = []byte("Repositories loaded.\n")
 	src.Commands["sudo dnf5 -y upgrade"] = nil
-	src.Commands["chezmoi init --promptString Machine=vm --promptBool ManagedByNimbus=true --promptMultichoice Profiles=common -- https://github.com/Furyfree/dotfiles.git"] = nil
+	src.Commands["chezmoi init --promptString Machine=vm --promptBool ManagedByNimbus=true --promptMultichoice Profiles=common --promptBool Enable 1Password SSH integration=false -- https://github.com/Furyfree/dotfiles.git"] = nil
 	src.Commands["chezmoi apply"] = nil
 	src.Commands["chezmoi source-path"] = []byte(home)
 	src.Commands[facts.Key("git", facts.GitArgs(home, "config", "--get", "remote.origin.url")...)] = []byte("https://github.com/Furyfree/dotfiles.git")
@@ -174,6 +176,24 @@ func TestInitAppliesDotfilesBeforeCargoAndRetriesAFailure(t *testing.T) {
 	code, out, errOut := run(t, "init", "--checkout", root, "--machine", "vm", "-y")
 	if code != ExitFailure || !strings.Contains(out, "skipped    remaining Nimbus user tools: dotfiles or tool installation failed") || !strings.Contains(errOut, "required secret unavailable") {
 		t.Fatalf("%d %s%s", code, out, errOut)
+	}
+	logs, err := filepath.Glob(filepath.Join(os.Getenv("XDG_STATE_HOME"), "nimbus", "install", "run-*", "engine.log"))
+	if err != nil || len(logs) != 1 {
+		t.Fatalf("missing installation log: %v %v", logs, err)
+	}
+	data, err := os.ReadFile(logs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"required secret unavailable", "FAKE-RENDERED-SECRET"} {
+		if strings.Contains(string(data), secret) {
+			t.Fatalf("Chezmoi secret-capable output entered log: %s", secret)
+		}
+	}
+	for _, detail := range []string{"stage end", "elapsed_ms=", "status=failed"} {
+		if !strings.Contains(string(data), detail) {
+			t.Fatalf("missing stage diagnostic %s", detail)
+		}
 	}
 	for _, call := range src.calls {
 		if strings.Contains(call, "cargo install demo") {
@@ -365,12 +385,8 @@ func TestInstallerRequiresAnOpenableControllingTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Execute only the initial guards, before any host inspection or installation.
-	guards, _, ok := strings.Cut(string(data), "# shellcheck disable=SC1091")
-	if !ok {
-		t.Fatal("installer guard boundary missing")
-	}
-	cmd := exec.Command(bash, "-c", guards+"\nexit 99\n")
+	// The terminal guard must stop the complete entry before host inspection.
+	cmd := exec.Command(bash, "-c", string(data))
 	cmd.Env = []string{"HOME=" + t.TempDir(), "PATH=" + filepath.Dir(bash)}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	output, err := cmd.CombinedOutput()
@@ -461,7 +477,7 @@ func TestSelectionRejectsChangedCheckoutIdentityBeforeWriting(t *testing.T) {
 	}
 }
 
-func TestInstallerGitApproval(t *testing.T) {
+func TestInstallerGitPrerequisiteDoesNotAsk(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(repoRoot(t), "install.sh"))
 	if err != nil {
 		t.Fatal(err)
@@ -474,22 +490,11 @@ func TestInstallerGitApproval(t *testing.T) {
 	if !ok {
 		t.Fatal("missing Git installation boundary")
 	}
-	for _, input := range []string{"", "\n", "n\n", "yes\n", "y\n"} {
-		t.Run(strings.ReplaceAll(input, "\n", "newline"), func(t *testing.T) {
-			home := t.TempDir()
-			if err := os.WriteFile(filepath.Join(home, "answer"), []byte(input), 0600); err != nil {
-				t.Fatal(err)
-			}
-			// Redirect only the terminal read; never run platform checks or real sudo.
-			script := "set -eu\nsay() { :; }\nfail() { echo \"$*\"; exit 1; }\nsudo() { echo mutation; }\n" + strings.ReplaceAll(body, "</dev/tty", "<answer")
-			cmd := exec.Command("bash", "-c", script)
-			cmd.Dir = home
-			output, err := cmd.CombinedOutput()
-			approved := input == "yes\n" || input == "y\n"
-			if (err == nil) != approved || strings.Contains(string(output), "mutation") != approved {
-				t.Fatalf("approval %q: %v %s", input, err, output)
-			}
-		})
+	script := "set -eu\nsay() { :; }\ninstaller_run() { printf '%s\\n' \"$*\"; }\n" + body
+	cmd := exec.Command("bash", "-c", script)
+	output, err := cmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(output), "sudo dnf5 -y install git") {
+		t.Fatalf("prerequisite unexpectedly asked: %v %s", err, output)
 	}
 }
 

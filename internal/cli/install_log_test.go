@@ -1,0 +1,309 @@
+package cli
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/Furyfree/nimbus/internal/facts"
+)
+
+func testInstallLog(t *testing.T) *installLog {
+	t.Helper()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("NIMBUS_INSTALL_LOG_DIR", "")
+	l, err := openInstallLog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = l.file.Close() })
+	return l
+}
+
+func TestInstallLogPrivateLifecycleAndRetention(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("NIMBUS_INSTALL_LOG_DIR", "")
+	var first, last string
+	for i := 0; i < 23; i++ {
+		l, err := openInstallLog()
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Deterministic names exercise chronological retirement without sleeps.
+		renamed := filepath.Join(filepath.Dir(l.dir), fmt.Sprintf("run-%03d", i))
+		if err := os.Rename(l.dir, renamed); err != nil {
+			t.Fatal(err)
+		}
+		l.dir = renamed
+		if i == 0 {
+			first = renamed
+		}
+		last = renamed
+		if privateLogPath(l.dir, true) != nil || privateLogPath(filepath.Join(l.dir, "engine.log"), false) != nil {
+			t.Fatal("log is not private")
+		}
+		l.event("test installation detail")
+		if err := l.finish(errors.New("installation failed")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(first); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("oldest completed run retained")
+	}
+	entries, err := os.ReadDir(filepath.Dir(last))
+	if err != nil || len(entries) != 20 {
+		t.Fatalf("retained=%d err=%v", len(entries), err)
+	}
+	data, _ := os.ReadFile(filepath.Join(last, "engine.log"))
+	if !strings.Contains(string(data), "status=failed") || !strings.Contains(string(data), "elapsed=") {
+		t.Fatalf("missing closing diagnostic: %s", data)
+	}
+}
+
+func TestInstallLogRetirementPreservesActiveAndForeignFiles(t *testing.T) {
+	l := testInstallLog(t)
+	base := filepath.Dir(l.dir)
+	if err := pruneInstallLogs(base, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(l.dir); err != nil {
+		t.Fatal("active run removed")
+	}
+	if err := l.finish(nil); err != nil {
+		t.Fatal(err)
+	}
+	foreign := filepath.Join(l.dir, "keep-me")
+	if err := os.WriteFile(foreign, []byte("unrelated"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := pruneInstallLogs(base, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(foreign); err != nil {
+		t.Fatal("foreign file removed")
+	}
+}
+
+func TestInstallLogRejectsUnsafePaths(t *testing.T) {
+	for _, attack := range []string{"directory-symlink", "ancestor-symlink", "file-symlink", "hardlink", "permissions", "marker"} {
+		t.Run(attack, func(t *testing.T) {
+			l := testInstallLog(t)
+			if err := l.finish(nil); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(filepath.Join(l.dir, ".finished")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(l.dir, ".active"), []byte("123\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			dir := l.dir
+			target := filepath.Join(t.TempDir(), "private")
+			if err := os.WriteFile(target, []byte("PRESERVE"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			switch attack {
+			case "directory-symlink":
+				link := filepath.Join(t.TempDir(), "link")
+				if err := os.Symlink(dir, link); err != nil {
+					t.Fatal(err)
+				}
+				dir = link
+			case "ancestor-symlink":
+				link := filepath.Join(t.TempDir(), "link")
+				if err := os.Symlink(filepath.Dir(dir), link); err != nil {
+					t.Fatal(err)
+				}
+				dir = filepath.Join(link, filepath.Base(dir))
+			case "file-symlink", "hardlink":
+				path := filepath.Join(dir, "engine.log")
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				link := os.Symlink
+				if attack == "hardlink" {
+					link = os.Link
+				}
+				if err := link(target, path); err != nil {
+					t.Fatal(err)
+				}
+			case "permissions":
+				if err := os.Chmod(dir, 0755); err != nil {
+					t.Fatal(err)
+				}
+			case "marker":
+				if err := os.WriteFile(filepath.Join(dir, ".nimbus-install"), []byte("foreign"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Setenv("NIMBUS_INSTALL_LOG_DIR", dir)
+			if got, err := openInstallLog(); err == nil {
+				got.finish(nil)
+				t.Fatal("unsafe log accepted")
+			}
+			data, _ := os.ReadFile(target)
+			if string(data) != "PRESERVE" {
+				t.Fatal("unrelated file changed")
+			}
+		})
+	}
+}
+
+func TestInstallLogReusesOnlyActiveRuns(t *testing.T) {
+	l := testInstallLog(t)
+	t.Setenv("NIMBUS_INSTALL_LOG_DIR", l.dir)
+	child, err := openInstallLog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.owned || child.dir != l.dir {
+		t.Fatal("child replaced the outer log")
+	}
+	if err := child.finish(nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(l.dir, ".active")); err != nil {
+		t.Fatal("child closed the outer run")
+	}
+	if err := l.finish(nil); err != nil {
+		t.Fatal(err)
+	}
+	if child, err := openInstallLog(); err == nil {
+		child.finish(nil)
+		t.Fatal("finished run reused")
+	}
+}
+
+func TestInstallLogCompletionRefusesSymlink(t *testing.T) {
+	l := testInstallLog(t)
+	target := filepath.Join(t.TempDir(), "preserve")
+	if err := os.WriteFile(target, []byte("unchanged"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(l.dir, ".finished")); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.finish(nil); err == nil {
+		t.Fatal("unsafe completion accepted")
+	}
+	data, _ := os.ReadFile(target)
+	if string(data) != "unchanged" {
+		t.Fatal("completion damaged unrelated file")
+	}
+	if _, err := os.Stat(filepath.Join(l.dir, ".active")); err != nil {
+		t.Fatal("invalid completion made run eligible for deletion")
+	}
+}
+
+type transcriptSource struct{ *facts.FakeSource }
+
+func (s transcriptSource) Stream(out, errOut io.Writer, name string, args ...string) error {
+	io.WriteString(out, "NATIVE-STDOUT\n")
+	io.WriteString(errOut, "NATIVE-STDERR\n")
+	return nil
+}
+
+func TestInstallLogExcludesSecretsAndPreservesNativeDiagnostics(t *testing.T) {
+	l := testInstallLog(t)
+	var terminal strings.Builder
+	src := installSource{transcriptSource{&facts.FakeSource{Commands: map[string][]byte{
+		"chezmoi data": []byte("FAKE-TOKEN"), "dnf5 makecache": []byte("repository metadata refreshed\n"),
+	}, Failures: map[string]string{"chezmoi data": "FAKE-SECRET-ERROR"}}}, l, &terminal}
+	if _, err := src.Run("dnf5", "makecache"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := src.Run("chezmoi", "data")
+	if err == nil {
+		t.Fatal("failed secret command succeeded")
+	}
+	fmt.Fprintln(installWriter{&terminal, l}, err)
+	if err := src.Stream(installWriter{&terminal, l}, installWriter{&terminal, l}, "chezmoi", "apply"); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(filepath.Join(l.dir, "engine.log"))
+	for _, secret := range []string{"FAKE-TOKEN", "FAKE-SECRET-ERROR", "NATIVE-STDOUT", "NATIVE-STDERR"} {
+		if strings.Contains(string(data), secret) {
+			t.Fatalf("secret-capable output leaked: %s", secret)
+		}
+	}
+	if !strings.Contains(terminal.String(), "FAKE-SECRET-ERROR") || !strings.Contains(terminal.String(), "NATIVE-STDOUT") {
+		t.Fatal("native diagnostics disappeared")
+	}
+	if err := src.Stream(installWriter{&terminal, l}, installWriter{&terminal, l}, "sudo", "dnf5", "-y", "install", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(filepath.Join(l.dir, "engine.log"))
+	for _, want := range []string{"repository metadata refreshed", "NATIVE-STDOUT", "NATIVE-STDERR", "command end", "elapsed="} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("missing safe detail: %s", want)
+		}
+	}
+}
+
+func TestInstallLogWriteFailureIsReported(t *testing.T) {
+	l := testInstallLog(t)
+	l.file.Close()
+	s := installSource{&facts.FakeSource{Commands: map[string][]byte{"dnf5 makecache": []byte("output")}}, l, io.Discard}
+	if _, err := s.Run("dnf5", "makecache"); err == nil {
+		t.Fatal("log failure hidden")
+	}
+	if err := l.finish(nil); err == nil {
+		t.Fatal("closing log failure hidden")
+	}
+}
+
+func TestReadOnlyCommandsDoNotCreateInstallationLogs(t *testing.T) {
+	root, _ := installerFixture(t)
+	base := os.Getenv("XDG_STATE_HOME")
+	for _, args := range [][]string{{"validate"}, {"status"}, {"doctor"}, {"sync", "--plan"}} {
+		run(t, append(args, "--checkout", root, "--machine", "vm")...)
+	}
+	entries, err := os.ReadDir(base)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("inspection wrote installation state: %v %v", entries, err)
+	}
+}
+
+func TestInstallLogDoesNotPrintExpectedInspectionFailures(t *testing.T) {
+	l := testInstallLog(t)
+	var terminal strings.Builder
+	src := installSource{&facts.FakeSource{Commands: map[string][]byte{"systemctl is-active firewalld": []byte("inactive")}, Failures: map[string]string{"systemctl is-active firewalld": "exit status 3", "sudo -n -v": "password required"}}, l, &terminal}
+	if _, err := src.Run("systemctl", "is-active", "firewalld"); err == nil {
+		t.Fatal("probe failure lost")
+	}
+	if _, err := src.Run("sudo", "-n", "-v"); err == nil {
+		t.Fatal("sudo cache miss lost")
+	}
+	if terminal.Len() != 0 {
+		t.Fatalf("inspection made terminal noise: %s", terminal.String())
+	}
+}
+
+func TestInstallLogKeepsRecorderAndKeyExtractionFailuresVisible(t *testing.T) {
+	for _, command := range [][]string{{"sudo", "/usr/bin/nimbus", "internal", "record", "--stage", "/tmp/fixture"}, {"rpm2archive", "/tmp/fixture.rpm"}} {
+		t.Run(command[0], func(t *testing.T) {
+			l := testInstallLog(t)
+			var terminal strings.Builder
+			src := installSource{&facts.FakeSource{Failures: map[string]string{facts.Key(command[0], command[1:]...): "native validation failed: FIXTURE-DETAIL"}}, l, &terminal}
+			_, err := src.Run(command[0], command[1:]...)
+			if err == nil {
+				t.Fatal("native failure disappeared")
+			}
+			fmt.Fprintln(installWriter{&terminal, l}, err)
+			if !strings.Contains(terminal.String(), "FIXTURE-DETAIL") {
+				t.Fatal("native cause hidden from terminal")
+			}
+			data, readErr := os.ReadFile(filepath.Join(l.dir, "engine.log"))
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if strings.Contains(string(data), "FIXTURE-DETAIL") {
+				t.Fatal("metadata-only command error entered transcript")
+			}
+		})
+	}
+}

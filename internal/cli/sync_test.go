@@ -17,6 +17,8 @@ func applyEnv(t *testing.T) string {
 	t.Helper()
 	root := repoRoot(t)
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("NIMBUS_INSTALL_LOG_DIR", "")
 	saved := stateRoot
 	stateRoot = filepath.Join(t.TempDir(), "state")
 	t.Cleanup(func() { stateRoot = saved })

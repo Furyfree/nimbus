@@ -122,14 +122,23 @@ Continue with:
 curl -fsSL https://raw.githubusercontent.com/Furyfree/nimbus/main/install.sh | bash
 ~~~
 
-The engine RPM channel and its reviewed signing-key pin are not available
-yet. The one-liner is not a complete fresh-install path until that release
-gate is met. It obtains Git when necessary and clones or validates the
-checkout; bootstrap then verifies and installs the signed COPR engine. This
-route remains blocked until the real project key and fingerprint are shipped.
-With that prerequisite met, Nimbus installs the system through one reviewed
-`nimbus sync`, initializes Chezmoi, and runs `chezmoi apply`, including its
-user-tool installation. Failures appear in the closing stage report.
+The signed `furyfree/nimbus` COPR channel and its reviewed key are available.
+This checkout requires engine 0.1.1 or newer for the improved installation
+flow; publish that engine build before repeating the clean VM drill. Bootstrap
+checks compatibility and stops if the installed engine is too old.
+
+The installer starts private logs, asks for sudo once, obtains its displayed
+prerequisites, then offers machine/profile selection as soon as the engine is
+ready. One workstation plan approval covers system installation, repository
+reconciliation, Chezmoi apply, and its declared user tools. Fresh Chezmoi setup
+leaves optional 1Password SSH integration disabled without asking; append
+`| bash -s -- --onepassword-ssh` instead of `| bash` to opt in explicitly.
+
+The closing report includes setup instructions, stage results, elapsed time,
+and the log directory. Logs retain the latest 20 completed runs below
+`~/.local/state/nimbus/install` (or `XDG_STATE_HOME`). Package and Mise output
+is recorded; authentication input, Chezmoi output, and secret-capable commands
+are excluded. Failures preserve completed work and diagnostics for retry.
 
 Btrfs recovery points stay on the same disk and are not backups. Nimbus
 provides no backup; home, guest, and container data are excluded and may be

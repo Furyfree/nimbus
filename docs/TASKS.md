@@ -2,7 +2,8 @@
 
 ## Current phase: Bootstrap, initialization, and Chezmoi handoff
 
-Plan: [Bootstrap, initialization, and Chezmoi handoff](ROADMAP.md#5-bootstrap-initialization-and-chezmoi-handoff).
+Plan: [Bootstrap, initialization, and Chezmoi
+handoff](ROADMAP.md#5-bootstrap-initialization-and-chezmoi-handoff).
 Phases 1 to 4 are merged. Phase 4's checklist is in the evidence section.
 
 ### Integration readiness
@@ -26,8 +27,52 @@ that fixture without changing production behavior.
 Phase 5's installation and failure-retry milestone passed on the Fedora VM.
 All three repositories are public and their integration PRs are merged. The
 manual `v0.1.0` release and signed COPR build passed; the verified public key
-is supplied by this checkout. A clean one-liner drill with the COPR engine
-remains the final release gate.
+is supplied by this checkout. The clean one-liner drill with the COPR engine
+completed. Its follow-up
+improvements below need a new clean VM drill before publication readiness.
+
+### Installation follow-up, 2026-09-07
+
+- [x] Remove redundant Git, GPG, and engine DNF yes prompts; supervise one
+  early sudo session through normal-user init and forward validated flags.
+- [x] Default fresh Chezmoi SSH integration to false without a question;
+  preserve stored opt-ins and support explicit `--onepassword-ssh`.
+- [x] Move five CLI tools to verified native Mise release backends, remove
+  `cargo-update`, and retain Terra Typst as its sole desired provider.
+- [x] Reconcile transaction-created duplicate repositories before subsequent
+  upgrades and at completion, without changing vendor files or signing keys.
+- [x] Add private bootstrap, engine, and Mise logs, command/stage timings,
+  bounded retention, and explicit secret-output exclusions.
+- [x] Complete integrated validation and the requested Fable 5.1 review.
+- [ ] Publish engine 0.1.1 or newer and the reviewed definitions, rebuild
+  COPR, and repeat the clean VM drill. The compatibility floor rejects 0.1.0.
+
+Validation: `just check` passes in Nimbus with Go 1.26.7 and in dotfiles
+(119 tests, three existing optional skips, plus the Bash gate). Nimbus also
+passes `go test -race ./internal/cli ./internal/facts`. Real isolated Mise
+installations and version checks pass for all five upstream tools. The actual
+init regression excludes fake rendered secrets and native secret errors from
+engine logs while preserving terminal diagnostics; the actual sync regression
+requires duplicate overrides before upgrade and a clean subsequent plan.
+Engine builds labelled 0.1.0 and 0.1.1 respectively reject and validate this
+checkout, exercising the compatibility floor.
+
+Claude Code's exact `claude-fable-5-1` model completed one full read-only review
+and two focused follow-ups alongside primary validation. Its final verdict is
+clean. Probe noise, missing native failure diagnostics, path normalization,
+early failure logging, and the two integration-test gaps were addressed.
+Strict refusal of symlinked log ancestors remains intentional. The changes
+are prepared for pull-request publication. Hosted CI, the manual release,
+and the next VM drill remain separate delivery gates.
+
+The previous VM run installed all system packages and 22 Mise tools. Native
+DNF logs show three recovered mirror 404s; they did not leave those packages
+missing. Observable timestamps span approximately 33 minutes, including the
+source builds, without an exact complete-run transcript. The read-only plan
+then requested two duplicate repository repairs from ChatGPT and 1Password
+RPM scriptlets. New tests cover that convergence and the next run will have
+native timing evidence. The VM remains installed; it has not been reset or
+modified for this follow-up.
 
 ### Initialization
 
@@ -75,9 +120,11 @@ remains the final release gate.
   validate new manifests before writing, and hold init's lock through its run.
 - [x] Refuse empty EOF approval and unsupported or unknown platforms before
   mutation.
-- [x] Preserve native RPM architecture identity and conservative legacy ownership;
+- [x] Preserve native RPM architecture identity and conservative legacy
+ownership;
   compare install, removal, and upgrade transactions before and after execution.
-- [x] Verify actual active repository keys; reconcile DNF trust and refuse unsafe
+- [x] Verify actual active repository keys; reconcile DNF trust and refuse
+unsafe
   existing Flatpak trust changes.
 - [x] Document public HTTPS bootstrap as the intended path. GitHub visibility
   has not been changed by these local edits.
@@ -147,9 +194,9 @@ successfully downloaded the engine with bootstrap's isolated DNF repository
 settings, verified its signature with the shipped pin, and used that binary
 to validate this checkout. No package was installed by this check.
 
-The restored VM has not run the new installer. The owner runs `~/start-phase5`
-after the bootstrap pin reaches main; the launcher records output, status,
-and elapsed time. The clean installation remains an open Phase 5 gate.
+The subsequent public one-liner completed on the restored VM. The temporary
+`~/start-phase5` launcher was removed; it is not part of the supported entry
+path. See the installation follow-up above for the new drill requirements.
 
 ### Manual release preparation, 2026-09-07
 
@@ -195,13 +242,16 @@ the signing key during a build. Release publication and the signed build
 therefore precede adding the verified bootstrap pin and the final VM drill.
 No placeholder pin has been added.
 
-The restored Fedora 44 VM contains no Nimbus receipts or Chezmoi state. Its
+At that preparation checkpoint, the restored VM held no receipts or Chezmoi
+state. Its
 old manual engine and checkout were moved, without deletion, to
-`~/phase5-pre-copr-20260907T180840Z/`. The new `~/start-phase5` launcher checks
+`~/phase5-pre-copr-20260907T180840Z/`. The temporary `~/start-phase5` launcher
+checked
 that COPR metadata exists, then runs the public installer through a terminal
 with output-only logging, exit-code propagation, and elapsed time. It was
-syntax-checked but not run. The owner starts the drill only after the release
-and pinned bootstrap are available on main.
+syntax-checked but not run. It was later removed before the successful public
+one-liner drill; it is
+not required by the supported installer.
 
 ### Fedora build-toolchain compatibility, 2026-09-07
 
@@ -328,7 +378,8 @@ inspection is not a full package-signature or installation verification.
 - `just check` and `just validate` pass locally. The original PR #9 CI head
   failed ShellCheck 0.9.0 on compound shell guards; those guards are corrected
   locally. This does not change or establish CI for the unpushed fixes.
-- Dotfiles `just check` completes 114 Python tests with three native/opt-in skips
+- Dotfiles `just check` completes 114 Python tests with three native/opt-in
+skips
   and its Bash suite. The separate disposable-home Neovim integration test
   passes. Isolated Chezmoi `managed`, `status`, and `diff` pass; full `verify`
   reports the deliberately pending installer script, while
@@ -590,7 +641,8 @@ inspection is not a full package-signature or installation verification.
 - The declared repository URLs for 1Password, Brave, VSCodium, and Terra are
   taken from the makers' documentation and the container's repository files;
   they are exercised only when Phase 3 planning reads them.
-- User-scope steps are implemented through `[installer]` and `cargo:` references.
+- User-scope steps are implemented through `[installer]` and `cargo:`
+references.
   Services remain a later phase.
 - Definition validation checks armored key-file form; planning checks observed
   active trust and execution verifies downloaded or declared keys before import.

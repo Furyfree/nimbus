@@ -25,6 +25,7 @@ const (
 type options struct {
 	json        bool
 	showVersion bool
+	installLog  *installLog
 }
 
 // Envelope is the versioned structure every --json result uses.

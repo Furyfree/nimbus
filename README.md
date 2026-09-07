@@ -40,6 +40,19 @@ configuration and invokes Mise to install its declared runtimes and tools.
 Standalone use requires Mise already installed; normal diff, apply, edit, and
 update operations remain direct Chezmoi commands.
 
+Fresh installation asks for sudo, selects the machine as soon as the engine
+is ready, then asks once after showing the workstation plan. Optional
+1Password SSH integration is off for fresh init. To opt in explicitly:
+
+~~~sh
+curl -fsSL https://raw.githubusercontent.com/Furyfree/nimbus/main/install.sh | bash -s -- --onepassword-ssh
+~~~
+
+The installer prints its private log directory and elapsed time. Logs live
+below `~/.local/state/nimbus/install` (or `XDG_STATE_HOME`) and retain the latest
+20 completed runs. Native package and Mise output is saved; keyboard input,
+Chezmoi template output, and secret-capable commands are excluded.
+
 ## Project documents
 
 - [SPEC.md](docs/SPEC.md) defines the complete accepted system contract.
@@ -105,8 +118,8 @@ list what Nimbus manages. The first VM drills are recorded in TASKS.md.
 
 ## Releases
 
-Releases are manual. After merging reviewed changes, run `just tag v0.1.0`
-from clean, up-to-date main, then `just release v0.1.0`. The workflow tests
+Releases are manual. After merging reviewed changes, run `just tag v0.1.1`
+from clean, up-to-date main, then `just release v0.1.1`. The workflow tests
 and packages vendored source, then creates a draft release for you to inspect
 and publish. Pushes to main or tags never start it. The COPR build is a separate
 manual action after publication.
