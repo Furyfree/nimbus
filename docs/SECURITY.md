@@ -71,22 +71,27 @@ Rules:
   Nimbus downloads it to a file and prints its SHA-256 for the record before
   running those same bytes; that digest is not a pre-approved pin. It never
   pipes a download into a shell. Mise installs Rust and the tracked
-  Cargo tools through its Cargo backend with `cargo.binstall = false`, keeping
-  source builds and one Mise-owned lifecycle. Chezmoi invokes installation
+  tools through native backends, retaining one Mise-owned lifecycle. The
+  five previously source-built CLI tools now use maker release binaries
+  through the Aqua or GitHub backends with normal verification enabled.
+  Chezmoi invokes installation
   with `MISE_SYSTEM_DEPS=warn` and `MISE_AUTO_UPDATE=false`, so apply neither
   installs system dependencies nor incidentally updates the Mise binary.
   Missing Mise or failed installs fail apply; dotfiles scripts never bootstrap
   system packages or escalate privileges. The maker owns later updates:
   Mise's `auto_update = true` in its Chezmoi-managed config, Zed's own updater,
-  and Topgrade for Mise tools, including Herdr and its Cargo declarations.
+  and Topgrade for Mise tools, including Herdr and the release binaries.
   Removal is explicit and shown
   in the plan: `cargo uninstall`, `mise implode`, and `zed --uninstall`.
-- Cargo counts as the maker's channel, so Sheldon, VM Curator,
-  Tinymist, Caligula, `cargo-update`, and Yazi's `resvg` helper stay on
-  Cargo through Mise although Terra packages some of them. The owner's recorded
-  exceptions: Nimbus installs Terra's `topgrade` so the tool that drives the
-  user-scope update phase is not replaced by that phase, and Terra's `typst`
-  to avoid its large local source build. Typst has no duplicate Mise provider.
+- Maker release binaries are accepted through native Mise backends:
+  Tinymist, Sheldon, and resvg use its Aqua registry entries; Caligula and
+  VM Curator use upstream GitHub release assets. `latest` follows stable
+  releases through native Mise upgrades. Signature and checksum checks stay
+  enabled, with no third-party quick-install service added. `cargo-update`
+  is removed; Mise already owns updates. Native targeted pruning retires only
+  obsolete Cargo providers unused by other tracked configurations, after
+  replacement executables are installed and checked. Nimbus installs Terra's
+  `topgrade` and `typst`; Typst has no duplicate Mise provider.
 - Flathub is permitted, not preferred. The owner chooses native RPMs where an
   accepted repository has one. The selected Flatpaks are Spotify, Obsidian,
   and Fastmail; Fastmail's official Linux distribution is through Flathub.
@@ -104,7 +109,7 @@ Rules:
   used.
 - Starship comes from Terra because its maker script installs to
   `/usr/local/bin` with sudo and has no self-update.
-- VM Curator is a Cargo crate that drives QEMU directly without libvirt.
+- VM Curator drives QEMU directly without libvirt.
   Nimbus owns `qemu-system-x86`, `qemu-img`, `swtpm`, and `virt-viewer` as
   Fedora packages; `qemu-system-x86` supplies the display backends, OVMF, and
   `passt`, and `virt-viewer` gives SPICE clipboard sharing with a guest.
@@ -158,6 +163,15 @@ Rules:
   data: user files are synchronized or stored externally, and local guest and
   container data may be lost and recreated. Complete disk loss is therefore an
   accepted rebuild and resynchronization event, not a Nimbus restore path.
+
+## Installation diagnostics
+
+Installation logs use private user-owned directories and files, retain the
+latest 20 completed runs, and reject unsafe paths. Package transactions and
+Mise output are recorded; Chezmoi output and arbitrary user commands remain
+terminal-only because they can render secrets. Authentication input and
+environment dumps are never captured. Read-only inspection creates no logs.
+Do not commit or publish these local diagnostics.
 
 ## Engine bootstrap trust
 

@@ -141,14 +141,12 @@ source order. This list feeds the definitions and shrinks as they land.
     - Codex, Claude Code, Grok, LiteParse, markdownlint-cli (`Mise/npm`)
     - OpenCode, Antigravity CLI, Herdr (`Mise` registry)
     - Go, .NET, uv, Java Corretto, Node.js (`Mise`)
-    - Rust (`Mise`, using rustup underneath; provides Cargo for the tools
-      below)
+    - Rust (`Mise`, using rustup underneath; provides Cargo for development)
     - gopls (`Mise/Go`)
-- Cargo tools (`user: mise install`, using Mise's Cargo backend after Rust;
-  declared in Chezmoi's `~/.config/mise/conf.d/cargo.toml`)
+- CLI tools (`user: mise install`, using native Mise release backends;
+  declared in Chezmoi's `~/.config/mise/conf.d/` fragments)
   - Caligula (`caligula`)
-  - Tinymist (`tinymist-cli` from the upstream Git release; binary `tinymist`)
-  - cargo-update (`cargo-update`)
+  - Tinymist (`tinymist`, native Aqua registry entry)
   - Sheldon (`sheldon`)
   - SVG preview for Yazi (`resvg`)
   - VM Curator (`vm-curator`)
@@ -197,7 +195,7 @@ source order. This list feeds the definitions and shrinks as they land.
 
 ## Virtualization
 
-- VM Curator (`user: Mise Cargo backend`, listed with the Cargo tools)
+- VM Curator (`user: Mise GitHub backend`, listed with the CLI tools)
 - QEMU, TPM, and SPICE viewer
   (`DNF/Fedora: qemu-system-x86 qemu-img swtpm virt-viewer`)
 - Windows container (`Docker: dockurr/windows`, pinned by digest)

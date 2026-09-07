@@ -78,7 +78,8 @@ directories themselves, and every other checkout path are excluded.
 The definition digest is SHA-256 over an unambiguously framed sequence of
 entries sorted bytewise by slash-separated checkout-relative path. The input
 starts with `nimbus-definitions-v1` followed by a zero byte. Each entry encodes
-the path length as an unsigned 64-bit big-endian integer, the path bytes, mode as
+the path length as an unsigned 64-bit big-endian integer, the path bytes, mode
+as
 an unsigned 32-bit big-endian integer holding octal `0100644` or `0100755`,
 content length as an unsigned 64-bit big-endian integer, and the exact content
 bytes. The digest renders as `sha256:` followed by lowercase hexadecimal.
@@ -158,7 +159,7 @@ schema = 1
 
 [compatibility]
 fedora = ["44"]
-min_engine = "0.1.0"
+min_engine = "0.1.1"
 
 [dnf]
 max_parallel_downloads = 20
@@ -482,7 +483,7 @@ directory, and optionally the `config` file the Chezmoi handoff writes and the
 directory. A crate is a package reference with the reserved `cargo:` prefix;
 it waits for `~/.cargo/bin/cargo`, which the Rust runtime provides, and is
 verified through `cargo install --list`. The tracked profiles instead keep
-their Cargo tools in Chezmoi's `~/.config/mise/conf.d/cargo.toml`, alongside
+their CLI tools in Chezmoi's `~/.config/mise/conf.d/` fragments, alongside
 the runtimes in `~/.config/mise/config.toml`. Mise installs both after Chezmoi
 has written the files, through Chezmoi's after-apply script. Chezmoi owns
 these declarations and the invocation; Nimbus does not repeat their list or
@@ -856,11 +857,11 @@ Running it explicitly trusts the current `install.sh` on the approved Nimbus
 
 1. requires a controlling terminal and refuses root
 2. verifies the supported Fedora release and architecture
-3. shows the HTTPS Nimbus origin and any DNF operation before approval
+3. starts private installation logs and obtains sudo once for prerequisites
 4. obtains the required Git transport through DNF when absent
 5. clones the approved origin to `~/.local/share/nimbus`, or validates and
    reuses an existing checkout there without changing it
-6. invokes that checkout's versioned `bootstrap` script
+6. invokes that checkout's versioned `bootstrap` script with validated arguments
 
 An existing target is accepted only when its canonical checkout has the
 approved normalized origin and passes containment checks. A symlinked checkout
@@ -885,9 +886,14 @@ repository configuration. Native RPM verification requires both signature and
 digests with an isolated keyring containing only that key. A failed download,
 wrong signer, unsigned package, or wrong package identity stops installation.
 Only after verification does bootstrap install its public key and repository
-file, import the key, and ask through DNF before installing the verified local
-RPM and its dependencies. Existing bootstrap files must match exactly; foreign
-files and symlinks are left untouched. The source is restricted to `nimbus`.
+file, import the key, and install the verified local RPM and its dependencies
+through DNF with `-y`. Git, GPG, system Python 3, and the engine are bootstrap
+prerequisites; their displayed commands need no separate yes prompt. The
+normal-user shell supervises a bounded sudo keepalive through init and stops it
+on exit. The engine asks for machine/profile selection as soon as it is
+available, then shows the workstation plan and asks once before installing its
+resources. Existing bootstrap files must match exactly; foreign files and
+symlinks are left untouched. The source is restricted to `nimbus`.
 
 The bootstrap key and repository remain for native DNF updates. Temporary
 downloads and the isolated verification keyring are removed on success or
@@ -904,6 +910,13 @@ Chezmoi when desired, after which init initializes it if needed and applies
 its local source. Git and repository resources installed during bootstrap may be
 adopted when they belong to desired state. The running Nimbus engine remains a
 DNF-owned prerequisite outside Nimbus resource ownership.
+
+The approved plan also covers disabling duplicate providers created by
+package transactions. Sync checks repositories after system installation and
+upgrade, shows exact native DNF overrides, and verifies convergence before
+continuing. Vendor repository files and signing keys remain intact. Canonical
+source or key changes beyond these duplicate overrides require a new run.
+The policy is included in the plan JSON and approval digest.
 
 The installation is rerunnable. It reuses only already-valid pieces and stops
 on ambiguity; partial DNF state remains recoverable through DNF, and a cloned
@@ -949,7 +962,8 @@ The new manifest is validated before writing. Init holds the operation lock
 from the manifest and selector writes through its final stage. Platform checks
 precede every mutation. Definitions are reloaded after approval and between
 execution passes; changed selection or definitions require a new run. Selection
-edits carry the reviewed plan digest into sync. EOF without an answer is never approval.
+edits carry the reviewed plan digest into sync. EOF without an answer is never
+approval.
 
 A machine manifest may carry `hardware`, a substring of the DMI product or
 board name, and a component may carry a `[detect]` table with `chassis`,
@@ -988,9 +1002,18 @@ texts:
 chezmoi init \
   --promptString Machine=<machine id> \
   --promptBool ManagedByNimbus=true \
+  --promptBool 'Enable 1Password SSH integration=false' \
   --promptMultichoice 'Profiles=<id>/<id>/...' \
   <dotfiles repository>
 ~~~
+
+Fresh Nimbus initialization answers the optional 1Password SSH prompt with
+false. `--onepassword-ssh`, forwarded by both shell entry points, opts in. It
+excludes `--no-dotfiles`. Existing initialized sources retain their stored
+answer; an explicitly requested opt-in against a disabled existing source
+prints the native refresh command instead of silently rewriting it. The
+1Password applications and closing setup instructions remain available.
+Standalone Chezmoi retains its normal interactive prompt.
 
 When reading `chezmoi data`, Nimbus uses the exact `Machine`, `ManagedByNimbus`,
 and `Profiles` keys. The lowercase `profiles` key is dotfiles' derived platform
@@ -1014,8 +1037,9 @@ user, and verifies
 build prerequisites, without a tool installation command. Source builds need
 Make, pkg-config, and the OpenSSL, curl, zlib, and libudev development packages
 as well as the compiler toolchain; Nimbus installs them before the handoff.
-Chezmoi writes `~/.config/mise/config.toml` and the Linux Cargo fragment at
-`~/.config/mise/conf.d/cargo.toml`; Nimbus never edits those files.
+Chezmoi writes `~/.config/mise/config.toml` and the Linux tool fragments below
+`~/.config/mise/conf.d/`; Nimbus never edits those files. VM Curator
+selection is x86_64-only because upstream publishes no ARM release binary.
 The common profile supplies Typst through `terra:typst`; Chezmoi does not
 declare a second Typst installation through Cargo.
 
@@ -1039,12 +1063,17 @@ approved user update lifecycle. The script never bootstraps system packages or
 escalates privileges. Configuration for an application does not imply its
 installation: only the native Mise declarations select user tools.
 
-Mise's Cargo backend builds from source (`cargo.binstall = false`) into its
-data directory, normally `~/.local/share/mise/installs`; shell activation
-exposes the selected binaries. Tinymist's native `install_env` sets
-`TMPDIR=/var/tmp` for its build and later upgrades, avoiding Fedora's
-quota-limited RAM filesystem at `/tmp`. Other commands keep their normal
-temporary directory, and native Cargo owns its temporary build files.
+Mise installs Tinymist, Sheldon, and resvg through its native registry's
+Aqua release backends. Caligula and VM Curator use native GitHub release
+backends with the appropriate upstream binary assets. All select `latest`
+stable; native `mise upgrade`, including the existing Topgrade Mise step,
+updates them without editing pinned tags. Normal Mise checksum verification
+remains enabled. Cargo binaries are no longer globally disabled, and
+`cargo-update` is removed because Mise already owns these updates.
+After installing and checking the replacement executables, the after script
+prunes only the six obsolete Cargo tool identities through native Mise.
+Versions still required by other tracked configurations and unrelated tools
+remain installed. A replacement failure prevents this cleanup.
 The script runs on every full apply, rather
 than only when configuration changes, so reapplying restores missing tools.
 Nimbus reports the handoff as one dotfiles and tools stage; individual tool
@@ -1057,8 +1086,36 @@ output remains visible as it arrives. Dotfiles emits applicable shell,
 1Password, and desktop setup instructions before starting Mise; Nimbus also
 marks the Chezmoi answer-refresh command. Only these marked instructions are
 retained in memory, deduplicated, bounded to 32 lines of at most 4096 bytes,
-and never executed or saved as a transcript. Control characters are excluded
+and never executed as commands. Control characters are excluded
 from the closing notes.
+
+Installation logs live in private per-run directories below
+`${XDG_STATE_HOME:-~/.local/state}/nimbus/install`. The path is printed at
+startup and completion. Bootstrap supervises the complete run without an
+external terminal recorder or capturing keyboard input. A Linux Python
+supervisor preserves terminal access and suspend/resume behavior. Cancellation
+signals the handoff process group, including native sudo monitors that relay
+signals to their commands. On cancellation or failure, the supervisor reaps
+descendants before shell cleanup marks the run finished or removes downloads.
+Descendants in separate sessions or without signal permission must exit before
+cleanup proceeds; the waiting state and available process IDs are printed.
+Successful native commands may leave their deliberate background services
+running. Direct init creates the same log layout. Keep the newest 20 completed
+runs; active runs and directories with unknown files or unsafe ownership are
+preserved. Symlinks and shared or hardlinked log files are rejected. Logging
+failures make the run fail visibly.
+
+`bootstrap.log` holds bootstrap commands, output, key checks, exit status,
+and elapsed time. `engine.log` adds selection, source identity, plans, native
+package output, command timing/status, repository reconciliation, and stage
+and total timings. The Mise hook writes its own `mise.log`, including full
+native install and migration output. Successful inspection output from safe
+package commands is logged even when the terminal only needs a summary.
+Chezmoi output, arbitrary user scripts, secret-capable command results,
+authentication input, environment dumps, and template renderings are excluded;
+their lifecycle status is recorded while native diagnostics remain visible.
+Read-only commands never create these logs. Logs are local diagnostic state,
+never receipts or repository content.
 
 Ordinary sync neither invokes Chezmoi nor installs tools from these dotfiles
 configurations. The convenience commands delegate directly:

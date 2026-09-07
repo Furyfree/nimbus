@@ -140,11 +140,11 @@ func TestChezmoiHandoffRunsOnceWithThePromptFlags(t *testing.T) {
 	var out strings.Builder
 	dotfiles := &definitions.Dotfiles{Repo: "https://github.com/Furyfree/dotfiles.git"}
 	// Without chezmoi the handoff waits for the next run.
-	if err := chezmoiHandoff(src, &out, "laptop", []string{"common", "development"}, dotfiles); err == nil || !strings.Contains(err.Error(), "chezmoi is not installed yet") {
+	if err := chezmoiHandoff(src, &out, "laptop", []string{"common", "development"}, dotfiles, false); err == nil || !strings.Contains(err.Error(), "chezmoi is not installed yet") {
 		t.Fatalf("without chezmoi: %v\n%s", err, out.String())
 	}
 	src.Paths["chezmoi"] = "/usr/bin/chezmoi"
-	key := facts.Key("chezmoi", "init", "--promptString", "Machine=laptop", "--promptBool", "ManagedByNimbus=true", "--promptMultichoice", "Profiles=common/development", "--", dotfiles.Repo)
+	key := facts.Key("chezmoi", "init", "--promptString", "Machine=laptop", "--promptBool", "ManagedByNimbus=true", "--promptMultichoice", "Profiles=common/development", "--promptBool", "Enable 1Password SSH integration=false", "--", dotfiles.Repo)
 	src.Commands[key] = nil
 	src.Commands[facts.Key("chezmoi", "apply")] = nil
 	src.Commands["chezmoi source-path"] = []byte(home)
@@ -154,7 +154,7 @@ func TestChezmoiHandoffRunsOnceWithThePromptFlags(t *testing.T) {
 	// initialized; the handoff runs again.
 	src.Dirs[filepath.Join(home, ".local", "share", "chezmoi")] = []string{}
 	out.Reset()
-	if err := chezmoiHandoff(src, &out, "laptop", []string{"common", "development"}, dotfiles); err != nil || !strings.Contains(out.String(), "$ chezmoi apply") {
+	if err := chezmoiHandoff(src, &out, "laptop", []string{"common", "development"}, dotfiles, false); err != nil || !strings.Contains(out.String(), "$ chezmoi apply") {
 		t.Fatalf("handoff: %v\n%s", err, out.String())
 	}
 	// Initialized already: only the refresh command is printed.
@@ -162,11 +162,42 @@ func TestChezmoiHandoffRunsOnceWithThePromptFlags(t *testing.T) {
 	delete(src.Commands, key)
 	src.Commands[facts.Key("chezmoi", facts.ChezmoiDataArgs...)] = []byte(`{"Machine":"laptop","ManagedByNimbus":true,"Profiles":["common"],"profiles":["common","unix","linux"]}`)
 	out.Reset()
-	if err := chezmoiHandoff(src, &out, "laptop", []string{"common"}, dotfiles); err != nil || !strings.Contains(out.String(), "chezmoi init --prompt --promptString Machine=laptop") {
+	if err := chezmoiHandoff(src, &out, "laptop", []string{"common"}, dotfiles, false); err != nil || !strings.Contains(out.String(), "chezmoi init --prompt --promptString Machine=laptop") {
 		t.Fatalf("initialized: %v\n%s", err, out.String())
 	}
 	out.Reset()
-	if err := chezmoiHandoff(src, &out, "vm", nil, nil); err != nil || !strings.Contains(out.String(), "dotfiles skipped") {
+	if err := chezmoiHandoff(src, &out, "vm", nil, nil, false); err != nil || !strings.Contains(out.String(), "dotfiles skipped") {
 		t.Fatalf("no dotfiles: %v\n%s", err, out.String())
+	}
+}
+
+func TestInitOnePasswordSSHIsExplicitAndPreservesExistingSelection(t *testing.T) {
+	root, src := installerFixture(t)
+	initial := "chezmoi init --promptString Machine=vm --promptBool ManagedByNimbus=true --promptMultichoice Profiles=common --promptBool Enable 1Password SSH integration="
+	delete(src.Commands, initial+"false -- https://github.com/Furyfree/dotfiles.git")
+	src.Commands[initial+"true -- https://github.com/Furyfree/dotfiles.git"] = nil
+	src.Commands[facts.Key("chezmoi", facts.ChezmoiDataArgs...)] = []byte(`{"Machine":"vm","ManagedByNimbus":true,"Profiles":["common"],"onePasswordSsh":true}`)
+	code, out, errOut := run(t, "init", "--checkout", root, "--machine", "vm", "--onepassword-ssh", "-y")
+	if code != ExitOK || !contains(src.calls, initial+"true -- https://github.com/Furyfree/dotfiles.git") {
+		t.Fatalf("opt-in failed: %d %s%s", code, out, errOut)
+	}
+	src.Dirs[filepath.Join(os.Getenv("HOME"), ".local", "share", "chezmoi")] = []string{".git"}
+	src.calls = nil
+	code, out, errOut = run(t, "init", "--checkout", root, "--machine", "vm", "-y")
+	if code != ExitOK || !strings.Contains(out, "Enable 1Password SSH integration=true") {
+		t.Fatalf("existing opt-in lost: %d %s%s", code, out, errOut)
+	}
+	for _, call := range src.calls {
+		if strings.HasPrefix(call, "chezmoi init") {
+			t.Fatal("existing source reinitialized")
+		}
+	}
+}
+
+func TestInitRejectsOnePasswordWithoutDotfilesBeforeMutation(t *testing.T) {
+	root, src := installerFixture(t)
+	code, _, errOut := run(t, "init", "--checkout", root, "--new", "newbox", "--no-dotfiles", "--onepassword-ssh")
+	if code != ExitUsage || !strings.Contains(errOut, "exclude each other") || len(src.calls) != 0 {
+		t.Fatalf("conflicting flags reached mutation: %d %s %v", code, errOut, src.calls)
 	}
 }

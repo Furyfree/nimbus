@@ -298,8 +298,9 @@ project key verifies that RPM. Bootstrap stops before engine installation if
 its reviewed key files are absent. It verifies the key fingerprint and RPM
 signature with an isolated keyring before native DNF installation. Existing
 engines must be DNF-owned at `/usr/bin/nimbus`, with no other engine shadowing
-that path. Exercising the public one-liner on the restored VM remains the
-final Phase 5 exit gate.
+that path. The public one-liner completed on the restored VM. The resulting prompt,
+logging, binary-provider, and repository-convergence improvements require
+a repeat clean drill with the next engine build before closing this follow-up.
 
 Source release preparation is a manually dispatched workflow on main, taking
 an existing version tag on that branch. It runs the tagged commit's local gate
@@ -318,12 +319,25 @@ the official Mise installer, shows its digest, runs it as the normal user
 before the handoff, and verifies the user-owned binary. Chezmoi owns the
 native tool configuration and an after script that runs `mise install` on
 every full Linux or macOS apply, under `MISE_SYSTEM_DEPS=warn` and
-`MISE_AUTO_UPDATE=false`. Its Linux `~/.config/mise/conf.d/cargo.toml`
-declares the Cargo tools for Mise's native backend; the development profile
-does not repeat them. Nimbus installs selected system dependencies itself.
+`MISE_AUTO_UPDATE=false`. Its Linux `~/.config/mise/conf.d/` fragments
+declare user CLI tools for native Mise release backends, with VM Curator
+selected only on x86_64. The development profile does not repeat them. Nimbus
+installs selected system dependencies itself.
 The common profile selects Terra's Typst RPM instead of a Cargo build.
-Tinymist remains a source build with its native install environment pointing
-temporary files at `/var/tmp`, outside Fedora's quota-limited `/tmp`.
+Tinymist, Sheldon, and resvg use Aqua release entries; Caligula and VM Curator
+use GitHub release binaries. All follow stable versions through Mise. The
+after script verifies replacements before targeted obsolete Cargo cleanup;
+`cargo-update` is removed. Fresh init disables the optional SSH integration
+without prompting unless `--onepassword-ssh` is supplied. Bootstrap gathers
+sudo before prerequisites, keeps the credential alive through init, and
+leaves one workstation-plan approval. Private native logs retain the latest
+20 completed runs, with stage timings and secret-capable output excluded.
+System Python 3 supervises handoff process groups while preserving the terminal;
+cancellation must reap descendants before completion or temporary-file cleanup.
+Successful native commands may leave their own background services running.
+Active and protected logs do not consume completed-run retention slots.
+Post-package repository reconciliation must leave no duplicate repairs for
+the next read-only plan.
 A later Chezmoi apply restores missing user tools; upgrades remain explicit.
 Standalone dotfiles use requires Mise already installed. Missing Mise and
 native install failures fail apply, while diff and preview install nothing.

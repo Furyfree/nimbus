@@ -99,6 +99,9 @@ type Plan struct {
 	Checkout    facts.Checkout `json:"checkout"`
 	Operations  []Operation    `json:"operations"`
 	Prune       []Prune        `json:"prune"`
+	// RepositoryReconciliation covers vendor repository files that RPM
+	// scriptlets may create after the reviewed install or upgrade.
+	RepositoryReconciliation string `json:"repository_reconciliation,omitempty"`
 	// PruneUnavailable says why prune candidates cannot be known yet.
 	PruneUnavailable string  `json:"prune_unavailable,omitempty"`
 	Updates          Updates `json:"updates"`
@@ -142,6 +145,13 @@ func Build(in Inputs) (*Plan, error) {
 		b.repos[r.ID] = append(b.repos[r.ID], r)
 	}
 	p := &Plan{Machine: in.Resolved.Machine, Definitions: in.Definitions, Checkout: in.Facts.Checkout.Value, Complete: true}
+	for _, id := range in.Resolved.Repositories {
+		r := in.Root.Repositories[id]
+		if r.Kind == "dnf" && r.ReleasePackage == "" {
+			p.RepositoryReconciliation = "After package transactions, disable new duplicate providers of declared baseurls through DNF overrides; preserve vendor files and keys, and verify the declared sources."
+			break
+		}
+	}
 	p.Operations = append(p.Operations, b.dnfConfig()...)
 	p.Operations = append(p.Operations, b.repositories()...)
 	p.Operations = append(p.Operations, b.packages()...)
@@ -1280,11 +1290,12 @@ func (b *builder) updates() Updates {
 // while the definition digest still does.
 func digest(p *Plan) string {
 	type canon struct {
-		Machine     string      `json:"machine"`
-		Definitions string      `json:"definitions"`
-		Operations  []Operation `json:"operations"`
+		Machine                  string      `json:"machine"`
+		Definitions              string      `json:"definitions"`
+		Operations               []Operation `json:"operations"`
+		RepositoryReconciliation string      `json:"repository_reconciliation,omitempty"`
 	}
-	data, _ := json.Marshal(canon{Machine: p.Machine, Definitions: p.Definitions, Operations: p.Operations})
+	data, _ := json.Marshal(canon{Machine: p.Machine, Definitions: p.Definitions, Operations: p.Operations, RepositoryReconciliation: p.RepositoryReconciliation})
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
 }

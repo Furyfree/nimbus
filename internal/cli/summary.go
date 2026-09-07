@@ -6,13 +6,15 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 )
 
 type runStep struct {
-	Name   string `json:"name"`
-	Status string `json:"status"`
-	Detail string `json:"detail,omitempty"`
+	DurationMS int64  `json:"duration_ms,omitempty"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Detail     string `json:"detail,omitempty"`
 }
 
 // setupNoteWriter keeps explicit instructions while forwarding all native
@@ -77,6 +79,9 @@ func renderRunSummary(out io.Writer, command string, steps []runStep) {
 	}
 	for _, step := range steps {
 		fmt.Fprintf(out, "  %-10s %s", step.Status, step.Name)
+		if step.DurationMS > 0 {
+			fmt.Fprintf(out, " (%s)", (time.Duration(step.DurationMS) * time.Millisecond).Round(time.Millisecond))
+		}
 		if step.Detail != "" {
 			fmt.Fprintf(out, ": %s", step.Detail)
 		}

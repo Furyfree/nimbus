@@ -61,12 +61,16 @@ var (
 	// privileged command, and renews the credential while apply runs, so a
 	// long transaction does not ask again. Tests replace it.
 	sudoKeepalive = func(src facts.Source, out, errOut io.Writer) (func(), error) {
-		fmt.Fprintln(out, "sudo is needed for the privileged commands; the password is asked once")
-		if err := src.Stream(out, errOut, "sudo", "-v"); err != nil {
-			return nil, err
+		if _, err := src.Run("sudo", "-n", "-v"); err != nil {
+			fmt.Fprintln(out, "sudo is needed for the privileged commands; the password is asked once")
+			if err := src.Stream(out, errOut, "sudo", "-v"); err != nil {
+				return nil, err
+			}
 		}
 		done := make(chan struct{})
+		stopped := make(chan struct{})
 		go func() {
+			defer close(stopped)
 			t := time.NewTicker(time.Minute)
 			defer t.Stop()
 			for {
@@ -78,7 +82,7 @@ var (
 				}
 			}
 		}()
-		return func() { close(done) }, nil
+		return func() { close(done); <-stopped }, nil
 	}
 	// approver reads the interactive answer. Tests replace it.
 	approver = func(in io.Reader, out io.Writer, context string) bool {
@@ -223,6 +227,9 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 		return err
 	}
 	src := newSource()
+	if opts.installLog != nil && !sf.plan {
+		src = installSource{src, opts.installLog, unlogged(cmd.ErrOrStderr())}
+	}
 	if !sf.plan {
 		if err := facts.CheckPlatform(src, s.Checkout.Definitions().Compatibility.Fedora); err != nil {
 			return err
@@ -445,6 +452,11 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			}
 			break
 		}
+		if !sf.userOnly && p.RepositoryReconciliation != "" {
+			if err := reconcileRepositories(s, flags, src, approvedCheckout, options, execOut, &result); err != nil {
+				return err
+			}
+		}
 		if len(r.Pending) == 0 || len(r.Executed) == 0 {
 			break
 		}
@@ -460,6 +472,11 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			return fail(r.Failed, r.Error)
 		}
 		result.Upgraded = true
+		if p.RepositoryReconciliation != "" {
+			if err := reconcileRepositories(s, flags, src, approvedCheckout, options, execOut, &result); err != nil {
+				return err
+			}
+		}
 	}
 	if result.Error != "" {
 		return reported{}

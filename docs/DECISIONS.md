@@ -661,10 +661,22 @@ tool list; the engine's direct `cargo:` references remain supported.
 
 Native Cargo configuration has no declarative install list. A Mise fragment
 uses an existing native format and lifecycle without adding a Nimbus resolver.
-`cargo.binstall = false` preserves source builds. Mise owns these installs and
-updates; `cargo-update` remains available for separately installed Cargo tools.
+The original configuration forced source builds with `cargo.binstall = false`.
+The 2026-09-07 amendment below replaces that choice; Mise retains ownership of
+installation and updates.
 Existing `~/.cargo/bin` tools remain untouched, so migrating their binaries or
 removing possible PATH conflicts is a separate explicit action.
+
+Amended 2026-09-07 after the clean VM installation: use native Mise release
+backends for Tinymist, Sheldon, resvg, Caligula, and VM Curator. Upstream
+binaries avoid long source builds and Tinymist's manually pinned Git tag.
+Aqua supplies the first three registry entries; the native GitHub backend
+supplies the other two. `latest` tracks stable versions through explicit Mise
+or Topgrade upgrades. Keep verification enabled and remove the blanket binary
+disable setting. Remove `cargo-update`; there is no second updater for these
+Mise-owned tools. Install and verify replacement executables before native
+pruning limited to obsolete Cargo identities. Other tracked project needs and
+direct `~/.cargo/bin` installations are preserved. Typst remains a Terra RPM.
 
 #### D-033: Chezmoi invokes installation for its declared user tools
 

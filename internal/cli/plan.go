@@ -36,6 +36,9 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 		fmt.Fprintf(&b, " (checkout %s at %.12s, %s)", p.Checkout.Origin, p.Checkout.Commit, state)
 	}
 	b.WriteString("\n")
+	if p.RepositoryReconciliation != "" {
+		fmt.Fprintf(&b, "%s\n", p.RepositoryReconciliation)
+	}
 
 	var sources, problems, notes, userTools []string
 	var installTx *plan.Operation
