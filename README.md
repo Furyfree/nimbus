@@ -76,9 +76,11 @@ ShellCheck for the installation and release scripts.
 produces a static `nimbus` binary that runs on any x86_64 Linux, and
 `just vm-push` copies that binary and the definitions to the drill VM.
 
-The engine RPM channel and reviewed signing-key pin remain a release blocker.
-Bootstrap is prepared to verify and install the COPR RPM, but refuses a fresh
-installation until the real public key and its reviewed fingerprint are shipped.
+The engine is distributed through the signed
+[`furyfree/nimbus` COPR](https://copr.fedorainfracloud.org/coprs/furyfree/nimbus/).
+Bootstrap verifies its RPM against the checked-in public key and fingerprint
+before asking DNF to install it. The clean VM drill remains the final Phase 5
+gate.
 
 The delivered commands are `init`, `sync`, `validate`, `doctor`, `status`,
 `managed`, `unmanaged`, `why`, the `profiles`, `components`, and `packages`

@@ -24,12 +24,10 @@ on EOF at the optional SSH prompt; supplying the user's empty answer fixed
 that fixture without changing production behavior.
 
 Phase 5's installation and failure-retry milestone passed on the Fedora VM.
-Release completion still requires the signed engine distribution, its reviewed
-key pin, and a clean one-liner drill with the final changes. All three
-repositories are now public. The COPR key URL still returned HTTP 404 on
-2026-09-07. Earlier checks that day found Nimbus and dotfiles private, before
-the owner changed visibility. Commit and push are authorized; the final
-published changes still need current CI and review.
+All three repositories are public and their integration PRs are merged. The
+manual `v0.1.0` release and signed COPR build passed; the verified public key
+is supplied by this checkout. A clean one-liner drill with the COPR engine
+remains the final release gate.
 
 ### Initialization
 
@@ -119,12 +117,39 @@ published changes still need current CI and review.
   Fedora VM.
 - [x] Publish Nimbus and dotfiles through the owner's GitHub visibility change
   after reviewing current files and reachable Git history with Gitleaks.
-- [ ] Create the COPR project, verify its real public signing key, publish the
+- [x] Create the COPR project, verify its real public signing key, publish the
   approved release source, and obtain a successful signed engine build.
 - [ ] Ship the verified COPR key and fingerprint, then repeat the public
   one-liner from the restored VM without a manually supplied engine.
 
 ## Evidence
+
+### First source release and signed COPR engine, 2026-09-07
+
+Dotfiles PR 15, Nimbus PR 9, and COPR PRs 1-2 are merged. Their final heads
+passed CI. The manual Nimbus release workflow `34155168739` passed its full
+local gate and offline vendored build, then created the reviewed `v0.1.0`
+draft. Its published source archive comes from
+`e1c081bb31ddc8d9c3823a8859b43c6188fe50d3` using Go 1.26.7, with SHA-256
+`54e113b54c11d09def622c639a59e4ad7d30378020e3bd8d77c57c4072950808`.
+The archive retains 23 dependency notices and the separate Unicode data notice.
+
+COPR workflow `34155340456` submitted build `10958015`, which succeeded for
+Fedora 44 x86_64 with network access disabled. The hosted source RPM contains
+the exact published source archive. The binary RPM reports `nimbus 0.1.0`,
+contains only the engine and license notices, and has no install scriptlets.
+Native RPM verification with `_pkgverify_level all` in an isolated keyring
+reports `digests signatures OK` using the official project's public key:
+`8FF8 E546 C3AB E441 46CF A411 DD1D 48E2 CA0E 9F6A`. Repository metadata is
+published. The public key and fingerprint are now supplied by the checkout;
+the source-release tag remains unchanged. A normal-user Fedora container
+successfully downloaded the engine with bootstrap's isolated DNF repository
+settings, verified its signature with the shipped pin, and used that binary
+to validate this checkout. No package was installed by this check.
+
+The restored VM has not run the new installer. The owner runs `~/start-phase5`
+after the bootstrap pin reaches main; the launcher records output, status,
+and elapsed time. The clean installation remains an open Phase 5 gate.
 
 ### Manual release preparation, 2026-09-07
 

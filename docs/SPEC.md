@@ -875,8 +875,9 @@ terminal is an error before mutation. The checked-out script revalidates the
 checkout and uses the DNF-owned `/usr/bin/nimbus`. A different engine ahead
 of that path is an error. Before a fresh installation, it requires the reviewed
 COPR public key and fingerprint from `system/keys/nimbus.asc` and
-`system/keys/nimbus.fingerprint`; these files are not supplied until the real
-project key is verified. No fingerprint is accepted from an environment variable.
+`system/keys/nimbus.fingerprint`. These files contain the verified project
+key; replacing them requires review of the new key and its signed RPM.
+No fingerprint is accepted from an environment variable.
 
 Bootstrap checks that the key contains exactly the pinned, valid primary key,
 then downloads the x86_64 engine from `furyfree/nimbus` using an isolated DNF
