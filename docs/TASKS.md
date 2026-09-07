@@ -94,6 +94,18 @@ published changes still need current CI and review.
   snapshot, run `install.sh` from a served copy of the branch, reach the
   first sync, the Chezmoi handoff, and the user-scope steps.
 
+### Manual source release
+
+- [x] Add a manual-only workflow accepting an existing stable version tag on
+  main. Test the tagged source and generate the vendored archive, source
+  identity, module inventory, and checksums in temporary storage.
+- [x] Separate read-only build/test permissions from draft creation; require
+  manual publication and a separate COPR dispatch. Preserve existing releases.
+- [x] Document the operator steps and first signing-key/VM prerequisites in
+  [the release guide](../tools/release/README.md).
+- [ ] Exercise the hosted workflow after merge with the first approved tag,
+  inspect and publish its draft, then obtain the signed COPR build.
+
 ### Outside this repository
 
 - [x] Read the current dotfiles template and PROFILES.md: the three handoff
@@ -113,6 +125,24 @@ published changes still need current CI and review.
   one-liner from the restored VM without a manually supplied engine.
 
 ## Evidence
+
+### Manual release preparation, 2026-09-07
+
+The complete local gate passes with Go 1.26.7, including nine source-export
+scenarios. Actionlint and Gitleaks pass. Four local executions of the draft
+job with a fake GitHub CLI cover success, changed tags, checksum failure, and
+an existing release. They perform no GitHub mutation.
+
+A disposable Git snapshot of Nimbus produced a 2.85 MB vendored source archive
+with 23 dependency notice files. Its real offline Go tests, versioned engine
+build, and definitions validation passed; Fedora RPM tools also produced an
+SRPM without network access. This fixture is not a published release.
+CodeRabbit was unavailable because of its rate limit. The local Codex fallback
+found that Git's `push.followTags` setting could publish extra tags. The helper
+now disables tag following explicitly; a native Git regression verifies only
+the requested tag reaches the remote. Targeted verification and the complete
+local gate pass. No new release workflow has run on GitHub; hosted validation
+and the first draft remain pending.
 
 ### COPR bootstrap preparation, 2026-09-07
 

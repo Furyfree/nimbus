@@ -71,7 +71,7 @@ just check
 ~~~
 
 It runs `gofmt`, `go vet`, `go test`, `git diff --check`, markdownlint, and
-ShellCheck for the installation scripts.
+ShellCheck for the installation and release scripts.
 `just validate` runs `nimbus validate` against this checkout, `just build`
 produces a static `nimbus` binary that runs on any x86_64 Linux, and
 `just vm-push` copies that binary and the definitions to the drill VM.
@@ -100,3 +100,14 @@ Failures end with a summary of completed, failed, and skipped work.
 The remaining commands are read-only:
 `validate` checks the definitions, `doctor` inspects the host, and the views
 list what Nimbus manages. The first VM drills are recorded in TASKS.md.
+
+## Releases
+
+Releases are manual. After merging reviewed changes, run `just tag v0.1.0`
+from clean, up-to-date main, then `just release v0.1.0`. The workflow tests
+and packages vendored source, then creates a draft release for you to inspect
+and publish. Pushes to main or tags never start it. The COPR build is a separate
+manual action after publication.
+
+See the [release guide](tools/release/README.md) for exact steps, artifacts,
+retry behavior, and the first COPR/VM handoff.

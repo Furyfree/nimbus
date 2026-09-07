@@ -301,6 +301,12 @@ installation. Existing engines must be DNF-owned at `/usr/bin/nimbus`, with no
 other engine shadowing that path. Publishing and pinning the real RPM channel,
 then exercising the public one-liner on a fresh VM, remain Phase 5 exit gates.
 
+Source release preparation is a manually dispatched workflow on main, taking
+an existing version tag on that branch. It runs the tagged commit's local gate
+and verifies a vendored offline build before creating a draft release. The
+owner publishes the inspected source assets, then separately dispatches the
+COPR build. Pushes never release; no existing tag or release is replaced.
+
 Neither script updates an existing checkout, provisions the workstation, or
 handles Chezmoi. Chezmoi is an ordinary Nimbus-managed system package installed
 by the reviewed first sync. The engine remains directly DNF-owned and checkout

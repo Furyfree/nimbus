@@ -2,7 +2,7 @@
 check: fmt-check vet test
     git diff --check HEAD
     if command -v markdownlint >/dev/null 2>&1; then markdownlint '*.md' 'docs/**/*.md' 'tools/**/*.md'; else echo 'markdownlint not installed: skipped'; fi
-    if command -v shellcheck >/dev/null 2>&1; then shellcheck install.sh bootstrap; else echo 'shellcheck not installed: skipped'; fi
+    if command -v shellcheck >/dev/null 2>&1; then shellcheck install.sh bootstrap tools/release/*.sh; else echo 'shellcheck not installed: skipped'; fi
 
 fmt-check:
     test -z "$(gofmt -l .)" || { gofmt -l .; echo 'gofmt: files need formatting'; exit 1; }
@@ -22,6 +22,14 @@ validate:
 # their stack traces.
 build:
     CGO_ENABLED=0 go build -ldflags='-s -w' -o nimbus ./cmd/nimbus
+
+# Create and push an annotated version tag from clean, up-to-date main.
+tag version:
+    bash tools/release/tag.sh {{quote(version)}}
+
+# Start manual draft-release preparation for an existing remote tag.
+release tag:
+    gh workflow run release.yml --repo Furyfree/nimbus --ref main -f {{quote("tag=" + tag)}}
 
 # The .git directory goes along so the selector can read the origin; the VM
 # has no git. A running binary cannot be overwritten, so the new one is moved

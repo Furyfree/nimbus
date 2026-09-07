@@ -836,6 +836,21 @@ visibility is an explicit publication action outside installation. A private
 fork needs authenticated Git before cloning; its private raw installer cannot
 be fetched anonymously. Bootstrap never stores a token or configures login.
 
+Engine source releases are manual. The owner supplies an existing stable
+`vMAJOR.MINOR.PATCH` tag reachable from main to `Prepare release`, dispatched
+on main. Push and tag events never release. The workflow checks the tagged
+commit, exports its tracked source with generated Go dependencies and notices,
+and verifies an offline build before creating a GitHub draft release. Assets
+include the source archive, its exact commit and toolchain/module inventory,
+and SHA-256 checksums. Build and test jobs have read-only repository access;
+only the separate draft-creation job receives release write permission.
+
+Publication and COPR build submission remain separate manual actions. The
+workflow never moves a tag or overwrites an existing release. Failed source
+checks create no release; an incomplete draft after an upload failure requires
+inspection before retry. The source archive matches the version selected in
+the COPR spec; COPR compiles, tests, and signs the installable engine RPM.
+
 Running it explicitly trusts the current `install.sh` on the approved Nimbus
 `main` branch. This remote entry point is deliberately small. It:
 

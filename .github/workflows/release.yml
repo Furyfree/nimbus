@@ -1,0 +1,88 @@
+name: Prepare release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing stable tag on main (for example v0.1.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nimbus-release
+  cancel-in-progress: false
+
+jobs:
+  source:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      commit: ${{ steps.select.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select an existing release tag on main
+        id: select
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          commit=$(git rev-parse --verify "refs/tags/${TAG}^{commit}")
+          git merge-base --is-ancestor "$commit" refs/remotes/origin/main
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          cp tools/release/source.sh "$RUNNER_TEMP/release-source.sh"
+          git checkout --detach "$commit"
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: extractions/setup-just@v4
+      - run: npm install --global markdownlint-cli
+      - run: sudo apt-get install -y shellcheck gnupg
+      - run: just check
+      - name: Prepare and test vendored source
+        env:
+          TAG: ${{ inputs.tag }}
+        run: bash "$RUNNER_TEMP/release-source.sh" "$TAG" "$RUNNER_TEMP/release"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-source
+          path: ${{ runner.temp }}/release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  draft:
+    needs: source
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-source
+          path: release
+      - name: Create a draft with the verified source assets
+        working-directory: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+          COMMIT: ${{ needs.source.outputs.commit }}
+        run: |
+          set -euo pipefail
+          sha256sum --check SHA256SUMS
+          remote_commit=$(gh api "repos/$GH_REPO/commits/$TAG" --jq .sha)
+          [[ "$remote_commit" == "$COMMIT" ]]
+          cp RELEASE-SOURCE.txt notes.txt
+          printf '\nSource release for COPR. Review dependency licenses before publishing.\n' >> notes.txt
+          gh release create "$TAG" "nimbus-${TAG#v}-vendor.tar.gz" \
+            RELEASE-SOURCE.txt SHA256SUMS --verify-tag --draft \
+            --title "Nimbus $TAG" --notes-file notes.txt
+          echo "Draft prepared for $TAG ($COMMIT). Publish it manually before starting the COPR build." >> "$GITHUB_STEP_SUMMARY"
