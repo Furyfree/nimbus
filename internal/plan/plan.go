@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,6 +21,7 @@ import (
 // Operation kinds, actions, and risk classes.
 const (
 	KindDNFConfig     = "dnf-config"
+	KindUser          = "user" // a user-scope tool: installer, runtimes, crate
 	KindRepository    = "repository"
 	KindPackage       = "package"
 	KindFlatpakRemote = "flatpak-remote"
@@ -56,8 +59,8 @@ type Operation struct {
 	// Items are the package references a merged transaction installs, one
 	// receipt each; Paths then explains the transaction as a whole.
 	Items []string `json:"items,omitempty"`
-	// Resolved maps a requested name to the package DNF resolved it to when
-	// they differ, so verification looks for what actually arrives.
+	// Resolved maps requested names to native RPM name.arch identities from
+	// the preview or installed state, including resolved provides.
 	Resolved    map[string]string `json:"resolved,omitempty"`
 	Steps       []Step            `json:"steps,omitempty"`
 	Transaction *Transaction      `json:"transaction,omitempty"`
@@ -134,10 +137,7 @@ func Build(in Inputs) (*Plan, error) {
 	if in.Applied == nil {
 		in.Applied = &state.Applied{Receipts: map[string]state.Receipt{}}
 	}
-	b := &builder{in: in, installed: map[string]facts.Package{}, repos: map[string][]facts.Repository{}, ready: map[string]bool{}, blockedRepo: map[string]string{}, pendingRepo: map[string]bool{}, duplicates: map[string][]string{}}
-	for _, p := range in.Facts.Packages.Value {
-		b.installed[p.Name] = p
-	}
+	b := &builder{in: in, repos: map[string][]facts.Repository{}, ready: map[string]bool{}, blockedRepo: map[string]string{}, pendingRepo: map[string]bool{}, duplicates: map[string][]string{}}
 	for _, r := range in.Facts.Repositories.Value {
 		b.repos[r.ID] = append(b.repos[r.ID], r)
 	}
@@ -146,6 +146,7 @@ func Build(in Inputs) (*Plan, error) {
 	p.Operations = append(p.Operations, b.repositories()...)
 	p.Operations = append(p.Operations, b.packages()...)
 	p.Operations = append(p.Operations, b.flatpaks()...)
+	p.Operations = append(p.Operations, b.userTools()...)
 	p.Operations = append(p.Operations, b.ownedRemovals()...)
 	p.Prune = b.prune()
 	if in.Prune && (in.Applied == nil || in.Applied.Baseline == nil) {
@@ -165,9 +166,8 @@ func Build(in Inputs) (*Plan, error) {
 }
 
 type builder struct {
-	in        Inputs
-	installed map[string]facts.Package
-	repos     map[string][]facts.Repository
+	in    Inputs
+	repos map[string][]facts.Repository
 	// ready records declared repositories the host already provides
 	// correctly; blockedRepo records why one cannot be used; pendingRepo
 	// records one that an earlier operation of this plan provides.
@@ -189,7 +189,7 @@ type builder struct {
 // installsPackage reports whether the plan installs a bare Fedora package
 // that is desired and not yet present.
 func (b *builder) installsPackage(name string) bool {
-	if _, installed := b.installed[name]; installed {
+	if _, installed := facts.FindPackage(b.in.Facts.Packages.Value, name); installed {
 		return false
 	}
 	for _, p := range b.in.Resolved.Packages {
@@ -254,14 +254,23 @@ func (b *builder) inspectRepo(id string, r definitions.Repository) (ready bool, 
 		return false, "", ""
 	}
 	var drift []string
+	var keyDrift []string
 	for _, have := range enabled {
 		if r.Kind == "dnf" && r.ReleasePackage == "" {
 			if have.File != "nimbus-"+id+".repo" {
 				return false, "", fmt.Sprintf("repository %s is provided by %s, not by nimbus-%s.repo, which Nimbus would own; remove that file first", have.ID, have.File, id)
 			}
+			if reason := RepositoryKeyDrift(id, r, have); reason != "" {
+				keyDrift = append(keyDrift, have.ID+": "+reason)
+			}
 			if fileDrift := ownedFileDrift(id, r, have); len(fileDrift) > 0 {
 				drift = append(drift, fileDrift...)
 				continue
+			}
+		}
+		if r.Kind != "dnf" || r.ReleasePackage != "" {
+			if reason := RepositoryKeyDrift(id, r, have); reason != "" {
+				keyDrift = append(keyDrift, have.ID+": "+reason)
 			}
 		}
 		// The effective values include overrides below repos.override.d,
@@ -286,6 +295,9 @@ func (b *builder) inspectRepo(id string, r definitions.Repository) (ready bool, 
 				}
 			}
 		}
+	}
+	if len(keyDrift) > 0 {
+		return false, "reconcile signing key: " + strings.Join(append(keyDrift, drift...), "; "), ""
 	}
 	if len(drift) > 0 {
 		switch {
@@ -447,6 +459,21 @@ func (b *builder) repositories() []Operation {
 		case repair != "":
 			op.Action, op.Summary = ActionRepair, fmt.Sprintf("repair repository %s: %s", id, repair)
 			switch {
+			case strings.HasPrefix(repair, "reconcile signing key:"):
+				op.Steps = repositorySteps(id, r)
+				if r.Kind == "dnf" && r.ReleasePackage == "" {
+					op.Steps[len(op.Steps)-1] = AddRepoStep(id, r, true)
+					op.Steps = append(op.Steps, PrioritySteps(id, r)...)
+				} else {
+					var steps []Step
+					for _, step := range op.Steps {
+						if len(step.Argv) > 1 && step.Argv[0] == "dnf5" && (step.Argv[1] == "install" || step.Argv[1] == "copr") {
+							continue
+						}
+						steps = append(steps, step)
+					}
+					op.Steps = steps
+				}
 			case strings.HasPrefix(repair, "rewrite "):
 				op.Steps = []Step{AddRepoStep(id, r, true)}
 			case strings.HasPrefix(repair, "correct "):
@@ -480,17 +507,17 @@ func KeyPath(id string) string { return "/etc/pki/rpm-gpg/RPM-GPG-KEY-nimbus-" +
 
 // PrioritySteps renders dnf5 config-manager setopt for every host ID of a
 // repository, which writes an override file instead of touching the
-// maker's repository file. Signature checking is set in the same override,
-// so a repair of a maker-owned repository restores it as well.
+// maker's repository file. The override enables signature checking and
+// points to the verified local key that the enable or key repair installed.
 func PrioritySteps(id string, r definitions.Repository) []Step {
 	var opts []string
 	for _, host := range DNFRepoIDs(id, r) {
-		opts = append(opts, host+".gpgcheck=1")
+		opts = append(opts, host+".gpgcheck=1", host+".gpgkey=file://"+KeyPath(id))
 		if r.Priority != nil {
 			opts = append(opts, fmt.Sprintf("%s.priority=%d", host, *r.Priority))
 		}
 	}
-	return []Step{{Description: "set signature checking and priority through a DNF override", Argv: append([]string{"dnf5", "config-manager", "setopt"}, opts...), Privileged: true}}
+	return []Step{{Description: "set signature checking, the verified local key and priority through a DNF override", Argv: append([]string{"dnf5", "config-manager", "setopt"}, opts...), Privileged: true}}
 }
 
 // CheckRepository decides whether the host provides a declared DNF or COPR
@@ -565,16 +592,18 @@ func repositorySteps(id string, r definitions.Repository) []Step {
 	switch {
 	case r.Kind == "copr":
 		return append([]Step{
-			{Description: "download the COPR key and verify its fingerprint is " + fp, Argv: []string{"gpg", "--batch", "--show-keys", "--with-colons", "<verified key>"}},
-			{Description: "import the verified key into the RPM database, so packages are checked against exactly it", Argv: []string{"rpm", "--import", "<verified key>"}, Privileged: true},
+			{Description: "download the COPR key and verify its fingerprint is " + fp, Argv: append([]string{"gpg"}, facts.KeyInspectArgs("<verified key>")...)},
+			{Description: "install the verified key", Argv: []string{"install", "-m", "0644", "<verified key>", KeyPath(id)}, Privileged: true},
+			{Description: "import the verified key into the RPM database", Argv: []string{"rpm", "--import", KeyPath(id)}, Privileged: true},
 			{Description: "enable the COPR through DNF", Argv: []string{"dnf5", "copr", "enable", "-y", r.Project}, Privileged: true},
 		}, PrioritySteps(id, r)...)
 	case r.ReleasePackage != "":
 		return append([]Step{
 			{Description: "download " + r.ReleasePackage + " and verify sha256 " + r.SHA256},
 			{Description: "unpack the verified package to find its key", Argv: []string{"rpm2archive", "<verified package>"}},
-			{Description: "verify the extracted key fingerprint is " + fp, Argv: []string{"gpg", "--batch", "--show-keys", "--with-colons", "<extracted key>"}},
-			{Description: "import the verified key", Argv: []string{"rpm", "--import", "<extracted key>"}, Privileged: true},
+			{Description: "verify the extracted key fingerprint is " + fp, Argv: append([]string{"gpg"}, facts.KeyInspectArgs("<extracted key>")...)},
+			{Description: "install the verified key", Argv: []string{"install", "-m", "0644", "<extracted key>", KeyPath(id)}, Privileged: true},
+			{Description: "import the verified key", Argv: []string{"rpm", "--import", KeyPath(id)}, Privileged: true},
 			{Description: "install the release package with signature checking on", Argv: []string{"dnf5", "install", "-y", "<verified package>"}, Privileged: true},
 		}, PrioritySteps(id, r)...)
 	default:
@@ -583,7 +612,7 @@ func repositorySteps(id string, r definitions.Repository) []Step {
 			keySource = "read system/" + r.KeyFile + " from the checkout"
 		}
 		return []Step{
-			{Description: keySource + " and verify its fingerprint is " + fp, Argv: []string{"gpg", "--batch", "--show-keys", "--with-colons", "<verified key>"}},
+			{Description: keySource + " and verify its fingerprint is " + fp, Argv: append([]string{"gpg"}, facts.KeyInspectArgs("<verified key>")...)},
 			{Description: "install the verified key", Argv: []string{"install", "-m", "0644", "<verified key>", KeyPath(id)}, Privileged: true},
 			{Description: "import the key into the RPM database", Argv: []string{"rpm", "--import", KeyPath(id)}, Privileged: true},
 			AddRepoStep(id, r, false),
@@ -608,8 +637,9 @@ func (b *builder) flatpakRemote(id string, r definitions.Repository) (Operation,
 		ID: "flatpak-remote:" + id, Kind: KindFlatpakRemote, Action: ActionEnable, Risk: RiskMedium,
 		Summary: "add system Flatpak remote " + id, Paths: b.repoPaths(id),
 		Steps: []Step{
-			{Description: "add the remote", Argv: []string{"flatpak", "remote-add", "--if-not-exists", "--system", id, r.URL}, Privileged: true},
-			{Description: "verify the remote key fingerprint is " + definitions.NormalizeFingerprint(r.Key)},
+			{Description: "download " + r.URL + " and verify its sole primary key fingerprint is " + definitions.NormalizeFingerprint(r.Key)},
+			{Description: "add the verified remote", Argv: []string{"flatpak", "remote-add", "--if-not-exists", "--system", "--from", id, "<verified remote definition>"}, Privileged: true},
+			{Description: "verify the installed remote URL, signature checking and key fingerprint"},
 		},
 	}
 	if !b.in.Facts.Flatpak.Known() {
@@ -629,6 +659,11 @@ func (b *builder) flatpakRemote(id string, r definitions.Repository) (Operation,
 			continue
 		}
 		if remote.URL == r.URL || strings.TrimSuffix(remote.URL, "/") == strings.TrimSuffix(strings.TrimSuffix(r.URL, "flathub.flatpakrepo"), "/") {
+			if reason := FlatpakKeyDrift(r, remote); reason != "" {
+				op.Blocked = "system remote " + id + ": " + reason + "; inspect and correct its signing keys with the native Flatpak tools before retrying"
+				b.blockedRepo[id] = op.Blocked
+				return op, true
+			}
 			b.ready[id] = true
 			return Operation{}, false
 		}
@@ -661,14 +696,20 @@ func (b *builder) packages() []Operation {
 	var adopt, pending, blocked []Operation
 	var install []definitions.ResolvedPackage
 	for _, p := range b.in.Resolved.Packages {
-		if p.Prefix == definitions.PrefixFlatpak {
+		if p.Prefix == definitions.PrefixFlatpak || p.Prefix == definitions.PrefixCargo {
 			continue
 		}
-		if inst, ok := b.installed[p.Name]; ok {
+		if inst, ok := InstalledPackage(p.Name, b.in.Applied.Receipts["package:"+p.Canonical], b.in.Facts.Packages.Value); ok {
 			op := Operation{ID: "package:" + p.Canonical, Kind: KindPackage, Action: ActionAdopt, Risk: RiskLow,
-				Summary: fmt.Sprintf("adopt %s %s, already installed", p.Name, inst.EVR()), Paths: p.Paths}
-			if _, managed := b.in.Applied.Receipts[op.ID]; managed {
+				Summary: fmt.Sprintf("adopt %s %s, already installed", p.Name, inst.EVR()), Paths: p.Paths, Resolved: map[string]string{p.Name: inst.ID()}}
+			if receipt, managed := b.in.Applied.Receipts[op.ID]; managed && receipt.Package == inst.ID() {
 				op.Action, op.Summary = ActionKeep, fmt.Sprintf("%s %s is managed and unchanged", p.Name, inst.EVR())
+			}
+			if receipt, managed := b.in.Applied.Receipts[op.ID]; managed && receipt.Package == "" {
+				receipt.Resource = op.ID
+				if _, err := receiptPackage(receipt, b.in.Facts.Packages.Value); err != nil {
+					op.Blocked = err.Error()
+				}
 			}
 			if note := b.sourceNote(p, inst); note != "" {
 				op.Notes = append(op.Notes, note)
@@ -779,7 +820,11 @@ func (b *builder) installTransaction(pkgs []definitions.ResolvedPackage) Operati
 	seen := map[string]bool{}
 	for _, row := range tx.Packages {
 		if row.Section == "installing" {
-			seen[row.Name] = true
+			for _, n := range names {
+				if (facts.Package{Name: row.Name, Arch: row.Arch}).Matches(n) {
+					seen[n] = true
+				}
+			}
 		}
 	}
 	var unmatched []string
@@ -798,7 +843,10 @@ func (b *builder) installTransaction(pkgs []definitions.ResolvedPackage) Operati
 	for _, row := range tx.Packages {
 		switch row.Section {
 		case "installing":
-			p, wanted := byName[row.Name]
+			p, wanted := byName[facts.PackageID(row.Name, row.Arch)]
+			if !wanted {
+				p, wanted = byName[row.Name]
+			}
 			if !wanted {
 				if len(unmatched) == 0 {
 					problems = append(problems, "would install "+row.Name+", which nothing selects")
@@ -810,9 +858,13 @@ func (b *builder) installTransaction(pkgs []definitions.ResolvedPackage) Operati
 				if op.Resolved == nil {
 					op.Resolved = map[string]string{}
 				}
-				op.Resolved[requested] = row.Name
+				op.Resolved[requested] = facts.PackageID(row.Name, row.Arch)
 				op.Notes = append(op.Notes, fmt.Sprintf("%s resolves to the package %s", requested, row.Name))
 			}
+			if op.Resolved == nil {
+				op.Resolved = map[string]string{}
+			}
+			op.Resolved[p.Name] = facts.PackageID(row.Name, row.Arch)
 			if !contains(b.expectedRepos(p.Prefix), row.Repository) {
 				problems = append(problems, fmt.Sprintf("%s would come from repository %s, not %s", row.Name, row.Repository, strings.Join(b.expectedRepos(p.Prefix), " or ")))
 			}
@@ -858,14 +910,17 @@ func (b *builder) removeTransaction(installTx *Transaction) (Operation, bool) {
 	if installTx != nil {
 		for _, row := range installTx.Packages {
 			if strings.HasPrefix(row.Section, "removing") || row.Section == SectionReplaced {
-				erased[row.Name] = true
+				erased[facts.PackageID(row.Name, row.Arch)] = true
 			}
 		}
 	}
 	var names []string
 	for _, name := range b.in.Resolved.Removes {
-		if _, ok := b.installed[name]; ok && !erased[name] {
-			names = append(names, name)
+		for _, inst := range b.in.Facts.Packages.Value {
+			if inst.Matches(name) && !erased[inst.ID()] {
+				names = append(names, name)
+				break
+			}
 		}
 	}
 	if len(names) == 0 {
@@ -970,18 +1025,62 @@ func (b *builder) flatpaks() []Operation {
 	return ops
 }
 
-// ownedRemovals plans the removal of packages Nimbus installed or adopted
-// that the definitions no longer select. Removal is permitted only from the
-// lifecycle the receipt recorded.
+// InstalledPackage also recognizes a provide resolved by an earlier verified
+// installation. The receipt binds that native identity to this reference.
+func InstalledPackage(request string, receipt state.Receipt, packages []facts.Package) (facts.Package, bool) {
+	if receipt.Package != "" {
+		return facts.FindPackage(packages, receipt.Package)
+	}
+	return facts.FindPackage(packages, request)
+}
+
+func receiptPackage(r state.Receipt, packages []facts.Package) (string, error) {
+	if r.Package != "" {
+		return r.Package, nil
+	}
+	request := PackageName(r.Resource)
+	matches := map[string]bool{}
+	for _, p := range packages {
+		if p.Matches(request) {
+			matches[p.ID()] = true
+		}
+	}
+	if len(matches) > 1 {
+		return "", fmt.Errorf("legacy receipt for %s does not identify which installed architecture Nimbus owns; select each installed architecture explicitly to establish ownership", request)
+	}
+	for id := range matches {
+		return id, nil
+	}
+	// Old provide receipts recorded a native name only in prose. That is
+	// not an ownership identity from which deletion can safely be inferred.
+	fields := strings.Fields(r.Intended)
+	if len(fields) >= 3 && fields[0] == "installed" && fields[1] != request {
+		return "", fmt.Errorf("legacy receipt for %s may refer to %s; its native ownership must be established before removal", request, fields[1])
+	}
+	return request, nil
+}
+
+// ownedRemovals uses the verified native identity, or an unambiguous legacy
+// receipt, to remove packages the definitions no longer select.
 func (b *builder) ownedRemovals() []Operation {
 	desired := map[string]bool{}
-	desiredNames := map[string]bool{}
+	desiredNative := map[string]bool{}
 	for _, p := range b.in.Resolved.Packages {
-		desired["package:"+p.Canonical] = true
-		desired["flatpak:"+p.Name] = true
-		desiredNames[p.Name] = true
+		if p.Prefix == definitions.PrefixFlatpak {
+			desired["flatpak:"+p.Name] = true
+			continue
+		}
+		if p.Prefix == definitions.PrefixCargo {
+			continue
+		}
+		id := "package:" + p.Canonical
+		desired[id] = true
+		if inst, ok := InstalledPackage(p.Name, b.in.Applied.Receipts[id], b.in.Facts.Packages.Value); ok {
+			desiredNative[inst.ID()] = true
+		}
 	}
-	var dnf, ops []Operation
+	var names, receiptIDs []string
+	var ops []Operation
 	for _, id := range sortedKeys(b.in.Applied.Receipts) {
 		r := b.in.Applied.Receipts[id]
 		if desired[id] {
@@ -989,39 +1088,42 @@ func (b *builder) ownedRemovals() []Operation {
 		}
 		switch r.Provider {
 		case "dnf":
-			name := PackageName(id)
-			if desiredNames[name] {
-				// The package is still desired under another prefix; the
-				// new identity is adopted and only the old receipt goes.
-				ops = append(ops, Operation{ID: id, Kind: KindPackage, Action: ActionRetire, Risk: RiskLow,
-					Summary: fmt.Sprintf("retire the receipt of %s, which is now selected as another reference", name), Paths: []string{"receipt"}})
+			r.Resource = id
+			name, err := receiptPackage(r, b.in.Facts.Packages.Value)
+			if err != nil {
+				// Explicit selections of every matching architecture transfer
+				// ownership without guessing which one the old receipt meant.
+				matched, covered := false, true
+				for _, inst := range b.in.Facts.Packages.Value {
+					if inst.Matches(PackageName(id)) {
+						matched = true
+						covered = covered && desiredNative[inst.ID()]
+					}
+				}
+				if matched && covered {
+					ops = append(ops, Operation{ID: id, Kind: KindPackage, Action: ActionRetire, Risk: RiskLow, Summary: "retire legacy receipt after explicit architecture selections", Paths: []string{"receipt"}})
+					continue
+				}
+				ops = append(ops, Operation{ID: id, Kind: KindPackage, Action: ActionRemove, Risk: RiskMedium, Summary: "resolve ownership of " + PackageName(id), Blocked: err.Error()})
 				continue
 			}
-			if _, ok := b.installed[name]; !ok {
-				// Already gone: only the receipt is retired, so a later
-				// hand installation is not mistaken for Nimbus's.
-				ops = append(ops, Operation{ID: id, Kind: KindPackage, Action: ActionRetire, Risk: RiskLow,
-					Summary: fmt.Sprintf("retire the receipt of %s, which is no longer installed or selected", name), Paths: []string{"receipt"}})
+			_, present := facts.FindPackage(b.in.Facts.Packages.Value, name)
+			if desiredNative[name] || !present {
+				ops = append(ops, Operation{ID: id, Kind: KindPackage, Action: ActionRetire, Risk: RiskLow, Summary: "retire the receipt of " + name + ", which is absent or selected by another reference", Paths: []string{"receipt"}})
 				continue
 			}
-			dnf = append(dnf, Operation{ID: id, Kind: KindPackage, Action: ActionRemove, Risk: RiskMedium,
-				Summary: fmt.Sprintf("remove %s, no longer selected (installed by Nimbus as %s)", name, r.Operation), Paths: []string{"receipt"}})
+			names = append(names, name)
+			receiptIDs = append(receiptIDs, id)
 		case "flatpak":
 			name := strings.TrimPrefix(id, "flatpak:")
-			ops = append(ops, Operation{ID: id, Kind: KindFlatpak, Action: ActionRemove, Risk: RiskMedium,
-				Summary: fmt.Sprintf("remove Flatpak %s, no longer selected", name), Paths: []string{"receipt"},
-				Steps: []Step{{Description: "remove the application", Argv: []string{"flatpak", "uninstall", "--system", "--noninteractive", name}, Privileged: true}}})
+			ops = append(ops, Operation{ID: id, Kind: KindFlatpak, Action: ActionRemove, Risk: RiskMedium, Summary: "remove Flatpak " + name + ", no longer selected", Paths: []string{"receipt"}, Steps: []Step{{Description: "remove the application", Argv: []string{"flatpak", "uninstall", "--system", "--noninteractive", name}, Privileged: true}}})
 		}
 	}
-	if len(dnf) > 0 {
-		names := make([]string, 0, len(dnf))
-		for _, op := range dnf {
-			names = append(names, PackageName(op.ID))
-		}
+	if len(names) > 0 {
+		sort.Strings(names)
+		names = slices.Compact(names)
 		op := b.previewRemoval("packages:remove-owned", names, "remove "+strings.Join(names, ", ")+", installed by Nimbus and no longer selected")
-		for _, o := range dnf {
-			op.Paths = append(op.Paths, o.ID)
-		}
+		op.Paths = receiptIDs
 		ops = append([]Operation{op}, ops...)
 	}
 	return ops
@@ -1049,7 +1151,11 @@ func (b *builder) previewRemoval(id string, names []string, summary string) Oper
 	}
 	var extra []string
 	for _, row := range tx.Packages {
-		if !declared[row.Name] {
+		matched := false
+		for name := range declared {
+			matched = matched || (facts.Package{Name: row.Name, Arch: row.Arch}).Matches(name)
+		}
+		if !matched {
 			extra = append(extra, row.Name)
 		}
 	}
@@ -1085,7 +1191,11 @@ func (b *builder) prune() []Prune {
 	}
 	desired := map[string]bool{}
 	for _, p := range b.in.Resolved.Packages {
-		desired[p.Name] = true
+		if p.Prefix != definitions.PrefixFlatpak && p.Prefix != definitions.PrefixCargo {
+			if inst, ok := InstalledPackage(p.Name, b.in.Applied.Receipts["package:"+p.Canonical], b.in.Facts.Packages.Value); ok {
+				desired[inst.ID()] = true
+			}
+		}
 	}
 	for _, r := range b.in.Resolved.Removes {
 		desired[r] = true
@@ -1093,15 +1203,19 @@ func (b *builder) prune() []Prune {
 	managed := map[string]bool{}
 	for id, r := range b.in.Applied.Receipts {
 		if r.Provider == "dnf" {
-			managed[PackageName(id)] = true
+			if r.Package != "" {
+				managed[r.Package] = true
+			} else {
+				managed[PackageName(id)] = true
+			}
 		}
 	}
 	var out []Prune
 	for _, p := range b.in.Facts.Packages.Value {
-		if p.Reason != "user" || desired[p.Name] || b.in.Applied.InBaseline(p.Name) || managed[p.Name] || IsReleasePackage(b.in.Root, p.Name) {
+		if p.Reason != "user" || desired[p.ID()] || desired[p.Name] || b.in.Applied.InBaseline(p.ID()) || b.in.Applied.InBaseline(p.Name) || managed[p.ID()] || managed[p.Name] || IsReleasePackage(b.in.Root, p.Name) {
 			continue
 		}
-		out = append(out, Prune{Name: p.Name, EVR: p.EVR(), Repository: p.FromRepo})
+		out = append(out, Prune{Name: p.ID(), EVR: p.EVR(), Repository: p.FromRepo})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	if out == nil {
@@ -1158,4 +1272,108 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// InstallerScript stands for the downloaded installer in a plan step; apply
+// writes the script to its stage directory and fills the path in. HomeDir
+// stands for the home directory in a declared install command.
+const (
+	InstallerScript = "<installer script>"
+	HomeDir         = "<home>"
+	AfterHandoff    = "chezmoi"
+)
+
+// userTools plans the user-scope steps: a maker's installer, the command
+// that installs its runtimes once Chezmoi has written their configuration,
+// and the crates cargo install builds with the Rust runtime. They run as the
+// user, never through sudo, and write no receipt: presence is the record.
+func (b *builder) userTools() []Operation {
+	var ops []Operation
+	if !b.in.Facts.User.Known() {
+		// The desired tools are not dropped silently: one blocked
+		// operation says why they cannot be planned.
+		if len(b.in.Resolved.Installers) > 0 || b.hasPrefix(definitions.PrefixCargo) {
+			ops = append(ops, Operation{ID: "user:tools", Kind: KindUser, Action: ActionInstall, Risk: RiskLow,
+				Summary: "plan the user-scope tools", Blocked: "the user-scope tool state is unknown: " + b.in.Facts.User.Error})
+		}
+		return ops
+	}
+	u := b.in.Facts.User.Value
+	var runtimeOps []string
+	for _, in := range b.in.Resolved.Installers {
+		id := "user:" + in.Component
+		binary := b.userFile(u.Home, in.Installer.Binary)
+		op := Operation{ID: id, Kind: KindUser, Risk: RiskLow, Paths: in.Paths}
+		if binary {
+			op.Action, op.Summary = ActionKeep, fmt.Sprintf("%s is installed at ~/%s", in.Component, in.Installer.Binary)
+		} else {
+			op.Action, op.Summary = ActionInstall, fmt.Sprintf("install %s from %s as the user", in.Component, in.Installer.URL)
+			op.Steps = []Step{
+				{Description: "download " + in.Installer.URL + " to the stage directory and show its sha256"},
+				{Description: "run the installer as the user", Argv: []string{"sh", InstallerScript}},
+				{Description: "verify ~/" + in.Installer.Binary + " exists"},
+			}
+		}
+		ops = append(ops, op)
+		if len(in.Installer.Install) == 0 {
+			continue
+		}
+		rt := Operation{ID: id + ":install", Kind: KindUser, Action: ActionInstall, Risk: RiskLow, Paths: in.Paths,
+			Summary: fmt.Sprintf("install the %s runtimes declared in ~/%s", in.Component, in.Installer.Config),
+			Steps:   []Step{{Description: "run as the user, repeatable", Argv: append([]string(nil), in.Installer.Install...)}}}
+		switch {
+		case !binary:
+			rt.After = id
+		case !b.userFile(u.Home, in.Installer.Config):
+			rt.After = AfterHandoff
+			rt.Notes = append(rt.Notes, fmt.Sprintf("~/%s does not exist yet; the Chezmoi handoff writes it", in.Installer.Config))
+		}
+		runtimeOps = append(runtimeOps, rt.ID)
+		ops = append(ops, rt)
+	}
+	installed := map[string]bool{}
+	for _, crate := range u.Crates {
+		installed[crate] = true
+	}
+	for _, p := range b.in.Resolved.Packages {
+		if p.Prefix != definitions.PrefixCargo {
+			continue
+		}
+		op := Operation{ID: "package:" + p.Canonical, Kind: KindUser, Risk: RiskLow, Paths: p.Paths}
+		switch {
+		case installed[p.Name]:
+			op.Action, op.Summary = ActionKeep, "crate "+p.Name+" is installed"
+		default:
+			op.Action, op.Summary = ActionInstall, "cargo install "+p.Name+" as the user"
+			op.Steps = []Step{{Description: "build and install the crate", Argv: []string{HomeDir + "/.cargo/bin/cargo", "install", p.Name}}}
+			if !u.Cargo {
+				if len(runtimeOps) > 0 {
+					op.After = runtimeOps[0]
+					op.Notes = append(op.Notes, "cargo comes with the Rust runtime Mise installs")
+				} else {
+					op.Blocked = "cargo is not installed and no component installs a Rust runtime"
+				}
+			}
+		}
+		ops = append(ops, op)
+	}
+	return ops
+}
+
+// hasPrefix reports whether any desired package uses the prefix.
+func (b *builder) hasPrefix(prefix string) bool {
+	for _, p := range b.in.Resolved.Packages {
+		if p.Prefix == prefix {
+			return true
+		}
+	}
+	return false
+}
+
+// userFile reports whether a file relative to the home directory exists,
+// read through the source so a test can say what the home holds.
+func (b *builder) userFile(home, rel string) bool {
+	path := filepath.Join(home, rel)
+	names, err := b.in.Source.ReadDir(filepath.Dir(path))
+	return err == nil && contains(names, filepath.Base(path))
 }

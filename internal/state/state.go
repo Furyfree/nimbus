@@ -20,6 +20,10 @@ import (
 // Schema is the state schema this engine reads and writes.
 const Schema = 1
 
+// Version 2 records native RPM identity; version 1 remains readable.
+const ReceiptSchema = 2
+const BaselineSchema = 2
+
 // Root is the state directory.
 const Root = "/var/lib/nimbus"
 
@@ -40,8 +44,9 @@ type Receipt struct {
 	Engine        string      `json:"engine"`
 	Definitions   Definitions `json:"definitions"`
 	Machine       string      `json:"machine"`
-	Resource      string      `json:"resource"` // operation ID, such as package:dnf:ripgrep
-	Provider      string      `json:"provider"` // dnf, flatpak, repository, flatpak-remote
+	Resource      string      `json:"resource"`          // operation ID, such as package:dnf:ripgrep
+	Provider      string      `json:"provider"`          // dnf, flatpak, repository, flatpak-remote
+	Package       string      `json:"package,omitempty"` // verified native RPM name.arch
 	Paths         []string    `json:"paths,omitempty"`
 	Previous      string      `json:"previous"`
 	Intended      string      `json:"intended"`
@@ -112,7 +117,7 @@ func Read(root string) (*Applied, error) {
 		if err := json.Unmarshal(data, &b); err != nil {
 			return nil, fmt.Errorf("baseline: %w", err)
 		}
-		if b.Schema != Schema {
+		if b.Schema != 1 && b.Schema != BaselineSchema {
 			return nil, fmt.Errorf("baseline schema %d is not supported", b.Schema)
 		}
 		a.Baseline = &b
@@ -135,7 +140,7 @@ func Read(root string) (*Applied, error) {
 		if err := json.Unmarshal(data, &r); err != nil {
 			return nil, fmt.Errorf("receipt %s: %w", e.Name(), err)
 		}
-		if r.Schema != Schema {
+		if r.Schema != 1 && r.Schema != ReceiptSchema {
 			return nil, fmt.Errorf("receipt %s: schema %d is not supported", e.Name(), r.Schema)
 		}
 		a.Receipts[r.Resource] = r
@@ -182,7 +187,7 @@ func Record(root, planDigest string, st *Stage) error {
 		if !r.Verified {
 			return fmt.Errorf("receipt %s is not verified; a failed operation never gets a receipt", r.Resource)
 		}
-		if r.Schema != Schema || r.Resource == "" || r.Operation == "" {
+		if (r.Schema != 1 && r.Schema != ReceiptSchema) || r.Resource == "" || r.Operation == "" {
 			return fmt.Errorf("receipt %s is incomplete", r.Resource)
 		}
 	}
@@ -195,7 +200,7 @@ func Record(root, planDigest string, st *Stage) error {
 	if st.Baseline != nil {
 		if _, err := os.Stat(filepath.Join(root, BaselineFile)); errors.Is(err, fs.ErrNotExist) {
 			b := *st.Baseline
-			b.Schema = Schema
+			b.Schema = BaselineSchema
 			sort.Strings(b.Packages)
 			data, _ := json.MarshalIndent(b, "", "  ")
 			if err := writeAtomic(filepath.Join(root, BaselineFile), data, 0o644); err != nil {

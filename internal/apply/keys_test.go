@@ -1,0 +1,89 @@
+package apply
+
+import (
+	"io"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/plan"
+)
+
+type keyScript struct {
+	*scripted
+	installedKey string
+	leaveOldKey  bool
+	extraKey     bool
+}
+
+func (s *keyScript) Run(name string, args ...string) ([]byte, error) {
+	if name == "gpg" {
+		key := s.fpr
+		if args[len(args)-1] == plan.KeyPath("terra") || strings.HasSuffix(args[len(args)-1], ".trustedkeys.gpg") {
+			key = s.installedKey
+		}
+		out := "pub:::::::::\nfpr:::::::::" + key + ":\n"
+		if s.extraKey {
+			out += "pub:::::::::\nfpr:::::::::" + strings.Repeat("3", 40) + ":\n"
+		}
+		return []byte(out), nil
+	}
+	if name == "sudo" && len(args) > 0 && args[0] == "install" && !s.leaveOldKey {
+		s.installedKey = s.fpr
+	}
+	return s.scripted.Run(name, args...)
+}
+
+func (s *keyScript) Stream(_, _ io.Writer, name string, args ...string) error {
+	_, err := s.Run(name, args...)
+	return err
+}
+
+func TestRepositoryPinRepairVerifiesTheInstalledReplacement(t *testing.T) {
+	for _, leaveOld := range []bool{false, true} {
+		t.Run(map[bool]string{false: "replacement installed", true: "replacement missing"}[leaveOld], func(t *testing.T) {
+			src := &keyScript{scripted: newScripted(), installedKey: strings.Repeat("1", 40), leaveOldKey: leaveOld}
+			opts := options(t, src.scripted, t.TempDir())
+			opts.Source = src
+			src.Dirs[facts.RepoOverride] = []string{"99-config_manager.repo"}
+			src.Files[filepath.Join(facts.RepoOverride, "99-config_manager.repo")] = []byte("[nimbus-terra]\ngpgkey=https://wrong.invalid/key\n")
+			op := plan.Operation{ID: "repository:terra", Kind: plan.KindRepository, Action: plan.ActionRepair,
+				Steps: []plan.Step{{Argv: []string{"gpg", "<verified key>"}}, plan.AddRepoStep("terra", terra(), true)}}
+			p := &plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:key", Operations: []plan.Operation{op}}
+			result := Run(p, opts)
+			if leaveOld {
+				if result.Error == "" || !strings.Contains(result.Error, "trusted fingerprints") || len(result.Executed) != 0 {
+					t.Fatalf("unchanged key accepted: %+v", result)
+				}
+			} else if result.Error != "" || len(result.Executed) != 1 {
+				t.Fatalf("repair failed: %+v", result)
+			}
+		})
+	}
+}
+
+func TestKeyBundleWithAdditionalPrimaryKeyIsRejectedBeforeImport(t *testing.T) {
+	src := &keyScript{scripted: newScripted(), extraKey: true}
+	opts := options(t, src.scripted, t.TempDir())
+	opts.Source = src
+	p := &plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:key", Operations: []plan.Operation{{ID: "repository:terra", Kind: plan.KindRepository, Action: plan.ActionEnable}}}
+	result := Run(p, opts)
+	if !strings.Contains(result.Error, "2 primary keys") || src.ran("sudo ") {
+		t.Fatalf("unapproved bundled key imported: %+v\n%v", result, src.log)
+	}
+}
+
+func TestFlatpakEnableVerifiesInstalledKeyInsteadOfOnlyDownloadedKey(t *testing.T) {
+	src := &keyScript{scripted: newScripted(), installedKey: strings.Repeat("1", 40)}
+	opts := options(t, src.scripted, t.TempDir())
+	opts.Source = src
+	p := &plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:remote", Operations: []plan.Operation{{ID: "flatpak-remote:flathub", Kind: plan.KindFlatpakRemote, Action: plan.ActionEnable}}}
+	result := Run(p, opts)
+	if !strings.Contains(result.Error, "trusted fingerprints") || len(result.Executed) != 0 {
+		t.Fatalf("wrong installed remote key accepted: %+v", result)
+	}
+	if _, ok := src.Files[filepath.Join(facts.FlatpakRepoPath, "config")]; !ok {
+		t.Fatal("test never reached remote enable")
+	}
+}

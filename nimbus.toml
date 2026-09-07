@@ -13,7 +13,7 @@ min_engine = "0.1.0"
 # before the first package transaction. Defaults: 3 parallel downloads, no
 # mirror latency test, prompts default to No.
 [dnf]
-max_parallel_downloads = 10
+max_parallel_downloads = 20
 fastestmirror = true
 defaultyes = true
 

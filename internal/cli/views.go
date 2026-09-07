@@ -43,12 +43,6 @@ type packageView struct {
 
 // packageViews joins desired packages with installed ones and receipts.
 func packageViews(s *selected, f *facts.Facts, applied *state.Applied) []packageView {
-	installed := map[string]facts.Package{}
-	if f.Packages.Known() {
-		for _, p := range f.Packages.Value {
-			installed[p.Name] = p
-		}
-	}
 	desired := map[string]bool{}
 	var views []packageView
 	for _, p := range s.Resolved.Packages {
@@ -69,7 +63,14 @@ func packageViews(s *selected, f *facts.Facts, applied *state.Applied) []package
 					}
 				}
 			}
-		} else if inst, ok := installed[p.Name]; ok {
+		} else if p.Prefix == definitions.PrefixCargo {
+			// A crate is the user's, verified by presence; installed means
+			// managed, since nothing else installs it.
+			if f.User.Known() && contains(f.User.Value.Crates, p.Name) {
+				v.Installed, v.Repository, v.State = "installed", "cargo", "managed"
+			}
+		} else if inst, ok := plan.InstalledPackage(p.Name, applied.Receipts[id], f.Packages.Value); ok {
+			desired[inst.ID()] = true
 			v.Installed, v.Repository, v.Reason = inst.EVR(), inst.FromRepo, inst.Reason
 			v.State = "adopt"
 		}
@@ -79,12 +80,12 @@ func packageViews(s *selected, f *facts.Facts, applied *state.Applied) []package
 		views = append(views, v)
 	}
 	for _, p := range f.Packages.Value {
-		if desired[p.Name] {
+		if desired[p.ID()] {
 			continue
 		}
 		st := "dependency"
 		switch {
-		case applied.InBaseline(p.Name):
+		case applied.InBaseline(p.ID()) || applied.InBaseline(p.Name):
 			st = "pre-existing"
 		case plan.IsReleasePackage(s.Checkout.Definitions(), p.Name):
 			st = "managed" // installed by Nimbus while enabling its repository
@@ -92,7 +93,7 @@ func packageViews(s *selected, f *facts.Facts, applied *state.Applied) []package
 		default:
 			st = "unmanaged"
 		}
-		views = append(views, packageView{Canonical: "dnf:" + p.Name, Name: p.Name, State: st, Installed: p.EVR(), Repository: p.FromRepo, Reason: p.Reason})
+		views = append(views, packageView{Canonical: "dnf:" + p.ID(), Name: p.ID(), State: st, Installed: p.EVR(), Repository: p.FromRepo, Reason: p.Reason})
 	}
 	if f.Flatpak.Known() {
 		for _, app := range f.Flatpak.Value.Apps {

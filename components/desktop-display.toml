@@ -6,3 +6,6 @@ requires = []
 conflicts = []
 packages = ["ddcutil"]
 removes = []
+
+[detect]
+chassis = "desktop"

@@ -14,6 +14,15 @@ type Resolved struct {
 	Removes      []string            `json:"removes"`
 	Files        []ResolvedFile      `json:"files"`
 	Repositories []string            `json:"repositories"`
+	// Installers are the user-scope tools of the selected components.
+	Installers []ResolvedInstaller `json:"installers"`
+}
+
+// ResolvedInstaller is one component's installer with its selection paths.
+type ResolvedInstaller struct {
+	Component string    `json:"component"`
+	Installer Installer `json:"installer"`
+	Paths     []string  `json:"paths"`
 }
 
 // ResolvedComponent is a selected component with every path that selected it.
@@ -181,7 +190,7 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 	// with the same name selected from any RPM repository.
 	selectedRPM := map[string]string{}
 	for _, rp := range pkgs {
-		if rp.Prefix != PrefixFlatpak {
+		if rp.Prefix != PrefixFlatpak && rp.Prefix != PrefixCargo {
 			selectedRPM[rp.Name] = rp.Canonical
 		}
 	}
@@ -220,7 +229,7 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 		sort.Strings(rp.Paths)
 		r.Packages = append(r.Packages, *rp)
 		switch rp.Prefix {
-		case PrefixDNF:
+		case PrefixDNF, PrefixCargo:
 		case PrefixFlatpak:
 			if id := c.FlatpakRepository(); id != "" {
 				repos[id] = true
@@ -234,6 +243,14 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 		r.Files = append(r.Files, files[target])
 	}
 	r.Repositories = sortedKeys(repos)
+	for _, rc := range r.Components {
+		if comp := c.Components[rc.ID]; comp != nil && comp.Installer != nil {
+			r.Installers = append(r.Installers, ResolvedInstaller{Component: rc.ID, Installer: *comp.Installer, Paths: rc.Paths})
+		}
+	}
+	if r.Installers == nil {
+		r.Installers = []ResolvedInstaller{}
+	}
 	if r.Components == nil {
 		r.Components = []ResolvedComponent{}
 	}

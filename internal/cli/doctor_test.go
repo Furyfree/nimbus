@@ -80,7 +80,7 @@ func TestDoctorOnRepositoryCheckout(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("exit %d\n%s%s", code, out, errOut)
 	}
-	if !strings.Contains(out, "pass    platform: fedora 44 on x86_64") || !strings.Contains(out, "0 failed, 0 unknown, 9 checks") {
+	if !strings.Contains(out, "pass    platform: fedora 44 on x86_64") || !strings.Contains(out, "0 failed, 0 unknown, 10 checks") {
 		t.Fatalf("output:\n%s", out)
 	}
 	code, out, _ = run(t, "doctor", "--checkout", root, "--json")
@@ -99,7 +99,7 @@ func TestDoctorOnRepositoryCheckout(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &env); err != nil {
 		t.Fatal(err)
 	}
-	if len(env.Data.Checks) != 9 || env.Data.Failed != 0 || env.Data.Checks[0].ID != "platform" {
+	if len(env.Data.Checks) != 10 || env.Data.Failed != 0 || env.Data.Checks[0].ID != "platform" {
 		t.Fatalf("envelope = %+v", env.Data)
 	}
 }

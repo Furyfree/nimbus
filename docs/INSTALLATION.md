@@ -5,9 +5,6 @@ Nimbus. [SPEC.md](SPEC.md) remains the product contract. The earlier test draft
 is superseded evidence in commit
 `c0bb8a4660732e6e9556297da2c15ba0f286ee98`, not an active guide.
 
-Nimbus is not implemented yet. The final bootstrap command below documents the
-accepted future handoff rather than a currently usable installer.
-
 ## Target result
 
 Install Fedora 44 on x86_64 as a small bootable base with:
@@ -119,7 +116,7 @@ sudo btrfs subvolume list /
 Confirm that networking and `sudo` work. Do not manually install the desktop or
 duplicate resources that Nimbus will own.
 
-When Nimbus bootstrap is implemented, continue with:
+Continue with:
 
 ~~~sh
 curl -fsSL https://raw.githubusercontent.com/Furyfree/nimbus/main/install.sh | bash

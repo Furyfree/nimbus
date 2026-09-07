@@ -14,7 +14,10 @@ import (
 // COPR repository declares a higher number so it cannot shadow Fedora.
 const FedoraPriority = 99
 
-var dnfOptionRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+var (
+	dnfOptionRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+	pciVendorRe = regexp.MustCompile(`^[0-9a-f]{4}$`)
+)
 
 var (
 	releaseRe     = regexp.MustCompile(`^[0-9]+$`)
@@ -204,7 +207,7 @@ func (c *Checkout) validateRefs(where string, raws []string, errs *ErrorList) []
 			continue
 		}
 		switch ref.Prefix {
-		case PrefixDNF:
+		case PrefixDNF, PrefixCargo:
 		case PrefixFlatpak:
 			if c.FlatpakRepository() == "" {
 				errs.Add(where, "%q needs a flatpak repository in %s", raw, RootFile)
@@ -302,6 +305,31 @@ func validateComponent(c *Checkout, comp *Component, errs *ErrorList) {
 	validateIDList(where, "required component", comp.Requires, c.hasComponent, comp.ID, errs)
 	validateIDList(where, "conflicting component", comp.Conflicts, c.hasComponent, comp.ID, errs)
 	c.validateRefs(where, comp.Packages, errs)
+	if d := comp.Detect; d != nil {
+		if d.Chassis != "" && d.Chassis != "laptop" && d.Chassis != "desktop" {
+			errs.Add(where, "detect.chassis %q must be laptop or desktop", d.Chassis)
+		}
+		if d.DisplayVendor != "" && !pciVendorRe.MatchString(d.DisplayVendor) {
+			errs.Add(where, "detect.display_vendor %q must be four lowercase hex digits", d.DisplayVendor)
+		}
+		if d.Chassis == "" && d.DisplayVendor == "" {
+			errs.Add(where, "detect needs chassis or display_vendor")
+		}
+	}
+	if in := comp.Installer; in != nil {
+		if !strings.HasPrefix(in.URL, "https://") {
+			errs.Add(where, "installer.url must be an https URL")
+		}
+		if in.Binary == "" || !cleanRelativePath(in.Binary) {
+			errs.Add(where, "installer.binary must be a clean path relative to the home directory")
+		}
+		if in.Config != "" && !cleanRelativePath(in.Config) {
+			errs.Add(where, "installer.config must be a clean path relative to the home directory")
+		}
+		if (in.Config == "") != (len(in.Install) == 0) {
+			errs.Add(where, "installer.config and installer.install go together")
+		}
+	}
 	seen := map[string]bool{}
 	for _, name := range comp.Removes {
 		if err := ParseRPMName(name); err != nil {

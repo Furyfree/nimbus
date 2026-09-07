@@ -11,3 +11,6 @@ packages = [
   "rpmfusion-nonfree:intel-media-driver",
 ]
 removes = []
+
+[detect]
+display_vendor = "8086"

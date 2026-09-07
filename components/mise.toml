@@ -1,0 +1,14 @@
+# Nimbus installs Mise itself as the user. Chezmoi applies its configuration
+# and invokes mise install for the declared runtimes and tools.
+schema = 1
+id = "mise"
+
+requires = []
+conflicts = []
+# Build prerequisites for tools declared in the global Chezmoi configuration.
+packages = ["gcc", "gcc-c++", "clang", "cmake", "ninja-build"]
+removes = []
+
+[installer]
+url = "https://mise.run"
+binary = ".local/bin/mise"

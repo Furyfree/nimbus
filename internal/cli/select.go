@@ -12,6 +12,8 @@ import (
 
 	"github.com/Furyfree/nimbus/internal/apply"
 	"github.com/Furyfree/nimbus/internal/definitions"
+	"github.com/Furyfree/nimbus/internal/doctor"
+	"github.com/Furyfree/nimbus/internal/facts"
 )
 
 // The selection commands edit the two manifest lists a user would otherwise
@@ -337,6 +339,9 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 	}
 	trial := &selected{Root: s.Root, Checkout: &trialCheckout, Resolved: r}
 	src := newSource()
+	if err := facts.CheckPlatform(src, s.Checkout.Definitions().Compatibility.Fedora); err != nil {
+		return err
+	}
 	p, _, err := planWithState(trial, src, false)
 	if err != nil {
 		return err
@@ -368,6 +373,21 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 	if err != nil {
 		return err
 	}
+	defer lock.Release()
+	fresh, err := loadSelected(flags)
+	if err != nil {
+		return err
+	}
+	if fresh.Root != s.Root || fresh.Resolved.Machine != s.Resolved.Machine || fresh.Checkout.Digest() != s.Checkout.Digest() {
+		return errors.New("definitions or selection changed while the plan was being reviewed; run the command again")
+	}
+	freshPlan, _, err := planWithState(trial, src, false)
+	if err != nil {
+		return err
+	}
+	if freshPlan.Digest != p.Digest {
+		return errors.New("the system changed while the plan was being reviewed; run the command again")
+	}
 	current, err := os.ReadFile(path)
 	if err != nil || string(current) != string(before) {
 		lock.Release()
@@ -378,6 +398,9 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 		return err
 	}
 	fmt.Fprintf(review, "wrote %s; the Git change is yours to commit\n", path)
+	if strings.HasPrefix(edit.cmdName, "profiles ") && edited.Dotfiles != nil {
+		fmt.Fprintf(review, "Chezmoi keeps its own copy of the profiles; refresh it with:\n  %s\n", doctor.ChezmoiRefresh(edited.ID, r.Profiles))
+	}
 	if nothingToRun(p) {
 		lock.Release()
 		if opts.json {
@@ -388,7 +411,7 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 	flags.machine = s.Resolved.Machine
 	// The edit is the request; it runs without system updates, which are
 	// a plain sync's job.
-	return runSyncWith(cmd, opts, flags, syncFlags{yes: true, noUpgrade: true}, lock)
+	return runSyncWith(cmd, opts, flags, syncFlags{yes: true, noUpgrade: true, approvedDigest: p.Digest}, lock)
 }
 
 func listProfiles(s *selected) []selectionView {

@@ -1,79 +1,81 @@
 # Nimbus tasks
 
-## Current phase: Controlled DNF apply and receipts
+## Current phase: Bootstrap, initialization, and Chezmoi handoff
 
-Plan: [Controlled DNF apply and receipts](ROADMAP.md#4-controlled-dnf-apply-and-receipts).
-Phases 1 to 3 are merged. The first disposable-VM run belongs to this phase
-and is the owner's; its steps are in the evidence below.
+Plan: [Bootstrap, initialization, and Chezmoi handoff](ROADMAP.md#5-bootstrap-initialization-and-chezmoi-handoff).
+Phases 1 to 4 are merged. Phase 4's checklist is in the evidence section.
 
-### State
+### Initialization
 
-- [x] Add `internal/state`: `/var/lib/nimbus` with a schema file, receipts
-  per resource, a journal, and the baseline of packages that existed before
-  Nimbus first applied anything. The normal user reads it; only the hidden
-  `nimbus internal record` action, run through sudo, writes it, and only a
-  stage bound to the plan digest with verified receipts.
-- [x] Record the baseline with the first receipt of the first apply; a later
-  record never replaces it.
+- [x] Hardware facts: DMI product and board names, the chassis kind from the
+  SMBIOS chassis type, and display adapters by PCI vendor and device, read
+  from sysfs through the source.
+- [x] Typed detection: `[detect]` on the hardware components, `hardware` on
+  the tracked machines, `plan.ProposeComponents` and `plan.MatchMachine`
+  with laptop, desktop, and VM fixtures.
+- [x] `nimbus init`: validates the checkout, reads its origin, asks which
+  machine with the matching one pre-selected, runs the new-machine dialog
+  for `--new`, writes the manifest and the selector, syncs, hands off to
+  Chezmoi once, and reports its configuration and tool installation together.
+  A second user-only pass runs only for explicit Nimbus-owned declarations.
+- [x] `install.sh` and `bootstrap`: platform and user checks, Git through
+  DNF, clone or validate the checkout, the engine from the COPR, init with
+  its input on the terminal; shellcheck runs in `just check` and CI.
+- [x] Doctor's `chezmoi` check compares Chezmoi's stored machine and
+  profiles with the manifest; `profiles add|remove` print the refresh
+  command.
 
-### Executor
+### User scope
 
-- [x] Add `internal/apply`: the kernel operation lock under
-  `$XDG_RUNTIME_DIR/nimbus/operation.lock`, mode 0700 and 0600, content
-  diagnostic only.
-- [x] Enable repositories natively: key downloaded or read from the
-  checkout, fingerprint checked with `gpg` before any privileged command,
-  `install` and `rpm --import`, then `dnf5 config-manager addrepo` for
-  Nimbus-owned repositories; a release RPM verified by SHA-256 with its key
-  extracted through `rpm2archive`; `dnf5 copr enable`; priorities through
-  `dnf5 config-manager setopt`, which writes a DNF override instead of the
-  maker's file; a Flatpak remote added from the verified `.flatpakrepo`.
-- [x] Install packages with one `dnf5 install`; afterwards the installed
-  set is compared with the preview and the differences are reported, not
-  refused (D-027).
-- [x] Verify every operation by re-inspecting the host; a failed
-  verification gets no receipt and stops the run; earlier receipts stay.
-- [x] Owned removal of packages with a receipt that the definitions no
-  longer select; `sync --prune` removes the third-bucket candidates.
+- [x] `[installer]` on components and the `cargo:` prefix; the `mise`
+  component. The tracked development profile now delegates its Cargo tools to
+  Chezmoi's native Mise configuration instead of declaring duplicate crates.
+- [x] Planned as the user: the maker installer with its digest shown and
+  binary verified, no receipts. Chezmoi's after-script invokes Mise for the
+  configured runtimes and Cargo tools on each full apply; ordinary sync does
+  not install or repair those tools.
+- [x] Select Mise and its existing build prerequisites through the common
+  profile so a non-development machine can apply the global tool configuration.
 
-### Commands
+### Installer stabilization
 
-- [x] `nimbus sync [-p] [-y] [-n] [-r]`: refreshes metadata, shows the plan,
-  asks once, prepares the declared sources, runs the native commands with
-  their output visible, upgrades the system, verifies, records receipts, and
-  reports differences from the plan. `-p` is the read-only plan.
-- [x] `packages install [QUERY]`, `packages remove [QUERY]`,
-  `profiles add|remove [ID...]`, `components add|remove [ID...]`: edit the
-  manifest in memory, show the diff and plan, require approval, write the
-  manifest atomically, apply, and leave the Git change to the user. Without
-  IDs the Bubble Tea picker opens; it needs a terminal.
-- [x] `unmanaged --all` adds the pre-existing bucket with its marker;
-  `managed` distinguishes receipts from adoptable packages.
-- [x] Delete `components/fedora-base.toml`; the baseline replaces it and
-  resolves Q-018.
+- [x] Apply Chezmoi during init, including its user-tool scripts; retain native
+  lifecycle commands through `dotfiles diff`, `apply`, and `update`. Script
+  failures fail the dotfiles-and-tools stage and remain retryable.
+- [x] Show completed, failed, and skipped work with reasons, including partial
+  native changes; fail the exit status for required incomplete work.
+- [x] Recheck approved selection and definitions, carry selection approval,
+  validate new manifests before writing, and hold init's lock through its run.
+- [x] Refuse empty EOF approval and unsupported or unknown platforms before
+  mutation.
+- [x] Preserve native RPM architecture identity and conservative legacy ownership;
+  compare install, removal, and upgrade transactions before and after execution.
+- [x] Verify actual active repository keys; reconcile DNF trust and refuse unsafe
+  existing Flatpak trust changes.
+- [x] Document public HTTPS bootstrap as the intended path. GitHub visibility
+  has not been changed by these local edits.
 
 ### Validation
 
-- [x] State tests: atomic writes, refusal of unbound or unverified stages,
-  baseline immutability, schema rejection.
-- [x] Executor tests with a scripted host whose state changes as commands
-  run: the full happy path with receipts and baseline, stop at the first
-  failure with earlier receipts kept, key mismatch before any privileged
-  command, verification failure without a receipt, incomplete plan refused,
-  owned removal retiring its receipt.
-- [x] CLI tests: the one question and its refusal, incomplete plan, stop at
-  the first failed operation with the lock held, manifest rendering and
-  diff, the selection flows, the picker hook.
+- [x] Tests: hardware parsing, proposals and matches, the init dialog with
+  the picker and prompt hooks, the handoff command, the doctor check, the
+  user-scope planner and executor.
 - [x] Run `just check`.
-- [x] First disposable-VM runs, 2026-09-04: see the evidence section.
+- [ ] Fresh-VM drill of the one-liner, owner's action: restore the
+  snapshot, run `install.sh` from a served copy of the branch, reach the
+  first sync, the Chezmoi handoff, and the user-scope steps.
 
 ### Outside this repository
 
-- [ ] Dotfiles repository, before Phase 5: delete `machines/` and its
-  symlink-selector README, add `Machine` and `ManagedByNimbus` prompts to
-  `.chezmoi.toml.tmpl`, drop the profile-choice validation so the list is
-  stored as sent, deploy every Linux config except Hyprland and Noctalia
-  unconditionally, and update PROFILES.md.
+- [x] Read the current dotfiles template and PROFILES.md: the three handoff
+  prompts and unvalidated stored profile list are present.
+- [x] Validate the populated dotfiles Mise configuration and Linux Cargo
+  fragment together. The owner's runtime selections now include Rust; the
+  seven Cargo tools moved to `home/dot_config/mise/conf.d/cargo.toml`.
+- [ ] Verify initial and refreshed Chezmoi prompts, apply, and user-tool
+  installation together in an isolated home and disposable Fedora VM.
+- [ ] Publish Nimbus and dotfiles through a separately authorized GitHub
+  visibility change after reviewing their content and history.
 
 ## Evidence
 
@@ -98,8 +100,67 @@ and is the owner's; its steps are in the evidence below.
   recipient and subject. Record the installed version and whether the failure
   persists there before attributing it to Fastmail or its Flatpak packaging.
 
-### Phase 4 evidence
+- Chezmoi-owned installation, 2026-09-05: focused Nimbus tests cover a single
+  Chezmoi handoff, native tool failure and retry in init and dotfiles summaries,
+  and ordinary sync leaving dotfiles tools alone. The real common definitions
+  provide Mise without development. Dotfiles lifecycle fixtures run native
+  Chezmoi against a tiny temporary source and fake Mise: configs precede
+  installation, unchanged apply repairs a missing tool, errors propagate and
+  retry, missing prerequisites and root are refused, Windows renders no action,
+  and previews do not install. Real downloads and platform execution remain
+  part of the VM and native platform gates.
+- Cargo handoff, 2026-09-05: native `mise config ls --json` loads the main
+  configuration and all seven Cargo tools from the fragment in an isolated
+  home; `mise settings get cargo.binstall` returns false. Isolated Chezmoi
+  `managed`, `status`, `diff`, and `verify` pass for the rendered Mise targets;
+  platform checks exclude the Cargo fragment on macOS and Windows. Offline
+  `mise ls --json` cannot resolve uncached latest versions; downloads and real
+  installation remain part of the disposable VM gate.
+- Installer stabilization, 2026-09-05: focused tests cover Chezmoi apply
+  before Mise and Cargo, skipped dependencies and retry, unrelated Chezmoi
+  source or selection refusal, lock continuity, invalid manifests without
+  writes, changed definitions during approval, EOF without an answer, and
+  platform refusal before metadata refresh. Native package and key tests cover
+  multilib ownership, legacy migration, collateral and partial transactions,
+  active key replacement, bundled keys, and existing Flatpak trust.
+  `just check`, `just validate`, and `gitleaks dir --redact --no-banner .`
+  passed. No live installation, VM drill, commit, push, or visibility change
+  was performed.
+- Local CodeRabbit CLI 0.7.6 reviewed the tracked uncommitted diff once. Its two
+  minor findings were addressed: the dotfiles group in the public CLI list and
+  accepting an explicit final yes at EOF while refusing empty or whitespace-only
+  EOF. New untracked files and subsequent integration changes were reviewed by
+  the main agent and covered by focused checks.
 
+- Phase 5 drill, first run, 2026-09-04, on the restored VM with the `vm`
+  manifest: `nimbus init --machine vm` wrote the selector, the first sync
+  ran, and the handoff reached `chezmoi init` with the three prompt flags;
+  the private clone failed on a password typed at git's prompt and init
+  reported it and went on, as designed. The second sync then primed sudo
+  for a run that held no privileged step, reported "0 operations applied"
+  when everything waited for the handoff, and repeated the cargo note once
+  per crate. Fixed the same day: sudo is primed only when a system
+  operation, a receipt, or the upgrade needs it; a run whose operations all
+  wait says so and runs nothing; a note is shown once; a pending user step
+  names what it waits for in words. Read back over ssh afterwards: 142
+  receipts under one dnf-config, nine repositories, 130 packages, one remote,
+  and two Flatpaks; a baseline of 635 packages; DNF history holding exactly
+  the release RPM, one install of 901 packages, and one upgrade; the two
+  maker repository files disabled through the override; Mise 2026.9.1 in
+  `~/.local/bin`; no sudo credential left cached. Two more fixes from that
+  reading: doctor called chezmoi absent because only the required commands
+  were looked up, and the empty source directory the failed clone left
+  behind counted as an initialized Chezmoi for both the handoff and the
+  facts. The retry with GitHub authentication is next.
+- Phase 5 passthrough, 2026-09-04, main agent only: the executor ran a
+  full inspection before every user-scope step and discarded it; the plan
+  dropped the user tools silently when their facts were unknown, now one
+  blocked operation; the Mise runtimes command named `mise` although
+  `~/.local/bin` joins PATH only at the next login, now the full path;
+  bootstrap hid the validation output on failure; SPEC denied the sudo
+  renewal that sync performs and placed key import in planning; the Phase 5
+  sections still called the removed command apply; INSTALLATION.md said
+  Nimbus was not implemented; ROADMAP.md named Phase 1 as current.
 - Phase 4 apply, 2026-09-03: `internal/state`, `internal/apply`, the hidden
   `internal record` action, `nimbus sync`, the selection commands, and the
   picker. Probed in the research container: `dnf5 config-manager addrepo
@@ -230,7 +291,6 @@ and is the owner's; its steps are in the evidence below.
 - On 2026-09-02 the Chezmoi handoff gained `managed_by_nimbus`, the `windows-vm`
   profile joined the vocabulary, and the dotfiles repository was reconciled to
   the handoff (D-007), removing its machine manifests and symlink selector.
-- No Go implementation exists yet.
 - The Fedora 44 package-query tool is development evidence only and does not
   define desired state.
 
@@ -263,21 +323,15 @@ and is the owner's; its steps are in the evidence below.
 - The declared repository URLs for 1Password, Brave, VSCodium, and Terra are
   taken from the makers' documentation and the container's repository files;
   they are exercised only when Phase 3 planning reads them.
-- User-scope steps (Mise, Cargo, `mise install`) and services are not yet
-  schema fields, so PACKAGES.md still lists what the definitions cannot yet
-  express.
-- A `key_file` is checked only for its armored public-key form; Phase 3
-  verifies the fingerprint when the key is imported through the command
-  runner.
+- User-scope steps are implemented through `[installer]` and `cargo:` references.
+  Services remain a later phase.
+- Definition validation checks armored key-file form; planning checks observed
+  active trust and execution verifies downloaded or declared keys before import.
 - Development engine builds (`0.0.0-dev`) skip the `min_engine` comparison;
   release builds enforce it.
 
-- The dotfiles template change for Q-015 is outside this repository and
-  blocks only the Phase 5 handoff.
-- Key URLs and fingerprints for RPM Fusion, 1Password, Brave, VSCodium, the
-  Hyprland COPR, Flathub, and the owner's COPRs must be recorded in
-  nimbus.toml from the makers' published keys before those repositories are
-  used; Docker's, OpenAI's, and Terra's are already recorded.
+- The current repository declarations include their key URLs or files and pins.
+  Real native reconciliation and Flatpak repair still need disposable-VM drills.
 - A maker's installer script cannot be pinned to a version; Nimbus downloads
   it, shows the file's digest, and runs that file.
 - Exact DNF5 constraint and desktop-session update behavior remains deliberately
@@ -287,10 +341,10 @@ and is the owner's; its steps are in the evidence below.
 
 ## Completion rule
 
-Complete the phase only when every checkbox passes, evidence is recorded, a
-representative DNF component and the selection commands complete and reverse
-safely in the disposable VM, and every mutation runs through the reviewed
-plan with a receipt.
+Complete the phase only when the required installation and validation tasks
+pass, the evidence is recorded, and a disposable Fedora VM reaches applied
+user configuration and the selected user tools. Native system ownership needs
+verified receipts; user tools retain their explicit no-receipt lifecycle.
+Public repository visibility is a separate publication action.
 
-Stop after the VM run is recorded and request separate authorization before
-starting bootstrap and initialization.
+Stop before starting the services and remaining system resources phase.
