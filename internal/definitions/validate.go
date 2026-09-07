@@ -14,7 +14,10 @@ import (
 // COPR repository declares a higher number so it cannot shadow Fedora.
 const FedoraPriority = 99
 
-var dnfOptionRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+var (
+	dnfOptionRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+	pciVendorRe = regexp.MustCompile(`^[0-9a-f]{4}$`)
+)
 
 var (
 	releaseRe     = regexp.MustCompile(`^[0-9]+$`)
@@ -85,7 +88,11 @@ func validateRoot(c *Checkout, errs *ErrorList) {
 			errs.Add(RootFile, "dnf.%s: option names are lowercase letters, digits, and underscores", key)
 		}
 		switch r.DNF[key].(type) {
-		case int64, bool, string:
+		case int64, bool:
+		case string:
+			if strings.ContainsAny(r.DNF[key].(string), "\r\n\x00") {
+				errs.Add(RootFile, "dnf.%s: value must not contain line breaks or NUL", key)
+			}
 		default:
 			errs.Add(RootFile, "dnf.%s: value must be a number, boolean, or string", key)
 		}
@@ -104,7 +111,7 @@ func validateRoot(c *Checkout, errs *ErrorList) {
 				priorities[*repo.Priority] = id
 			}
 		}
-		if id == PrefixDNF || id == PrefixFlatpak {
+		if id == PrefixDNF || id == PrefixFlatpak || id == PrefixCargo {
 			errs.Add(RootFile, "%s: %q is a reserved prefix", where, id)
 		} else if !prefixRe.MatchString(id) {
 			errs.Add(RootFile, "%s: invalid repository ID", where)
@@ -204,7 +211,7 @@ func (c *Checkout) validateRefs(where string, raws []string, errs *ErrorList) []
 			continue
 		}
 		switch ref.Prefix {
-		case PrefixDNF:
+		case PrefixDNF, PrefixCargo:
 		case PrefixFlatpak:
 			if c.FlatpakRepository() == "" {
 				errs.Add(where, "%q needs a flatpak repository in %s", raw, RootFile)
@@ -287,6 +294,9 @@ func validateIDList(where, kind string, ids []string, exists func(string) bool, 
 
 func validateProfile(c *Checkout, p *Profile, errs *ErrorList) {
 	where := "profiles/" + p.ID + ".toml"
+	if err := ValidateID(p.ID); err != nil {
+		errs.Add(where, "id: %v", err)
+	}
 	if p.Schema != CurrentSchema {
 		errs.Add(where, "schema %d is not supported", p.Schema)
 	}
@@ -296,12 +306,40 @@ func validateProfile(c *Checkout, p *Profile, errs *ErrorList) {
 
 func validateComponent(c *Checkout, comp *Component, errs *ErrorList) {
 	where := "components/" + comp.ID + ".toml"
+	if err := ValidateID(comp.ID); err != nil {
+		errs.Add(where, "id: %v", err)
+	}
 	if comp.Schema != CurrentSchema {
 		errs.Add(where, "schema %d is not supported", comp.Schema)
 	}
 	validateIDList(where, "required component", comp.Requires, c.hasComponent, comp.ID, errs)
 	validateIDList(where, "conflicting component", comp.Conflicts, c.hasComponent, comp.ID, errs)
 	c.validateRefs(where, comp.Packages, errs)
+	if d := comp.Detect; d != nil {
+		if d.Chassis != "" && d.Chassis != "laptop" && d.Chassis != "desktop" {
+			errs.Add(where, "detect.chassis %q must be laptop or desktop", d.Chassis)
+		}
+		if d.DisplayVendor != "" && !pciVendorRe.MatchString(d.DisplayVendor) {
+			errs.Add(where, "detect.display_vendor %q must be four lowercase hex digits", d.DisplayVendor)
+		}
+		if d.Chassis == "" && d.DisplayVendor == "" {
+			errs.Add(where, "detect needs chassis or display_vendor")
+		}
+	}
+	if in := comp.Installer; in != nil {
+		if !strings.HasPrefix(in.URL, "https://") {
+			errs.Add(where, "installer.url must be an https URL")
+		}
+		if in.Binary == "" || !cleanRelativePath(in.Binary) {
+			errs.Add(where, "installer.binary must be a clean path relative to the home directory")
+		}
+		if in.Config != "" && !cleanRelativePath(in.Config) {
+			errs.Add(where, "installer.config must be a clean path relative to the home directory")
+		}
+		if (in.Config == "") != (len(in.Install) == 0) {
+			errs.Add(where, "installer.config and installer.install go together")
+		}
+	}
 	seen := map[string]bool{}
 	for _, name := range comp.Removes {
 		if err := ParseRPMName(name); err != nil {
@@ -345,6 +383,9 @@ func validateComponent(c *Checkout, comp *Component, errs *ErrorList) {
 
 func validateMachine(c *Checkout, m *Machine, errs *ErrorList) {
 	where := "machines/" + m.ID + ".toml"
+	if err := ValidateID(m.ID); err != nil {
+		errs.Add(where, "id: %v", err)
+	}
 	if m.Schema != CurrentSchema {
 		errs.Add(where, "schema %d is not supported", m.Schema)
 	}

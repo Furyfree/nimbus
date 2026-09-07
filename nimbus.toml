@@ -13,7 +13,7 @@ min_engine = "0.1.0"
 # before the first package transaction. Defaults: 3 parallel downloads, no
 # mirror latency test, prompts default to No.
 [dnf]
-max_parallel_downloads = 10
+max_parallel_downloads = 20
 fastestmirror = true
 defaultyes = true
 
@@ -55,7 +55,8 @@ priority = 101
 [repositories.brave]
 kind = "dnf"
 baseurl = "https://brave-browser-rpm-release.s3.brave.com/$basearch/"
-key_url = "https://brave-browser-rpm-release.s3.brave.com/brave-core.asc"
+# The maker URL bundles three primary keys; store only the pinned signer.
+key_file = "keys/brave.asc"
 key = "DBF1 A116 C220 B8C7 164F 9823 0686 B784 2003 8257"
 priority = 102
 

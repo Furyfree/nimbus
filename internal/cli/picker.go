@@ -15,10 +15,32 @@ import (
 // It is the presentation half of a selection command; the command itself
 // still shows the diff and plan and asks for approval afterwards.
 func runPicker(title string, items []pickItem) ([]string, error) {
+	return pick(title, items, false)
+}
+
+// runPickOne is the single-choice form: the entry under the cursor is the
+// answer, and enter confirms it.
+func runPickOne(title string, items []pickItem) (string, error) {
+	chosen, err := pick(title, items, true)
+	if err != nil {
+		return "", err
+	}
+	if len(chosen) != 1 {
+		return "", errors.New("nothing chosen")
+	}
+	return chosen[0], nil
+}
+
+func pick(title string, items []pickItem, single bool) ([]string, error) {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		return nil, errors.New("the picker needs a terminal; pass explicit IDs instead")
 	}
-	m := pickerModel{title: title, items: items, selected: map[int]bool{}}
+	m := pickerModel{title: title, items: items, selected: map[int]bool{}, single: single}
+	for i, it := range items {
+		if single && it.Selected {
+			m.cursor = i
+		}
+	}
 	for i, it := range items {
 		if it.Selected {
 			m.selected[i] = true
@@ -31,6 +53,12 @@ func runPicker(title string, items []pickItem) ([]string, error) {
 	fm := final.(pickerModel)
 	if fm.aborted {
 		return nil, errors.New("picker cancelled")
+	}
+	if single {
+		if vis := fm.visible(); len(vis) > 0 && fm.cursor < len(vis) {
+			return []string{fm.items[vis[fm.cursor]].ID}, nil
+		}
+		return nil, errors.New("nothing chosen")
 	}
 	var chosen []string
 	for i, it := range fm.items {
@@ -49,6 +77,7 @@ type pickerModel struct {
 	filter   string
 	aborted  bool
 	done     bool
+	single   bool // one answer, the entry under the cursor
 }
 
 func (m pickerModel) Init() tea.Cmd { return nil }
@@ -85,7 +114,7 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor++
 		}
 	case " ", "tab":
-		if len(vis) > 0 {
+		if len(vis) > 0 && !m.single {
 			i := vis[m.cursor]
 			m.selected[i] = !m.selected[i]
 		}
@@ -111,7 +140,11 @@ var (
 
 func (m pickerModel) View() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s  %s\n", titleStyle.Render(m.title), dimStyle.Render("type to filter, space toggles, enter confirms, esc cancels"))
+	hint := "type to filter, space toggles, enter confirms, esc cancels"
+	if m.single {
+		hint = "type to filter, enter chooses, esc cancels"
+	}
+	fmt.Fprintf(&b, "%s  %s\n", titleStyle.Render(m.title), dimStyle.Render(hint))
 	if m.filter != "" {
 		fmt.Fprintf(&b, "filter: %s\n", m.filter)
 	}
@@ -127,6 +160,9 @@ func (m pickerModel) View() string {
 		mark := "[ ]"
 		if m.selected[i] {
 			mark = "[x]"
+		}
+		if m.single {
+			mark = " "
 		}
 		line := fmt.Sprintf("%s %s", mark, m.items[i].ID)
 		if m.items[i].Detail != "" {

@@ -1,6 +1,7 @@
 # HP EliteBook X G1a: AMD integrated graphics.
 schema = 1
 id = "laptop"
+hardware = "EliteBook X G1a"
 
 profiles = [
   "common",

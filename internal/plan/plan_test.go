@@ -139,7 +139,11 @@ func answerInstall(t *testing.T, src *facts.FakeSource, in Inputs, mutate func([
 				repo = DNFRepoIDs(p.Prefix, in.Root.Repositories[p.Prefix])[0]
 			}
 		}
-		rows = append(rows, TxPackage{Name: name, Arch: "x86_64", EVR: "0:1-1.fc44", Repository: repo, Section: "installing"})
+		native, arch := facts.SplitPackageRequest(name)
+		if arch == "" {
+			arch = "x86_64"
+		}
+		rows = append(rows, TxPackage{Name: native, Arch: arch, EVR: "0:1-1.fc44", Repository: repo, Section: "installing"})
 	}
 	if mutate != nil {
 		rows = mutate(rows)
@@ -200,7 +204,7 @@ func TestPlanOnFreshFedora(t *testing.T) {
 		t.Fatalf("docker steps = %+v", docker.Steps)
 	}
 	rf := repositorySteps("rpmfusion-free", c.Definitions().Repositories["rpmfusion-free"])
-	if !strings.Contains(rf[0].Description, "sha256") || rf[1].Argv[0] != "rpm2archive" || rf[4].Argv[1] != "install" {
+	if !strings.Contains(rf[0].Description, "sha256") || rf[1].Argv[0] != "rpm2archive" || rf[5].Argv[1] != "install" {
 		t.Fatalf("release package steps = %+v", rf)
 	}
 
@@ -338,12 +342,12 @@ func TestPlanRemovesDeclaredPackages(t *testing.T) {
 	// ffmpeg-free is installed on this host, so media-codecs must swap it.
 	f.Packages.Value = append(f.Packages.Value, facts.Package{Name: "ffmpeg-free", Epoch: "0", Version: "8.0.1", Release: "6.fc44", Arch: "x86_64", FromRepo: "fedora", Reason: "user"})
 	in := Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src}
-	key := facts.Key("dnf5", "--assumeno", "--cacheonly", "remove", "ffmpeg-free")
+	key := facts.Key("dnf5", "--assumeno", "--cacheonly", "remove", "--no-autoremove", "ffmpeg-free")
 	src.Commands[key] = previewText([]TxPackage{{Name: "ffmpeg-free", Arch: "x86_64", EVR: "0:8.0.1-6.fc44", Repository: "@System", Section: "removing"}})
 	src.Failures[key] = "exit status 1"
 	p := answerInstall(t, src, in, nil)
 	op := find(p, "packages:remove")
-	if op == nil || op.Blocked != "" || op.Risk != RiskMedium || strings.Join(op.Steps[0].Argv, " ") != "dnf5 -y remove ffmpeg-free" {
+	if op == nil || op.Blocked != "" || op.Risk != RiskMedium || strings.Join(op.Steps[0].Argv, " ") != "dnf5 -y remove --no-autoremove ffmpeg-free" {
 		t.Fatalf("remove = %+v", op)
 	}
 	if find(p, "package:dnf:ffmpeg-free") != nil {
@@ -381,7 +385,7 @@ func TestPlanDigestCoversOnlyTheApplySection(t *testing.T) {
 	if c2.Digest != a.Digest || len(c2.Updates.Available) != 0 {
 		t.Fatal("update information must not change the plan digest")
 	}
-	f.Flatpak.Value.Remotes = []facts.FlatpakRemote{{Name: "flathub", URL: "https://dl.flathub.org/repo/"}}
+	f.Flatpak.Value.Remotes = []facts.FlatpakRemote{{Name: "flathub", URL: "https://dl.flathub.org/repo/", GPGVerify: true, KeyFingerprints: []string{definitions.NormalizeFingerprint(c.Definitions().Repositories["flathub"].Key)}}}
 	d, _ := Build(in)
 	if d.Digest == a.Digest || find(d, "flatpak-remote:flathub") != nil || find(d, "flatpak:com.spotify.Client").Blocked != "" {
 		t.Fatal("a present remote must change the operations and the digest")
@@ -457,10 +461,13 @@ func readyHost(t *testing.T, c *definitions.Checkout) (*facts.FakeSource, *facts
 				for i := range f.Repositories.Value {
 					if f.Repositories.Value[i].ID == host {
 						f.Repositories.Value[i].GPGCheck, f.Repositories.Value[i].Priority, found = "1", strconv.Itoa(*r.Priority), true
+						f.Repositories.Value[i].KeyFingerprints = []string{definitions.NormalizeFingerprint(r.Key)}
+						f.Repositories.Value[i].KeyError = ""
+						f.Repositories.Value[i].GPGKey = "file://" + KeyPath(id)
 					}
 				}
 				if !found {
-					f.Repositories.Value = append(f.Repositories.Value, facts.Repository{ID: host, File: "_" + host + ".repo", Enabled: true, GPGCheck: "1", Priority: strconv.Itoa(*r.Priority)})
+					f.Repositories.Value = append(f.Repositories.Value, facts.Repository{ID: host, File: "_" + host + ".repo", Enabled: true, GPGCheck: "1", Priority: strconv.Itoa(*r.Priority), GPGKey: "file://" + KeyPath(id), KeyFingerprints: []string{definitions.NormalizeFingerprint(r.Key)}})
 				}
 			}
 		}
@@ -476,6 +483,8 @@ func ownedRepoFile(c *definitions.Checkout, id string, edit func(*facts.Reposito
 		have.Options[o.Key] = o.Value
 	}
 	have.GPGCheck, have.Priority, have.BaseURL = have.Options["gpgcheck"], have.Options["priority"], have.Options["baseurl"]
+	have.GPGKey = have.Options["gpgkey"]
+	have.KeyFingerprints = []string{definitions.NormalizeFingerprint(c.Definitions().Repositories[id].Key)}
 	if edit != nil {
 		edit(&have)
 	}
@@ -538,7 +547,7 @@ func TestFlatpakRemoteMustMatchTheDeclaredURL(t *testing.T) {
 	if op := find(p, "flatpak:com.spotify.Client"); op == nil || !strings.Contains(op.Blocked, "cannot be used") {
 		t.Fatalf("spotify = %+v", op)
 	}
-	f.Flatpak.Value.Remotes = []facts.FlatpakRemote{{Name: "flathub", URL: "https://dl.flathub.org/repo/"}}
+	f.Flatpak.Value.Remotes = []facts.FlatpakRemote{{Name: "flathub", URL: "https://dl.flathub.org/repo/", GPGVerify: true, KeyFingerprints: []string{definitions.NormalizeFingerprint(c.Definitions().Repositories["flathub"].Key)}}}
 	f.Flatpak.Value.Apps = []facts.FlatpakApp{{ID: "com.spotify.Client", Version: "1", Origin: "fedora"}}
 	p, _ = Build(Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src})
 	if op := find(p, "flatpak:com.spotify.Client"); op == nil || op.Action != ActionAdopt || op.Blocked != "" || len(op.Notes) != 1 || !strings.Contains(op.Notes[0], "remote fedora, not flathub") {
@@ -572,7 +581,7 @@ func applied(receipts ...string) *state.Applied {
 		if strings.HasPrefix(r, "flatpak:") {
 			provider = "flatpak"
 		}
-		a.Receipts[r] = state.Receipt{Schema: state.Schema, Resource: r, Provider: provider, Operation: "install", Verified: true}
+		a.Receipts[r] = state.Receipt{Schema: state.Schema, Resource: r, Provider: provider, Package: facts.PackageID(PackageName(r), "x86_64"), Operation: "install", Verified: true}
 	}
 	return a
 }
@@ -592,7 +601,7 @@ func TestAppliedStateShapesThePlan(t *testing.T) {
 		facts.Package{Name: "no-longer-wanted", Version: "1", Release: "1", Arch: "x86_64", FromRepo: "fedora", Reason: "user"},
 		facts.Package{Name: "hand-installed", Version: "1", Release: "1", Arch: "x86_64", FromRepo: "fedora", Reason: "user"},
 	)
-	key := facts.Key("dnf5", "--assumeno", "--cacheonly", "remove", "no-longer-wanted")
+	key := facts.Key("dnf5", "--assumeno", "--cacheonly", "remove", "--no-autoremove", "no-longer-wanted.x86_64")
 	src.Commands[key] = previewText([]TxPackage{{Name: "no-longer-wanted", Arch: "x86_64", EVR: "0:1-1", Repository: "@System", Section: "removing"}})
 	src.Failures[key] = "exit status 1"
 	in := Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Applied: a, Source: src}
@@ -602,21 +611,21 @@ func TestAppliedStateShapesThePlan(t *testing.T) {
 		t.Fatalf("managed package = %+v", op)
 	}
 	owned := find(p, "packages:remove-owned")
-	if owned == nil || owned.Blocked != "" || strings.Join(owned.Steps[0].Argv, " ") != "dnf5 -y remove no-longer-wanted" || !contains(owned.Paths, "package:dnf:no-longer-wanted") {
+	if owned == nil || owned.Blocked != "" || strings.Join(owned.Steps[0].Argv, " ") != "dnf5 -y remove --no-autoremove no-longer-wanted.x86_64" || !contains(owned.Paths, "package:dnf:no-longer-wanted") {
 		t.Fatalf("owned removal = %+v", owned)
 	}
 	names := map[string]bool{}
 	for _, pr := range p.Prune {
 		names[pr.Name] = true
 	}
-	if names["gzip"] || names["no-longer-wanted"] || !names["hand-installed"] {
+	if names["gzip.x86_64"] || names["no-longer-wanted.x86_64"] || !names["hand-installed.x86_64"] {
 		t.Fatalf("prune buckets wrong: %+v", p.Prune)
 	}
 	if find(p, "packages:prune") != nil {
 		t.Fatal("prune transaction planned without Prune")
 	}
 
-	pruneKey := facts.Key("dnf5", "--assumeno", "--cacheonly", "remove", "hand-installed")
+	pruneKey := facts.Key("dnf5", "--assumeno", "--cacheonly", "remove", "--no-autoremove", "hand-installed.x86_64")
 	src.Commands[pruneKey] = previewText([]TxPackage{{Name: "hand-installed", Arch: "x86_64", EVR: "0:1-1", Repository: "@System", Section: "removing"}})
 	src.Failures[pruneKey] = "exit status 1"
 	in.Prune = true
@@ -624,7 +633,7 @@ func TestAppliedStateShapesThePlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if op := find(p, "packages:prune"); op == nil || op.Action != ActionPrune || op.Blocked != "" || !contains(op.Paths, "unmanaged:hand-installed") {
+	if op := find(p, "packages:prune"); op == nil || op.Action != ActionPrune || op.Blocked != "" || !contains(op.Paths, "unmanaged:hand-installed.x86_64") {
 		t.Fatalf("prune transaction = %+v", op)
 	}
 	if find(p, "packages:remove-owned") == nil {
@@ -772,7 +781,7 @@ func TestNeededUpgradesAreAcceptedAndNoted(t *testing.T) {
 func TestDNFDropInIsPlannedFirstAndVerifiedWhole(t *testing.T) {
 	c, r := repository(t)
 	rendered := DNFDropIn(c.Definitions())
-	if !strings.HasPrefix(rendered, "# Written by Nimbus") || !strings.Contains(rendered, "[main]\ndefaultyes=True\nfastestmirror=True\nmax_parallel_downloads=10\n") {
+	if !strings.HasPrefix(rendered, "# Written by Nimbus") || !strings.Contains(rendered, "[main]\ndefaultyes=True\nfastestmirror=True\nmax_parallel_downloads=20\n") {
 		t.Fatalf("rendered drop-in:\n%s", rendered)
 	}
 	build := func(have string, managed bool) *Operation {
@@ -908,7 +917,66 @@ func TestAnotherSourceIsNotedOnAdoptionAndKeep(t *testing.T) {
 	if op := find(p, "package:dnf:git"); op == nil || len(op.Notes) != 0 {
 		t.Fatalf("the installer's source needs no note: %+v", op)
 	}
-	if steps := repositorySteps("hyprland-copr", c.Definitions().Repositories["hyprland-copr"]); steps[1].Argv[0] != "rpm" || steps[1].Argv[1] != "--import" || !steps[1].Privileged {
+	if steps := repositorySteps("hyprland-copr", c.Definitions().Repositories["hyprland-copr"]); steps[2].Argv[0] != "rpm" || steps[2].Argv[1] != "--import" || !steps[2].Privileged {
 		t.Fatalf("the COPR key must be imported before the enable: %+v", steps)
+	}
+}
+
+func TestMiseBootstrapLeavesConfiguredToolsToChezmoi(t *testing.T) {
+	c, _ := repository(t)
+	// The global dotfiles apply must also work without development selected.
+	c.Machines["common-only"] = &definitions.Machine{Schema: 1, ID: "common-only", Profiles: []string{"common"}}
+	r, errs := definitions.Resolve(c, "common-only")
+	if len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	src, f := readyHost(t, c)
+	home := "/home/tester"
+	f.User = facts.Section[facts.User]{Value: facts.User{Home: home, Cargo: false, Crates: []string{}}}
+	in := Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src}
+	// A fresh home: Nimbus installs Mise itself. Chezmoi owns its tools.
+	p := answerInstall(t, src, in, nil)
+	if op := find(p, "user:mise"); op == nil || op.Action != ActionInstall || op.Steps[1].Argv[0] != "sh" || op.Steps[1].Argv[1] != InstallerScript || op.Steps[1].Privileged {
+		t.Fatalf("mise installer = %+v", op)
+	}
+	if op := find(p, "user:mise:install"); op != nil {
+		t.Fatalf("Nimbus must not install the Chezmoi-owned tools: %+v", op)
+	}
+	// Mise present, config not written yet: no runtime operation is planned.
+	src.Dirs[home+"/.local/bin"] = []string{"mise"}
+	p = answerInstall(t, src, in, nil)
+	if op := find(p, "user:mise"); op == nil || op.Action != ActionKeep {
+		t.Fatalf("mise present = %+v", op)
+	}
+	if op := find(p, "user:mise:install"); op != nil {
+		t.Fatalf("Nimbus must not wait for the Mise config: %+v", op)
+	}
+	// Even with applied configuration and missing Rust, sync leaves the
+	// tool installation to Chezmoi.
+	src.Dirs[home+"/.config/mise"] = []string{"config.toml"}
+	p = answerInstall(t, src, in, nil)
+	if op := find(p, "user:mise:install"); op != nil {
+		t.Fatalf("Nimbus must not duplicate the Chezmoi install script: %+v", op)
+	}
+	for _, op := range p.Operations {
+		if strings.HasPrefix(op.ID, "package:cargo:") {
+			t.Fatalf("Mise-owned Cargo tool must not also be installed directly: %+v", op)
+		}
+		if op.Kind == KindUser {
+			for _, st := range op.Steps {
+				if st.Privileged {
+					t.Fatalf("user-scope step marked privileged: %+v", op)
+				}
+			}
+		}
+	}
+	// Unknown user-scope state blocks instead of dropping the tools.
+	f.User = facts.Section[facts.User]{Error: "cargo install --list: broken"}
+	p = answerInstall(t, src, in, nil)
+	if op := find(p, "user:tools"); op == nil || op.Blocked == "" || !strings.Contains(op.Blocked, "broken") || p.Complete {
+		t.Fatalf("unknown user state = %+v complete %v", op, p.Complete)
+	}
+	if find(p, "user:mise") != nil || find(p, "package:cargo:sheldon") != nil {
+		t.Fatal("user tools planned without their facts")
 	}
 }

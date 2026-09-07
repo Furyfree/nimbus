@@ -36,6 +36,7 @@ packages = [
   "file",
   "jq",
   "poppler-utils",
+  "terra:typst",
   "ImageMagick",
   "terra:golang-github-jesseduffield-lazygit",
   "just",
@@ -53,6 +54,7 @@ packages = [
 ]
 
 components = [
+  "mise",
   "snapper",
   "tailscale",
 ]

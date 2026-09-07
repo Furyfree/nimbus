@@ -14,3 +14,6 @@ packages = [
   "mokutil",
 ]
 removes = []
+
+[detect]
+display_vendor = "10de"

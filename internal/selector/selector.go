@@ -98,6 +98,44 @@ func Load(path string) (*Selector, error) {
 	return &s, nil
 }
 
+// Write stores the selector: the directory with mode 0700 when it is
+// missing, the file written beside its target and renamed into place, so a
+// reader never sees a partial file. The origin must already be normalized.
+func Write(path string, s *Selector) error {
+	if s.Schema != CurrentSchema || s.Checkout == "" || s.Machine == "" || s.Origin == "" {
+		return errors.New("selector: schema, checkout, machine, and origin are required")
+	}
+	if normalized, err := NormalizeOrigin(s.Origin); err != nil || normalized != s.Origin {
+		return fmt.Errorf("selector: origin %q is not a normalized identity", s.Origin)
+	}
+	if info, err := os.Lstat(path); err == nil && info.Mode()&fs.ModeSymlink != 0 {
+		return fmt.Errorf("selector %s must not be a symlink", path)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	content := fmt.Sprintf("schema = %d\ncheckout = %q\nmachine = %q\norigin = %q\n", s.Schema, s.Checkout, s.Machine, s.Origin)
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.toml")
+	if err != nil {
+		return err
+	}
+	if _, err := tmp.WriteString(content); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return err
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
+}
+
 var scpLikeRe = regexp.MustCompile(`^(?:[^@/]+@)?([^:/]+):(.+)$`)
 
 // NormalizeOrigin reduces a Git locator to its repository identity: transport

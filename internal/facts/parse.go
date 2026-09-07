@@ -3,8 +3,10 @@ package facts
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -119,6 +121,8 @@ func parseRepoFile(file string, data []byte) []Repository {
 			current.BaseURL = value
 		case "metalink":
 			current.Metalink = value
+		case "mirrorlist":
+			current.Mirrorlist = value
 		}
 	}
 	return repos
@@ -132,6 +136,47 @@ func normalizeRepo(v string) string {
 		return strings.TrimSuffix(inner, ")")
 	}
 	return v
+}
+
+// parseCargoList reads cargo install --list: a crate heads each block as
+// "name vX.Y.Z:" at the start of a line, its binaries indented below.
+func parseCargoList(out []byte) []string {
+	var crates []string
+	for _, line := range strings.Split(string(out), "\n") {
+		if line == "" || line[0] == ' ' || line[0] == '\t' {
+			continue
+		}
+		name, _, _ := strings.Cut(line, " ")
+		crates = append(crates, name)
+	}
+	sort.Strings(crates)
+	return crates
+}
+
+// ParseChezmoiData reads the handoff's exact keys. "Profiles" holds the
+// machine selection; "profiles" is a separate list derived by dotfiles.
+func ParseChezmoiData(out []byte) (Chezmoi, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(out, &fields); err != nil {
+		return Chezmoi{Initialized: true}, fmt.Errorf("chezmoi data: %w", err)
+	}
+	data := Chezmoi{Initialized: true}
+	for _, field := range []struct {
+		name   string
+		target any
+	}{
+		{"Machine", &data.Machine},
+		{"ManagedByNimbus", &data.ManagedByNimbus},
+		{"Profiles", &data.Profiles},
+		{"onePasswordSsh", &data.OnePasswordSSH},
+	} {
+		if raw, ok := fields[field.name]; ok {
+			if err := json.Unmarshal(raw, field.target); err != nil {
+				return Chezmoi{Initialized: true}, fmt.Errorf("chezmoi data %s: %w", field.name, err)
+			}
+		}
+	}
+	return data, nil
 }
 
 func normalizeBool(v string) string {

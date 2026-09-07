@@ -5,9 +5,6 @@ Nimbus. [SPEC.md](SPEC.md) remains the product contract. The earlier test draft
 is superseded evidence in commit
 `c0bb8a4660732e6e9556297da2c15ba0f286ee98`, not an active guide.
 
-Nimbus is not implemented yet. The final bootstrap command below documents the
-accepted future handoff rather than a currently usable installer.
-
 ## Target result
 
 Install Fedora 44 on x86_64 as a small bootable base with:
@@ -119,17 +116,20 @@ sudo btrfs subvolume list /
 Confirm that networking and `sudo` work. Do not manually install the desktop or
 duplicate resources that Nimbus will own.
 
-When Nimbus bootstrap is implemented, continue with:
+Continue with:
 
 ~~~sh
 curl -fsSL https://raw.githubusercontent.com/Furyfree/nimbus/main/install.sh | bash
 ~~~
 
-That script obtains Git when necessary, clones or validates the Nimbus checkout,
-installs the Nimbus engine through the approved COPR, and enters the reviewed
-Nimbus initialization flow. Nimbus then installs the system through one
-`nimbus sync`, initializes Chezmoi, and prints the direct `chezmoi diff` and
-`chezmoi apply` commands for the user configuration.
+The engine RPM channel and its reviewed signing-key pin are not available
+yet. The one-liner is not a complete fresh-install path until that release
+gate is met. It obtains Git when necessary and clones or validates the
+checkout; bootstrap then verifies and installs the signed COPR engine. This
+route remains blocked until the real project key and fingerprint are shipped.
+With that prerequisite met, Nimbus installs the system through one reviewed
+`nimbus sync`, initializes Chezmoi, and runs `chezmoi apply`, including its
+user-tool installation. Failures appear in the closing stage report.
 
 Btrfs recovery points stay on the same disk and are not backups. Nimbus
 provides no backup; home, guest, and container data are excluded and may be

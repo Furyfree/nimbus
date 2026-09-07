@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# The checked-out half of the Nimbus installation. install.sh runs this with
+# its input on the terminal. It obtains the signed engine through native RPM
+# and DNF tools, then starts init for this checkout.
+# The first sync installs workstation resources after review.
+set -euo pipefail
+
+CHECKOUT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+
+say() { printf '%s\n' "$*"; }
+fail() { printf 'bootstrap: %s\n' "$*" >&2; exit 1; }
+
+[ "$(id -u)" -ne 0 ] || fail "run as the normal user, not root"
+# shellcheck disable=SC1091
+. /etc/os-release 2>/dev/null || fail "/etc/os-release is missing"
+if [ "${ID:-}" != "fedora" ] || [ "${VERSION_ID:-}" != "44" ] || [ "$(uname -m)" != "x86_64" ]; then
+  fail "Nimbus supports Fedora 44 on x86_64"
+fi
+[ -f "${CHECKOUT}/nimbus.toml" ] || fail "${CHECKOUT} holds no nimbus.toml"
+
+ENGINE=/usr/bin/nimbus
+KEY_SOURCE="${CHECKOUT}/system/keys/nimbus.asc"
+PIN_SOURCE="${CHECKOUT}/system/keys/nimbus.fingerprint"
+KEY_TARGET=/etc/pki/rpm-gpg/RPM-GPG-KEY-nimbus
+REPO_TARGET=/etc/yum.repos.d/nimbus-engine.repo
+REPO_URL=https://download.copr.fedorainfracloud.org/results/furyfree/nimbus/fedora-44-x86_64/
+work=""
+
+if command -v nimbus >/dev/null 2>&1 && [ "$(command -v nimbus)" != "${ENGINE}" ]; then
+  fail "another nimbus shadows ${ENGINE} on PATH; move it aside before retrying"
+fi
+
+if [ ! -x "${ENGINE}" ]; then
+  # A release supplies both files only after the real COPR key is reviewed.
+  # Missing trust material must stop before package or repository changes.
+  if [ ! -f "${KEY_SOURCE}" ] || [ -L "${KEY_SOURCE}" ]; then
+    fail "the reviewed COPR public key is not available in this checkout"
+  fi
+  if [ ! -f "${PIN_SOURCE}" ] || [ -L "${PIN_SOURCE}" ]; then
+    fail "the reviewed COPR fingerprint is not available in this checkout"
+  fi
+  PIN="$(cat "${PIN_SOURCE}")"
+  [[ "${PIN}" =~ ^[0-9A-F]{40}$ ]] || fail "invalid COPR signing-key fingerprint"
+fi
+
+if ! command -v gpg >/dev/null 2>&1; then
+  say "GnuPG is required to verify repository signing keys:"
+  say "  sudo dnf5 -y install gnupg2"
+  read -r -p "Install GnuPG? [y/N] " answer || fail "GnuPG installation declined"
+  case "${answer}" in
+    y|Y|yes|YES) ;;
+    *) fail "GnuPG installation declined" ;;
+  esac
+  sudo dnf5 -y install gnupg2
+fi
+
+if [ ! -x "${ENGINE}" ]; then
+  work="$(mktemp -d)"
+  trap 'rm -rf -- "${work}"' EXIT
+  mkdir -m 700 "${work}/gnupg" "${work}/rpmdb" "${work}/repos" "${work}/packages"
+  cp -- "${KEY_SOURCE}" "${work}/key.asc"
+  key_info="$(gpg --batch --no-options --homedir "${work}/gnupg" --with-colons --show-keys "${work}/key.asc")" || fail "cannot inspect the COPR signing key"
+  fingerprint="$(printf '%s\n' "${key_info}" | awk -F: '
+    $1 == "pub" { count++; primary=1; if ($2 == "r" || $2 == "e") bad=1; next }
+    $1 == "sub" { primary=0 }
+    $1 == "fpr" && primary { fingerprint=$10; primary=0 }
+    END { if (count != 1 || bad) exit 1; print fingerprint }
+  ')" || fail "COPR key must contain one valid primary key"
+  [ "${fingerprint}" = "${PIN}" ] || fail "COPR signing-key fingerprint mismatch"
+  cat > "${work}/repos/nimbus-engine.repo" <<EOF
+[nimbus-engine]
+name=Nimbus engine (furyfree/nimbus COPR)
+baseurl=${REPO_URL}
+enabled=1
+gpgcheck=1
+repo_gpgcheck=0
+gpgkey=file://${KEY_TARGET}
+sslverify=1
+skip_if_unavailable=0
+includepkgs=nimbus
+EOF
+  # Preserve an existing configuration unless it is exactly the expected one.
+  for target in "${KEY_TARGET}" "${REPO_TARGET}"; do
+    [ ! -L "${target}" ] || fail "refusing symlink ${target}"
+    if [ -e "${target}" ]; then
+      if [ ! -f "${target}" ] || [ "$(stat -c %u "${target}")" != 0 ]; then
+        fail "unowned bootstrap file: ${target}"
+      fi
+      expected="${work}/key.asc"
+      [ "${target}" != "${REPO_TARGET}" ] || expected="${work}/repos/nimbus-engine.repo"
+      cmp -s "${expected}" "${target}" || fail "existing ${target} differs; inspect it before retrying"
+    fi
+  done
+  say "Downloading the Nimbus engine from furyfree/nimbus for Fedora 44 x86_64."
+  # Download only the engine from an isolated source configuration. Dependencies
+  # are resolved by the final native DNF transaction against the host's sources.
+  dnf5 --setopt="reposdir=${work}/repos" --setopt="cachedir=${work}/cache" \
+    --setopt="nimbus-engine.gpgkey=file://${work}/key.asc" \
+    download --arch=x86_64 --destdir="${work}/packages" nimbus
+  shopt -s nullglob
+  packages=("${work}/packages/"*.rpm)
+  [ "${#packages[@]}" -eq 1 ] || fail "expected exactly one Nimbus RPM"
+  package="${packages[0]}"
+  # An isolated RPM keyring binds the signature to this key, rather than any
+  # unrelated key already trusted by the system. Require signature AND digests.
+  rpmkeys --dbpath "${work}/rpmdb" --define '_keyring rpmdb' --import "${work}/key.asc"
+  rpmkeys --dbpath "${work}/rpmdb" --define '_keyring rpmdb' \
+    --define '_pkgverify_level all' --checksig "${package}" || fail "Nimbus RPM signature verification failed"
+  identity="$(rpm -qp --qf '%{NAME} %{ARCH}' "${package}")"
+  [ "${identity}" = 'nimbus x86_64' ] || fail "unexpected RPM identity: ${identity}"
+  say "Verified Nimbus RPM against COPR key ${PIN}."
+  say "Installing ${KEY_TARGET} and ${REPO_TARGET}; DNF will show the package transaction for approval."
+  sudo install -m 0644 -- "${work}/key.asc" "${KEY_TARGET}"
+  sudo install -m 0644 -- "${work}/repos/nimbus-engine.repo" "${REPO_TARGET}"
+  sudo rpmkeys --import "${KEY_TARGET}"
+  sudo dnf5 --setopt=localpkg_gpgcheck=1 install "${package}"
+  [ -x "${ENGINE}" ] || fail "DNF completed without installing ${ENGINE}"
+fi
+
+[ "$(rpm -qf --qf '%{NAME}' "${ENGINE}")" = nimbus ] || fail "${ENGINE} is not owned by the Nimbus RPM"
+[ "$(command -v nimbus)" = "${ENGINE}" ] || fail "another nimbus shadows ${ENGINE} on PATH; move it aside before retrying"
+say "nimbus is installed: $("${ENGINE}" version)"
+if ! report="$("${ENGINE}" validate --checkout "${CHECKOUT}" 2>&1)"; then
+  printf '%s\n' "${report}" >&2
+  fail "the checkout does not validate with this engine"
+fi
+# Release temporary files before exec; EXIT traps do not run after exec.
+if [ -n "${work:-}" ]; then
+  rm -rf -- "${work}"
+  trap - EXIT
+fi
+exec "${ENGINE}" init --checkout "${CHECKOUT}" "$@"

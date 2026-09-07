@@ -37,7 +37,7 @@ func status(r Report, id string) Check {
 
 func TestHealthySystemPasses(t *testing.T) {
 	r := Run(healthy(), healthyConfig())
-	if r.Failed != 0 || r.Unknown != 0 || len(r.Checks) != 9 {
+	if r.Failed != 0 || r.Unknown != 0 || len(r.Checks) != 10 {
 		t.Fatalf("report = %+v", r)
 	}
 	for _, c := range r.Checks {
@@ -150,5 +150,32 @@ func TestMissingGitIsUnknownNotABrokenCheckout(t *testing.T) {
 	cfg.CheckoutOverride = true
 	if c := status(Run(f, cfg), "selector"); c.Status != Unknown {
 		t.Fatalf("missing git with override = %+v", c)
+	}
+}
+
+func TestChezmoiSelectionIsComparedWithTheManifest(t *testing.T) {
+	cfg := healthyConfig()
+	cfg.Machine, cfg.Profiles, cfg.Dotfiles = "laptop", []string{"common", "development"}, true
+	f := healthy()
+	f.Commands["chezmoi"] = "/usr/bin/chezmoi"
+	f.Chezmoi = facts.Section[facts.Chezmoi]{Value: facts.Chezmoi{Initialized: true, Machine: "laptop", ManagedByNimbus: true, Profiles: []string{"development", "common"}}}
+	if c := status(Run(f, cfg), "chezmoi"); c.Status != Pass {
+		t.Fatalf("matching selection = %+v", c)
+	}
+	f.Chezmoi.Value.Profiles = []string{"common"}
+	if c := status(Run(f, cfg), "chezmoi"); c.Status != Fail || !strings.Contains(c.Remediation, "chezmoi init --prompt --promptString Machine=laptop") || !strings.Contains(c.Remediation, "Profiles=common/development") {
+		t.Fatalf("stale profiles = %+v", c)
+	}
+	f.Chezmoi.Value = facts.Chezmoi{}
+	if c := status(Run(f, cfg), "chezmoi"); c.Status != Fail || !strings.Contains(c.Remediation, "nimbus init") {
+		t.Fatalf("not initialized = %+v", c)
+	}
+	f.Commands["chezmoi"] = ""
+	if c := status(Run(f, cfg), "chezmoi"); c.Status != Unknown {
+		t.Fatalf("without chezmoi = %+v", c)
+	}
+	cfg.Dotfiles = false
+	if c := status(Run(f, cfg), "chezmoi"); c.Status != Pass {
+		t.Fatalf("without dotfiles = %+v", c)
 	}
 }

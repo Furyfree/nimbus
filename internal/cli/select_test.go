@@ -185,7 +185,7 @@ func TestSelectionEditDigestSurvivesTheManifestWrite(t *testing.T) {
 	// the reload; the run then stops at the first operation, which needs the
 	// network, and that proves the digests matched.
 	code, out, errOut := run(t, "components", "add", "docker", "--checkout", root, "--machine", "laptop", "-y")
-	if code != ExitFailure || !strings.Contains(out, "wrote ") || !strings.Contains(out, "sync stopped at repository:brave") {
+	if code != ExitFailure || !strings.Contains(out, "wrote ") || !strings.Contains(out, "failed     repository:brave") {
 		t.Fatalf("edit flow: %d %q\n%s", code, errOut, out)
 	}
 	data, _ := os.ReadFile(manifestPath(root, "laptop"))

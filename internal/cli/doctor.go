@@ -45,6 +45,7 @@ the network.`,
 func runDoctor(cmd *cobra.Command, opts *options, override string) error {
 	cfg := doctor.Config{CheckoutOverride: override != ""}
 	root := ""
+	var sel *selector.Selector
 	if override != "" {
 		r, err := canonical(override)
 		if err != nil {
@@ -56,7 +57,7 @@ func runDoctor(cmd *cobra.Command, opts *options, override string) error {
 		if err != nil {
 			return err
 		}
-		sel, err := selector.Load(path)
+		sel, err = selector.Load(path)
 		if err != nil {
 			cfg.SelectorError = err.Error()
 		} else {
@@ -84,6 +85,14 @@ func runDoctor(cmd *cobra.Command, opts *options, override string) error {
 		}
 		if c != nil && len(c.Root_.Compatibility.Fedora) > 0 {
 			cfg.SupportedReleases = c.Root_.Compatibility.Fedora
+		}
+		// The Chezmoi check needs the selected machine's profiles.
+		if c != nil && len(errs) == 0 && sel != nil {
+			if m, ok := c.Machines[sel.Machine]; ok {
+				if r, rerrs := definitions.Resolve(c, sel.Machine); len(rerrs) == 0 {
+					cfg.Machine, cfg.Profiles, cfg.Dotfiles = sel.Machine, r.Profiles, m.Dotfiles != nil
+				}
+			}
 		}
 	}
 

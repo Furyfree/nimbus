@@ -27,7 +27,10 @@ type scripted struct {
 	log       []string
 	fail      map[string]string // command prefix -> error
 	installs  []string          // what dnf5 install adds
-	fpr       string            // fingerprint gpg reports
+	crates    []string          // what cargo install --list shows
+	// installerLeavesNothing makes sh leave no binary behind.
+	installerLeavesNothing bool
+	fpr                    string // fingerprint gpg reports
 	// privilegedNoop makes every sudo command succeed without effect.
 	privilegedNoop bool
 }
@@ -66,7 +69,7 @@ func (s *scripted) Run(name string, args ...string) ([]byte, error) {
 	case name == "uname":
 		return []byte("x86_64\n"), nil
 	case name == "gpg":
-		return []byte("fpr:::::::::" + s.fpr + ":\n"), nil
+		return []byte("pub:::::::::\nfpr:::::::::" + s.fpr + ":\n"), nil
 	case name == "flatpak" && args[0] == "remotes":
 		var b strings.Builder
 		for _, r := range s.remotes {
@@ -83,6 +86,25 @@ func (s *scripted) Run(name string, args ...string) ([]byte, error) {
 		return []byte("active\n"), nil
 	case name == "sudo":
 		return s.privileged(args)
+	case strings.HasSuffix(name, "/.cargo/bin/cargo") && args[0] == "install" && args[1] == "--list":
+		var b strings.Builder
+		for _, c := range s.crates {
+			fmt.Fprintf(&b, "%s v1.0.0:\n    %s\n", c, c)
+		}
+		return []byte(b.String()), nil
+	case strings.HasSuffix(name, "/.cargo/bin/cargo") && args[0] == "install":
+		s.crates = append(s.crates, args[1])
+		return nil, nil
+	case name == "sh":
+		// The maker's installer leaves its binary below the home directory,
+		// unless the test says it leaves nothing.
+		if !s.installerLeavesNothing {
+			home, _ := os.UserHomeDir()
+			s.Dirs[filepath.Join(home, ".local", "bin")] = []string{"mise"}
+		}
+		return nil, nil
+	case name == "env":
+		return nil, nil
 	}
 	return nil, fmt.Errorf("%s: %w", key, facts.ErrNotRecorded)
 }
@@ -99,8 +121,9 @@ func (s *scripted) privileged(argv []string) ([]byte, error) {
 	case argv[0] == "dnf5" && argv[1] == "config-manager" && argv[2] == "setopt":
 		var override string
 		for _, a := range argv[3:] {
-			if id, value, ok := strings.Cut(a, ".enabled="); ok {
-				override += "[" + id + "]\nenabled=" + value + "\n"
+			option, value, ok := strings.Cut(a, "=")
+			if dot := strings.LastIndexByte(option, '.'); ok && dot > 0 {
+				override += "[" + option[:dot] + "]\n" + option[dot+1:] + "=" + value + "\n"
 			}
 		}
 		if override != "" {
@@ -110,7 +133,7 @@ func (s *scripted) privileged(argv []string) ([]byte, error) {
 	case argv[0] == "dnf5" && argv[1] == "-y" && argv[2] == "remove":
 		var kept []string
 		for _, n := range s.installed {
-			if !contains(argv[3:], n) {
+			if !contains(argv[4:], n) {
 				kept = append(kept, n)
 			}
 		}
@@ -127,6 +150,7 @@ func (s *scripted) privileged(argv []string) ([]byte, error) {
 		s.Files[filepath.Join(facts.RepoDir, "nimbus-terra.repo")] = []byte(file)
 	case argv[0] == "flatpak" && argv[1] == "remote-add":
 		s.remotes = append(s.remotes, argv[5])
+		s.Files[filepath.Join(facts.FlatpakRepoPath, "config")] = []byte("[remote \"" + argv[5] + "\"]\ngpg-verify=true\n")
 	case argv[0] == "flatpak" && argv[1] == "install":
 		s.apps = append(s.apps, argv[5])
 	}
@@ -217,7 +241,7 @@ func TestRunExecutesVerifiesAndRecords(t *testing.T) {
 	for _, want := range []string{
 		"sudo install -m 0644 ", "sudo rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-nimbus-terra", "sudo dnf5 config-manager addrepo --id=nimbus-terra",
 		"sudo flatpak remote-add --if-not-exists --system --from flathub ", "sudo dnf5 -y install ripgrep",
-		"sudo flatpak install --system --noninteractive flathub com.spotify.Client", "gpg --batch --show-keys --with-colons ",
+		"sudo flatpak install --system --noninteractive flathub com.spotify.Client", "gpg --no-options --homedir /dev/null ",
 	} {
 		if !src.ran(want) {
 			t.Errorf("did not run %q\n%s", want, strings.Join(src.log, "\n"))
@@ -236,7 +260,7 @@ func TestRunExecutesVerifiesAndRecords(t *testing.T) {
 	if a.Receipts["package:dnf:bash"].Operation != "adopt" || a.Receipts["package:dnf:ripgrep"].Operation != "install" || !strings.HasPrefix(a.Receipts["package:dnf:ripgrep"].Intended, "installed ") {
 		t.Fatalf("operations = %+v", a.Receipts)
 	}
-	if a.Baseline == nil || !a.InBaseline("coreutils") || a.InBaseline("ripgrep") {
+	if a.Baseline == nil || !a.InBaseline("coreutils.x86_64") || a.InBaseline("ripgrep.x86_64") {
 		t.Fatalf("baseline = %+v", a.Baseline)
 	}
 }
@@ -250,7 +274,7 @@ func TestDifferencesFromThePreviewAreReportedNotRefused(t *testing.T) {
 	r := Run(samplePlan(t), options(t, src, root))
 	// The fake reports every installed package as 1-1.fc44, so ripgrep's
 	// version differs from its preview as well; both are reported.
-	if r.Error != "" || len(r.Differences) != 2 || r.Differences[0] != "DNF also installed surprise 1-1.fc44 (fedora)" || !strings.Contains(r.Differences[1], "ripgrep was installed as 1-1.fc44, the preview showed 0:15.2.0-1.fc44") {
+	if r.Error != "" || len(r.Differences) != 2 || r.Differences[0] != "DNF also installed surprise.x86_64 1-1.fc44" || !strings.Contains(r.Differences[1], "ripgrep.x86_64 is 1-1.fc44 after DNF; the preview expected 15.2.0-1.fc44") {
 		t.Fatalf("result = %+v", r)
 	}
 	src = newScripted()
@@ -331,7 +355,7 @@ func TestIncompletePlanIsRefusedAndOwnedRemovalRetiresReceipts(t *testing.T) {
 	opts.FirstApply = false
 	p = &plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:rm", Operations: []plan.Operation{
 		{ID: "packages:remove-owned", Kind: plan.KindPackage, Action: plan.ActionRemove, Summary: "remove old", Paths: []string{"package:dnf:old"},
-			Steps: []plan.Step{{Argv: []string{"dnf5", "-y", "remove", "old"}, Privileged: true}}},
+			Steps: []plan.Step{{Argv: []string{"dnf5", "-y", "remove", "--no-autoremove", "old"}, Privileged: true}}},
 	}}
 	r := Run(p, opts)
 	if r.Error != "" {
@@ -344,23 +368,31 @@ func TestIncompletePlanIsRefusedAndOwnedRemovalRetiresReceipts(t *testing.T) {
 }
 
 func TestRetireRemovesOnlyTheReceipt(t *testing.T) {
-	src := newScripted()
-	root := t.TempDir()
-	opts := options(t, src, root)
-	opts.FirstApply = false
-	if err := state.Record(root, "sha256:earlier", &state.Stage{Schema: state.Schema, PlanDigest: "sha256:earlier", Receipts: []state.Receipt{{Schema: state.Schema, Resource: "package:dnf:gone", Provider: "dnf", Operation: "install", PlanDigest: "sha256:earlier", Verified: true}}}); err != nil {
-		t.Fatal(err)
-	}
-	p := &plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:retire", Operations: []plan.Operation{
-		{ID: "package:dnf:gone", Kind: plan.KindPackage, Action: plan.ActionRetire, Summary: "retire gone"},
-	}}
-	r := Run(p, opts)
-	if r.Error != "" || src.ran("sudo ") {
-		t.Fatalf("retire ran a command or failed: %+v\n%s", r, strings.Join(src.log, "\n"))
-	}
-	a, _ := state.Read(root)
-	if _, ok := a.Receipts["package:dnf:gone"]; ok {
-		t.Fatal("receipt not retired")
+	for _, kind := range []string{plan.KindPackage, plan.KindFlatpak} {
+		t.Run(kind, func(t *testing.T) {
+			id, provider := "package:dnf:gone", "dnf"
+			if kind == plan.KindFlatpak {
+				id, provider = "flatpak:org.example.Gone", "flatpak"
+			}
+			src := newScripted()
+			root := t.TempDir()
+			opts := options(t, src, root)
+			opts.FirstApply = false
+			if err := state.Record(root, "sha256:earlier", &state.Stage{Schema: state.Schema, PlanDigest: "sha256:earlier", Receipts: []state.Receipt{{Schema: state.Schema, Resource: id, Provider: provider, Operation: "install", PlanDigest: "sha256:earlier", Verified: true}}}); err != nil {
+				t.Fatal(err)
+			}
+			p := &plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:retire", Operations: []plan.Operation{
+				{ID: id, Kind: kind, Action: plan.ActionRetire, Summary: "retire gone"},
+			}}
+			r := Run(p, opts)
+			if r.Error != "" || src.ran("sudo ") {
+				t.Fatalf("retire ran a command or failed: %+v\n%s", r, strings.Join(src.log, "\n"))
+			}
+			a, _ := state.Read(root)
+			if _, ok := a.Receipts[id]; ok {
+				t.Fatal("receipt not retired")
+			}
+		})
 	}
 }
 
@@ -461,21 +493,21 @@ func TestUpgradeRunsTheNativeUpdatersWithVisibleOutput(t *testing.T) {
 	src := newScripted()
 	src.privilegedNoop = true
 	opts := options(t, src, t.TempDir())
-	if err := Upgrade(opts, opts.Root); err != nil {
-		t.Fatal(err)
+	if result := Upgrade(opts, opts.Root); result.Error != "" {
+		t.Fatal(result.Error)
 	}
 	if !src.ran("sudo dnf5 -y upgrade") || src.ran("sudo flatpak update") {
 		t.Fatalf("without flatpak on PATH only DNF upgrades:\n%s", strings.Join(src.log, "\n"))
 	}
 	src.Paths["flatpak"] = "/usr/bin/flatpak"
-	if err := Upgrade(opts, opts.Root); err != nil {
-		t.Fatal(err)
+	if result := Upgrade(opts, opts.Root); result.Error != "" {
+		t.Fatal(result.Error)
 	}
 	if !src.ran("sudo flatpak update --system --noninteractive") {
 		t.Fatalf("flatpak update missing:\n%s", strings.Join(src.log, "\n"))
 	}
 	src.fail["sudo dnf5 -y upgrade"] = "exit status 1"
-	if err := Upgrade(opts, opts.Root); err == nil {
+	if result := Upgrade(opts, opts.Root); result.Error == "" {
 		t.Fatal("a failed dnf5 upgrade was not reported")
 	}
 }
@@ -498,10 +530,10 @@ func TestBaselineIsTheSnapshotBeforeTheRunNotAfter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.Baseline == nil || !a.InBaseline("bash") {
+	if a.Baseline == nil || !a.InBaseline("bash.x86_64") {
 		t.Fatalf("baseline = %+v", a.Baseline)
 	}
-	if a.InBaseline("ripgrep") || a.InBaseline("libfoo") {
+	if a.InBaseline("ripgrep.x86_64") || a.InBaseline("libfoo.x86_64") {
 		t.Fatalf("packages installed by the run are in the baseline: %v", a.Baseline.Packages)
 	}
 }
@@ -549,5 +581,66 @@ func TestCOPRImportsTheVerifiedKeyBeforeEnabling(t *testing.T) {
 	}
 	if importAt == 0 || enableAt == 0 || importAt > enableAt {
 		t.Fatalf("import %d enable %d:\n%s", importAt, enableAt, strings.Join(src.log, "\n"))
+	}
+}
+
+func TestUserToolsRunAsTheUserAndAreVerifiedByPresence(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	src := newScripted()
+	root := t.TempDir()
+	opts := options(t, src, root)
+	opts.Fetch = func(url string) ([]byte, error) {
+		if url != "https://mise.run" {
+			return nil, errors.New("unexpected " + url)
+		}
+		return []byte("#!/bin/sh\necho installer\n"), nil
+	}
+	src.Dirs[filepath.Join(home, ".cargo", "bin")] = []string{"cargo"}
+	var out strings.Builder
+	opts.Out = &out
+	p := &plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:user", Operations: []plan.Operation{
+		{ID: "user:mise", Kind: plan.KindUser, Action: plan.ActionInstall, Summary: "install mise",
+			Steps: []plan.Step{{Description: "download https://mise.run to the stage directory and show its sha256"}, {Argv: []string{"sh", plan.InstallerScript}}, {Description: "verify ~/.local/bin/mise exists"}}},
+		{ID: "user:mise:install", Kind: plan.KindUser, Action: plan.ActionInstall, Summary: "install runtimes",
+			Steps: []plan.Step{{Argv: []string{"env", "MISE_SYSTEM_DEPS=warn", plan.HomeDir + "/.local/bin/mise", "-C", plan.HomeDir, "install"}}}},
+		{ID: "package:cargo:sheldon", Kind: plan.KindUser, Action: plan.ActionInstall, Summary: "cargo install sheldon",
+			Steps: []plan.Step{{Argv: []string{plan.HomeDir + "/.cargo/bin/cargo", "install", "sheldon"}}}},
+	}}
+	r := Run(p, opts)
+	if r.Error != "" || strings.Join(r.Executed, ",") != "user:mise,user:mise:install,package:cargo:sheldon" {
+		t.Fatalf("result = %+v\n%s", r, strings.Join(src.log, "\n"))
+	}
+	for _, want := range []string{"sha256 ", "sh " + filepath.Join(opts.Stage, "installer-mise.sh"), "env MISE_SYSTEM_DEPS=warn " + home + "/.local/bin/mise -C " + home + " install", home + "/.cargo/bin/cargo install sheldon"} {
+		if !src.ran(want) && !strings.Contains(out.String(), want) {
+			t.Errorf("missing %q\n%s\n%s", want, strings.Join(src.log, "\n"), out.String())
+		}
+	}
+	for _, l := range src.log {
+		if strings.HasPrefix(l, "sudo ") {
+			t.Fatalf("a user-scope step went through sudo: %s", l)
+		}
+	}
+	if a, _ := state.Read(root); a != nil && len(a.Receipts) != 0 {
+		t.Fatalf("user-scope steps must write no receipt: %v", a.Receipts)
+	}
+	// The installer left nothing: verification fails and the run stops.
+	src2 := newScripted()
+	src2.installerLeavesNothing = true
+	opts2 := options(t, src2, t.TempDir())
+	opts2.Fetch = opts.Fetch
+	if r := Run(&plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:user2", Operations: p.Operations[:1]}, opts2); r.Error == "" || !strings.Contains(r.Error, "~/.local/bin/mise does not exist") {
+		t.Fatalf("missing binary passed verification: %+v", r)
+	}
+}
+
+func TestRemovalWithoutNamedPackagesIsRefusedBeforeNativeExecution(t *testing.T) {
+	src := newScripted()
+	opts := options(t, src, t.TempDir())
+	opts.FirstApply = false
+	p := &plan.Plan{Complete: true, Operations: []plan.Operation{{ID: "packages:remove", Kind: plan.KindPackage, Action: plan.ActionRemove, Steps: []plan.Step{{Argv: []string{"dnf5", "-y", "remove", "--no-autoremove"}}}}}}
+	result := Run(p, opts)
+	if result.Error == "" || src.ran("sudo ") {
+		t.Fatalf("empty removal executed: %+v", result)
 	}
 }

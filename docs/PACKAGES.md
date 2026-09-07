@@ -1,11 +1,12 @@
 # Packages
 
-Everything Nimbus installs, by application. The source is shown in
-parentheses: `DNF/Fedora` is a bare package name, every other DNF source is a
-repository declared in `nimbus.toml`, and `user:` marks a step Nimbus runs as
-the normal user without sudo. An installer script is downloaded to a file and
-shown with its digest before it runs. [SECURITY.md](SECURITY.md) owns the source
-order. This list feeds the definitions and shrinks as they land.
+The workstation software, including dotfiles-declared user tools. Sources appear
+in parentheses: `DNF/Fedora` is a bare package name, every other DNF source is a
+repository declared in `nimbus.toml`, and `user:` marks installation as the
+normal user without sudo. Nimbus runs its declared installers; Chezmoi invokes
+Mise for tools declared in dotfiles. An installer script is downloaded to a file
+and shown with its digest before it runs. [SECURITY.md](SECURITY.md) owns the
+source order. This list feeds the definitions and shrinks as they land.
 
 ## Session
 
@@ -131,29 +132,30 @@ order. This list feeds the definitions and shrinks as they land.
 
 ## CLI
 
-- Mise (`user: installer from https://mise.run`, before the Chezmoi handoff)
-  - Auto-update (`auto_update = true` in the Chezmoi-managed Mise config)
-  - Runtimes (`user: mise install`, after Chezmoi has written
-    `~/.config/mise/config.toml`)
-    - Codex, Claude Code, OpenCode, Pi, Grok (`Mise/npm`)
-    - Go, .NET, uv, Python, Java Corretto, Node.js (`Mise`)
+- Mise (`user: installer from https://mise.run`, before the Chezmoi handoff;
+  declared as the `mise` component)
+  - Auto-update (`auto_update = true` in the Chezmoi-managed Mise config;
+    disabled during apply with `MISE_AUTO_UPDATE=false`)
+  - Runtimes (`user: mise install`, invoked by Chezmoi after writing
+    `~/.config/mise/config.toml` on each full apply; upgrades remain explicit)
+    - Codex, Claude Code, Grok, LiteParse, markdownlint-cli (`Mise/npm`)
+    - OpenCode, Antigravity CLI, Herdr (`Mise` registry)
+    - Go, .NET, uv, Java Corretto, Node.js (`Mise`)
     - Rust (`Mise`, using rustup underneath; provides Cargo for the tools
       below)
-    - markdownlint-cli (`Mise/npm`)
-    - gopls, golangci-lint (`Mise/Go`)
-    - lazydocker (`Mise/Go: github.com/jesseduffield/lazydocker`)
-- Cargo tools (`user: cargo install`, after the Rust runtime)
+    - gopls (`Mise/Go`)
+- Cargo tools (`user: mise install`, using Mise's Cargo backend after Rust;
+  declared in Chezmoi's `~/.config/mise/conf.d/cargo.toml`)
   - Caligula (`caligula`)
-  - Typst (`typst-cli`)
-  - Tinymist (`tinymist`)
+  - Tinymist (`tinymist-cli` from the upstream Git release; binary `tinymist`)
   - cargo-update (`cargo-update`)
   - Sheldon (`sheldon`)
   - SVG preview for Yazi (`resvg`)
   - VM Curator (`vm-curator`)
 - Just (`DNF/Fedora: just`)
+- Typst (`DNF/Terra: typst`; selected by the common profile)
 - Topgrade (`DNF/Terra: topgrade`; configuration through Chezmoi)
-- Herdr (`user: installer from https://herdr.dev/install.sh`; `herdr update`
-  runs from the Chezmoi-owned Topgrade configuration)
+- Herdr (`user: Mise`, listed with the tool declarations above)
 - ShellCheck and gitleaks (`DNF/Fedora: ShellCheck gitleaks`)
 - Neovim (`DNF/Fedora: neovim`)
 - Chezmoi (`DNF/Fedora: chezmoi`)
@@ -195,7 +197,7 @@ order. This list feeds the definitions and shrinks as they land.
 
 ## Virtualization
 
-- VM Curator (`user: cargo install vm-curator`, listed with the Cargo tools)
+- VM Curator (`user: Mise Cargo backend`, listed with the Cargo tools)
 - QEMU, TPM, and SPICE viewer
   (`DNF/Fedora: qemu-system-x86 qemu-img swtpm virt-viewer`)
 - Windows container (`Docker: dockurr/windows`, pinned by digest)

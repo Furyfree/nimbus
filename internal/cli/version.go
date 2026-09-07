@@ -31,6 +31,7 @@ func renderVersion(w io.Writer, asJSON bool) error {
 	fmt.Fprintf(&buf, "nimbus %s\n", info.Engine)
 	fmt.Fprintf(&buf, "definition schema: %d\n", info.DefinitionSchema)
 	fmt.Fprintf(&buf, "output schema: %d\n", info.OutputSchema)
+	fmt.Fprintf(&buf, "state schema: %d; receipt schemas: %v; baseline schemas: %v\n", info.StateSchema, info.ReceiptSchemas, info.BaselineSchemas)
 	_, err := w.Write(buf.Bytes())
 	return err
 }

@@ -521,7 +521,8 @@ better said as data than as a file anyway, so `nimbus.toml` carries a
 `[dnf]` table of libdnf5 `[main]` options that Nimbus renders into
 `/etc/dnf/libdnf5.conf.d/20-nimbus.conf`, verifies whole, and plans first.
 The declared options, against libdnf5's defaults on Fedora 44:
-`max_parallel_downloads = 10` (default 3, maximum 20), `fastestmirror =
+`max_parallel_downloads = 20` (default 3, maximum 20; raised to the maximum
+on 2026-09-04 after the Phase 4 performance look), `fastestmirror =
 true` (default off; picks a mirror by TCP latency instead of the metalink
 order, which helps most on Terra and RPM Fusion mirrorlists), and
 `defaultyes = true` (default off; the owner's own interactive `dnf` prompts
@@ -592,6 +593,104 @@ sources are prepared, because one command is one decision; a mutating
 `plan`, because a command called plan that changes the system misleads;
 and asking nothing by default, because the first run on a new machine
 installs hundreds of packages and deserves a pause.
+
+#### D-029: Init asks four things and detection is typed data
+
+Decided 2026-09-04 at the start of Phase 5. Init's first question is which
+machine this is, listing the tracked manifests and "new"; the tracked one
+whose `hardware` identity appears in the DMI product or board name is
+pre-selected, which makes the common case one keypress. A new machine
+answers three more: profiles, components, and the dotfiles repository, with
+the components proposed by `[detect]` rules on the hardware components
+(chassis kind from the SMBIOS chassis type, display adapter by PCI vendor)
+and the repository defaulting to the one every tracked manifest shares. The
+rules and identities live in the definitions, not in code, so a new machine
+or adapter is a TOML change. `--machine`, `--new`, `--dotfiles`, and
+`--no-dotfiles` answer without prompts. Rejected: a code table of known
+machines, because it hides behavior the definitions should say; and asking
+for the dotfiles repository on every init, because a tracked manifest
+already knows.
+
+#### D-030: User-scope tools are an installer table and cargo references
+
+Decided 2026-09-04. A maker's installer is a component `[installer]` table:
+its URL, the binary it leaves below the home directory, and for Mise the
+Chezmoi-written config and the install command that runs once it exists.
+Cargo tools are package references with the reserved `cargo:` prefix, so
+they resolve, select, and show like every other package. Both run as the
+user through the same streaming source the privileged steps use, never
+through sudo, and are verified by presence rather than recorded, as
+SPEC.md says for user scope. The runtimes command runs on every sync once
+its config exists, since Mise itself is idempotent and fast when nothing
+is missing. Rejected: a separate user-scope provider package, because two
+operation shapes did not justify one; and receipts for user tools, because
+their removal is explicit and their presence is the record.
+
+#### D-031: Complete installation and explicit dotfiles commands
+
+Decided 2026-09-05 after the repository audit. Init must apply Chezmoi before
+running the user tools that need its configuration. Initializing its source
+alone leaves installation unfinished. Init holds the operation lock through
+selection and all stages, reports completed, failed, and skipped work, and
+exits unsuccessfully when a required stage is incomplete. Independent user
+tools can continue after another fails; failed dependencies remain skipped.
+Successful native work remains available to the next retry.
+
+`nimbus dotfiles diff`, `apply`, and `update` delegate to Chezmoi. Update is an
+explicit request for Chezmoi's native Git pull and apply, including its own
+conflict handling; ordinary sync does not fetch or apply dotfiles. This amends
+the earlier manual-only apply boundary. Nimbus and dotfiles are intended to be
+public so fresh HTTPS clones need no authentication. Publishing existing
+repositories remains a separate owner action; secret-provider access remains
+separate from repository access.
+
+The audit also fixes approval input reloads, EOF handling, unsupported-platform
+mutation, native RPM architecture identity, and before/after reporting for all
+DNF transactions. Repository pins must match active trust, including sources
+already present. A new maker key needs a reviewed definition change. Existing
+Flatpak trust that cannot safely be replaced blocks for explicit native repair;
+there is no automatic key-rotation framework.
+
+#### D-032: Chezmoi owns the Cargo tool list through Mise
+
+Decided 2026-09-05. The seven development Cargo tools move from Nimbus profile
+references to Chezmoi's Linux `~/.config/mise/conf.d/cargo.toml`. Mise's native
+Cargo backend installs them alongside the configured runtimes in the existing
+post-handoff `mise install` step. This amends D-030's ownership of the tracked
+tool list; the engine's direct `cargo:` references remain supported.
+
+Native Cargo configuration has no declarative install list. A Mise fragment
+uses an existing native format and lifecycle without adding a Nimbus resolver.
+`cargo.binstall = false` preserves source builds. Mise owns these installs and
+updates; `cargo-update` remains available for separately installed Cargo tools.
+Existing `~/.cargo/bin` tools remain untouched, so migrating their binaries or
+removing possible PATH conflicts is a separate explicit action.
+
+#### D-033: Chezmoi invokes installation for its declared user tools
+
+Decided 2026-09-05. Chezmoi owns both native Mise tool configuration and
+invoking `mise install` after applying it. This amends D-017, D-030, D-031,
+and D-032: Nimbus installs the Mise binary and system dependencies, then
+hands off to Chezmoi. The tracked manifests no longer need a second Nimbus
+user-tool pass. Ordinary sync does not apply dotfiles or install their tools.
+The common profile selects Mise and its existing build prerequisites because
+the dotfiles tool configuration also applies without the development profile.
+The engine retains direct Cargo references and optional installer commands
+for explicitly Nimbus-owned user tools.
+
+One after script runs on every full Linux or macOS apply, without a
+`managed_by_nimbus` gate. Unlike an onchange script, it restores a deleted
+tool even when configuration is unchanged. Windows renders no action, matching
+its Mise configuration exclusion. Standalone use requires existing Mise;
+missing Mise or a native installation failure fails apply visibly. Nimbus
+reports this as one dotfiles and tools stage with individual native output.
+Read-only diff and preview do not install tools.
+
+The invocation uses `MISE_SYSTEM_DEPS=warn` and `MISE_AUTO_UPDATE=false`.
+Dotfiles scripts may install declared user tools but never system packages or
+privileged resources. Upgrades remain explicit. Application configuration
+alone is not an installation declaration. This keeps standalone Chezmoi apply
+complete without duplicating tool ownership in Nimbus.
 
 ### Resolved questions
 
@@ -875,6 +974,13 @@ checkout during bootstrap, which would remove the compatibility metadata but
 execute code from a mutable checkout and give the engine no DNF-owned
 lifecycle. The engine and checkout change independently, so `nimbus.toml`
 compatibility metadata stays and is verified before any operation.
+
+Implementation status, 2026-09-07: the distribution decision remains accepted,
+but the engine channel and reviewed key pin are unavailable. Bootstrap's
+installation path now verifies the pinned key and engine signature in an
+isolated RPM keyring, and refuses a fresh install without reviewed key files.
+Publishing the RPM channel and supplying its real key remain open Phase 5
+gates; local integration does not complete them.
 
 #### Q-007: Mise installation handoff (resolved)
 

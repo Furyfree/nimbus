@@ -51,21 +51,37 @@ Rules:
   VSCodium, and OpenAI's ChatGPT repository. The ChatGPT RPM's own
   post-install script would add that repository; Nimbus declares it directly
   and installs `chatgpt` from it so DNF owns the updates.
-- User-scope maker channels are the Mise, Zed, and Herdr installer scripts,
-  `cargo install`, and `mise install`. Nimbus runs them as the normal user,
-  never as root, as steps of the plan. A maker's script cannot be
-  pinned to a version, so Nimbus downloads it to a file, shows the URL and
-  the digest of that file, and runs exactly that file after approval; it
-  never pipes a download into a shell. Mise installs Rust, so Cargo steps
-  follow the Mise runtime step. The maker owns later updates: Mise's
-  `auto_update = true` in its Chezmoi-managed config, Zed's own updater, and
-  Topgrade for Herdr, Cargo, and Mise runtimes. Removal is explicit and shown
+- Brave's `system/keys/brave.asc` contains only the already pinned release
+  signer, `DBF1 A116 C220 B8C7 164F 9823 0686 B784 2003 8257`, extracted from
+  its [official RPM key bundle](https://brave-browser-rpm-release.s3.brave.com/brave-core.asc)
+  and cross-checked against [Brave's published keys](https://brave.com/signing-keys/).
+  The bundle contains two additional primary keys; they are not trusted by
+  this declaration. Refreshing the stored key must preserve the pin unless a
+  separately reviewed signing-key change is intended.
+- User-scope maker channels are the Mise and Zed installer scripts,
+  `cargo install`, and `mise install`. Nimbus runs its selected installers
+  as the normal user, never as root, as steps of the plan. Chezmoi invokes
+  Mise for its own tool declarations after writing user configuration.
+  The plan identifies the mutable maker-script URL. After plan approval,
+  Nimbus downloads it to a file and prints its SHA-256 for the record before
+  running those same bytes; that digest is not a pre-approved pin. It never
+  pipes a download into a shell. Mise installs Rust and the tracked
+  Cargo tools through its Cargo backend with `cargo.binstall = false`, keeping
+  source builds and one Mise-owned lifecycle. Chezmoi invokes installation
+  with `MISE_SYSTEM_DEPS=warn` and `MISE_AUTO_UPDATE=false`, so apply neither
+  installs system dependencies nor incidentally updates the Mise binary.
+  Missing Mise or failed installs fail apply; dotfiles scripts never bootstrap
+  system packages or escalate privileges. The maker owns later updates:
+  Mise's `auto_update = true` in its Chezmoi-managed config, Zed's own updater,
+  and Topgrade for Mise tools, including Herdr and its Cargo declarations.
+  Removal is explicit and shown
   in the plan: `cargo uninstall`, `mise implode`, and `zed --uninstall`.
-- Cargo counts as the maker's channel, so Sheldon, VM Curator, Typst,
+- Cargo counts as the maker's channel, so Sheldon, VM Curator,
   Tinymist, Caligula, `cargo-update`, and Yazi's `resvg` helper stay on
-  Cargo although Terra packages some of them. The owner's recorded
-  exception: Nimbus installs Terra's `topgrade` so the tool that drives the
-  user-scope update phase is not replaced by that phase.
+  Cargo through Mise although Terra packages some of them. The owner's recorded
+  exceptions: Nimbus installs Terra's `topgrade` so the tool that drives the
+  user-scope update phase is not replaced by that phase, and Terra's `typst`
+  to avoid its large local source build. Typst has no duplicate Mise provider.
 - Flathub is permitted, not preferred. The owner chooses native RPMs where an
   accepted repository has one. The selected Flatpaks are Spotify, Obsidian,
   and Fastmail; Fastmail's official Linux distribution is through Flathub.
@@ -138,6 +154,21 @@ Rules:
   container data may be lost and recreated. Complete disk loss is therefore an
   accepted rebuild and resynchronization event, not a Nimbus restore path.
 
+## Engine bootstrap trust
+
+The engine is distributed through `furyfree/nimbus` on Fedora COPR. Bootstrap
+requires a reviewed public key and fingerprint in the checkout, verifies the
+single primary key, and requires a valid RPM signature and digests in an
+isolated keyring before installing the engine. The system's other trusted
+keys cannot satisfy this initial verification. Only the `nimbus` x86_64
+package is accepted; DNF shows and confirms installation of its dependencies.
+
+The installed source keeps `gpgcheck=1`, TLS verification, and an
+`includepkgs=nimbus` restriction for native updates. COPR does not supply signed
+repository metadata, so `repo_gpgcheck=0` does not replace RPM verification.
+Key rotation requires a reviewed change. Bootstrap refuses conflicting existing
+key/repository files and PATH-shadowed engines. It never uses `--nogpgcheck`.
+
 ## Secure Boot
 
 - Secure Boot stays enabled. Nimbus never disables it, prompts to disable it,
@@ -173,8 +204,9 @@ Rules:
 - Nimbus itself makes no network calls except through DNF, Flatpak, digest-
   pinned container image pulls, the user-scope maker channels named above,
   the one clone of the approved origin by `install.sh`, the metadata
-  refresh at the start of `nimbus sync`, and the one explicit Chezmoi
-  initialization.
+  refresh at the start of `nimbus sync`, and explicit Chezmoi initialization,
+  apply, or update. Chezmoi apply may download its declared user tools through
+  Mise; update also uses its native Git transport.
 
 ## Privilege
 
@@ -223,13 +255,22 @@ Rules:
   snapshots do not cover home-directory tools.
 - User-scope tools may update themselves on the maker's schedule. Mise's
   accepted global setting is `auto_update = true`; it replaces only the
-  user-owned Mise binary. Zed updates itself the same way. This is accepted
+  user-owned Mise binary. Chezmoi overrides it to false during apply, keeping
+  its installation step separate from updates. Zed updates itself the same
+  way. This is accepted
   because neither can reach the system layer.
 - Firmware updates go through `fwupd` as a reviewed manual task.
 - Fedora release upgrades are Fedora's native workflow, not Nimbus's.
 - The Nimbus engine updates through DNF like any other package.
 
-## What doctor checks
+## Doctor coverage
+
+The current engine checks the supported platform, selector, definitions,
+required commands, package visibility, repository signatures, Secure Boot,
+SELinux, firewalld, and the Chezmoi selection.
+
+The complete target policy below also needs later security, service, and
+Windows-guest phases; it is not a claim of current automated coverage:
 
 - Secure Boot enabled, SELinux enforcing, firewalld active with the expected
   default zone

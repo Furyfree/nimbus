@@ -19,12 +19,14 @@ internal/apply/        executes the plan: lock, native steps, receipts
 internal/selector/     the local selector and the checkout origin check
 internal/version/      engine build identity and supported schema numbers
 
+install.sh, bootstrap  the remote entry point and the checkout-owned handoff
+
 nimbus.toml            schema, supported Fedora releases, repositories
 machines/              one manifest per workstation
 profiles/              user-facing bundles: packages and components
 components/            shared capabilities: packages, removals, files
 system/root/etc/       sources of Nimbus-owned files below /etc
-system/keys/           repository signing keys with no public URL
+system/keys/           single pinned repository signing keys stored locally
 
 docs/                  contracts, policy, roadmap, tasks, decisions
 tools/package-query/   throwaway Fedora container for package research
@@ -35,6 +37,7 @@ one way: `cli` uses `definitions`, `facts`, `doctor`, `plan`, `apply`,
 `state`, `selector`, and `version`; `doctor` uses `facts`; `plan` uses
 `definitions`, `facts`, and `state`; `apply` uses `plan`, `facts`, and
 `state`;
+`version` reads supported receipt and baseline schemas from `state`;
 `facts` uses `selector` for the origin read; `definitions` uses `version`
 for the engine check; nothing imports `cli`, and `facts` never imports
 `definitions`, so observed state cannot leak into desired state.
@@ -80,7 +83,7 @@ selector (or --checkout)
 selector (or --checkout)  -> canonical root, definitions loaded for the
                              supported releases; failures become checks
 facts.Inspect(Source)     -> one Section per fact family, unknown on error
-doctor.Run(facts, config) -> nine checks with observation, impact, fix
+doctor.Run(facts, config) -> ten checks with observation, impact, fix
 render                    -> human lines or the JSON envelope; exit 1 on fail
 ~~~
 
@@ -102,13 +105,13 @@ plan.Build(inputs)      -> sources to prepare, packages to adopt or install,
                            declared removals, Flatpaks, prune candidates,
                            update information, digest
 render, Proceed? [Y/n]  -> --plan stops here; -y or --json skips the question
-lock, plan again        -> the digest must equal the one answered
+lock, reload, plan again -> reread definitions and selection; verify approval
 apply.Run(sources)      -> DNF drop-in, repositories, Flatpak remote; refresh
 apply.Run(plan)         -> per operation: native steps through Source with
                            their output on the terminal, verification by
                            re-inspection, receipts through `internal record`
 apply.Upgrade           -> dnf5 upgrade, flatpak update (unless -n)
-report                  -> operations applied, differences from the plan
+report                  -> succeeded, failed, skipped; observed differences
 ~~~
 
 The planner asks DNF for its own view of each transaction with
@@ -132,7 +135,11 @@ install is one `dnf5 install`; afterwards the installed set is compared
 with the preview and the differences are reported, not refused. Receipts go
 through the hidden `nimbus internal record` action, which validates the
 stage against the plan digest and writes atomically below `/var/lib/nimbus`;
-it is the one privileged action of this phase. The selection commands edit a
+it is the one privileged action of this phase. DNF receipts also record the
+native name and architecture separately from the requested package reference;
+ambiguous legacy ownership blocks removal. Every DNF transaction, including
+removal and upgrade, compares the installed set before and after execution.
+The selection commands edit a
 manifest in memory, validate and plan it, show the diff and plan, ask once,
 and then write the file and sync without system updates.
 
@@ -140,7 +147,11 @@ and then write the file and sync without system updates.
 
 - **Read-only.** Nothing writes a file, invokes sudo, or opens a network
   connection except `sync` without `--plan`, whose first step is the
-  metadata refresh. `definitions` and `selector` run no command at all;
+  metadata refresh, and the commands that lead into it: `init` writes the
+  selector and a new manifest, the selection commands write the manifest.
+  Explicit `dotfiles apply` and `dotfiles update` delegate user mutations to
+  Chezmoi; `dotfiles diff` only inspects local state.
+  `definitions` and `selector` run no command at all;
   `facts` and `plan` run native read-only commands only through `Source`,
   so a test can see every one of them. Tests run the loader against a
   read-only tree to prove the first part.
@@ -154,9 +165,9 @@ and then write the file and sync without system updates.
 - **Strict data, small types.** Files carry only the fields current
   definitions use; a new field enters the schema together with a definition
   and a fixture that exercise it.
-- **Thin command layer.** `cli` holds no logic beyond argument handling and
-  rendering, so the same resolver serves tests, later commands, and the
-  dashboard.
+- **Command orchestration.** `cli` owns approval, locking, stage ordering, and
+  summaries. Resolution, facts, planning, and native execution remain in their
+  respective packages and can be tested independently.
 
 ## Data model
 
@@ -168,10 +179,51 @@ packages with their selection paths, removals, files with derived `/etc`
 targets, and the repositories in use. The JSON envelope wraps any result with
 the engine version and output schema number.
 
+## The flow of `nimbus init`
+
+~~~text
+loadCheckout, CheckoutOrigin  -> validated definitions, the approved origin
+facts.Inspect(Source).Hardware -> DMI names, chassis kind, display adapters
+plan.MatchMachine, pick one    -> a tracked manifest, or --new with the dialog:
+plan.ProposeComponents            profiles, components pre-selected by the
+                                  detection rules, the dotfiles repository
+validate, lock, write           -> manifest and selector, lock held through init
+runSyncWith                    -> first sync, one question, defer dependent tools
+chezmoiHandoff                 -> init, then apply local source and its tools
+runSyncWith(userOnly)          -> only explicit Nimbus tool declarations, if any
+report                        -> stage outcomes and retry information
+~~~
+
+`install.sh` and `bootstrap` are the shell in front of this: the first
+checks the platform and the user, obtains Git, clones or validates the
+checkout, and runs the second with its input on the terminal; the second
+runs init with an existing verified engine. When `/usr/bin/nimbus` is absent,
+it checks the reviewed key and fingerprint, downloads and verifies the RPM,
+and installs it through DNF. Missing trust material blocks a fresh installation.
+Both scripts are shellcheck-clean and part of `just check`.
+
+User-scope tools are planned by `plan.userTools` from `Resolved.Installers`
+and the `cargo:` references, executed by `apply.userTool` as the user through
+`Source.Stream`, and verified by presence: the installer's binary, or the
+crate in `cargo install --list`. They write no receipt. The tracked development
+profile uses Mise's Cargo backend instead: Chezmoi owns its native config
+fragment and invokes `mise install` from an after-apply script. The Mise
+component installs the binary and build prerequisites through the common
+profile. No tracked manifest needs a second Nimbus
+user pass, and ordinary sync never invokes this dotfiles installation. Init
+reports Chezmoi and its tool installations together as the dotfiles and tools
+stage, preserving native output and failure status.
+
+Init and inspection share `facts.ParseChezmoiData`, which reads exact JSON
+keys. Chezmoi's `Profiles` is the machine selection; its lowercase `profiles`
+is a separate derived list and must never replace the selection.
+The handoff's output writer forwards the live stream and collects only marked
+setup notes. Init's deferred summary repeats those instructions on success or
+failure; it does not retain native installation logs.
+
 ## Where later phases attach
 
-- Phase 5 adds bootstrap, `init`, the hardware detector, and the Chezmoi
-  handoff.
+- Phase 6 adds services, groups, and the remaining system resources.
 
 Each arrives as its own package with its own tests, and `cli` stays a thin
 layer over them.

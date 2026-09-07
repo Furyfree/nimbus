@@ -80,7 +80,7 @@ func TestStatusSummarizesThePlan(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
-	if !strings.Contains(out, "machine desktop: 6 profiles, 13 components, 162 desired packages") || !strings.Contains(out, "plan incomplete") {
+	if !strings.Contains(out, "machine desktop: 6 profiles, 14 components, 169 desired packages") || !strings.Contains(out, "plan incomplete") {
 		t.Fatalf("status output:\n%s", out)
 	}
 	code, out, _ = run(t, "status", "--checkout", root, "--machine", "desktop", "--json")
@@ -139,6 +139,11 @@ func TestPlanReadsLikeAnInstaller(t *testing.T) {
 		{ID: "flatpak:com.spotify.Client", Kind: plan.KindFlatpak, Action: plan.ActionInstall, Summary: "install Flatpak com.spotify.Client"},
 		{ID: "package:dnf:bash", Kind: plan.KindPackage, Action: plan.ActionAdopt, Summary: "adopt bash"},
 		{ID: "package:dnf:zsh", Kind: plan.KindPackage, Action: plan.ActionKeep, Summary: "zsh is managed"},
+		{ID: "user:mise", Kind: plan.KindUser, Action: plan.ActionInstall, Summary: "install mise from https://mise.run as the user"},
+		{ID: "user:mise:install", Kind: plan.KindUser, Action: plan.ActionInstall, Summary: "install the mise runtimes declared in ~/.config/mise/config.toml", After: plan.AfterHandoff},
+		{ID: "package:cargo:sheldon", Kind: plan.KindUser, Action: plan.ActionKeep, Summary: "crate sheldon is installed"},
+		{ID: "package:cargo:typst-cli", Kind: plan.KindUser, Action: plan.ActionInstall, Summary: "cargo install typst-cli as the user", After: "user:mise:install", Notes: []string{"cargo comes with the Rust runtime Mise installs"}},
+		{ID: "package:cargo:resvg", Kind: plan.KindUser, Action: plan.ActionInstall, Summary: "cargo install resvg as the user", After: "user:mise:install", Notes: []string{"cargo comes with the Rust runtime Mise installs"}},
 	}}
 	out := string(renderPlan(p, false, true))
 	for _, line := range strings.Split(out, "\n") {
@@ -154,7 +159,8 @@ func TestPlanReadsLikeAnInstaller(t *testing.T) {
 		"  upgrades needed: openssl-libs-1:3.5.8-1.fc44\n",
 		"install 1 Flatpaks: com.spotify.Client\n",
 		"note: 1 installed packages are upgraded",
-		"adopt 1 already installed\n1 managed and unchanged\n",
+		"user tools, as the user without sudo:\n  install mise from https://mise.run as the user\n  install the mise runtimes declared in ~/.config/mise/config.toml (after the\n    Chezmoi handoff)\n  cargo install typst-cli as the user (after the mise runtimes)\n",
+		"adopt 1 already installed\n2 managed and unchanged\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("plan lacks %q:\n%s", want, out)
@@ -162,5 +168,33 @@ func TestPlanReadsLikeAnInstaller(t *testing.T) {
 	}
 	if strings.Contains(out, "dependency-00") || strings.Contains(out, "[") {
 		t.Errorf("dependencies and tags do not belong in the plan:\n%s", out)
+	}
+}
+
+func TestNotesAreShownOnceAndWaitingRunsNeedNoSudo(t *testing.T) {
+	p := &plan.Plan{Machine: "vm", Complete: true, Operations: []plan.Operation{
+		{ID: "package:dnf:zsh", Kind: plan.KindPackage, Action: plan.ActionKeep},
+		{ID: "user:mise", Kind: plan.KindUser, Action: plan.ActionKeep},
+		{ID: "user:mise:install", Kind: plan.KindUser, Action: plan.ActionInstall, Summary: "install the mise runtimes", After: plan.AfterHandoff},
+		{ID: "package:cargo:sheldon", Kind: plan.KindUser, Action: plan.ActionInstall, Summary: "cargo install sheldon", After: "user:mise:install", Notes: []string{"cargo comes with the Rust runtime Mise installs"}},
+		{ID: "package:cargo:resvg", Kind: plan.KindUser, Action: plan.ActionInstall, Summary: "cargo install resvg", After: "user:mise:install", Notes: []string{"cargo comes with the Rust runtime Mise installs"}},
+	}}
+	out := string(renderPlan(p, false, false))
+	if strings.Count(out, "cargo comes with the Rust runtime") != 1 {
+		t.Fatalf("note repeated:\n%s", out)
+	}
+	if runnable(p) != 0 || needsSudo(p, true, true) {
+		t.Fatalf("a run with only waiting user steps must run nothing and prime no sudo")
+	}
+	if got := waitingLine(p); got != "3 operations wait for the Chezmoi handoff, then the mise runtimes; nothing else to run now" {
+		t.Fatalf("waiting line = %q", got)
+	}
+	// The upgrade, a first run, or any system operation still needs sudo.
+	if !needsSudo(p, false, true) || !needsSudo(p, true, false) {
+		t.Fatal("upgrade and first run need sudo")
+	}
+	p.Operations = append(p.Operations, plan.Operation{ID: "package:dnf:bat", Kind: plan.KindPackage, Action: plan.ActionAdopt})
+	if !needsSudo(p, true, true) {
+		t.Fatal("an adoption records a receipt through sudo")
 	}
 }

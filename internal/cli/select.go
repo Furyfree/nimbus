@@ -12,6 +12,8 @@ import (
 
 	"github.com/Furyfree/nimbus/internal/apply"
 	"github.com/Furyfree/nimbus/internal/definitions"
+	"github.com/Furyfree/nimbus/internal/doctor"
+	"github.com/Furyfree/nimbus/internal/facts"
 )
 
 // The selection commands edit the two manifest lists a user would otherwise
@@ -337,9 +339,18 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 	}
 	trial := &selected{Root: s.Root, Checkout: &trialCheckout, Resolved: r}
 	src := newSource()
+	if err := facts.CheckPlatform(src, s.Checkout.Definitions().Compatibility.Fedora); err != nil {
+		return err
+	}
+	if _, err := src.Run("dnf5", "makecache"); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "metadata not refreshed: %v; using cached metadata\n", err)
+	}
 	p, _, err := planWithState(trial, src, false)
 	if err != nil {
 		return err
+	}
+	if p.Checkout.Origin == "" || p.Checkout.Commit == "" {
+		return errors.New("checkout origin and commit could not be inspected; selection changes require an inspectable Git clone")
 	}
 	// In JSON mode the review text goes to stderr and the envelope from the
 	// sync that follows is the only thing on stdout; JSON asks nothing.
@@ -368,6 +379,24 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 	if err != nil {
 		return err
 	}
+	defer lock.Release()
+	fresh, err := loadSelected(flags)
+	if err != nil {
+		return err
+	}
+	if fresh.Root != s.Root || fresh.Resolved.Machine != s.Resolved.Machine || fresh.Checkout.Digest() != s.Checkout.Digest() {
+		return errors.New("definitions or selection changed while the plan was being reviewed; run the command again")
+	}
+	freshPlan, _, err := planWithState(trial, src, false)
+	if err != nil {
+		return err
+	}
+	if !sameCheckoutIdentity(freshPlan.Checkout, p.Checkout) {
+		return errors.New("checkout identity changed while the plan was being reviewed; run the command again")
+	}
+	if freshPlan.Digest != p.Digest {
+		return errors.New("the system changed while the plan was being reviewed; run the command again")
+	}
 	current, err := os.ReadFile(path)
 	if err != nil || string(current) != string(before) {
 		lock.Release()
@@ -378,6 +407,14 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 		return err
 	}
 	fmt.Fprintf(review, "wrote %s; the Git change is yours to commit\n", path)
+	if strings.HasPrefix(edit.cmdName, "profiles ") && edited.Dotfiles != nil {
+		selection := facts.Inspect(src, "").Chezmoi
+		if selection.Known() && selection.Value.Initialized {
+			fmt.Fprintf(review, "Chezmoi keeps its own copy of the profiles; refresh it with:\n  %s\n", doctor.ChezmoiRefresh(edited.ID, r.Profiles, selection.Value.OnePasswordSSH))
+		} else {
+			fmt.Fprintln(review, "Chezmoi selection is unavailable; run nimbus doctor after initializing Chezmoi to obtain the refresh command.")
+		}
+	}
 	if nothingToRun(p) {
 		lock.Release()
 		if opts.json {
@@ -388,7 +425,7 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 	flags.machine = s.Resolved.Machine
 	// The edit is the request; it runs without system updates, which are
 	// a plain sync's job.
-	return runSyncWith(cmd, opts, flags, syncFlags{yes: true, noUpgrade: true}, lock)
+	return runSyncWith(cmd, opts, flags, syncFlags{yes: true, noUpgrade: true, approvedDigest: p.Digest, approvedCheckout: &p.Checkout}, lock)
 }
 
 func listProfiles(s *selected) []selectionView {

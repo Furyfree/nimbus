@@ -46,6 +46,13 @@ type Config struct {
 	CheckoutOverride bool
 	// ApprovedOrigin is the selector's origin when the selector was used.
 	ApprovedOrigin string
+	// Machine and Profiles are the selected machine's, for the Chezmoi
+	// check; empty when no machine is selected.
+	Machine  string
+	Profiles []string
+	// Dotfiles is true when the selected machine declares a dotfiles
+	// repository, so a handoff is expected.
+	Dotfiles bool
 }
 
 // Run evaluates every check against the facts.
@@ -69,6 +76,7 @@ func Run(f *facts.Facts, cfg Config) Report {
 	add(secureBoot(f))
 	add(selinux(f))
 	add(firewalld(f))
+	add(chezmoiSelection(f, cfg))
 	return r
 }
 
@@ -290,4 +298,54 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// chezmoiSelection compares what Chezmoi stored at its initialization with
+// the selected machine and its profiles; a profile change after the handoff
+// is refreshed by hand with the command profiles add prints.
+func chezmoiSelection(f *facts.Facts, cfg Config) Check {
+	c := Check{ID: "chezmoi"}
+	switch {
+	case cfg.Machine == "" || !cfg.Dotfiles:
+		c.Status, c.Observation = Pass, "no dotfiles repository is declared; nothing to compare"
+	case f.Commands["chezmoi"] == "":
+		c.Status, c.Observation = Unknown, "chezmoi is not installed"
+		c.Remediation = "sync installs chezmoi through the common profile; init then performs the handoff"
+	case !f.Chezmoi.Known():
+		c.Status, c.Observation = Unknown, f.Chezmoi.Error
+	case !f.Chezmoi.Value.Initialized:
+		c.Status, c.Observation = Fail, "Chezmoi is not initialized"
+		c.Impact = "the user configuration is not managed yet"
+		c.Remediation = "run nimbus init for the one-time Chezmoi handoff"
+	case !f.Chezmoi.Value.ManagedByNimbus || f.Chezmoi.Value.Machine != cfg.Machine || !sameSet(f.Chezmoi.Value.Profiles, cfg.Profiles):
+		c.Status = Fail
+		c.Observation = fmt.Sprintf("Chezmoi stores machine %q, managed_by_nimbus %v, profiles %s; the manifest selects %s with profiles %s", f.Chezmoi.Value.Machine, f.Chezmoi.Value.ManagedByNimbus, strings.Join(f.Chezmoi.Value.Profiles, "/"), cfg.Machine, strings.Join(cfg.Profiles, "/"))
+		c.Impact = "the user configuration follows a stale selection"
+		c.Remediation = "refresh with: " + ChezmoiRefresh(cfg.Machine, cfg.Profiles, f.Chezmoi.Value.OnePasswordSSH)
+	default:
+		c.Status, c.Observation = Pass, "Chezmoi stores the selected machine and profiles"
+	}
+	return c
+}
+
+// ChezmoiRefresh is the direct command that re-answers the Nimbus prompts
+// of an initialized Chezmoi.
+func ChezmoiRefresh(machine string, profiles []string, onePasswordSSH bool) string {
+	return fmt.Sprintf("chezmoi init --prompt --promptString Machine=%s --promptBool ManagedByNimbus=true --promptMultichoice Profiles=%s --promptBool 'Enable 1Password SSH integration=%t'", machine, strings.Join(profiles, "/"), onePasswordSSH)
+}
+
+func sameSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	set := map[string]bool{}
+	for _, x := range a {
+		set[x] = true
+	}
+	for _, y := range b {
+		if !set[y] {
+			return false
+		}
+	}
+	return true
 }
