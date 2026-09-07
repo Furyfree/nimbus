@@ -483,7 +483,7 @@ directory, and optionally the `config` file the Chezmoi handoff writes and the
 directory. A crate is a package reference with the reserved `cargo:` prefix;
 it waits for `~/.cargo/bin/cargo`, which the Rust runtime provides, and is
 verified through `cargo install --list`. The tracked profiles instead keep
-their Cargo tools in Chezmoi's `~/.config/mise/conf.d/cargo.toml`, alongside
+their CLI tools in Chezmoi's `~/.config/mise/conf.d/` fragments, alongside
 the runtimes in `~/.config/mise/config.toml`. Mise installs both after Chezmoi
 has written the files, through Chezmoi's after-apply script. Chezmoi owns
 these declarations and the invocation; Nimbus does not repeat their list or
@@ -887,13 +887,13 @@ digests with an isolated keyring containing only that key. A failed download,
 wrong signer, unsigned package, or wrong package identity stops installation.
 Only after verification does bootstrap install its public key and repository
 file, import the key, and install the verified local RPM and its dependencies
-through DNF with `-y`. Git, GPG, and the engine are bootstrap prerequisites;
-their displayed commands need no separate yes prompt. The normal-user shell
-supervises a bounded sudo keepalive through init and stops it on exit. The
-engine asks for machine/profile selection as soon as it is available, then
-shows the workstation plan and asks once before installing its resources.
-Existing bootstrap files must match exactly; foreign
-files and symlinks are left untouched. The source is restricted to `nimbus`.
+through DNF with `-y`. Git, GPG, system Python 3, and the engine are bootstrap
+prerequisites; their displayed commands need no separate yes prompt. The
+normal-user shell supervises a bounded sudo keepalive through init and stops it
+on exit. The engine asks for machine/profile selection as soon as it is
+available, then shows the workstation plan and asks once before installing its
+resources. Existing bootstrap files must match exactly; foreign files and
+symlinks are left untouched. The source is restricted to `nimbus`.
 
 The bootstrap key and repository remain for native DNF updates. Temporary
 downloads and the isolated verification keyring are removed on success or
@@ -1037,8 +1037,9 @@ user, and verifies
 build prerequisites, without a tool installation command. Source builds need
 Make, pkg-config, and the OpenSSL, curl, zlib, and libudev development packages
 as well as the compiler toolchain; Nimbus installs them before the handoff.
-Chezmoi writes `~/.config/mise/config.toml` and the Linux tool fragment at
-`~/.config/mise/conf.d/cargo.toml`; Nimbus never edits those files.
+Chezmoi writes `~/.config/mise/config.toml` and the Linux tool fragments below
+`~/.config/mise/conf.d/`; Nimbus never edits those files. VM Curator
+selection is x86_64-only because upstream publishes no ARM release binary.
 The common profile supplies Typst through `terra:typst`; Chezmoi does not
 declare a second Typst installation through Cargo.
 
@@ -1091,10 +1092,18 @@ from the closing notes.
 Installation logs live in private per-run directories below
 `${XDG_STATE_HOME:-~/.local/state}/nimbus/install`. The path is printed at
 startup and completion. Bootstrap supervises the complete run without an
-external terminal recorder or capturing keyboard input. Direct init creates
-the same layout. Keep the newest 20 completed runs; active runs and directories
-with unknown files or unsafe ownership are preserved. Symlinks and shared or
-hardlinked log files are rejected. Logging failures make the run fail visibly.
+external terminal recorder or capturing keyboard input. A Linux Python
+supervisor preserves terminal access and suspend/resume behavior. Cancellation
+signals the handoff process group, including native sudo monitors that relay
+signals to their commands. On cancellation or failure, the supervisor reaps
+descendants before shell cleanup marks the run finished or removes downloads.
+Descendants in separate sessions or without signal permission must exit before
+cleanup proceeds; the waiting state and available process IDs are printed.
+Successful native commands may leave their deliberate background services
+running. Direct init creates the same log layout. Keep the newest 20 completed
+runs; active runs and directories with unknown files or unsafe ownership are
+preserved. Symlinks and shared or hardlinked log files are rejected. Logging
+failures make the run fail visibly.
 
 `bootstrap.log` holds bootstrap commands, output, key checks, exit status,
 and elapsed time. `engine.log` adds selection, source identity, plans, native

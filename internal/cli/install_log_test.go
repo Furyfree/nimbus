@@ -62,6 +62,22 @@ func TestInstallLogPrivateLifecycleAndRetention(t *testing.T) {
 	if !strings.Contains(string(data), "status=failed") || !strings.Contains(string(data), "elapsed=") {
 		t.Fatalf("missing closing diagnostic: %s", data)
 	}
+	active, err := openInstallLog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = active.file.Close() })
+	entries, err = os.ReadDir(filepath.Dir(active.dir))
+	if err != nil || len(entries) != 21 {
+		t.Fatalf("active run reduced completed retention: entries=%d err=%v", len(entries), err)
+	}
+	if err := active.finish(nil); err != nil {
+		t.Fatal(err)
+	}
+	entries, err = os.ReadDir(filepath.Dir(active.dir))
+	if err != nil || len(entries) != 20 {
+		t.Fatalf("completed retention=%d err=%v", len(entries), err)
+	}
 }
 
 func TestInstallLogRetirementPreservesActiveAndForeignFiles(t *testing.T) {

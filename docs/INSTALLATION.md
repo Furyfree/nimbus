@@ -128,11 +128,12 @@ flow; publish that engine build before repeating the clean VM drill. Bootstrap
 checks compatibility and stops if the installed engine is too old.
 
 The installer starts private logs, asks for sudo once, obtains its displayed
-prerequisites, then offers machine/profile selection as soon as the engine is
-ready. One workstation plan approval covers system installation, repository
-reconciliation, Chezmoi apply, and its declared user tools. Fresh Chezmoi setup
-leaves optional 1Password SSH integration disabled without asking; append
-`| bash -s -- --onepassword-ssh` instead of `| bash` to opt in explicitly.
+prerequisites (Git, GnuPG, system Python 3, and Nimbus), then offers
+machine/profile selection as soon as the engine is ready. One workstation plan
+approval covers system installation, repository reconciliation, Chezmoi apply,
+and its declared user tools. Fresh Chezmoi setup leaves optional 1Password SSH
+integration disabled without asking; append `| bash -s -- --onepassword-ssh`
+instead of `| bash` to opt in explicitly.
 
 The closing report includes setup instructions, stage results, elapsed time,
 and the log directory. Logs retain the latest 20 completed runs below

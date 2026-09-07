@@ -29,8 +29,17 @@ system/root/etc/       sources of Nimbus-owned files below /etc
 system/keys/           single pinned repository signing keys stored locally
 
 docs/                  contracts, policy, roadmap, tasks, decisions
+tools/install/         Linux handoff supervision and terminal regression tests
 tools/package-query/   throwaway Fedora container for package research
 ~~~
+
+The shell handoffs use system Python 3 and `tools/install/handoff.py` to keep
+the command in its own foreground process group. The helper acts as a Linux
+child subreaper, forwards cancellation, waits for descendants on cancellation or
+failure, and restores terminal ownership. Successful native commands may leave
+their own background services. This keeps cancellation cleanup after native
+command termination without recording terminal input. It is only an installation
+helper; inspection and ordinary engine commands do not invoke it.
 
 Everything under `internal/` is private to this module. Dependencies point
 one way: `cli` uses `definitions`, `facts`, `doctor`, `plan`, `apply`,

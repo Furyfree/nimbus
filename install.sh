@@ -82,8 +82,7 @@ installer_prune() {
       [ "$(cat "$dir/.nimbus-install")" != 1 ]; then
       continue
     fi
-    count=$((count + 1))
-    if [ "$count" -le 20 ] || [ -e "$dir/.active" ] || [ -L "$dir/.active" ] ||
+    if [ -e "$dir/.active" ] || [ -L "$dir/.active" ] ||
       [ ! -f "$dir/.finished" ]; then
       continue
     fi
@@ -93,6 +92,8 @@ installer_prune() {
       [ -f "$file" ] && [ ! -L "$file" ] && [ -O "$file" ] && [ "$(stat -c %a "$file")" = 600 ] && [ "$(stat -c %h "$file")" = 1 ] || safe=false
     done < <(find "$dir" -mindepth 1 -maxdepth 1 -print0)
     [ "$safe" = true ] || continue
+    count=$((count + 1))
+    [ "$count" -gt 20 ] || continue
     rm -- "$dir/.nimbus-install" "$dir/.finished"
     for file in "$dir/bootstrap.log" "$dir/engine.log" "$dir/mise.log"; do [ ! -e "$file" ] || rm -- "$file"; done
     rmdir -- "$dir"
@@ -152,7 +153,8 @@ installer_interrupt() {
 
 installer_handoff() {
   local status=0
-  (trap - INT TERM; exec "$@") <&0 &
+  [ -f "$CHECKOUT/tools/install/handoff.py" ] || fail 'checkout lacks the installation supervisor; update and review the checkout before retrying'
+  (trap - INT TERM; exec /usr/bin/python3 -I -B "$CHECKOUT/tools/install/handoff.py" "$@") <&0 &
   installer_child_pid=$!
   wait "$installer_child_pid" || status=$?
   installer_child_pid=''
@@ -247,10 +249,12 @@ installer_sudo
 say "Nimbus origin: ${ORIGIN}"
 say "checkout:      ${CHECKOUT}"
 
-if ! command -v git >/dev/null 2>&1; then
-  say "git is missing; it is installed through DNF:"
-  say "  sudo dnf5 -y install git"
-  installer_run sudo dnf5 -y install git
+prerequisites=()
+command -v git >/dev/null 2>&1 || prerequisites+=(git)
+[ -x /usr/bin/python3 ] || prerequisites+=(python3)
+if [ "${#prerequisites[@]}" -gt 0 ]; then
+  say "Installing missing bootstrap prerequisites: ${prerequisites[*]}"
+  installer_run sudo dnf5 -y install "${prerequisites[@]}"
 fi
 
 # Normalize a Git locator to its repository identity the way Nimbus does.

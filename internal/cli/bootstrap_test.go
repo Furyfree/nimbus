@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -32,7 +33,7 @@ func TestBootstrapCOPR(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
 			bin := filepath.Join(root, "bin")
-			for _, path := range []string{bin, filepath.Join(root, "system/keys"), filepath.Join(root, "etc"), filepath.Join(root, "tmp")} {
+			for _, path := range []string{bin, filepath.Join(root, "system/keys"), filepath.Join(root, "tools/install"), filepath.Join(root, "etc"), filepath.Join(root, "tmp")} {
 				if err := os.MkdirAll(path, 0700); err != nil {
 					t.Fatal(err)
 				}
@@ -115,6 +116,11 @@ esac
 				t.Fatal(err)
 			}
 			write("install.sh", string(library), 0700)
+			helper, err := os.ReadFile(filepath.Join(repoRoot(t), "tools/install/handoff.py"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			write("tools/install/handoff.py", string(helper), 0600)
 			switch tc.failure {
 			case "gpg-install":
 				if err := os.Remove(filepath.Join(bin, "gpg")); err != nil {
@@ -145,6 +151,7 @@ esac
 				write("bootstrap", strings.ReplaceAll(text, "ENGINE="+filepath.Join(bin, "nimbus"), "ENGINE="+filepath.Join(root, "other-nimbus")), 0700)
 			}
 			cmd := exec.Command(filepath.Join(bin, "bash"), filepath.Join(root, "bootstrap"), "--machine", "vm", "--onepassword-ssh")
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 			cmd.Env = []string{"PATH=" + bin, "HOME=" + root, "TMPDIR=" + filepath.Join(root, "tmp"), "ROOT=" + root, "TRACE=" + filepath.Join(root, "trace"), "FAILURE=" + tc.failure, "LC_ALL=C", "REAL_GPG=" + mustLookPath(t, "gpg"), "work=" + filepath.Join(root, "preserve")}
 			output, err := cmd.CombinedOutput()
 			success := tc.failure == "" || tc.failure == "existing" || tc.failure == "gpg-install"

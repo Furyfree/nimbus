@@ -319,9 +319,10 @@ the official Mise installer, shows its digest, runs it as the normal user
 before the handoff, and verifies the user-owned binary. Chezmoi owns the
 native tool configuration and an after script that runs `mise install` on
 every full Linux or macOS apply, under `MISE_SYSTEM_DEPS=warn` and
-`MISE_AUTO_UPDATE=false`. Its Linux `~/.config/mise/conf.d/cargo.toml`
-declares the user CLI tools for native Mise release backends; the development profile
-does not repeat them. Nimbus installs selected system dependencies itself.
+`MISE_AUTO_UPDATE=false`. Its Linux `~/.config/mise/conf.d/` fragments
+declare user CLI tools for native Mise release backends, with VM Curator
+selected only on x86_64. The development profile does not repeat them. Nimbus
+installs selected system dependencies itself.
 The common profile selects Terra's Typst RPM instead of a Cargo build.
 Tinymist, Sheldon, and resvg use Aqua release entries; Caligula and VM Curator
 use GitHub release binaries. All follow stable versions through Mise. The
@@ -331,6 +332,10 @@ without prompting unless `--onepassword-ssh` is supplied. Bootstrap gathers
 sudo before prerequisites, keeps the credential alive through init, and
 leaves one workstation-plan approval. Private native logs retain the latest
 20 completed runs, with stage timings and secret-capable output excluded.
+System Python 3 supervises handoff process groups while preserving the terminal;
+cancellation must reap descendants before completion or temporary-file cleanup.
+Successful native commands may leave their own background services running.
+Active and protected logs do not consume completed-run retention slots.
 Post-package repository reconciliation must leave no duplicate repairs for
 the next read-only plan.
 A later Chezmoi apply restores missing user tools; upgrades remain explicit.

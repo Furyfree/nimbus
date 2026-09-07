@@ -46,9 +46,12 @@ if [ ! -x "${ENGINE}" ]; then
 fi
 
 installer_sudo
-if ! command -v gpg >/dev/null 2>&1; then
-  say "GnuPG is required to verify repository signing keys: sudo dnf5 -y install gnupg2"
-  installer_run sudo dnf5 -y install gnupg2
+prerequisites=()
+command -v gpg >/dev/null 2>&1 || prerequisites+=(gnupg2)
+[ -x /usr/bin/python3 ] || prerequisites+=(python3)
+if [ "${#prerequisites[@]}" -gt 0 ]; then
+  say "Installing missing bootstrap prerequisites: ${prerequisites[*]}"
+  installer_run sudo dnf5 -y install "${prerequisites[@]}"
 fi
 
 if [ ! -x "${ENGINE}" ]; then

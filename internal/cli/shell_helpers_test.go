@@ -16,7 +16,8 @@ import (
 func shellHelper(t *testing.T, home, body string, extra ...string) ([]byte, error) {
 	t.Helper()
 	cmd := exec.Command("bash", "-c", `. "$LIBRARY"`+"\n"+body)
-	cmd.Env = append([]string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "LIBRARY=" + filepath.Join(repoRoot(t), "install.sh")}, extra...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.Env = append([]string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "CHECKOUT=" + repoRoot(t), "LIBRARY=" + filepath.Join(repoRoot(t), "install.sh")}, extra...)
 	return cmd.CombinedOutput()
 }
 
@@ -60,7 +61,7 @@ func TestShellLogRetentionPreservesUnknownAndActiveRuns(t *testing.T) {
 	if err := os.Mkdir(root, 0700); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 24; i++ {
+	for i := 0; i < 30; i++ {
 		dir := filepath.Join(root, fmt.Sprintf("run-%03d", i))
 		if err := os.Mkdir(dir, 0700); err != nil {
 			t.Fatal(err)
@@ -71,27 +72,42 @@ func TestShellLogRetentionPreservesUnknownAndActiveRuns(t *testing.T) {
 			}
 		}
 	}
-	if err := os.WriteFile(filepath.Join(root, "run-000", "unrelated"), []byte("preserve"), 0600); err != nil {
-		t.Fatal(err)
+	// Protected directories are both newer and older than eligible runs.
+	for _, index := range []int{0, 27} {
+		dir := filepath.Join(root, fmt.Sprintf("run-%03d", index))
+		if err := os.WriteFile(filepath.Join(dir, "unrelated"), []byte("preserve"), 0600); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := os.WriteFile(filepath.Join(root, "run-001", ".active"), []byte("123\n"), 0600); err != nil {
-		t.Fatal(err)
+	for _, index := range []int{1, 28} {
+		dir := filepath.Join(root, fmt.Sprintf("run-%03d", index))
+		if err := os.WriteFile(filepath.Join(dir, ".active"), []byte("123\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(filepath.Join(dir, ".finished")); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := os.Link(filepath.Join(root, "run-002", "bootstrap.log"), filepath.Join(home, "unrelated-log")); err != nil {
-		t.Fatal(err)
+	for _, index := range []int{2, 29} {
+		dir := filepath.Join(root, fmt.Sprintf("run-%03d", index))
+		if err := os.Link(filepath.Join(dir, "bootstrap.log"), filepath.Join(home, fmt.Sprintf("unrelated-log-%d", index))); err != nil {
+			t.Fatal(err)
+		}
 	}
 	out, err := shellHelper(t, home, `installer_prune "$LOG_ROOT"`, "LOG_ROOT="+root)
 	if err != nil {
 		t.Fatalf("prune: %v %s", err, out)
 	}
-	for _, name := range []string{"run-000", "run-001", "run-002", "run-004", "run-023"} {
-		if _, err := os.Stat(filepath.Join(root, name)); err != nil {
-			t.Fatalf("removed protected %s: %v", name, err)
-		}
-	}
-	for _, name := range []string{"run-003"} {
-		if _, err := os.Stat(filepath.Join(root, name)); !os.IsNotExist(err) {
-			t.Fatalf("did not prune %s: %v", name, err)
+	// Keep all six protected directories plus the newest 20 completed runs.
+	for i := 0; i < 30; i++ {
+		name := fmt.Sprintf("run-%03d", i)
+		_, err := os.Stat(filepath.Join(root, name))
+		if i >= 3 && i <= 6 {
+			if !os.IsNotExist(err) {
+				t.Fatalf("did not prune %s: %v", name, err)
+			}
+		} else if err != nil {
+			t.Fatalf("removed protected or recent completed %s: %v", name, err)
 		}
 	}
 }
@@ -140,7 +156,8 @@ func TestShellHandoffStopsChildOnInterruption(t *testing.T) {
 installer_session
 installer_handoff bash -c 'printf "%s" "$BASHPID" > "$READY"; exec sleep 20'
 `)
-			cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "LIBRARY=" + filepath.Join(repoRoot(t), "install.sh"), "READY=" + ready}
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+			cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "CHECKOUT=" + repoRoot(t), "LIBRARY=" + filepath.Join(repoRoot(t), "install.sh"), "READY=" + ready}
 			var out bytes.Buffer
 			cmd.Stdout = &out
 			cmd.Stderr = &out

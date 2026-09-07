@@ -48,7 +48,7 @@ func openInstallLog() (*installLog, error) {
 		if err := privateLogPath(base, true); err != nil {
 			return nil, err
 		}
-		if err := pruneInstallLogs(base, 19); err != nil {
+		if err := pruneInstallLogs(base, 20); err != nil {
 			return nil, err
 		}
 		var err error
@@ -197,7 +197,11 @@ func (l *installLog) finish(runErr error) error {
 			l.err = err
 		}
 		if err == nil {
-			if err := os.Remove(filepath.Join(l.dir, ".active")); err != nil && l.err == nil {
+			err = os.Remove(filepath.Join(l.dir, ".active"))
+			if err == nil {
+				err = pruneInstallLogs(filepath.Dir(l.dir), 20)
+			}
+			if err != nil && l.err == nil {
 				l.err = err
 			}
 		}

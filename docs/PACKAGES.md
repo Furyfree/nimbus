@@ -144,7 +144,7 @@ source order. This list feeds the definitions and shrinks as they land.
     - Rust (`Mise`, using rustup underneath; provides Cargo for development)
     - gopls (`Mise/Go`)
 - CLI tools (`user: mise install`, using native Mise release backends;
-  declared in Chezmoi's `~/.config/mise/conf.d/cargo.toml`)
+  declared in Chezmoi's `~/.config/mise/conf.d/` fragments)
   - Caligula (`caligula`)
   - Tinymist (`tinymist`, native Aqua registry entry)
   - Sheldon (`sheldon`)

@@ -48,7 +48,7 @@ improvements below need a new clean VM drill before publication readiness.
   COPR, and repeat the clean VM drill. The compatibility floor rejects 0.1.0.
 
 Validation: `just check` passes in Nimbus with Go 1.26.7 and in dotfiles
-(119 tests, three existing optional skips, plus the Bash gate). Nimbus also
+(121 tests, three existing optional skips, plus the Bash gate). Nimbus also
 passes `go test -race ./internal/cli ./internal/facts`. Real isolated Mise
 installations and version checks pass for all five upstream tools. The actual
 init regression excludes fake rendered secrets and native secret errors from
@@ -57,13 +57,23 @@ requires duplicate overrides before upgrade and a clean subsequent plan.
 Engine builds labelled 0.1.0 and 0.1.1 respectively reject and validate this
 checkout, exercising the compatibility floor.
 
-Claude Code's exact `claude-fable-5-1` model completed one full read-only review
-and two focused follow-ups alongside primary validation. Its final verdict is
+Claude Code's exact `claude-fable-5-1` model completed a full read-only review
+and focused follow-ups alongside primary validation; the final verdict is
 clean. Probe noise, missing native failure diagnostics, path normalization,
-early failure logging, and the two integration-test gaps were addressed.
-Strict refusal of symlinked log ancestors remains intentional. The changes
-are prepared for pull-request publication. Hosted CI, the manual release,
-and the next VM drill remain separate delivery gates.
+early failure logging, and integration-test gaps were addressed. Strict
+refusal of symlinked log ancestors remains intentional. Draft PRs are
+published. Hosted review found an ARM-only asset selection in dotfiles,
+PID-only shell cancellation, and protected logs consuming retention slots.
+All three findings are fixed. Dotfiles and COPR CI pass their updated heads;
+Nimbus needs CI on this follow-up commit.
+
+The handoff supervisor uses system Python 3 to preserve the terminal and reap
+cancelled descendants. Nine isolated regression tests pass locally and in a
+Fedora 44 container, including nested cancellation, terminal input, Ctrl-Z,
+background/foreground resume, initial background launch, and successful native
+background services. Retention tests preserve 20 completed runs alongside
+active or protected directories. `just check` and ShellCheck 0.9.0 pass.
+The manual release and the next clean VM drill remain separate delivery gates.
 
 The previous VM run installed all system packages and 22 Mise tools. Native
 DNF logs show three recovered mirror 404s; they did not leave those packages
@@ -90,9 +100,10 @@ modified for this follow-up.
 - [x] `install.sh` and `bootstrap`: platform and user checks, Git through
   DNF, clone or validate the checkout, init with a separately verified engine
   and its input on the terminal; shellcheck runs in `just check` and CI.
-- [ ] Publish the engine RPM channel and review its signing-key pin before
-  enabling automated engine installation. Bootstrap fails closed without an
-  existing engine; the intended COPR key URL returned HTTP 404 on 2026-09-07.
+- [x] Publish the engine RPM channel and verify its signing-key pin before
+  enabling automated engine installation. The manual `v0.1.0` release and
+  signed COPR build passed; bootstrap verifies the supplied public key.
+  Publishing 0.1.1 for the follow-up changes remains tracked above.
 - [x] Doctor's `chezmoi` check compares Chezmoi's stored machine and
   profiles with the manifest; `profiles add|remove` print the refresh
   command.

@@ -477,24 +477,45 @@ func TestSelectionRejectsChangedCheckoutIdentityBeforeWriting(t *testing.T) {
 	}
 }
 
-func TestInstallerGitPrerequisiteDoesNotAsk(t *testing.T) {
+func TestInstallerPrerequisitesDoNotAsk(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(repoRoot(t), "install.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, body, ok := strings.Cut(string(data), "if ! command -v git >/dev/null 2>&1; then\n")
+	_, body, ok := strings.Cut(string(data), "prerequisites=()\n")
 	if !ok {
-		t.Fatal("missing Git installation flow")
+		t.Fatal("missing prerequisite installation flow")
 	}
-	body, _, ok = strings.Cut(body, "\nfi\n")
+	body, _, ok = strings.Cut(body, "\n# Normalize a Git locator")
 	if !ok {
-		t.Fatal("missing Git installation boundary")
+		t.Fatal("missing prerequisite installation boundary")
 	}
-	script := "set -eu\nsay() { :; }\ninstaller_run() { printf '%s\\n' \"$*\"; }\n" + body
-	cmd := exec.Command("bash", "-c", script)
-	output, err := cmd.CombinedOutput()
-	if err != nil || !strings.Contains(string(output), "sudo dnf5 -y install git") {
-		t.Fatalf("prerequisite unexpectedly asked: %v %s", err, output)
+	for _, tc := range []struct {
+		name, gitStatus, want string
+		python                bool
+	}{
+		{"missing Git", "1", "sudo dnf5 -y install git", true},
+		{"missing Python", "0", "sudo dnf5 -y install python3", false},
+		{"missing both", "1", "sudo dnf5 -y install git python3", false},
+		{"already installed", "0", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			python := filepath.Join(t.TempDir(), "python3")
+			if tc.python {
+				if err := os.WriteFile(python, []byte("fixture"), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			script := "set -eu\nprerequisites=()\nsay() { :; }\n" +
+				"command() { return " + tc.gitStatus + "; }\n" +
+				"installer_run() { printf '%s\\n' \"$*\"; }\n" +
+				strings.ReplaceAll(body, "/usr/bin/python3", python)
+			cmd := exec.Command("bash", "-c", script)
+			output, err := cmd.CombinedOutput()
+			if err != nil || strings.TrimSpace(string(output)) != tc.want {
+				t.Fatalf("prerequisite unexpectedly asked or changed: %v %s", err, output)
+			}
+		})
 	}
 }
 
