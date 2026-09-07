@@ -33,8 +33,12 @@ fi
 if [ ! -x "${ENGINE}" ]; then
   # A release supplies both files only after the real COPR key is reviewed.
   # Missing trust material must stop before package or repository changes.
-  [ -f "${KEY_SOURCE}" ] && [ ! -L "${KEY_SOURCE}" ] || fail "the reviewed COPR public key is not available in this checkout"
-  [ -f "${PIN_SOURCE}" ] && [ ! -L "${PIN_SOURCE}" ] || fail "the reviewed COPR fingerprint is not available in this checkout"
+  if [ ! -f "${KEY_SOURCE}" ] || [ -L "${KEY_SOURCE}" ]; then
+    fail "the reviewed COPR public key is not available in this checkout"
+  fi
+  if [ ! -f "${PIN_SOURCE}" ] || [ -L "${PIN_SOURCE}" ]; then
+    fail "the reviewed COPR fingerprint is not available in this checkout"
+  fi
   PIN="$(cat "${PIN_SOURCE}")"
   [[ "${PIN}" =~ ^[0-9A-F]{40}$ ]] || fail "invalid COPR signing-key fingerprint"
 fi
@@ -79,7 +83,9 @@ EOF
   for target in "${KEY_TARGET}" "${REPO_TARGET}"; do
     [ ! -L "${target}" ] || fail "refusing symlink ${target}"
     if [ -e "${target}" ]; then
-      [ -f "${target}" ] && [ "$(stat -c %u "${target}")" = 0 ] || fail "unowned bootstrap file: ${target}"
+      if [ ! -f "${target}" ] || [ "$(stat -c %u "${target}")" != 0 ]; then
+        fail "unowned bootstrap file: ${target}"
+      fi
       expected="${work}/key.asc"
       [ "${target}" != "${REPO_TARGET}" ] || expected="${work}/repos/nimbus-engine.repo"
       cmp -s "${expected}" "${target}" || fail "existing ${target} differs; inspect it before retrying"
