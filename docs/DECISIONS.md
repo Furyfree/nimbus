@@ -521,7 +521,7 @@ better said as data than as a file anyway, so `nimbus.toml` carries a
 `[dnf]` table of libdnf5 `[main]` options that Nimbus renders into
 `/etc/dnf/libdnf5.conf.d/20-nimbus.conf`, verifies whole, and plans first.
 The declared options, against libdnf5's defaults on Fedora 44:
-`max_parallel_downloads = 10` (default 3, maximum 20; raised to the maximum
+`max_parallel_downloads = 20` (default 3, maximum 20; raised to the maximum
 on 2026-09-04 after the Phase 4 performance look), `fastestmirror =
 true` (default off; picks a mirror by TCP latency instead of the metalink
 order, which helps most on Terra and RPM Fusion mirrorlists), and
@@ -974,6 +974,13 @@ checkout during bootstrap, which would remove the compatibility metadata but
 execute code from a mutable checkout and give the engine no DNF-owned
 lifecycle. The engine and checkout change independently, so `nimbus.toml`
 compatibility metadata stays and is verified before any operation.
+
+Implementation status, 2026-09-07: the distribution decision remains accepted,
+but the engine channel and reviewed key pin are unavailable. Bootstrap's
+installation path now verifies the pinned key and engine signature in an
+isolated RPM keyring, and refuses a fresh install without reviewed key files.
+Publishing the RPM channel and supplying its real key remain open Phase 5
+gates; local integration does not complete them.
 
 #### Q-007: Mise installation handoff (resolved)
 

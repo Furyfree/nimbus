@@ -191,18 +191,20 @@ url = "https://dl.flathub.org/repo/flathub.flatpakrepo"
 key = "<fingerprint>"
 ~~~
 
-A repository ID is the prefix that package references use. `dnf` and
+A repository ID is the prefix that package references use. `dnf`, `cargo`, and
 `flatpak` are reserved: `dnf` is Fedora and `flatpak` is the single declared
-`flatpak` repository. On the host, a `dnf` repository Nimbus enables from a
-`baseurl` lives in `/etc/yum.repos.d/nimbus-<id>.repo` with the DNF
-repository ID `nimbus-<id>`, so ownership is readable from the directory; a
+`flatpak` repository, while `cargo` selects user-scope Cargo tools. On the
+host, a `dnf` repository Nimbus enables from a `baseurl` lives in
+`/etc/yum.repos.d/nimbus-<id>.repo` with the DNF repository ID `nimbus-<id>`,
+so ownership is readable from the directory; a
 release package and a COPR keep the IDs their own tooling creates. A file
 that already provides a declared repository under the maker's own ID is
 foreign: Nimbus neither duplicates it nor takes it over silently. `key_url` is
 where DNF fetches the signing key and `key` is the fingerprint that key must
 have; a key with another fingerprint fails the operation. A maker that
-publishes no key URL, such as OpenAI, has its key stored in the checkout
-instead as `key_file`, a path below `system/`. A COPR derives its key URL from
+publishes no key URL, such as OpenAI, or only a bundle with additional primary
+keys, such as Brave, has its single pinned key stored in the checkout instead
+as `key_file`, a path below `system/`. A COPR derives its key URL from
 the project, and a Flatpak remote carries its key inside the `.flatpakrepo`
 file. A `dnf` repository may instead name a `release_package` URL with its
 `sha256` when the maker distributes a release RPM, as RPM Fusion does.
@@ -221,13 +223,17 @@ unknown or different trust blocks for explicit native repair, because importing
 a key adds trust rather than replacing its existing keyring.
 
 The `[dnf]` table holds libdnf5 `[main]` options as numbers, booleans, or
-strings. Nimbus renders it, keys sorted, into
+strings. String values must be single-line and contain no NUL bytes.
+Nimbus renders it, keys sorted, into
 `/etc/dnf/libdnf5.conf.d/20-nimbus.conf`, the drop-in directory libdnf5 reads
 before `dnf.conf`, and plans that file as the first operation so every
 transaction downloads with the declared settings. The file is compared whole
 with the rendering: an absent file is written, a differing one rewritten, an
 identical one adopted, and a file Nimbus wrote is removed when the table is
 removed. A drop-in Nimbus never wrote is left alone.
+
+Machine, profile, and component IDs use lowercase letters, digits, and
+dashes, starting with a letter or digit.
 
 A machine manifest has a stable ID:
 
@@ -599,7 +605,10 @@ architecture. Schema 1 remains readable; ambiguous legacy ownership blocks
 removal. Older engines must refuse version 2 rather than discard its identity.
 The first sync also records the baseline: the
 packages installed before Nimbus took over, which are never prune candidates
-and are listed by `unmanaged --all` as pre-existing. The Windows guest data
+and are listed by `unmanaged --all` as pre-existing. Selecting a baseline
+package explicitly adopts it; later deselection removes that owned package
+through the reviewed plan. Baseline protection applies to unmanaged pruning.
+The Windows guest data
 root mounted at `/var/lib/nimbus/windows` is a separate subvolume holding guest
 data, not Nimbus state. A receipt records at least:
 
@@ -649,7 +658,10 @@ when the host provides it from the file Nimbus owns, with signature checking
 on and the declared location and priority. The owned file is compared whole
 with what Nimbus would write, so a changed value, a missing key, or a key
 Nimbus does not write is a repair operation that rewrites the file; a
-foreign file blocks. A host repository under another ID that serves a
+foreign file blocks. Native overrides that redirect a repository location or
+weaken its TLS verification block for explicit native correction before sync;
+rewriting the repository file cannot override those settings.
+A host repository under another ID that serves a
 declared baseurl, such as the file a maker's package writes when it is
 installed, is a duplicate provider: the repository operation disables it
 through a DNF override and never edits the maker's file. A release package
@@ -659,7 +671,10 @@ managed, never unmanaged or pruned.
 The canonical plan excludes volatile display data. Its digest covers the
 machine, the definition digest, and the operations with their exact steps
 and native transactions; the checkout origin, commit, and dirty state are
-reported beside it. The plan carries a digest that receipts record, so the
+reported beside it. Sync and selection commands separately recheck origin and
+commit under the operation lock and reject an identity change during the run.
+Dirty state is refreshed for receipts; Nimbus's own manifest edits can change
+it. The plan carries a digest that receipts record, so the
 state says which plan produced it.
 
 Planning never invokes sudo, writes files, accesses the network, or changes
@@ -674,7 +689,9 @@ repository provides, is incomplete and says so; sync runs only a complete plan.
 Sync installs and repairs desired resources, adopts existing ones whatever
 their source and records that source, and removes resources previously owned
 by Nimbus that are no longer desired. It leaves unrelated unmanaged resources
-unchanged. It then upgrades the system, unless `--no-upgrade` is given, so one
+unchanged. If an owned RPM or Flatpak has already been removed, sync retires
+only its receipt after confirming absence; unknown state blocks retirement.
+It then upgrades the system, unless `--no-upgrade` is given, so one
 command keeps the machine both as declared and current.
 
 `nimbus sync` works the way an installer does: show, ask once, run, report.
@@ -742,6 +759,9 @@ diagnostics. Kernel lock state is authoritative: stale content is replaced only
 after the file is successfully locked, never deleted merely because it is old.
 Read-only commands and plan review may run concurrently when they can obtain
 consistent input; `sync --plan` is one.
+
+The operation lock rejects symlinked directories and symlinked, non-regular,
+foreign-owned, or multiply linked lock files before writing diagnostic data.
 
 ## System files, triggers, and migrations
 
@@ -837,8 +857,26 @@ The outer Bash process reads `install.sh` from a pipe, so it must not replace
 its own standard input. It runs the checked-out bootstrap script with that
 child's standard input redirected from `/dev/tty`; absence of a controlling
 terminal is an error before mutation. The checked-out script revalidates the
-checkout, shows and enables the approved COPR, installs a compatible signed
-Nimbus RPM through DNF, and runs:
+checkout and uses the DNF-owned `/usr/bin/nimbus`. A different engine ahead
+of that path is an error. Before a fresh installation, it requires the reviewed
+COPR public key and fingerprint from `system/keys/nimbus.asc` and
+`system/keys/nimbus.fingerprint`; these files are not supplied until the real
+project key is verified. No fingerprint is accepted from an environment variable.
+
+Bootstrap checks that the key contains exactly the pinned, valid primary key,
+then downloads the x86_64 engine from `furyfree/nimbus` using an isolated DNF
+repository configuration. Native RPM verification requires both signature and
+digests with an isolated keyring containing only that key. A failed download,
+wrong signer, unsigned package, or wrong package identity stops installation.
+Only after verification does bootstrap install its public key and repository
+file, import the key, and ask through DNF before installing the verified local
+RPM and its dependencies. Existing bootstrap files must match exactly; foreign
+files and symlinks are left untouched. The source is restricted to `nimbus`.
+
+The bootstrap key and repository remain for native DNF updates. Temporary
+downloads and the isolated verification keyring are removed on success or
+failure. A failed DNF transaction leaves any completed source preparation in
+place for inspection and retry. With the engine present, bootstrap runs:
 
 ~~~text
 nimbus init --checkout ~/.local/share/nimbus
@@ -872,9 +910,12 @@ nimbus init:
    components with the ones the hardware detection rules propose
    pre-selected, and its dotfiles repository, defaulting to the one every
    tracked manifest shares; `--dotfiles URL` and `--no-dotfiles` answer the
-   last question; it then writes `machines/<id>.toml` with the DMI product
-   as `hardware` and leaves the Git change to the user
-5. writes ~/.config/nimbus/config.toml
+   last question and are rejected without `--new`; it then writes
+   `machines/<id>.toml` with the DMI product as `hardware` and leaves the Git
+   change to the user
+5. writes ~/.config/nimbus/config.toml; replacing an existing checkout or
+   approved origin requires a separate trust confirmation with an explicit
+   yes, even with `-y`
 6. runs `nimbus sync` for the machine, which shows the plan and asks once;
    `-y` answers yes
 7. initializes Chezmoi when the manifest names a dotfiles repository and
@@ -935,6 +976,10 @@ chezmoi init \
   <dotfiles repository>
 ~~~
 
+When reading `chezmoi data`, Nimbus uses the exact `Machine`, `ManagedByNimbus`,
+and `Profiles` keys. The lowercase `profiles` key is dotfiles' derived platform
+list, not the machine selection; JSON key casing must remain significant.
+
 Nimbus never edits Chezmoi internal state directly. The dotfiles repository is
 cross-platform and standalone: direct Chezmoi initialization prompts for the
 machine name and profiles, sets `managed_by_nimbus` to `false`, and works on
@@ -950,9 +995,13 @@ Mise before the handoff: it downloads the maker's installer from
 `https://mise.run` to a file, shows the digest, runs that file as the normal
 user, and verifies
 `~/.local/bin/mise`. The component declares the installer, binary, and system
-build prerequisites, without a tool installation command.
+build prerequisites, without a tool installation command. Source builds need
+Make, pkg-config, and the OpenSSL, curl, zlib, and libudev development packages
+as well as the compiler toolchain; Nimbus installs them before the handoff.
 Chezmoi writes `~/.config/mise/config.toml` and the Linux Cargo fragment at
 `~/.config/mise/conf.d/cargo.toml`; Nimbus never edits those files.
+The common profile supplies Typst through `terra:typst`; Chezmoi does not
+declare a second Typst installation through Cargo.
 
 On Linux and macOS, every full Chezmoi apply runs an after script that invokes
 Mise from the home directory after writing configuration:
@@ -976,11 +1025,24 @@ installation: only the native Mise declarations select user tools.
 
 Mise's Cargo backend builds from source (`cargo.binstall = false`) into its
 data directory, normally `~/.local/share/mise/installs`; shell activation
-exposes the selected binaries. The script runs on every full apply, rather
+exposes the selected binaries. Tinymist's native `install_env` sets
+`TMPDIR=/var/tmp` for its build and later upgrades, avoiding Fedora's
+quota-limited RAM filesystem at `/tmp`. Other commands keep their normal
+temporary directory, and native Cargo owns its temporary build files.
+The script runs on every full apply, rather
 than only when configuration changes, so reapplying restores missing tools.
 Nimbus reports the handoff as one dotfiles and tools stage; individual tool
 results remain visible in Mise's output. Existing direct installations in
 `~/.cargo/bin` are neither adopted nor removed; cleanup is an explicit action.
+
+Init repeats explicit `Setup note:` lines from the Chezmoi handoff after its
+closing stage summary, even when apply or tool installation fails. Native
+output remains visible as it arrives. Dotfiles emits applicable shell,
+1Password, and desktop setup instructions before starting Mise; Nimbus also
+marks the Chezmoi answer-refresh command. Only these marked instructions are
+retained in memory, deduplicated, bounded to 32 lines of at most 4096 bytes,
+and never executed or saved as a transcript. Control characters are excluded
+from the closing notes.
 
 Ordinary sync neither invokes Chezmoi nor installs tools from these dotfiles
 configurations. The convenience commands delegate directly:

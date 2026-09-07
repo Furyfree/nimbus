@@ -88,7 +88,11 @@ func validateRoot(c *Checkout, errs *ErrorList) {
 			errs.Add(RootFile, "dnf.%s: option names are lowercase letters, digits, and underscores", key)
 		}
 		switch r.DNF[key].(type) {
-		case int64, bool, string:
+		case int64, bool:
+		case string:
+			if strings.ContainsAny(r.DNF[key].(string), "\r\n\x00") {
+				errs.Add(RootFile, "dnf.%s: value must not contain line breaks or NUL", key)
+			}
 		default:
 			errs.Add(RootFile, "dnf.%s: value must be a number, boolean, or string", key)
 		}
@@ -107,7 +111,7 @@ func validateRoot(c *Checkout, errs *ErrorList) {
 				priorities[*repo.Priority] = id
 			}
 		}
-		if id == PrefixDNF || id == PrefixFlatpak {
+		if id == PrefixDNF || id == PrefixFlatpak || id == PrefixCargo {
 			errs.Add(RootFile, "%s: %q is a reserved prefix", where, id)
 		} else if !prefixRe.MatchString(id) {
 			errs.Add(RootFile, "%s: invalid repository ID", where)
@@ -290,6 +294,9 @@ func validateIDList(where, kind string, ids []string, exists func(string) bool, 
 
 func validateProfile(c *Checkout, p *Profile, errs *ErrorList) {
 	where := "profiles/" + p.ID + ".toml"
+	if err := ValidateID(p.ID); err != nil {
+		errs.Add(where, "id: %v", err)
+	}
 	if p.Schema != CurrentSchema {
 		errs.Add(where, "schema %d is not supported", p.Schema)
 	}
@@ -299,6 +306,9 @@ func validateProfile(c *Checkout, p *Profile, errs *ErrorList) {
 
 func validateComponent(c *Checkout, comp *Component, errs *ErrorList) {
 	where := "components/" + comp.ID + ".toml"
+	if err := ValidateID(comp.ID); err != nil {
+		errs.Add(where, "id: %v", err)
+	}
 	if comp.Schema != CurrentSchema {
 		errs.Add(where, "schema %d is not supported", comp.Schema)
 	}
@@ -373,6 +383,9 @@ func validateComponent(c *Checkout, comp *Component, errs *ErrorList) {
 
 func validateMachine(c *Checkout, m *Machine, errs *ErrorList) {
 	where := "machines/" + m.ID + ".toml"
+	if err := ValidateID(m.ID); err != nil {
+		errs.Add(where, "id: %v", err)
+	}
 	if m.Schema != CurrentSchema {
 		errs.Add(where, "schema %d is not supported", m.Schema)
 	}

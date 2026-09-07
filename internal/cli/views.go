@@ -64,10 +64,8 @@ func packageViews(s *selected, f *facts.Facts, applied *state.Applied) []package
 				}
 			}
 		} else if p.Prefix == definitions.PrefixCargo {
-			// A crate is the user's, verified by presence; installed means
-			// managed, since nothing else installs it.
 			if f.User.Known() && contains(f.User.Value.Crates, p.Name) {
-				v.Installed, v.Repository, v.State = "installed", "cargo", "managed"
+				v.Installed, v.Repository, v.State = "installed", "cargo", "adopt"
 			}
 		} else if inst, ok := plan.InstalledPackage(p.Name, applied.Receipts[id], f.Packages.Value); ok {
 			desired[inst.ID()] = true

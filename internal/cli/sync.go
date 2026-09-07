@@ -81,15 +81,20 @@ var (
 		return func() { close(done) }, nil
 	}
 	// approver reads the interactive answer. Tests replace it.
-	approver = func(in io.Reader, out io.Writer, _ string) bool {
-		fmt.Fprint(out, "Proceed? [Y/n] ")
+	approver = func(in io.Reader, out io.Writer, context string) bool {
+		trust := context == "selector trust"
+		if trust {
+			fmt.Fprint(out, "Approve this trust change? [y/N] ")
+		} else {
+			fmt.Fprint(out, "Proceed? [Y/n] ")
+		}
 		reader := bufio.NewReader(in)
 		line, err := reader.ReadString('\n')
 		if err != nil && !(errors.Is(err, io.EOF) && strings.TrimSpace(line) != "") {
 			return false
 		}
 		answer := strings.TrimSpace(strings.ToLower(line))
-		return answer == "" || answer == "y" || answer == "yes"
+		return (!trust && answer == "") || answer == "y" || answer == "yes"
 	}
 )
 
@@ -97,6 +102,7 @@ type syncFlags struct {
 	plan, yes, noUpgrade, prune bool
 	deferUser, userOnly         bool
 	approvedDigest              string
+	approvedCheckout            *facts.Checkout
 	definitionsDigest           string
 }
 
@@ -177,7 +183,9 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 						continue
 					}
 					detail := "an earlier stage did not complete"
-					if op.After != "" {
+					if op.Blocked != "" {
+						detail = "blocked: " + op.Blocked
+					} else if op.After != "" {
 						detail = "waiting for " + describeAfter(currentPlan, op.After)
 					}
 					result.Steps = append(result.Steps, runStep{Name: op.ID, Status: "skipped", Detail: detail})
@@ -238,6 +246,9 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	}
 	currentPlan = p
 	result.Digest = p.Digest
+	if !sf.plan && (p.Checkout.Origin == "" || p.Checkout.Commit == "") {
+		return errors.New("checkout origin and commit could not be inspected; sync requires an inspectable Git clone")
+	}
 	if sf.plan {
 		if opts.json {
 			if err := writeJSON(out, p, nil); err != nil {
@@ -251,6 +262,9 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			return reported{}
 		}
 		return nil
+	}
+	if sf.approvedCheckout != nil && !sameCheckoutIdentity(p.Checkout, *sf.approvedCheckout) {
+		return errors.New("checkout identity changed since approval; run the command again")
 	}
 	if sf.approvedDigest != "" && p.Digest != sf.approvedDigest {
 		return errors.New("the approved plan changed; run the command again")
@@ -316,14 +330,21 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	if freshSelection.Root != s.Root || freshSelection.Resolved.Machine != s.Resolved.Machine {
 		return errors.New("the selection changed while the question was open; run sync again")
 	}
-	if fresh, _, err := planWithState(freshSelection, src, sf.prune); err != nil {
+	fresh, freshApplied, err := planWithState(freshSelection, src, sf.prune)
+	if err != nil {
 		return err
-	} else if fresh.Digest != p.Digest {
+	}
+	if !sameCheckoutIdentity(fresh.Checkout, p.Checkout) {
+		return errors.New("checkout identity changed while the question was open; run sync again")
+	}
+	if fresh.Digest != p.Digest {
 		return errors.New("the system changed while the question was open and the plan with it; run sync again")
 	}
 	if err := facts.CheckPlatform(src, freshSelection.Checkout.Definitions().Compatibility.Fedora); err != nil {
 		return err
 	}
+	p, applied, currentPlan = fresh, freshApplied, fresh
+	approvedCheckout := p.Checkout
 	s = freshSelection
 	stage := filepath.Join(filepath.Dir(lockPath), "stage")
 	if err := os.MkdirAll(stage, 0o700); err != nil {
@@ -362,15 +383,15 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	phase = "apply"
 	for pass := 0; pass < 4; pass++ {
 		if pass > 0 {
-			if p, applied, err = replanUnchanged(s, flags, src, sf.prune); err != nil {
+			if p, applied, err = replanUnchanged(s, flags, src, sf.prune, approvedCheckout); err != nil {
 				return err
 			}
+			currentPlan = p
 			if !p.Complete {
-				if !opts.json {
-					out.Write(renderPlan(p, sf.prune, false))
-				}
+				execOut.Write(renderPlan(p, sf.prune, false))
 				return errors.New("the plan has problems; see above")
 			}
+			showReplanned(execOut, p, sf.prune, &result)
 			if nothingToRun(p) {
 				break
 			}
@@ -394,15 +415,17 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 					return fmt.Errorf("refresh metadata: %w", err)
 				}
 			}
-			if p, applied, err = replanUnchanged(s, flags, src, sf.prune); err != nil {
+			if p, applied, err = replanUnchanged(s, flags, src, sf.prune, approvedCheckout); err != nil {
 				return err
 			}
+			currentPlan = p
 			if !p.Complete {
-				if !opts.json {
-					out.Write(renderPlan(p, sf.prune, false))
-				}
+				execOut.Write(renderPlan(p, sf.prune, false))
 				return errors.New("the plan has problems; see above")
 			}
+		}
+		if len(prep) > 0 {
+			showReplanned(execOut, p, sf.prune, &result)
 		}
 		currentPlan = p
 		executable := syncOperations(p, sf)
@@ -451,7 +474,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 
 // replanUnchanged refreshes facts while requiring the approved definitions
 // and selection to remain unchanged for the entire run.
-func replanUnchanged(s *selected, flags machineFlags, src facts.Source, prune bool) (*plan.Plan, *state.Applied, error) {
+func replanUnchanged(s *selected, flags machineFlags, src facts.Source, prune bool, approvedCheckout facts.Checkout) (*plan.Plan, *state.Applied, error) {
 	fresh, err := loadSelected(flags)
 	if err != nil {
 		return nil, nil, err
@@ -459,7 +482,18 @@ func replanUnchanged(s *selected, flags machineFlags, src facts.Source, prune bo
 	if fresh.Root != s.Root || fresh.Resolved.Machine != s.Resolved.Machine || fresh.Checkout.Digest() != s.Checkout.Digest() {
 		return nil, nil, errors.New("definitions or selection changed during sync; run sync again")
 	}
-	return planWithState(fresh, src, prune)
+	p, applied, err := planWithState(fresh, src, prune)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !sameCheckoutIdentity(p.Checkout, approvedCheckout) {
+		return nil, nil, errors.New("checkout identity changed during sync; run sync again")
+	}
+	return p, applied, nil
+}
+
+func sameCheckoutIdentity(a, b facts.Checkout) bool {
+	return a.Origin != "" && a.Commit != "" && a.Root == b.Root && a.Origin == b.Origin && a.Commit == b.Commit
 }
 
 func syncOperations(p *plan.Plan, sf syncFlags) *plan.Plan {
@@ -588,4 +622,17 @@ func onlyUserFailures(r *apply.Result, p *plan.Plan) bool {
 		}
 	}
 	return true
+}
+
+func showReplanned(out io.Writer, p *plan.Plan, prune bool, result *syncResult) {
+	fmt.Fprintln(out, "updated plan after completed operations:")
+	out.Write(renderPlan(p, prune, false))
+	for _, op := range p.Operations {
+		for _, note := range op.Notes {
+			message := "replanned " + op.ID + ": " + note
+			if !contains(result.Differences, message) {
+				result.Differences = append(result.Differences, message)
+			}
+		}
+	}
 }

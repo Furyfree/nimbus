@@ -5,6 +5,32 @@
 Plan: [Bootstrap, initialization, and Chezmoi handoff](ROADMAP.md#5-bootstrap-initialization-and-chezmoi-handoff).
 Phases 1 to 4 are merged. Phase 4's checklist is in the evidence section.
 
+### Integration readiness
+
+- [x] Consolidate local branch histories into `integrate/phase5`, based on
+  current main, in Nimbus and dotfiles. Preserve the reviewed working trees
+  byte for byte while resolving the Phase 5/Fastmail merge conflicts.
+- [x] Remove obsolete local branch names and eight clean dotfiles worktrees.
+  Preserve the unfinished Ghostty worktree in detached state; its old
+  Noctalia-template approach conflicts with the accepted GUI-managed setup.
+- [x] Verify real Chezmoi initial and refresh prompts, stored machine/profile
+  data, the SSH opt-in, and apply/repair with a fake Mise in a disposable home.
+Local validation passes: `just check` in both repositories, `just validate`,
+and the new native Chezmoi handoff regression. Dotfiles runs 115 Python tests
+with three skips, plus its Bash suite. The skipped checks are native Hyprland,
+optional Neovim downloads, and the optional Zathura GUI test; the prior audit
+ran the Neovim download test separately. The first handoff fixture run failed
+on EOF at the optional SSH prompt; supplying the user's empty answer fixed
+that fixture without changing production behavior.
+
+Phase 5's installation and failure-retry milestone passed on the Fedora VM.
+Release completion still requires the signed engine distribution, its reviewed
+key pin, and a clean one-liner drill with the final changes. All three
+repositories are now public. The COPR key URL still returned HTTP 404 on
+2026-09-07. Earlier checks that day found Nimbus and dotfiles private, before
+the owner changed visibility. Commit and push are authorized; the final
+published changes still need current CI and review.
+
 ### Initialization
 
 - [x] Hardware facts: DMI product and board names, the chassis kind from the
@@ -19,8 +45,11 @@ Phases 1 to 4 are merged. Phase 4's checklist is in the evidence section.
   Chezmoi once, and reports its configuration and tool installation together.
   A second user-only pass runs only for explicit Nimbus-owned declarations.
 - [x] `install.sh` and `bootstrap`: platform and user checks, Git through
-  DNF, clone or validate the checkout, the engine from the COPR, init with
-  its input on the terminal; shellcheck runs in `just check` and CI.
+  DNF, clone or validate the checkout, init with a separately verified engine
+  and its input on the terminal; shellcheck runs in `just check` and CI.
+- [ ] Publish the engine RPM channel and review its signing-key pin before
+  enabling automated engine installation. Bootstrap fails closed without an
+  existing engine; the intended COPR key URL returned HTTP 404 on 2026-09-07.
 - [x] Doctor's `chezmoi` check compares Chezmoi's stored machine and
   profiles with the manifest; `profiles add|remove` print the refresh
   command.
@@ -72,12 +101,192 @@ Phases 1 to 4 are merged. Phase 4's checklist is in the evidence section.
 - [x] Validate the populated dotfiles Mise configuration and Linux Cargo
   fragment together. The owner's runtime selections now include Rust; the
   seven Cargo tools moved to `home/dot_config/mise/conf.d/cargo.toml`.
-- [ ] Verify initial and refreshed Chezmoi prompts, apply, and user-tool
-  installation together in an isolated home and disposable Fedora VM.
-- [ ] Publish Nimbus and dotfiles through a separately authorized GitHub
-  visibility change after reviewing their content and history.
+- [x] Verify initial and refreshed Chezmoi prompts and apply/repair together
+  in an isolated home, with the actual template and a fake Mise installer.
+- [x] Verify real user-tool installation and the handoff in a disposable
+  Fedora VM.
+- [x] Publish Nimbus and dotfiles through the owner's GitHub visibility change
+  after reviewing current files and reachable Git history with Gitleaks.
+- [ ] Create the COPR project, verify its real public signing key, publish the
+  approved release source, and obtain a successful signed engine build.
+- [ ] Ship the verified COPR key and fingerprint, then repeat the public
+  one-liner from the restored VM without a manually supplied engine.
 
 ## Evidence
+
+### COPR bootstrap preparation, 2026-09-07
+
+The owner made Nimbus, dotfiles, and COPR public. Both current-file and
+all-ref Git-history Gitleaks scans found no secrets. Nimbus PR 9 still points
+at `299d041`, whose CI failed on ShellCheck SC2015 and which conflicts with
+current main. The local integration checkout fixes those guards and passes
+`just check` with Go 1.26.7; this is not current hosted CI evidence.
+
+Bootstrap now uses the DNF-owned engine path and verifies a fresh COPR RPM
+with the pinned public key in an isolated RPM keyring before any engine/source
+installation. Tests exercise missing/invalid trust, a wrong fingerprint,
+foreign or symlinked repository files, download/signature/identity failures,
+DNF failure, PATH shadowing, successful handoff, and temporary-file cleanup.
+A Fedora 44 native RPM check accepts an ephemeral fixture signature with its
+key, and rejects both an unknown signer and the previously built unsigned RPM
+when signature and digest verification are both required. The test key existed
+only inside the disposable offline container and is not a release key.
+
+The COPR project API and public-key URL return 404. No real project key or
+placeholder pin has been added. Project creation, release publication, the
+signed build, and final VM validation remain pending.
+
+The restored Fedora 44 VM contains no Nimbus receipts or Chezmoi state. Its
+old manual engine and checkout were moved, without deletion, to
+`~/phase5-pre-copr-20260907T180840Z/`. The new `~/start-phase5` launcher checks
+that COPR metadata exists, then runs the public installer through a terminal
+with output-only logging, exit-code propagation, and elapsed time. It was
+syntax-checked but not run. The owner starts the drill only after the release
+and pinned bootstrap are available on main.
+
+### Fedora build-toolchain compatibility, 2026-09-07
+
+The engine's minimum Go version is now 1.26.7, matching Fedora 44's native
+compiler. The existing dependency graph requires at most Go 1.25; no
+dependency versions or Go source files changed for this adjustment. CI reads
+the minimum from `go.mod`. The full `just check` gate passes with Go 1.26.7
+and automatic toolchain switching disabled.
+
+The separate COPR recipe now requires `golang >= 1.26.7`. An offline Fedora
+44 container built both the source and binary RPMs from a private local
+working-tree snapshot. Its native Go compiler ran the full vendored Go test
+suite and the resulting engine validated every machine definition. The RPM
+contains the engine and license notices, no install scriptlets or compiler
+runtime dependency. This is local packaging evidence, not a signed release,
+COPR build, or VM installation of the RPM.
+
+The first host test mixed the 1.26.7 compiler with the inherited 1.27.1
+GOROOT; selecting both compiler and GOROOT explicitly fixed the test setup.
+The first RPM build exposed the draft's incorrect Go license path; it now
+uses Fedora's native license directory and the complete RPM build passes.
+
+### Completed VM installation and retry, 2026-09-07
+
+After the final retry, `nimbus status` reports all 140 desired packages
+present, with no pending or blocked changes. `mise ls` reports no missing
+tools. Typst 0.15.1 runs from Terra's RPM; DNF transaction 7 completed with
+status `Ok`. Tinymist's selected `v0.15.6` source build runs successfully.
+The earlier Cargo failures were recovered without reinstalling completed tools.
+
+`chezmoi --skip-secrets verify --exclude=scripts` passes, and doctor's
+Chezmoi selection check passes. Full verify returns 1 because the always-run
+Mise after-script is scheduled on every apply; status lists only that script.
+This does not indicate file drift or another failed tool installation.
+
+Doctor still reports disabled Secure Boot in the VM. The existing mcelog
+service failed at boot because it does not support the virtual AMD CPU.
+These remain VM limitations; no security policy was relaxed.
+
+This evidence closes installation and failure retry on the prepared VM.
+It does not prove the final public one-liner on a fresh snapshot: the drill
+used staged checkouts and a separately supplied engine, with fixes applied
+between attempts. The signed engine and public-source gates remain open.
+
+### Typst source and temporary build storage, 2026-09-07
+
+The next VM retry installed the development prerequisites, cargo-update,
+Sheldon, and VM Curator. Typst and Tinymist were still missing. Their retained
+compiler diagnostics report `Disk quota exceeded (os error 122)` under
+`/tmp`: Fedora mounted it as a 3.9 GiB tmpfs with user quotas, while the disk
+containing `/home` and `/var/tmp` had about 48 GiB free. This is a temporary
+build-storage failure, not another missing header or an observed OOM kill.
+
+At the owner's request, the common profile now selects `terra:typst`, and
+dotfiles removes `cargo:typst-cli`. The VM's cached Terra metadata provides
+`typst-0.15.1-1.fc44.x86_64`. Tinymist's native Mise `install_env` selects
+`TMPDIR=/var/tmp` for installation and upgrades; other tools and system mount
+settings are unchanged. A native Mise probe with fake Cargo verified the
+temporary directory, CLI selection, and failure propagation without installing
+tools. The successful real retry is recorded above.
+
+### Cargo prerequisites and closing setup notes, 2026-09-07
+
+The VM installed most Mise tools, including Caligula and resvg, but left five
+Cargo tools missing. The retained builds show OpenSSL probing and a missing
+`zlib.h`; VM Curator depends on libudev, whose pkg-config metadata is absent.
+The Mise component now explicitly selects Make, pkg-config, and OpenSSL,
+curl, zlib, and libudev development packages. The Fedora cache resolves their
+providers. Source builds remain selected; no binstall setting was weakened.
+
+Tinymist's published crate is library-only. Dotfiles now selects `tinymist-cli`
+and its `tinymist` binary from upstream release `v0.15.6` through Mise's Cargo
+Git backend with the lockfile enabled. The later retry and remaining
+temporary-storage failure are recorded above.
+
+Init forwards native output and repeats marked setup notes after its summary,
+including on failure. Dotfiles prints applicable 1Password, shell, and Noctalia
+instructions before running Mise. Regressions cover streaming fragments,
+duplicate notes, bounded capture, and successful and failed handoffs. No
+installation transcript is saved or interpreted as a command.
+
+### VM installation and Chezmoi selection, 2026-09-07
+
+The retry started at 17:19:37 CEST; DNF finished its upgrade at 17:25:06,
+about 5 minutes 29 seconds later. This excludes the previous failed attempt
+and repair wait; the final init exit timestamp was not recorded. DNF history
+marks both the installation and upgrade `Ok`. All 133 desired packages,
+including three Flatpaks, are present; status reports no pending operations
+or upgrades.
+
+Five Fedora RPM downloads returned 404 from `mirror.accum.se`; DNF retried
+other mirrors and installed every affected version. A concurrent native
+`dnf-makecache.service` reported an RPM lock error while Nimbus's transaction
+held the lock, but completed its metadata refresh. Neither stopped the system
+installation.
+
+Nimbus then falsely rejected the Chezmoi selection. The actual config stores
+the correct three machine profiles, but Go's case-insensitive struct decoding
+let lowercase `profiles` replace uppercase `Profiles` with the platform list.
+Init and inspection now share an exact-key parser. Regressions cover both key
+orders, missing and malformed machine selection, and the full handoff fixture
+with both lists. The later successful dotfiles apply and real Mise installation
+are recorded above.
+
+### VM repository-key failure, 2026-09-07
+
+The first run installed Git, wrote the selector and DNF configuration receipt,
+then stopped at Brave before enabling any third-party repository. The staged
+`key-brave.asc` contains three primary keys; the executor correctly requires
+exactly the declared key. The definition now uses `system/keys/brave.asc`,
+containing only the existing pinned release signer from the maker's bundle.
+The other downloaded DNF/COPR keys each have one matching primary key. Brave
+Origin 1.94.121's RPM header names the existing pinned signer; this header
+inspection is not a full package-signature or installation verification.
+
+### Repository passthrough, 2026-09-07
+
+- Started from Phase 5 PR #9 and carried forward main's Fastmail selection.
+  Local fixes cover lock-file ownership and links, strict definition IDs and
+  DNF values, effective repository overrides, absent Flatpak receipt retirement,
+  explicit removal without dependency cleanup, visible replanned erasures,
+  checkout identity before and after approval, explicit init trust approval,
+  and complete Chezmoi refresh prompts preserving the SSH preference.
+- `just check` and `just validate` pass locally. The original PR #9 CI head
+  failed ShellCheck 0.9.0 on compound shell guards; those guards are corrected
+  locally. This does not change or establish CI for the unpushed fixes.
+- Dotfiles `just check` completes 114 Python tests with three native/opt-in skips
+  and its Bash suite. The separate disposable-home Neovim integration test
+  passes. Isolated Chezmoi `managed`, `status`, and `diff` pass; full `verify`
+  reports the deliberately pending installer script, while
+  `verify --exclude=scripts` confirms all rendered files and permissions.
+- Claude Code (`claude-fable-5-1`) completed two full read-only audits.
+  Accepted findings were reproduced or traced and fixed. Exact managed
+  profile matching and adopted-package removal remain intentional; stopping
+  sudo renewal does not promise to revoke unrelated cached credentials.
+- The third, targeted peer pass hit Claude's session limit, reported to reset
+  at 20:50 Copenhagen time. Its closing verdict is unavailable. The main
+  agent inspected the final fix diff and verified it with regressions and the
+  full local gate; no other provider was substituted.
+- Source-only Gitleaks scans are clean in both repositories. No live install,
+  apply, privileged command, fresh-VM drill, or GitHub write was performed.
+- Fedora 44 disposable-container `repoquery` finds Chezmoi 2.72.0 in updates,
+  meeting the dotfiles source minimum. This is availability evidence, not a
+  fresh-install or restore drill.
 
 ### Desktop application selection
 
@@ -224,11 +433,10 @@ Phases 1 to 4 are merged. Phase 4's checklist is in the evidence section.
   in Terra, Hyprland in no accepted repository; the ChatGPT RPM was
   inspected and registers OpenAI's DNF repository, and Brave's repository
   carries `brave-origin`.
-- The dotfiles template currently prompts only for `onePasswordSsh` and
-  `Profiles` and fails on any profile outside its four choices, and the
-  repository still holds `machines/desktop.toml`, `machines/laptop.toml`, and
-  a README describing the old symlink selector; the handoff cannot succeed
-  until the template task above is done.
+- Superseded pre-handoff observation: dotfiles once had four fixed profile
+  choices, its own machine manifests, and a symlink selector. The current
+  template preserves Nimbus-supplied IDs and the machine manifests and old
+  selector model are gone; the Phase 5 evidence above supersedes this blocker.
 - The 2026-09-03 passthrough ran three passes: the main agent, Codex
   GPT-5.6 Sol at high reasoning (24 findings), and GLM 5.3 Flash at max
   reasoning through opencode (15 findings). Grok did not run because its CLI

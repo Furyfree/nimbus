@@ -321,7 +321,7 @@ func chezmoiSelection(f *facts.Facts, cfg Config) Check {
 		c.Status = Fail
 		c.Observation = fmt.Sprintf("Chezmoi stores machine %q, managed_by_nimbus %v, profiles %s; the manifest selects %s with profiles %s", f.Chezmoi.Value.Machine, f.Chezmoi.Value.ManagedByNimbus, strings.Join(f.Chezmoi.Value.Profiles, "/"), cfg.Machine, strings.Join(cfg.Profiles, "/"))
 		c.Impact = "the user configuration follows a stale selection"
-		c.Remediation = "refresh with: " + ChezmoiRefresh(cfg.Machine, cfg.Profiles)
+		c.Remediation = "refresh with: " + ChezmoiRefresh(cfg.Machine, cfg.Profiles, f.Chezmoi.Value.OnePasswordSSH)
 	default:
 		c.Status, c.Observation = Pass, "Chezmoi stores the selected machine and profiles"
 	}
@@ -330,8 +330,8 @@ func chezmoiSelection(f *facts.Facts, cfg Config) Check {
 
 // ChezmoiRefresh is the direct command that re-answers the Nimbus prompts
 // of an initialized Chezmoi.
-func ChezmoiRefresh(machine string, profiles []string) string {
-	return fmt.Sprintf("chezmoi init --prompt --promptString Machine=%s --promptBool ManagedByNimbus=true --promptMultichoice Profiles=%s", machine, strings.Join(profiles, "/"))
+func ChezmoiRefresh(machine string, profiles []string, onePasswordSSH bool) string {
+	return fmt.Sprintf("chezmoi init --prompt --promptString Machine=%s --promptBool ManagedByNimbus=true --promptMultichoice Profiles=%s --promptBool 'Enable 1Password SSH integration=%t'", machine, strings.Join(profiles, "/"), onePasswordSSH)
 }
 
 func sameSet(a, b []string) bool {

@@ -342,12 +342,12 @@ func TestPlanRemovesDeclaredPackages(t *testing.T) {
 	// ffmpeg-free is installed on this host, so media-codecs must swap it.
 	f.Packages.Value = append(f.Packages.Value, facts.Package{Name: "ffmpeg-free", Epoch: "0", Version: "8.0.1", Release: "6.fc44", Arch: "x86_64", FromRepo: "fedora", Reason: "user"})
 	in := Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src}
-	key := facts.Key("dnf5", "--assumeno", "--cacheonly", "remove", "ffmpeg-free")
+	key := facts.Key("dnf5", "--assumeno", "--cacheonly", "remove", "--no-autoremove", "ffmpeg-free")
 	src.Commands[key] = previewText([]TxPackage{{Name: "ffmpeg-free", Arch: "x86_64", EVR: "0:8.0.1-6.fc44", Repository: "@System", Section: "removing"}})
 	src.Failures[key] = "exit status 1"
 	p := answerInstall(t, src, in, nil)
 	op := find(p, "packages:remove")
-	if op == nil || op.Blocked != "" || op.Risk != RiskMedium || strings.Join(op.Steps[0].Argv, " ") != "dnf5 -y remove ffmpeg-free" {
+	if op == nil || op.Blocked != "" || op.Risk != RiskMedium || strings.Join(op.Steps[0].Argv, " ") != "dnf5 -y remove --no-autoremove ffmpeg-free" {
 		t.Fatalf("remove = %+v", op)
 	}
 	if find(p, "package:dnf:ffmpeg-free") != nil {
@@ -601,7 +601,7 @@ func TestAppliedStateShapesThePlan(t *testing.T) {
 		facts.Package{Name: "no-longer-wanted", Version: "1", Release: "1", Arch: "x86_64", FromRepo: "fedora", Reason: "user"},
 		facts.Package{Name: "hand-installed", Version: "1", Release: "1", Arch: "x86_64", FromRepo: "fedora", Reason: "user"},
 	)
-	key := facts.Key("dnf5", "--assumeno", "--cacheonly", "remove", "no-longer-wanted.x86_64")
+	key := facts.Key("dnf5", "--assumeno", "--cacheonly", "remove", "--no-autoremove", "no-longer-wanted.x86_64")
 	src.Commands[key] = previewText([]TxPackage{{Name: "no-longer-wanted", Arch: "x86_64", EVR: "0:1-1", Repository: "@System", Section: "removing"}})
 	src.Failures[key] = "exit status 1"
 	in := Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Applied: a, Source: src}
@@ -611,7 +611,7 @@ func TestAppliedStateShapesThePlan(t *testing.T) {
 		t.Fatalf("managed package = %+v", op)
 	}
 	owned := find(p, "packages:remove-owned")
-	if owned == nil || owned.Blocked != "" || strings.Join(owned.Steps[0].Argv, " ") != "dnf5 -y remove no-longer-wanted.x86_64" || !contains(owned.Paths, "package:dnf:no-longer-wanted") {
+	if owned == nil || owned.Blocked != "" || strings.Join(owned.Steps[0].Argv, " ") != "dnf5 -y remove --no-autoremove no-longer-wanted.x86_64" || !contains(owned.Paths, "package:dnf:no-longer-wanted") {
 		t.Fatalf("owned removal = %+v", owned)
 	}
 	names := map[string]bool{}
@@ -625,7 +625,7 @@ func TestAppliedStateShapesThePlan(t *testing.T) {
 		t.Fatal("prune transaction planned without Prune")
 	}
 
-	pruneKey := facts.Key("dnf5", "--assumeno", "--cacheonly", "remove", "hand-installed.x86_64")
+	pruneKey := facts.Key("dnf5", "--assumeno", "--cacheonly", "remove", "--no-autoremove", "hand-installed.x86_64")
 	src.Commands[pruneKey] = previewText([]TxPackage{{Name: "hand-installed", Arch: "x86_64", EVR: "0:1-1", Repository: "@System", Section: "removing"}})
 	src.Failures[pruneKey] = "exit status 1"
 	in.Prune = true

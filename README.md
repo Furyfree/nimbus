@@ -61,16 +61,24 @@ last complete snapshot is commit
 
 ## Development
 
+Building requires Go 1.26.7 or newer, matching Fedora 44's native toolchain.
+CI reads that minimum from `go.mod`.
+
 The local gate is:
 
 ~~~sh
 just check
 ~~~
 
-It runs `gofmt`, `go vet`, `go test`, `git diff --check`, and markdownlint.
+It runs `gofmt`, `go vet`, `go test`, `git diff --check`, markdownlint, and
+ShellCheck for the installation scripts.
 `just validate` runs `nimbus validate` against this checkout, `just build`
 produces a static `nimbus` binary that runs on any x86_64 Linux, and
 `just vm-push` copies that binary and the definitions to the drill VM.
+
+The engine RPM channel and reviewed signing-key pin remain a release blocker.
+Bootstrap is prepared to verify and install the COPR RPM, but refuses a fresh
+installation until the real public key and its reviewed fingerprint are shipped.
 
 The delivered commands are `init`, `sync`, `validate`, `doctor`, `status`,
 `managed`, `unmanaged`, `why`, the `profiles`, `components`, and `packages`

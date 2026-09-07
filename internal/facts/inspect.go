@@ -111,7 +111,7 @@ func chezmoi(src Source) (Chezmoi, error) {
 	if err != nil {
 		return Chezmoi{Initialized: true}, err
 	}
-	return parseChezmoiData(out)
+	return ParseChezmoiData(out)
 }
 
 // hardware reads the DMI identity and the display adapters. A machine
@@ -241,6 +241,21 @@ func repositories(src Source) ([]Repository, error) {
 		for _, o := range parseRepoFile(name, data) {
 			for i := range repos {
 				if match, _ := filepath.Match(o.ID, repos[i].ID); match {
+					if repos[i].OverrideOptions == nil {
+						repos[i].OverrideOptions = map[string]string{}
+					}
+					for key, value := range o.Options {
+						repos[i].OverrideOptions[key] = value
+					}
+					if value, ok := o.Options["baseurl"]; ok {
+						repos[i].BaseURL = value
+					}
+					if value, ok := o.Options["metalink"]; ok {
+						repos[i].Metalink = value
+					}
+					if value, ok := o.Options["mirrorlist"]; ok {
+						repos[i].Mirrorlist = value
+					}
 					if _, ok := o.Options["gpgkey"]; ok {
 						repos[i].GPGKey = o.GPGKey
 					}

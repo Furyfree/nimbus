@@ -4,8 +4,10 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/Furyfree/nimbus/internal/apply"
@@ -253,16 +255,24 @@ func TestInitDelegatesMiseToolsToChezmoiAndRetriesFailure(t *testing.T) {
 	}
 
 	// Chezmoi propagates an after-script failure even though files were applied.
+	src.Commands["chezmoi apply"] = []byte("Setup note: Sign in to 1Password.\nCompiling a crate...\n")
 	src.Failures["chezmoi apply"] = "mise install failed: crate build failed"
 	code, out, errOut := run(t, "init", "--checkout", root, "--machine", "vm", "-y")
 	if code != ExitFailure || !strings.Contains(out, "failed     dotfiles and tools") || !strings.Contains(out+errOut, "crate build failed") {
 		t.Fatalf("%d %s%s", code, out, errOut)
+	}
+	footer := out[strings.Index(out, "init summary:"):]
+	if !strings.Contains(footer, "Setup notes:") || !strings.Contains(footer, "Sign in to 1Password.") || strings.Contains(footer, "Compiling a crate") {
+		t.Fatalf("setup instructions lost or compiler output repeated: %s", footer)
 	}
 	delete(src.Failures, "chezmoi apply")
 	src.calls = nil
 	code, out, errOut = run(t, "init", "--checkout", root, "--machine", "vm", "-y")
 	if code != ExitOK || !strings.Contains(out, "succeeded  dotfiles and tools") || strings.Contains(out, "remaining Nimbus user tools") {
 		t.Fatalf("%d %s%s", code, out, errOut)
+	}
+	if strings.Count(out, "Sign in to 1Password.") != 2 || strings.LastIndex(out, "Setup notes:") < strings.Index(out, "init summary:") {
+		t.Fatalf("successful init did not repeat its setup notes last: %s", out)
 	}
 	count := 0
 	for _, call := range src.calls {
@@ -335,5 +345,196 @@ func TestInitRefusesUnrelatedChezmoiStateBeforeApplying(t *testing.T) {
 				t.Fatal("unrelated source was applied")
 			}
 		})
+	}
+}
+
+func TestInitRejectsIgnoredDotfilesFlags(t *testing.T) {
+	root, src := installerFixture(t)
+	code, out, errOut := run(t, "init", "--checkout", root, "--machine", "vm", "--no-dotfiles", "-y")
+	if code != ExitUsage || len(src.calls) > 0 {
+		t.Fatalf("ignored flag: code=%d calls=%v output=%s%s", code, src.calls, out, errOut)
+	}
+}
+
+func TestInstallerRequiresAnOpenableControllingTerminal(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash is unavailable")
+	}
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "install.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Execute only the initial guards, before any host inspection or installation.
+	guards, _, ok := strings.Cut(string(data), "# shellcheck disable=SC1091")
+	if !ok {
+		t.Fatal("installer guard boundary missing")
+	}
+	cmd := exec.Command(bash, "-c", guards+"\nexit 99\n")
+	cmd.Env = []string{"HOME=" + t.TempDir(), "PATH=" + filepath.Dir(bash)}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	output, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "a controlling terminal is required") {
+		t.Fatalf("installer passed the terminal guard: %v %s", err, output)
+	}
+}
+
+func TestInitTrustChangeNeedsSeparateApproval(t *testing.T) {
+	root, src := installerFixture(t)
+	path, _ := selector.DefaultPath()
+	old := &selector.Selector{Schema: selector.CurrentSchema, Checkout: root, Machine: "vm", Origin: "github.com/previous/nimbus"}
+	if err := selector.Write(path, old); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(path)
+	saved := approver
+	t.Cleanup(func() { approver = saved })
+	var asked bool
+	approver = func(io.Reader, io.Writer, string) bool { asked = true; return false }
+	code, out, _ := run(t, "init", "--checkout", root, "--machine", "vm", "-y")
+	after, _ := os.ReadFile(path)
+	if code != ExitFailure || !asked || string(before) != string(after) || len(src.calls) != 0 || !strings.Contains(out, "previous/nimbus") {
+		t.Fatalf("trust silently replaced: code=%d asked=%v calls=%v output=%s", code, asked, src.calls, out)
+	}
+}
+
+func TestSyncRefusesMissingCheckoutIdentity(t *testing.T) {
+	root, src := installerFixture(t)
+	src.Failures[facts.Key("git", facts.GitArgs(root, "rev-parse", "HEAD")...)] = "unreadable Git identity"
+	code, out, _ := run(t, "sync", "--checkout", root, "--machine", "vm", "-y")
+	if code != ExitFailure || len(src.calls) != 0 || !strings.Contains(out, "inspectable Git clone") {
+		t.Fatalf("unidentified sync: %d %v %s", code, src.calls, out)
+	}
+	if _, err := os.Stat(stateRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("state written: %v", err)
+	}
+}
+
+func TestInitRefreshPreservesEnabledSSH(t *testing.T) {
+	root, src := installerFixture(t)
+	src.Commands[facts.Key("chezmoi", facts.ChezmoiDataArgs...)] = []byte(`{"Machine":"other","ManagedByNimbus":true,"Profiles":["common"],"onePasswordSsh":true}`)
+	code, out, errOut := run(t, "init", "--checkout", root, "--machine", "vm", "-y")
+	if code != ExitFailure || !strings.Contains(out+errOut, "'Enable 1Password SSH integration=true'") || contains(src.calls, "chezmoi apply") {
+		t.Fatalf("refresh lost SSH: %d %s%s", code, out, errOut)
+	}
+}
+
+func TestTrustApprovalRequiresExplicitYes(t *testing.T) {
+	for _, input := range []string{"", "\n", " \n", "n\n", "yes\n", "y\n"} {
+		want := strings.TrimSpace(input) == "yes" || strings.TrimSpace(input) == "y"
+		if got := approver(strings.NewReader(input), io.Discard, "selector trust"); got != want {
+			t.Errorf("input %q approved=%t", input, got)
+		}
+	}
+}
+
+func TestSelectionRejectsChangedCheckoutIdentityBeforeWriting(t *testing.T) {
+	for _, field := range []string{"commit", "origin"} {
+		t.Run(field, func(t *testing.T) {
+			applyEnv(t)
+			root := editableCheckout(t)
+			src := fixtureSource(t, root)
+			withSource(t, src)
+			before, err := os.ReadFile(manifestPath(root, "laptop"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			saved := approver
+			t.Cleanup(func() { approver = saved })
+			approver = func(io.Reader, io.Writer, string) bool {
+				if field == "commit" {
+					src.Commands[facts.Key("git", facts.GitArgs(root, "rev-parse", "HEAD")...)] = []byte("changed\n")
+				} else {
+					src.Files[filepath.Join(root, ".git/config")] = []byte("[remote \"origin\"]\nurl=https://example.invalid/other\n")
+				}
+				return true
+			}
+			code, out, errOut := run(t, "components", "add", "docker", "--checkout", root, "--machine", "laptop")
+			if code != ExitFailure || !strings.Contains(errOut, "checkout identity changed") {
+				t.Fatalf("%d %s%s", code, out, errOut)
+			}
+			after, err := os.ReadFile(manifestPath(root, "laptop"))
+			if err != nil || string(after) != string(before) {
+				t.Fatalf("manifest changed: %v", err)
+			}
+		})
+	}
+}
+
+func TestInstallerGitApproval(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "install.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, body, ok := strings.Cut(string(data), "if ! command -v git >/dev/null 2>&1; then\n")
+	if !ok {
+		t.Fatal("missing Git installation flow")
+	}
+	body, _, ok = strings.Cut(body, "\nfi\n")
+	if !ok {
+		t.Fatal("missing Git installation boundary")
+	}
+	for _, input := range []string{"", "\n", "n\n", "yes\n", "y\n"} {
+		t.Run(strings.ReplaceAll(input, "\n", "newline"), func(t *testing.T) {
+			home := t.TempDir()
+			if err := os.WriteFile(filepath.Join(home, "answer"), []byte(input), 0600); err != nil {
+				t.Fatal(err)
+			}
+			// Redirect only the terminal read; never run platform checks or real sudo.
+			script := "set -eu\nsay() { :; }\nfail() { echo \"$*\"; exit 1; }\nsudo() { echo mutation; }\n" + strings.ReplaceAll(body, "</dev/tty", "<answer")
+			cmd := exec.Command("bash", "-c", script)
+			cmd.Dir = home
+			output, err := cmd.CombinedOutput()
+			approved := input == "yes\n" || input == "y\n"
+			if (err == nil) != approved || strings.Contains(string(output), "mutation") != approved {
+				t.Fatalf("approval %q: %v %s", input, err, output)
+			}
+		})
+	}
+}
+
+func TestInstallerAcceptsOnlyCheckoutRoots(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "install.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, body, ok := strings.Cut(string(data), "# Normalize a Git locator")
+	if !ok {
+		t.Fatal("missing checkout validation")
+	}
+	body = "# Normalize a Git locator" + body
+	body, _, ok = strings.Cut(body, "\nBOOTSTRAP=")
+	if !ok {
+		t.Fatal("missing checkout boundary")
+	}
+	home := t.TempDir()
+	repo := filepath.Join(home, "repo")
+	worktree := filepath.Join(home, "linked")
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Env = append(os.Environ(), "HOME="+home, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	git("init", repo)
+	git("-C", repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-m", "fixture")
+	git("-C", repo, "remote", "add", "origin", "https://github.com/Furyfree/nimbus.git")
+	git("-C", repo, "worktree", "add", "--detach", worktree)
+	nested := filepath.Join(repo, "nested")
+	if err := os.Mkdir(nested, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		path     string
+		accepted bool
+	}{{repo, true}, {worktree, true}, {nested, false}} {
+		cmd := exec.Command("bash", "-c", "set -eu\nsay() { :; }\nfail() { echo \"$*\"; exit 1; }\n"+body)
+		cmd.Env = append(os.Environ(), "HOME="+home, "CHECKOUT="+tc.path, "ORIGIN_ID=github.com/furyfree/nimbus")
+		out, err := cmd.CombinedOutput()
+		if (err == nil) != tc.accepted {
+			t.Fatalf("checkout %s: %v %s", tc.path, err, out)
+		}
 	}
 }

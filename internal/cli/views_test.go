@@ -2,11 +2,33 @@ package cli
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/Furyfree/nimbus/internal/facts"
 	"github.com/Furyfree/nimbus/internal/state"
 )
+
+func TestCargoOwnershipRequiresReceipt(t *testing.T) {
+	root, src := installerFixture(t)
+	src.Commands[facts.Key(filepath.Join(os.Getenv("HOME"), ".cargo/bin/cargo"), facts.CargoListArgs...)] = []byte("demo v1.0.0:\n    demo\n")
+	args := []string{"managed", "--checkout", root, "--machine", "vm"}
+	if code, out, errOut := run(t, args...); code != ExitOK || !strings.Contains(out, "adopt      cargo:demo") {
+		t.Fatalf("crate without receipt: %d %s%s", code, out, errOut)
+	}
+	stage := &state.Stage{Schema: state.Schema, PlanDigest: "sha256:p", Receipts: []state.Receipt{{
+		Schema: state.Schema, Resource: "package:cargo:demo", Provider: "cargo",
+		Operation: "adopt", PlanDigest: "sha256:p", Verified: true,
+	}}}
+	if err := state.Record(stateRoot, "sha256:p", stage); err != nil {
+		t.Fatal(err)
+	}
+	if code, out, errOut := run(t, args...); code != ExitOK || !strings.Contains(out, "managed    cargo:demo") {
+		t.Fatalf("crate with receipt: %d %s%s", code, out, errOut)
+	}
+}
 
 func TestOwnershipViews(t *testing.T) {
 	root := repoRoot(t)

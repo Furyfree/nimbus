@@ -256,6 +256,27 @@ func (b *builder) inspectRepo(id string, r definitions.Repository) (ready bool, 
 	var drift []string
 	var keyDrift []string
 	for _, have := range enabled {
+		for _, key := range []string{"baseurl", "metalink", "mirrorlist", "sslverify"} {
+			if value, overridden := have.OverrideOptions[key]; overridden {
+				want := have.Options[key]
+				if r.Kind == "dnf" && r.ReleasePackage == "" {
+					want = ""
+					if key == "baseurl" {
+						want = r.BaseURL
+					}
+				}
+				if key == "sslverify" {
+					want = "1"
+					switch strings.ToLower(value) {
+					case "true", "yes":
+						value = "1"
+					}
+				}
+				if value != want {
+					return false, "", fmt.Sprintf("repository %s has a conflicting %s override in %s; correct the native override before retrying", have.ID, key, strings.Join(have.Overrides, ", "))
+				}
+			}
+		}
 		if r.Kind == "dnf" && r.ReleasePackage == "" {
 			if have.File != "nimbus-"+id+".repo" {
 				return false, "", fmt.Sprintf("repository %s is provided by %s, not by nimbus-%s.repo, which Nimbus would own; remove that file first", have.ID, have.File, id)
@@ -1116,6 +1137,18 @@ func (b *builder) ownedRemovals() []Operation {
 			receiptIDs = append(receiptIDs, id)
 		case "flatpak":
 			name := strings.TrimPrefix(id, "flatpak:")
+			if !b.in.Facts.Flatpak.Known() {
+				ops = append(ops, Operation{ID: id, Kind: KindFlatpak, Action: ActionRemove, Risk: RiskMedium, Summary: "inspect Flatpak " + name + " before removal", Blocked: b.in.Facts.Flatpak.Error})
+				continue
+			}
+			present := false
+			for _, app := range b.in.Facts.Flatpak.Value.Apps {
+				present = present || app.ID == name
+			}
+			if !present {
+				ops = append(ops, Operation{ID: id, Kind: KindFlatpak, Action: ActionRetire, Risk: RiskLow, Summary: "retire the receipt of Flatpak " + name + ", which is absent", Paths: []string{"receipt"}})
+				continue
+			}
 			ops = append(ops, Operation{ID: id, Kind: KindFlatpak, Action: ActionRemove, Risk: RiskMedium, Summary: "remove Flatpak " + name + ", no longer selected", Paths: []string{"receipt"}, Steps: []Step{{Description: "remove the application", Argv: []string{"flatpak", "uninstall", "--system", "--noninteractive", name}, Privileged: true}}})
 		}
 	}
@@ -1134,11 +1167,11 @@ func (b *builder) ownedRemovals() []Operation {
 func (b *builder) previewRemoval(id string, names []string, summary string) Operation {
 	sort.Strings(names)
 	op := Operation{ID: id, Kind: KindPackage, Action: ActionRemove, Risk: RiskMedium, Summary: summary,
-		Steps: []Step{{Description: "run the reviewed removal", Argv: append([]string{"dnf5", "-y", "remove"}, names...), Privileged: true}}}
+		Steps: []Step{{Description: "run the reviewed removal", Argv: append([]string{"dnf5", "-y", "remove", "--no-autoremove"}, names...), Privileged: true}}}
 	if b.waitsForRepositories(&op) {
 		return op
 	}
-	out, err := b.in.Source.Run("dnf5", append([]string{"--assumeno", "--cacheonly", "remove"}, names...)...)
+	out, err := b.in.Source.Run("dnf5", append([]string{"--assumeno", "--cacheonly", "remove", "--no-autoremove"}, names...)...)
 	tx, perr := ParsePreview(out)
 	if perr != nil {
 		op.Blocked = previewFailure(out, err, perr)

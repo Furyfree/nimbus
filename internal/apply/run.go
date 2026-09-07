@@ -208,7 +208,7 @@ func (ex *executor) execute(op plan.Operation) (receipts []state.Receipt, remove
 		return ex.flatpakInstall(op)
 	case op.Kind == plan.KindFlatpak && op.Action == plan.ActionRemove:
 		return ex.flatpakRemove(op)
-	case op.Kind == plan.KindPackage && op.Action == plan.ActionRetire:
+	case (op.Kind == plan.KindPackage || op.Kind == plan.KindFlatpak) && op.Action == plan.ActionRetire:
 		return nil, []string{op.ID}, nil
 	case op.Kind == plan.KindPackage && op.Action == plan.ActionAdopt:
 		name := op.ID[strings.LastIndexByte(op.ID, ':')+1:]
@@ -723,15 +723,18 @@ func pathsFor(p *plan.Plan, id string) []string {
 }
 
 func (ex *executor) removeTransaction(op plan.Operation) ([]state.Receipt, []string, error) {
-	if len(op.Steps) == 0 || len(op.Steps[0].Argv) < 4 {
+	if len(op.Steps) == 0 || len(op.Steps[0].Argv) < 5 {
 		return nil, nil, errors.New("the removal command names no packages")
 	}
 	argv := op.Steps[0].Argv
+	if argv[3] != "--no-autoremove" {
+		return nil, nil, errors.New("the removal command must use --no-autoremove")
+	}
 	installed, err := ex.packageTransaction(argv, op.Transaction)
 	if err != nil {
 		return nil, nil, err
 	}
-	for _, name := range argv[3:] {
+	for _, name := range argv[4:] {
 		if p, ok := facts.FindPackage(installed, name); ok {
 			return nil, nil, fmt.Errorf("verification: %s is still installed after the removal", p.ID())
 		}

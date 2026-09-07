@@ -149,7 +149,7 @@ func TestChezmoiHandoffRunsOnceWithThePromptFlags(t *testing.T) {
 	src.Commands[facts.Key("chezmoi", "apply")] = nil
 	src.Commands["chezmoi source-path"] = []byte(home)
 	src.Commands[facts.Key("git", facts.GitArgs(home, "config", "--get", "remote.origin.url")...)] = []byte(dotfiles.Repo)
-	src.Commands[facts.Key("chezmoi", facts.ChezmoiDataArgs...)] = []byte(`{"Machine":"laptop","ManagedByNimbus":true,"Profiles":["common","development"]}`)
+	src.Commands[facts.Key("chezmoi", facts.ChezmoiDataArgs...)] = []byte(`{"Machine":"laptop","ManagedByNimbus":true,"Profiles":["common","development"],"profiles":["common","unix","linux","development"]}`)
 	// The empty directory a failed clone left behind does not count as
 	// initialized; the handoff runs again.
 	src.Dirs[filepath.Join(home, ".local", "share", "chezmoi")] = []string{}
@@ -160,7 +160,7 @@ func TestChezmoiHandoffRunsOnceWithThePromptFlags(t *testing.T) {
 	// Initialized already: only the refresh command is printed.
 	src.Dirs[filepath.Join(home, ".local", "share", "chezmoi")] = []string{".git"}
 	delete(src.Commands, key)
-	src.Commands[facts.Key("chezmoi", facts.ChezmoiDataArgs...)] = []byte(`{"Machine":"laptop","ManagedByNimbus":true,"Profiles":["common"]}`)
+	src.Commands[facts.Key("chezmoi", facts.ChezmoiDataArgs...)] = []byte(`{"Machine":"laptop","ManagedByNimbus":true,"Profiles":["common"],"profiles":["common","unix","linux"]}`)
 	out.Reset()
 	if err := chezmoiHandoff(src, &out, "laptop", []string{"common"}, dotfiles); err != nil || !strings.Contains(out.String(), "chezmoi init --prompt --promptString Machine=laptop") {
 		t.Fatalf("initialized: %v\n%s", err, out.String())

@@ -77,9 +77,14 @@ func TestSyncStopsAtTheFirstFailedOperation(t *testing.T) {
 	src := fixtureSource(t, root)
 	withoutTerra(src)
 	answerLaptopInstall(t, src, root)
+	key := filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), "nimbus", "stage", "key-brave.asc")
+	if src.Failures == nil {
+		src.Failures = map[string]string{}
+	}
+	src.Failures[facts.Key("gpg", facts.KeyInspectArgs(key)...)] = "key inspection failed"
 	withSource(t, src)
 	code, out, _ := run(t, "sync", "-y", "-n", "--checkout", root, "--machine", "laptop")
-	if code != ExitFailure || !strings.Contains(out, "plan for laptop") || !strings.Contains(out, "failed     repository:brave") || !strings.Contains(out, "network is not available") {
+	if code != ExitFailure || !strings.Contains(out, "plan for laptop") || !strings.Contains(out, "failed     repository:brave") || !strings.Contains(out, "key inspection failed") {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
 	// The drop-in was adopted before brave failed, so state exists; the
@@ -158,5 +163,134 @@ func TestSelectionCommandsKeepJSONOnStdout(t *testing.T) {
 	}
 	if !strings.Contains(errOut, "components add: add components docker") || !strings.Contains(errOut, "plan for laptop") {
 		t.Fatalf("the review text must go to stderr:\n%s", errOut)
+	}
+}
+
+func TestSyncShowsNewlyResolvedErasureBeforeExecuting(t *testing.T) {
+	root, src := installerFixture(t)
+	config := filepath.Join(root, "nimbus.toml")
+	data, _ := os.ReadFile(config)
+	if err := os.WriteFile(config, append(data, []byte("\n[dnf]\ndefaultyes=true\n")...), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "profiles/common.toml"), []byte("schema=1\nid=\"common\"\npackages=[\"demo\"]\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	checkout, err := loadCheckout(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src.Files[facts.DNFDropInPath] = []byte(plan.DNFDropIn(checkout.Definitions()))
+	preview := "dnf5 --assumeno --cacheonly install demo"
+	initial := "Repositories loaded.\nPackage Arch Version Repository Size\nInstalling:\n demo x86_64 1-1 fedora 1 KiB\n"
+	src.Commands[preview] = []byte(initial + "\nTransaction Summary:\n")
+	saved := newRecorder
+	t.Cleanup(func() { newRecorder = saved })
+	newRecorder = func(source facts.Source, stage string) func(string, *state.Stage) error {
+		record := saved(source, stage)
+		return func(digest string, st *state.Stage) error {
+			if err := record(digest, st); err != nil {
+				return err
+			}
+			src.Commands[preview] = []byte(initial + "Removing:\n unexpected-app x86_64 1-1 @System 1 KiB\n\nTransaction Summary:\n")
+			return nil
+		}
+	}
+	code, out, errOut := run(t, "sync", "--checkout", root, "--machine", "vm", "-n", "-y")
+	// The fake rejects the eventual package mutation; the post-preparation plan
+	// must already have exposed the newly resolved removal and retained its note.
+	if code != ExitFailure || !strings.Contains(out, "updated plan after completed operations:") || !strings.Contains(out, "unexpected-app") || !strings.Contains(out, "replanned packages:install:") {
+		t.Fatalf("unseen replan: %d %s%s", code, out, errOut)
+	}
+	if strings.Index(out, "unexpected-app") > strings.Index(out, "$ sudo dnf5 -y install demo") {
+		t.Fatal("erasure was shown only after execution")
+	}
+}
+
+func TestSyncTracksCheckoutIdentityAcrossApprovalAndReplanning(t *testing.T) {
+	for _, phase := range []string{"approval", "replan"} {
+		for _, field := range []string{"commit", "origin", "dirty"} {
+			t.Run(phase+"/"+field, func(t *testing.T) {
+				root, src := installerFixture(t)
+				rootFile := filepath.Join(root, "nimbus.toml")
+				data, err := os.ReadFile(rootFile)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(rootFile, append(data, []byte("\n[dnf]\nmax_parallel_downloads = 10\n")...), 0644); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(root, "profiles/common.toml"), []byte("schema = 1\nid = \"common\"\npackages = []\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				selected, err := loadSelected(machineFlags{checkout: root, machine: "vm"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				src.Files[facts.DNFDropInPath] = []byte(plan.DNFDropIn(selected.Checkout.Definitions()))
+				change := func() {
+					switch field {
+					case "commit":
+						src.Commands[facts.Key("git", facts.GitArgs(root, "rev-parse", "HEAD")...)] = []byte("changed-head\n")
+					case "origin":
+						src.Files[filepath.Join(root, ".git/config")] = []byte("[remote \"origin\"]\nurl=https://example.invalid/other\n")
+					case "dirty":
+						src.Commands[facts.Key("git", facts.GitArgs(root, "status", "--porcelain")...)] = []byte(" M README.md\n")
+					}
+				}
+				saved := approver
+				t.Cleanup(func() { approver = saved })
+				asked := false
+				approver = func(io.Reader, io.Writer, string) bool {
+					asked = true
+					if phase == "approval" {
+						change()
+					}
+					return true
+				}
+				if phase == "replan" {
+					record := newRecorder
+					newRecorder = func(source facts.Source, stage string) func(string, *state.Stage) error {
+						save := record(source, stage)
+						return func(digest string, st *state.Stage) error { err := save(digest, st); change(); return err }
+					}
+				}
+				code, out, errOut := run(t, "sync", "-n", "--checkout", root, "--machine", "vm")
+				if !asked {
+					t.Fatal("approval not reached")
+				}
+				if field == "dirty" {
+					if code != ExitOK {
+						t.Fatalf("dirty metadata prevented sync: %d %s%s", code, out, errOut)
+					}
+					if phase == "approval" {
+						applied, err := state.Read(stateRoot)
+						if err != nil || !applied.Receipts["dnf:config"].Definitions.Dirty {
+							t.Fatalf("stale dirty state: %+v %v", applied, err)
+						}
+					}
+				} else {
+					if code != ExitFailure || !strings.Contains(out, "checkout identity changed") || len(src.calls) > 0 {
+						t.Fatalf("identity change accepted: %d %s%s calls=%v", code, out, errOut, src.calls)
+					}
+					if phase == "approval" {
+						if _, err := os.Stat(stateRoot); !errors.Is(err, os.ErrNotExist) {
+							t.Fatalf("state written before identity check: %v", err)
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestSyncIncompleteJSONNamesBlockedOperation(t *testing.T) {
+	root := applyEnv(t)
+	src := fixtureSource(t, root)
+	withForeignTerra(t, src)
+	withSource(t, src)
+	code, out, errOut := run(t, "sync", "-n", "--json", "--checkout", root, "--machine", "laptop")
+	if code != ExitFailure || !strings.Contains(out, "terra.repo") {
+		t.Fatalf("blocked reason missing: %d %s%s", code, out, errOut)
 	}
 }

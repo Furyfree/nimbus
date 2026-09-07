@@ -133,7 +133,7 @@ func (s *scripted) privileged(argv []string) ([]byte, error) {
 	case argv[0] == "dnf5" && argv[1] == "-y" && argv[2] == "remove":
 		var kept []string
 		for _, n := range s.installed {
-			if !contains(argv[3:], n) {
+			if !contains(argv[4:], n) {
 				kept = append(kept, n)
 			}
 		}
@@ -355,7 +355,7 @@ func TestIncompletePlanIsRefusedAndOwnedRemovalRetiresReceipts(t *testing.T) {
 	opts.FirstApply = false
 	p = &plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:rm", Operations: []plan.Operation{
 		{ID: "packages:remove-owned", Kind: plan.KindPackage, Action: plan.ActionRemove, Summary: "remove old", Paths: []string{"package:dnf:old"},
-			Steps: []plan.Step{{Argv: []string{"dnf5", "-y", "remove", "old"}, Privileged: true}}},
+			Steps: []plan.Step{{Argv: []string{"dnf5", "-y", "remove", "--no-autoremove", "old"}, Privileged: true}}},
 	}}
 	r := Run(p, opts)
 	if r.Error != "" {
@@ -368,23 +368,31 @@ func TestIncompletePlanIsRefusedAndOwnedRemovalRetiresReceipts(t *testing.T) {
 }
 
 func TestRetireRemovesOnlyTheReceipt(t *testing.T) {
-	src := newScripted()
-	root := t.TempDir()
-	opts := options(t, src, root)
-	opts.FirstApply = false
-	if err := state.Record(root, "sha256:earlier", &state.Stage{Schema: state.Schema, PlanDigest: "sha256:earlier", Receipts: []state.Receipt{{Schema: state.Schema, Resource: "package:dnf:gone", Provider: "dnf", Operation: "install", PlanDigest: "sha256:earlier", Verified: true}}}); err != nil {
-		t.Fatal(err)
-	}
-	p := &plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:retire", Operations: []plan.Operation{
-		{ID: "package:dnf:gone", Kind: plan.KindPackage, Action: plan.ActionRetire, Summary: "retire gone"},
-	}}
-	r := Run(p, opts)
-	if r.Error != "" || src.ran("sudo ") {
-		t.Fatalf("retire ran a command or failed: %+v\n%s", r, strings.Join(src.log, "\n"))
-	}
-	a, _ := state.Read(root)
-	if _, ok := a.Receipts["package:dnf:gone"]; ok {
-		t.Fatal("receipt not retired")
+	for _, kind := range []string{plan.KindPackage, plan.KindFlatpak} {
+		t.Run(kind, func(t *testing.T) {
+			id, provider := "package:dnf:gone", "dnf"
+			if kind == plan.KindFlatpak {
+				id, provider = "flatpak:org.example.Gone", "flatpak"
+			}
+			src := newScripted()
+			root := t.TempDir()
+			opts := options(t, src, root)
+			opts.FirstApply = false
+			if err := state.Record(root, "sha256:earlier", &state.Stage{Schema: state.Schema, PlanDigest: "sha256:earlier", Receipts: []state.Receipt{{Schema: state.Schema, Resource: id, Provider: provider, Operation: "install", PlanDigest: "sha256:earlier", Verified: true}}}); err != nil {
+				t.Fatal(err)
+			}
+			p := &plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:retire", Operations: []plan.Operation{
+				{ID: id, Kind: kind, Action: plan.ActionRetire, Summary: "retire gone"},
+			}}
+			r := Run(p, opts)
+			if r.Error != "" || src.ran("sudo ") {
+				t.Fatalf("retire ran a command or failed: %+v\n%s", r, strings.Join(src.log, "\n"))
+			}
+			a, _ := state.Read(root)
+			if _, ok := a.Receipts[id]; ok {
+				t.Fatal("receipt not retired")
+			}
+		})
 	}
 }
 
@@ -623,5 +631,16 @@ func TestUserToolsRunAsTheUserAndAreVerifiedByPresence(t *testing.T) {
 	opts2.Fetch = opts.Fetch
 	if r := Run(&plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:user2", Operations: p.Operations[:1]}, opts2); r.Error == "" || !strings.Contains(r.Error, "~/.local/bin/mise does not exist") {
 		t.Fatalf("missing binary passed verification: %+v", r)
+	}
+}
+
+func TestRemovalWithoutNamedPackagesIsRefusedBeforeNativeExecution(t *testing.T) {
+	src := newScripted()
+	opts := options(t, src, t.TempDir())
+	opts.FirstApply = false
+	p := &plan.Plan{Complete: true, Operations: []plan.Operation{{ID: "packages:remove", Kind: plan.KindPackage, Action: plan.ActionRemove, Steps: []plan.Step{{Argv: []string{"dnf5", "-y", "remove", "--no-autoremove"}}}}}}
+	result := Run(p, opts)
+	if result.Error == "" || src.ran("sudo ") {
+		t.Fatalf("empty removal executed: %+v", result)
 	}
 }

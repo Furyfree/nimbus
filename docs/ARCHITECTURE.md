@@ -26,7 +26,7 @@ machines/              one manifest per workstation
 profiles/              user-facing bundles: packages and components
 components/            shared capabilities: packages, removals, files
 system/root/etc/       sources of Nimbus-owned files below /etc
-system/keys/           repository signing keys with no public URL
+system/keys/           single pinned repository signing keys stored locally
 
 docs/                  contracts, policy, roadmap, tasks, decisions
 tools/package-query/   throwaway Fedora container for package research
@@ -197,8 +197,10 @@ report                        -> stage outcomes and retry information
 `install.sh` and `bootstrap` are the shell in front of this: the first
 checks the platform and the user, obtains Git, clones or validates the
 checkout, and runs the second with its input on the terminal; the second
-installs the engine through DNF and runs init. Both are shellcheck-clean and
-part of `just check`.
+runs init with an existing verified engine. When `/usr/bin/nimbus` is absent,
+it checks the reviewed key and fingerprint, downloads and verifies the RPM,
+and installs it through DNF. Missing trust material blocks a fresh installation.
+Both scripts are shellcheck-clean and part of `just check`.
 
 User-scope tools are planned by `plan.userTools` from `Resolved.Installers`
 and the `cargo:` references, executed by `apply.userTool` as the user through
@@ -211,6 +213,13 @@ profile. No tracked manifest needs a second Nimbus
 user pass, and ordinary sync never invokes this dotfiles installation. Init
 reports Chezmoi and its tool installations together as the dotfiles and tools
 stage, preserving native output and failure status.
+
+Init and inspection share `facts.ParseChezmoiData`, which reads exact JSON
+keys. Chezmoi's `Profiles` is the machine selection; its lowercase `profiles`
+is a separate derived list and must never replace the selection.
+The handoff's output writer forwards the live stream and collects only marked
+setup notes. Init's deferred summary repeats those instructions on success or
+failure; it does not retain native installation logs.
 
 ## Where later phases attach
 

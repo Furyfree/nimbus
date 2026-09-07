@@ -122,11 +122,14 @@ Continue with:
 curl -fsSL https://raw.githubusercontent.com/Furyfree/nimbus/main/install.sh | bash
 ~~~
 
-That script obtains Git when necessary, clones or validates the Nimbus checkout,
-installs the Nimbus engine through the approved COPR, and enters the reviewed
-Nimbus initialization flow. Nimbus then installs the system through one
-`nimbus sync`, initializes Chezmoi, and prints the direct `chezmoi diff` and
-`chezmoi apply` commands for the user configuration.
+The engine RPM channel and its reviewed signing-key pin are not available
+yet. The one-liner is not a complete fresh-install path until that release
+gate is met. It obtains Git when necessary and clones or validates the
+checkout; bootstrap then verifies and installs the signed COPR engine. This
+route remains blocked until the real project key and fingerprint are shipped.
+With that prerequisite met, Nimbus installs the system through one reviewed
+`nimbus sync`, initializes Chezmoi, and runs `chezmoi apply`, including its
+user-tool installation. Failures appear in the closing stage report.
 
 Btrfs recovery points stay on the same disk and are not backups. Nimbus
 provides no backup; home, guest, and container data are excluded and may be

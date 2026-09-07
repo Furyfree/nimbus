@@ -316,9 +316,29 @@ func TestChezmoiDataIsReadOnlyWhenInitialized(t *testing.T) {
 		t.Fatalf("empty source directory = %+v %v", c, err)
 	}
 	src.Dirs[filepath.Join(home, ".local", "share", "chezmoi")] = []string{".git"}
-	src.Commands[Key("chezmoi", ChezmoiDataArgs...)] = []byte(`{"Machine":"laptop","ManagedByNimbus":true,"Profiles":["common","development"],"onePasswordSsh":false,"chezmoi":{"os":"linux"}}`)
+	src.Commands[Key("chezmoi", ChezmoiDataArgs...)] = []byte(`{"Machine":"laptop","ManagedByNimbus":true,"Profiles":["common","development"],"profiles":["common","unix","linux","development"],"onePasswordSsh":false,"chezmoi":{"os":"linux"}}`)
 	c, err := chezmoi(src)
 	if err != nil || !c.Initialized || c.Machine != "laptop" || !c.ManagedByNimbus || strings.Join(c.Profiles, ",") != "common,development" {
 		t.Fatalf("initialized = %+v %v", c, err)
+	}
+}
+
+func TestChezmoiDataUsesExactProfileKey(t *testing.T) {
+	for _, input := range []string{
+		`{"Profiles":["common","development"],"profiles":["common","unix","linux","development"]}`,
+		`{"profiles":["common","unix","linux","development"],"Profiles":["common","development"]}`,
+		`{"Profiles":["common","development"],"profiles":"unrelated data"}`,
+	} {
+		got, err := ParseChezmoiData([]byte(input))
+		if err != nil || strings.Join(got.Profiles, ",") != "common,development" {
+			t.Fatalf("parse %s = %+v, %v", input, got, err)
+		}
+	}
+	got, err := ParseChezmoiData([]byte(`{"profiles":["common","development"]}`))
+	if err != nil || len(got.Profiles) != 0 {
+		t.Fatalf("derived profiles supplied a missing machine selection: %+v, %v", got, err)
+	}
+	if _, err := ParseChezmoiData([]byte(`{"Profiles":"common"}`)); err == nil {
+		t.Fatal("invalid machine selection was accepted")
 	}
 }

@@ -41,6 +41,7 @@ type User struct {
 // its own data output: whether it exists, and the machine and profiles it
 // stored at initialization.
 type Chezmoi struct {
+	OnePasswordSSH  bool     `json:"one_password_ssh"`
 	Initialized     bool     `json:"initialized"`
 	Machine         string   `json:"machine,omitempty"`
 	ManagedByNimbus bool     `json:"managed_by_nimbus,omitempty"`
@@ -104,12 +105,14 @@ type Repository struct {
 	Priority        string   `json:"priority"`
 	BaseURL         string   `json:"baseurl,omitempty"`
 	Metalink        string   `json:"metalink,omitempty"`
+	Mirrorlist      string   `json:"mirrorlist,omitempty"`
 	// Options is every key of the section as written in its file, so a
 	// file Nimbus owns can be compared whole with what Nimbus would write.
 	Options map[string]string `json:"options,omitempty"`
 	// Overrides lists the files below /etc/dnf/repos.override.d that
 	// changed this repository's effective values.
-	Overrides []string `json:"overrides,omitempty"`
+	Overrides       []string          `json:"overrides,omitempty"`
+	OverrideOptions map[string]string `json:"override_options,omitempty"`
 }
 
 // Flatpak is the system installation's remotes and applications.

@@ -121,6 +121,8 @@ func parseRepoFile(file string, data []byte) []Repository {
 			current.BaseURL = value
 		case "metalink":
 			current.Metalink = value
+		case "mirrorlist":
+			current.Mirrorlist = value
 		}
 	}
 	return repos
@@ -151,18 +153,30 @@ func parseCargoList(out []byte) []string {
 	return crates
 }
 
-// parseChezmoiData reads the keys the Nimbus handoff stores; the template
-// keeps them at the top level of Chezmoi's data.
-func parseChezmoiData(out []byte) (Chezmoi, error) {
-	var data struct {
-		Machine         string   `json:"Machine"`
-		ManagedByNimbus bool     `json:"ManagedByNimbus"`
-		Profiles        []string `json:"Profiles"`
-	}
-	if err := json.Unmarshal(out, &data); err != nil {
+// ParseChezmoiData reads the handoff's exact keys. "Profiles" holds the
+// machine selection; "profiles" is a separate list derived by dotfiles.
+func ParseChezmoiData(out []byte) (Chezmoi, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(out, &fields); err != nil {
 		return Chezmoi{Initialized: true}, fmt.Errorf("chezmoi data: %w", err)
 	}
-	return Chezmoi{Initialized: true, Machine: data.Machine, ManagedByNimbus: data.ManagedByNimbus, Profiles: data.Profiles}, nil
+	data := Chezmoi{Initialized: true}
+	for _, field := range []struct {
+		name   string
+		target any
+	}{
+		{"Machine", &data.Machine},
+		{"ManagedByNimbus", &data.ManagedByNimbus},
+		{"Profiles", &data.Profiles},
+		{"onePasswordSsh", &data.OnePasswordSSH},
+	} {
+		if raw, ok := fields[field.name]; ok {
+			if err := json.Unmarshal(raw, field.target); err != nil {
+				return Chezmoi{Initialized: true}, fmt.Errorf("chezmoi data %s: %w", field.name, err)
+			}
+		}
+	}
+	return data, nil
 }
 
 func normalizeBool(v string) string {

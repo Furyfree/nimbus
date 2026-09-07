@@ -28,9 +28,9 @@ func TestQualifiedPackageConvergesAndOwnsOnlyItsArchitecture(t *testing.T) {
 		t.Fatalf("repeat: %+v", ops)
 	}
 	b.in.Resolved.Packages = nil
-	src.Commands[facts.Key("dnf5", "--assumeno", "--cacheonly", "remove", "driver-libs.i686")] = previewText([]TxPackage{{Name: "driver-libs", Arch: "i686", EVR: "1-1", Section: "removing", Repository: "@System"}})
+	src.Commands[facts.Key("dnf5", "--assumeno", "--cacheonly", "remove", "--no-autoremove", "driver-libs.i686")] = previewText([]TxPackage{{Name: "driver-libs", Arch: "i686", EVR: "1-1", Section: "removing", Repository: "@System"}})
 	ops = b.ownedRemovals()
-	if len(ops) != 1 || ops[0].Blocked != "" || strings.Join(ops[0].Steps[0].Argv, " ") != "dnf5 -y remove driver-libs.i686" {
+	if len(ops) != 1 || ops[0].Blocked != "" || strings.Join(ops[0].Steps[0].Argv, " ") != "dnf5 -y remove --no-autoremove driver-libs.i686" {
 		t.Fatalf("removal: %+v", ops)
 	}
 }
@@ -60,9 +60,18 @@ func TestProvideReceiptConvergesAndRemovesNativePackage(t *testing.T) {
 		t.Fatalf("provide repeated install: %+v", ops)
 	}
 	b.in.Resolved.Packages = nil
-	src.Commands[facts.Key("dnf5", "--assumeno", "--cacheonly", "remove", "actual-tool.x86_64")] = previewText([]TxPackage{{Name: "actual-tool", Arch: "x86_64", EVR: "1-1", Section: "removing", Repository: "@System"}})
+	src.Commands[facts.Key("dnf5", "--assumeno", "--cacheonly", "remove", "--no-autoremove", "actual-tool.x86_64")] = previewText([]TxPackage{{Name: "actual-tool", Arch: "x86_64", EVR: "1-1", Section: "removing", Repository: "@System"}})
 	ops := b.ownedRemovals()
-	if len(ops) != 1 || ops[0].Blocked != "" || ops[0].Steps[0].Argv[3] != "actual-tool.x86_64" {
+	if len(ops) != 1 || ops[0].Blocked != "" || ops[0].Steps[0].Argv[4] != "actual-tool.x86_64" {
 		t.Fatalf("provide removal: %+v", ops)
+	}
+}
+
+func TestAbsentFlatpakRetiresReceipt(t *testing.T) {
+	id := "flatpak:org.example.App"
+	b, _ := identityBuilder(nil, nil, map[string]state.Receipt{id: {Resource: id, Provider: "flatpak"}})
+	ops := b.ownedRemovals()
+	if len(ops) != 1 || ops[0].Action != ActionRetire || len(ops[0].Steps) != 0 {
+		t.Fatalf("absent app must retire receipt only: %+v", ops)
 	}
 }

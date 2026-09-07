@@ -83,7 +83,7 @@ func TestFailedNativeTransactionStillReportsPartialChanges(t *testing.T) {
 			opts.Source = src
 			opts.FirstApply = false
 			opts.Out = io.Discard
-			op := plan.Operation{ID: "packages:remove", Kind: plan.KindPackage, Action: plan.ActionRemove, Transaction: &plan.Transaction{Packages: []plan.TxPackage{{Name: "old", Arch: "i686", EVR: "1-1", Section: "removing"}}}, Steps: []plan.Step{{Argv: []string{"dnf5", "-y", "remove", "old.i686"}}}}
+			op := plan.Operation{ID: "packages:remove", Kind: plan.KindPackage, Action: plan.ActionRemove, Transaction: &plan.Transaction{Packages: []plan.TxPackage{{Name: "old", Arch: "i686", EVR: "1-1", Section: "removing"}}}, Steps: []plan.Step{{Argv: []string{"dnf5", "-y", "remove", "--no-autoremove", "old.i686"}}}}
 			r := Run(&plan.Plan{Complete: true, Operations: []plan.Operation{op}}, opts)
 			if (r.Error != "") != fail || !strings.Contains(strings.Join(r.Differences, "\n"), "DNF also removed keep.x86_64") {
 				t.Fatalf("result: %+v", r)

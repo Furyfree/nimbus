@@ -58,3 +58,57 @@ func TestLockPathNeedsAValidRuntimeDir(t *testing.T) {
 		}
 	}
 }
+
+func TestLockDoesNotTruncateSymlinkTarget(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "important")
+	if err := os.WriteFile(target, []byte("keep me"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "operation.lock")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := Acquire(link, LockInfo{})
+	if lock != nil {
+		lock.Release()
+	}
+	data, _ := os.ReadFile(target)
+	if err == nil || string(data) != "keep me" {
+		t.Fatalf("symlink accepted or target changed: error=%v contents=%q", err, data)
+	}
+}
+
+func TestLockRejectsLinkedDirectoriesAndHardlinks(t *testing.T) {
+	for _, kind := range []string{"directory symlink", "hardlink"} {
+		t.Run(kind, func(t *testing.T) {
+			root := t.TempDir()
+			target := filepath.Join(root, "important")
+			if err := os.WriteFile(target, []byte("keep me"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(root, "lock")
+			if kind == "hardlink" {
+				if err := os.Link(target, path); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if err := os.Symlink(root, path); err != nil {
+					t.Fatal(err)
+				}
+				path = filepath.Join(path, "operation.lock")
+			}
+			lock, err := Acquire(path, LockInfo{})
+			if lock != nil {
+				lock.Release()
+			}
+			if err == nil {
+				t.Fatal("linked lock accepted")
+			}
+			data, _ := os.ReadFile(target)
+			if string(data) != "keep me" {
+				t.Fatalf("target overwritten: %q", data)
+			}
+		})
+	}
+}

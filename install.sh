@@ -18,7 +18,9 @@ SUPPORTED_FEDORA="44"
 say() { printf '%s\n' "$*"; }
 fail() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
 
-[ -r /dev/tty ] && [ -w /dev/tty ] || fail "a controlling terminal is required; run this from an interactive shell"
+if ! ( : <> /dev/tty ) 2>/dev/null; then
+  fail "a controlling terminal is required; run this from an interactive shell"
+fi
 [ "$(id -u)" -ne 0 ] || fail "run as the normal user, not root; Nimbus uses sudo per command"
 
 # shellcheck disable=SC1091
@@ -33,6 +35,11 @@ say "checkout:      ${CHECKOUT}"
 if ! command -v git >/dev/null 2>&1; then
   say "git is missing; it is installed through DNF:"
   say "  sudo dnf5 -y install git"
+  read -r -p "Install Git? [y/N] " answer </dev/tty || fail "Git installation declined"
+  case "${answer}" in
+    y|Y|yes|YES) ;;
+    *) fail "Git installation declined" ;;
+  esac
   sudo dnf5 -y install git
 fi
 
@@ -49,7 +56,8 @@ normalize() {
 
 if [ -e "${CHECKOUT}" ]; then
   real="$(realpath -e "${CHECKOUT}")" || fail "${CHECKOUT} exists but cannot be resolved"
-  [ -d "${real}/.git" ] || fail "${CHECKOUT} exists and is not a Git clone; move it away or point Nimbus at a clone"
+  top="$(git -C "${real}" rev-parse --show-toplevel 2>/dev/null)" || fail "${CHECKOUT} exists and is not a Git worktree"
+  [ "$(realpath -e "${top}")" = "${real}" ] || fail "${CHECKOUT} is not the Git worktree root"
   remote="$(git -C "${real}" config --get remote.origin.url || true)"
   [ -n "${remote}" ] || fail "${CHECKOUT} has no origin remote"
   got="$(normalize "${remote}")"

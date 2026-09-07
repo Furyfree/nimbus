@@ -333,3 +333,33 @@ func TestMinimumEngine(t *testing.T) {
 		t.Fatalf("equal release must pass: %v", errs)
 	}
 }
+
+func TestInvalidIDsAndReservedCargo(t *testing.T) {
+	for _, kind := range []string{"machines", "profiles", "components"} {
+		t.Run(kind, func(t *testing.T) {
+			tree := baseTree()
+			tree[kind+"/bad;name.toml"] = "schema = 1\nid = \"bad;name\"\nprofiles = [\"common\"]\n"
+			if kind != "machines" {
+				tree[kind+"/bad;name.toml"] = "schema = 1\nid = \"bad;name\"\n"
+			}
+			if errs := loadAndValidate(t, writeTree(t, tree)); len(errs) == 0 {
+				t.Fatal("invalid identifier accepted")
+			}
+		})
+	}
+	t.Run("cargo repository", func(t *testing.T) {
+		tree := baseTree()
+		tree["nimbus.toml"] = strings.ReplaceAll(tree["nimbus.toml"], "repositories.terra", "repositories.cargo")
+		tree["profiles/common.toml"] = strings.ReplaceAll(tree["profiles/common.toml"], "terra:ghostty", "cargo:ghostty")
+		if errs := loadAndValidate(t, writeTree(t, tree)); len(errs) == 0 {
+			t.Fatal("reserved cargo repository accepted")
+		}
+	})
+	t.Run("DNF newline", func(t *testing.T) {
+		tree := baseTree()
+		tree["nimbus.toml"] += "\n[dnf]\nproxy = \"direct\\ngpgcheck=False\"\n"
+		if errs := loadAndValidate(t, writeTree(t, tree)); len(errs) == 0 {
+			t.Fatal("DNF option injection accepted")
+		}
+	})
+}

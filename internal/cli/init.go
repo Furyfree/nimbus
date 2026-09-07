@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bufio"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +17,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
+	"github.com/Furyfree/nimbus/internal/doctor"
 	"github.com/Furyfree/nimbus/internal/facts"
 	"github.com/Furyfree/nimbus/internal/plan"
 	"github.com/Furyfree/nimbus/internal/selector"
@@ -93,7 +93,11 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	if f.dotfiles != "" && f.noDotfiles {
 		return usageError{errors.New("--dotfiles and --no-dotfiles exclude each other")}
 	}
+	if f.newMachine == "" && (f.dotfiles != "" || f.noDotfiles) {
+		return usageError{errors.New("--dotfiles and --no-dotfiles require --new; tracked machines use their manifest")}
+	}
 	steps := []runStep{{Name: "selection", Status: "skipped"}, {Name: "system installation", Status: "skipped"}, {Name: "dotfiles and tools", Status: "skipped"}}
+	notes := &setupNoteWriter{out: out}
 	active := 0
 	defer func() {
 		if retErr != nil && steps[active].Status != "failed" {
@@ -103,6 +107,7 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 			}
 		}
 		renderRunSummary(out, "init", steps)
+		notes.render(out)
 	}()
 	checkout := f.checkout
 	if checkout == "" {
@@ -143,6 +148,16 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	if err != nil {
 		return err
 	}
+	existingSelector, selectorErr := selector.Load(selectorPath)
+	if selectorErr != nil && !errors.Is(selectorErr, os.ErrNotExist) {
+		return selectorErr
+	}
+	if existingSelector != nil && (existingSelector.Checkout != root || existingSelector.Origin != origin) {
+		fmt.Fprintf(out, "Selector trust change:\n  previous: %s (%s)\n  requested: %s (%s)\n", existingSelector.Checkout, existingSelector.Origin, root, origin)
+		if !approver(in, out, "selector trust") {
+			return errors.New("selector trust change not approved; the selector is unchanged")
+		}
+	}
 	machine := f.machine
 	var newManifest []byte
 	var newManifestPath string
@@ -167,8 +182,8 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 		machine = m.ID
 	}
 	if machine == "" {
-		if existing, err := selector.Load(selectorPath); err == nil && existing.Checkout == root {
-			machine = existing.Machine
+		if existingSelector != nil && existingSelector.Checkout == root {
+			machine = existingSelector.Machine
 			fmt.Fprintf(out, "the selector already names %s for this checkout\n", machine)
 		}
 	}
@@ -216,6 +231,21 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	if fresh.Digest() != originalDigest {
 		return errors.New("definitions changed during machine selection; run init again")
 	}
+	latestOrigin, err := selector.CheckoutOrigin(root)
+	if err != nil {
+		return err
+	}
+	if normalized, err := selector.NormalizeOrigin(latestOrigin); err != nil || normalized != origin {
+		return errors.New("checkout origin changed during initialization; run init again")
+	}
+	latestSelector, err := selector.Load(selectorPath)
+	if existingSelector == nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return errors.New("selector changed during initialization; run init again")
+		}
+	} else if err != nil || latestSelector == nil || *latestSelector != *existingSelector {
+		return errors.New("selector changed during initialization; run init again")
+	}
 	if newManifestPath != "" {
 		if err := writeManifest(newManifestPath, newManifest); err != nil {
 			return err
@@ -252,7 +282,7 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	}
 	active = 2
 	if m.Dotfiles != nil {
-		if err := chezmoiHandoff(src, out, machine, r.Profiles, m.Dotfiles); err != nil {
+		if err := chezmoiHandoff(src, notes, machine, r.Profiles, m.Dotfiles); err != nil {
 			if deferredTools {
 				steps[3].Detail = "dotfiles or tool installation failed; run nimbus init again after fixing the reported error"
 			}
@@ -423,7 +453,6 @@ func chezmoiHandoff(src facts.Source, out io.Writer, machine string, profiles []
 		}
 	} else {
 		fmt.Fprintln(out, "Chezmoi is already initialized; applying its existing local source")
-		fmt.Fprintf(out, "to refresh its answers: chezmoi init --prompt %s\n", strings.Join(flags, " "))
 	}
 	sourcePath, err := src.Run("chezmoi", "source-path")
 	if err != nil {
@@ -445,17 +474,14 @@ func chezmoiHandoff(src facts.Source, out io.Writer, machine string, profiles []
 	if err != nil {
 		return fmt.Errorf("read Chezmoi selection: %w", err)
 	}
-	var selection struct {
-		Machine         string
-		ManagedByNimbus bool
-		Profiles        []string
-	}
-	if err := json.Unmarshal(data, &selection); err != nil {
+	selection, err := facts.ParseChezmoiData(data)
+	if err != nil {
 		return fmt.Errorf("read Chezmoi selection: %w", err)
 	}
 	if selection.Machine != machine || !selection.ManagedByNimbus || !slices.Equal(sortedCopy(selection.Profiles), sortedCopy(profiles)) {
-		return fmt.Errorf("Chezmoi's stored selection differs; refresh it before retrying: chezmoi init --prompt %s", strings.Join(flags, " "))
+		return fmt.Errorf("Chezmoi's stored selection differs; refresh it before retrying: %s", doctor.ChezmoiRefresh(machine, profiles, selection.OnePasswordSSH))
 	}
+	fmt.Fprintf(out, "Setup note: To change your Chezmoi answers, run: %s\n", doctor.ChezmoiRefresh(machine, profiles, selection.OnePasswordSSH))
 	fmt.Fprintln(out, "-> apply user configuration and install its declared tools\n   $ chezmoi apply")
 	if err := src.Stream(out, out, "chezmoi", "apply"); err != nil {
 		return fmt.Errorf("chezmoi apply: %w", err)

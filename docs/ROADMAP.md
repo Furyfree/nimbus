@@ -292,8 +292,14 @@ The supported one-liner pipes the repository's raw `main` `install.sh` into
 Bash. That minimal script verifies the platform and normal-user context,
 obtains Git through DNF, clones or validates `~/.local/share/nimbus`, and runs
 the checkout's versioned `bootstrap` with the child input attached to
-`/dev/tty`. The checked-out script enables the reviewed COPR, installs the
-compatible Nimbus RPM, and invokes `nimbus init --checkout`.
+`/dev/tty`. The intended distribution is a reviewed, signed engine COPR.
+That repository and its signing-key pin are not available yet. Bootstrap's
+COPR path is prepared and tested with isolated fixtures, but a fresh install
+stops before mutation when the reviewed key files are absent. It verifies the
+key fingerprint and RPM signature with an isolated keyring before native DNF
+installation. Existing engines must be DNF-owned at `/usr/bin/nimbus`, with no
+other engine shadowing that path. Publishing and pinning the real RPM channel,
+then exercising the public one-liner on a fresh VM, remain Phase 5 exit gates.
 
 Neither script updates an existing checkout, provisions the workstation, or
 handles Chezmoi. Chezmoi is an ordinary Nimbus-managed system package installed
@@ -309,6 +315,9 @@ every full Linux or macOS apply, under `MISE_SYSTEM_DEPS=warn` and
 `MISE_AUTO_UPDATE=false`. Its Linux `~/.config/mise/conf.d/cargo.toml`
 declares the Cargo tools for Mise's native backend; the development profile
 does not repeat them. Nimbus installs selected system dependencies itself.
+The common profile selects Terra's Typst RPM instead of a Cargo build.
+Tinymist remains a source build with its native install environment pointing
+temporary files at `/var/tmp`, outside Fedora's quota-limited `/tmp`.
 A later Chezmoi apply restores missing user tools; upgrades remain explicit.
 Standalone dotfiles use requires Mise already installed. Missing Mise and
 native install failures fail apply, while diff and preview install nothing.
@@ -341,6 +350,10 @@ value supplied, including the current 1Password answer. Before this phase
 exits, the dotfiles template must declare `Machine` and `ManagedByNimbus` and
 store the profile list without validating it, and both the initial and
 refresh flags are verified against the real template in isolated homes.
+The dotfiles handoff regression now covers initial input, unknown future
+profile IDs, a refreshed machine/profile selection, preservation of the SSH
+opt-in, and apply/repair through the native Chezmoi lifecycle with fake Mise.
+Real Fedora tool installation remains a separate VM exit gate.
 
 ### Risks and recovery
 
@@ -360,16 +373,30 @@ selection and definitions under the operation lock. Init holds that lock across
 its stages. A failed dotfiles apply skips its dependents, while independent
 user tools may continue after another tool fails. A retry preserves completed
 native work and checks the current state again.
+Validation also covers ignored init flags, malformed definition IDs, DNF value
+line injection, conflicting native repository overrides, safe lock targets,
+and receipt-only retirement of already absent Flatpaks. The installer must
+prove it can open its controlling terminal before proceeding. Origin and
+commit changes invalidate approval separately from the plan digest. Explicit
+removals disable dependency cleanup; source replans show newly resolved
+erasures before execution and retain their notes in the closing report.
 
 ### Validation and exit criteria
 
 Test changed definitions during approval, concurrent init, invalid new manifests
 without writes, EOF, unsupported platforms without metadata refresh, multilib
 install and removal, collateral DNF changes, key mismatch, and partial summaries.
+Verify a stored single-key file can prepare a repository whose maker publishes
+a multi-key bundle, while the bundle itself remains rejected.
 Verify Chezmoi and native Mise failures reach the stage summary, a retry
 restores missing tools without changed configuration, and ordinary sync does
 not repeat the dotfiles tool installation. Verify standalone apply, missing
 Mise, Windows exclusion, and read-only preview without installation.
+Exercise Chezmoi data with both `Profiles` and `profiles`, in either order,
+through inspection and init so derived platform IDs cannot replace selection.
+Keep explicit setup instructions visible after the final summary on successful
+and failed handoffs. Verify that ordinary compiler output is not repeated and
+that source-build prerequisites are selected before Cargo tools run.
 The dotfiles Mise configuration must declare the intended runtimes, including
 Rust, before a successful end-to-end installation can be claimed.
 

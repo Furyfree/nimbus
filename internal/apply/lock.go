@@ -57,12 +57,32 @@ func Acquire(path string, info LockInfo) (*Lock, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
+	dirInfo, err := os.Lstat(filepath.Dir(path))
+	if err != nil {
+		return nil, err
+	}
+	if !dirInfo.IsDir() || dirInfo.Mode()&fs.ModeSymlink != 0 {
+		return nil, errors.New("lock directory must be a directory, not a symlink")
+	}
+	if stat, ok := dirInfo.Sys().(*syscall.Stat_t); ok && int(stat.Uid) != os.Getuid() {
+		return nil, errors.New("lock directory is not owned by this user")
+	}
 	if err := os.Chmod(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0o600)
 	if err != nil {
 		return nil, err
+	}
+	fileInfo, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	stat, ok := fileInfo.Sys().(*syscall.Stat_t)
+	if !fileInfo.Mode().IsRegular() || !ok || int(stat.Uid) != os.Getuid() || stat.Nlink != 1 {
+		f.Close()
+		return nil, errors.New("lock must be a regular file owned by this user with one link")
 	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		var other LockInfo

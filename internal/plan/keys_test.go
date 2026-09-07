@@ -55,3 +55,47 @@ func TestExistingFlatpakRemoteRequiresExactVerifiedTrust(t *testing.T) {
 		})
 	}
 }
+
+func TestConflictingRepositoryOverridesBlockBeforeMutation(t *testing.T) {
+	c, resolved := repository(t)
+	for _, key := range []string{"baseurl", "metalink", "mirrorlist", "sslverify"} {
+		t.Run(key, func(t *testing.T) {
+			src, f := readyHost(t, c)
+			for i := range f.Repositories.Value {
+				r := &f.Repositories.Value[i]
+				if r.ID == "nimbus-docker" {
+					value := "https://other.invalid/repo"
+					if key == "sslverify" {
+						value = "0"
+					}
+					r.OverrideOptions = map[string]string{key: value}
+					r.Overrides = []string{"other.repo"}
+				}
+			}
+			p, err := Build(Inputs{Resolved: resolved, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src})
+			if err != nil {
+				t.Fatal(err)
+			}
+			op := find(p, "repository:docker")
+			if p.Complete || op == nil || !strings.Contains(op.Blocked, key+" override") {
+				t.Fatalf("conflicting override accepted: %+v", op)
+			}
+		})
+	}
+}
+
+func TestEnabledTLSVerificationOverrideIsCompatible(t *testing.T) {
+	c, _ := repository(t)
+	for _, value := range []string{"1", "true", "yes"} {
+		_, f := readyHost(t, c)
+		for i := range f.Repositories.Value {
+			if f.Repositories.Value[i].ID == "nimbus-docker" {
+				f.Repositories.Value[i].OverrideOptions = map[string]string{"sslverify": value}
+			}
+		}
+		ready, repair, blocked := CheckRepository(c.Definitions(), "docker", f.Repositories.Value)
+		if !ready || repair != "" || blocked != "" {
+			t.Fatalf("safe TLS override %q rejected: ready=%t repair=%s blocked=%s", value, ready, repair, blocked)
+		}
+	}
+}
