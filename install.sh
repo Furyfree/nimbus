@@ -19,7 +19,9 @@ installer_arguments() {
     arg="$1"; shift
     case "$arg" in
       --machine|--new|--dotfiles)
-        [ "$#" -gt 0 ] && [[ "$1" != -* ]] && [ -n "$1" ] || fail "${arg} requires a value"
+        if [ "$#" -eq 0 ] || [[ "$1" == -* ]] || [ -z "$1" ]; then
+          fail "${arg} requires a value"
+        fi
         case "$arg" in --machine) machine="$1";; --new) new="$1";; --dotfiles) dotfiles="$1";; esac
         shift ;;
       --machine=*) machine="${arg#*=}"; [ -n "$machine" ] || fail '--machine requires a value';;
@@ -62,7 +64,9 @@ installer_private_dir() {
       if [ "$owner" != 0 ] || (( (8#$mode & 01000) == 0 )); then fail "writable ancestor in log path: ${current}"; fi
     fi
   done
-  [ -O "$path" ] && [ "$(stat -c %a "$path")" = 700 ] || fail "log directory must be owned by this user with mode 700: ${path}"
+  if [ ! -O "$path" ] || [ "$(stat -c %a "$path")" != 700 ]; then
+    fail "log directory must be owned by this user with mode 700: ${path}"
+  fi
 }
 
 installer_prune() {
@@ -71,10 +75,18 @@ installer_prune() {
   # Names created by mktemp contain no newlines. Sort only immediate children.
   mapfile -d '' -t runs < <(find "$root" -mindepth 1 -maxdepth 1 -type d -name 'run-*' -print0 | sort -zr)
   for dir in "${runs[@]}"; do
-    [ ! -L "$dir" ] && [ -O "$dir" ] && [ "$(stat -c %a "$dir")" = 700 ] || continue
-    [ -f "$dir/.nimbus-install" ] && [ ! -L "$dir/.nimbus-install" ] && [ "$(cat "$dir/.nimbus-install")" = 1 ] || continue
+    if [ -L "$dir" ] || [ ! -O "$dir" ] || [ "$(stat -c %a "$dir")" != 700 ]; then
+      continue
+    fi
+    if [ ! -f "$dir/.nimbus-install" ] || [ -L "$dir/.nimbus-install" ] ||
+      [ "$(cat "$dir/.nimbus-install")" != 1 ]; then
+      continue
+    fi
     count=$((count + 1))
-    [ "$count" -gt 20 ] && [ ! -e "$dir/.active" ] && [ ! -L "$dir/.active" ] && [ -f "$dir/.finished" ] || continue
+    if [ "$count" -le 20 ] || [ -e "$dir/.active" ] || [ -L "$dir/.active" ] ||
+      [ ! -f "$dir/.finished" ]; then
+      continue
+    fi
     safe=true
     while IFS= read -r -d '' file; do
       case "${file##*/}" in .nimbus-install|.finished|bootstrap.log|engine.log|mise.log) ;; *) safe=false;; esac
@@ -94,12 +106,24 @@ installer_session() {
   installer_started=$SECONDS
   if [ -n "${NIMBUS_INSTALL_LOG_DIR:-}" ]; then
     installer_private_dir "$NIMBUS_INSTALL_LOG_DIR"
-    [ -f "$NIMBUS_INSTALL_LOG_DIR/.nimbus-install" ] && [ ! -L "$NIMBUS_INSTALL_LOG_DIR/.nimbus-install" ] && [ "$(cat "$NIMBUS_INSTALL_LOG_DIR/.nimbus-install")" = 1 ] || fail 'invalid installation log marker'
+    if [ ! -f "$NIMBUS_INSTALL_LOG_DIR/.nimbus-install" ] ||
+      [ -L "$NIMBUS_INSTALL_LOG_DIR/.nimbus-install" ] ||
+      [ "$(cat "$NIMBUS_INSTALL_LOG_DIR/.nimbus-install")" != 1 ]; then
+      fail 'invalid installation log marker'
+    fi
     local marker
     for marker in .nimbus-install .active bootstrap.log; do
-      [ -f "$NIMBUS_INSTALL_LOG_DIR/$marker" ] && [ ! -L "$NIMBUS_INSTALL_LOG_DIR/$marker" ] && [ -O "$NIMBUS_INSTALL_LOG_DIR/$marker" ] && [ "$(stat -c %a "$NIMBUS_INSTALL_LOG_DIR/$marker")" = 600 ] && [ "$(stat -c %h "$NIMBUS_INSTALL_LOG_DIR/$marker")" = 1 ] || fail 'unsafe inherited installation log'
+      if [ ! -f "$NIMBUS_INSTALL_LOG_DIR/$marker" ] ||
+        [ -L "$NIMBUS_INSTALL_LOG_DIR/$marker" ] ||
+        [ ! -O "$NIMBUS_INSTALL_LOG_DIR/$marker" ] ||
+        [ "$(stat -c %a "$NIMBUS_INSTALL_LOG_DIR/$marker")" != 600 ] ||
+        [ "$(stat -c %h "$NIMBUS_INSTALL_LOG_DIR/$marker")" != 1 ]; then
+        fail 'unsafe inherited installation log'
+      fi
     done
-    [ ! -e "$NIMBUS_INSTALL_LOG_DIR/.finished" ] && [ ! -L "$NIMBUS_INSTALL_LOG_DIR/.finished" ] || fail 'installation log is already finished'
+    if [ -e "$NIMBUS_INSTALL_LOG_DIR/.finished" ] || [ -L "$NIMBUS_INSTALL_LOG_DIR/.finished" ]; then
+      fail 'installation log is already finished'
+    fi
   else
     local root="${XDG_STATE_HOME:-${HOME}/.local/state}/nimbus/install"
     while [[ "$root" == *'//'* ]]; do root="${root//\/\//\/}"; done
