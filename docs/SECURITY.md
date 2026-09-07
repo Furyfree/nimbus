@@ -67,7 +67,8 @@ Rules:
   exception: Nimbus installs Terra's `topgrade` so the tool that drives the
   user-scope update phase is not replaced by that phase.
 - Flathub is permitted, not preferred. The owner chooses native RPMs where an
-  accepted repository has one, so Flatpaks are Spotify and Obsidian only.
+  accepted repository has one. The selected Flatpaks are Spotify, Obsidian,
+  and Fastmail; Fastmail's official Linux distribution is through Flathub.
   Signal comes from Terra rather than the community Flathub build for that
   reason, and ProtonPlus, Heroic, Vesktop, gpu-screen-recorder, and Prism
   Launcher stay Terra RPMs because they integrate with Steam, Wine, Noctalia,

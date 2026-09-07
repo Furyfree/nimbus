@@ -27,6 +27,7 @@ packages = [
   "onepassword:1password-cli",
   "flatpak:com.spotify.Client",
   "flatpak:md.obsidian.Obsidian",
+  "flatpak:com.fastmail.Fastmail",
   # Terminal
   "terra:ghostty",
   # Theming
