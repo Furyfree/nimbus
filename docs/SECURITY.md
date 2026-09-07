@@ -33,10 +33,15 @@ preference is fixed and the same for every package:
    Desktop, WoWUp, and the Nimbus engine itself.
 
 Container images pinned by digest are the one remaining case; the Windows
-guest is the only one. Every repository, including the owner's COPRs and the
-Flathub remote, is declared in `nimbus.toml` with its signing key pinned, and
-every package reference names its repository as a prefix. `--nogpgcheck`
-never appears in a plan.
+guest is the only one. Workstation package repositories, including the owner's
+COPRs and the Flathub remote, are declared in `nimbus.toml` with their signing
+keys pinned, and every package reference names its repository as a prefix.
+The engine's
+bootstrap channel is separate: `system/keys/nimbus.asc` and
+`system/keys/nimbus.fingerprint` pin the public `furyfree/nimbus` COPR key,
+`8FF8 E546 C3AB E441 46CF A411 DD1D 48E2 CA0E 9F6A`. Its signed RPM was verified
+in an isolated keyring before this pin was shipped. Native DNF owns engine
+updates. `--nogpgcheck` never appears in a plan.
 
 Rules:
 

@@ -292,14 +292,14 @@ The supported one-liner pipes the repository's raw `main` `install.sh` into
 Bash. That minimal script verifies the platform and normal-user context,
 obtains Git through DNF, clones or validates `~/.local/share/nimbus`, and runs
 the checkout's versioned `bootstrap` with the child input attached to
-`/dev/tty`. The intended distribution is a reviewed, signed engine COPR.
-That repository and its signing-key pin are not available yet. Bootstrap's
-COPR path is prepared and tested with isolated fixtures, but a fresh install
-stops before mutation when the reviewed key files are absent. It verifies the
-key fingerprint and RPM signature with an isolated keyring before native DNF
-installation. Existing engines must be DNF-owned at `/usr/bin/nimbus`, with no
-other engine shadowing that path. Publishing and pinning the real RPM channel,
-then exercising the public one-liner on a fresh VM, remain Phase 5 exit gates.
+`/dev/tty`. The engine is distributed through the signed `furyfree/nimbus`
+COPR. Release `v0.1.0` and COPR build `10958015` succeeded; the checked-in
+project key verifies that RPM. Bootstrap stops before engine installation if
+its reviewed key files are absent. It verifies the key fingerprint and RPM
+signature with an isolated keyring before native DNF installation. Existing
+engines must be DNF-owned at `/usr/bin/nimbus`, with no other engine shadowing
+that path. Exercising the public one-liner on the restored VM remains the
+final Phase 5 exit gate.
 
 Source release preparation is a manually dispatched workflow on main, taking
 an existing version tag on that branch. It runs the tagged commit's local gate
