@@ -77,6 +77,16 @@ and is the owner's; its steps are in the evidence below.
 
 ## Evidence
 
+### Desktop application selection
+
+- [x] Select stable Fastmail (`flatpak:com.fastmail.Fastmail`) in the desktop
+  profile instead of a Chezmoi webapp; retain the existing system Flathub
+  source and normal Nimbus package lifecycle.
+- [ ] Install through a reviewed Nimbus sync and test Fastmail sign-in,
+  notifications, and default email-link handling in the desktop session.
+
+### Phase 4 evidence
+
 - Phase 4 apply, 2026-09-03: `internal/state`, `internal/apply`, the hidden
   `internal record` action, `nimbus sync`, the selection commands, and the
   picker. Probed in the research container: `dnf5 config-manager addrepo

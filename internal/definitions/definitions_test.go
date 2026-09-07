@@ -28,6 +28,22 @@ func TestRepositoryDefinitionsValidate(t *testing.T) {
 		if _, ok := c.Machines[id]; !ok {
 			t.Fatalf("machine %s is not tracked", id)
 		}
+		resolved, errs := Resolve(c, id)
+		if len(errs) > 0 {
+			t.Fatal(errs)
+		}
+		fastmail := 0
+		for _, p := range resolved.Packages {
+			if p.Canonical == "flatpak:com.fastmail.Fastmail" {
+				fastmail++
+				if strings.Join(p.Paths, ",") != "profile:hyprland-noctalia" {
+					t.Fatalf("%s Fastmail provenance = %v", id, p.Paths)
+				}
+			}
+		}
+		if fastmail != 1 || !contains(resolved.Repositories, "flathub") {
+			t.Fatalf("%s: expected one Fastmail package from Flathub", id)
+		}
 	}
 	r, errs := Resolve(c, "desktop")
 	if len(errs) > 0 {

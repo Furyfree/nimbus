@@ -38,6 +38,11 @@ order. This list feeds the definitions and shrinks as they land.
 - 1Password and 1Password CLI
   (`DNF/1Password repository: 1password 1password-cli`)
 - Obsidian (`Flatpak/Flathub: md.obsidian.Obsidian`)
+- Fastmail (`Flatpak/Flathub: com.fastmail.Fastmail`, stable)
+  - [Official Linux download](https://www.fastmail.com/download/) points to
+    [Flathub](https://flathub.org/en/apps/com.fastmail.Fastmail).
+    Selected in `hyprland-noctalia`; the package owns its launcher and icons.
+    Sign-in, notifications, and default mail handling need a desktop test.
 - Signal (`DNF/Terra: signal-desktop`)
 - Brave Origin (`DNF/Brave repository: brave-origin`)
 - Zathura (`DNF/Fedora: zathura`)
@@ -236,11 +241,7 @@ done with `noctalia msg plugins enable <id>` from the built-in `official` and
 ## Webapps
 
 Opened through `nimbus launch webapp`; Chezmoi owns the desktop entries.
+The selected initial set is below. Fastmail uses the Flatpak above instead.
 
-- [Claude](https://claude.ai/)
-- [Messenger](https://www.facebook.com/messages)
-- [Grok](https://grok.com/)
-- [Fastmail](https://app.fastmail.com/)
 - [Google Maps](https://www.google.com/maps)
-- [Outlook](https://outlook.cloud.microsoft/mail/)
-- [Teams](https://teams.cloud.microsoft/)
+- [FotMob](https://www.fotmob.com/)

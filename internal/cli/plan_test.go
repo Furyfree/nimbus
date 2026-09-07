@@ -80,7 +80,7 @@ func TestStatusSummarizesThePlan(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
-	if !strings.Contains(out, "machine desktop: 6 profiles, 13 components, 161 desired packages") || !strings.Contains(out, "plan incomplete") {
+	if !strings.Contains(out, "machine desktop: 6 profiles, 13 components, 162 desired packages") || !strings.Contains(out, "plan incomplete") {
 		t.Fatalf("status output:\n%s", out)
 	}
 	code, out, _ = run(t, "status", "--checkout", root, "--machine", "desktop", "--json")
