@@ -42,7 +42,9 @@ order. This list feeds the definitions and shrinks as they land.
   - [Official Linux download](https://www.fastmail.com/download/) points to
     [Flathub](https://flathub.org/en/apps/com.fastmail.Fastmail).
     Selected in `hyprland-noctalia`; the package owns its launcher and icons.
-    Sign-in, notifications, and default mail handling need a desktop test.
+    Retained with a known `mailto:` composition failure in the CachyOS test.
+    Recheck on the new Fedora installation; see the desktop application
+    evidence in [TASKS.md](TASKS.md#desktop-application-selection).
 - Signal (`DNF/Terra: signal-desktop`)
 - Brave Origin (`DNF/Brave repository: brave-origin`)
 - Zathura (`DNF/Fedora: zathura`)

@@ -82,8 +82,21 @@ and is the owner's; its steps are in the evidence below.
 - [x] Select stable Fastmail (`flatpak:com.fastmail.Fastmail`) in the desktop
   profile instead of a Chezmoi webapp; retain the existing system Flathub
   source and normal Nimbus package lifecycle.
-- [ ] Install through a reviewed Nimbus sync and test Fastmail sign-in,
-  notifications, and default email-link handling in the desktop session.
+- [x] Owner smoke test on CachyOS, 2026-09-07: installed the system Flathub
+  package and opened the signed-in inbox. The desktop default-handler query
+  returned `com.fastmail.Fastmail.desktop`, but email links opened only the
+  inbox, without a compose window or recipient. Direct `flatpak run` tests
+  with `mailto:` URLs, both with and without a subject, failed the same way.
+  Notifications were not confirmed. This does not verify installation through
+  Nimbus or behavior on Fedora.
+- [x] Owner accepts the `mailto:` limitation for this package-selection change
+  and keeps Fastmail selected. No custom launcher workaround or default-mail
+  configuration is added to Nimbus; further investigation is deferred to the
+  new Fedora installation.
+- [ ] On the new Fedora system, install through a reviewed Nimbus sync and
+  verify sign-in, notifications, and email-link composition, including the
+  recipient and subject. Record the installed version and whether the failure
+  persists there before attributing it to Fastmail or its Flatpak packaging.
 
 ### Phase 4 evidence
 
