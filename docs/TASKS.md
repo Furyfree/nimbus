@@ -141,16 +141,17 @@ CodeRabbit was unavailable because of its rate limit. The local Codex fallback
 found that Git's `push.followTags` setting could publish extra tags. The helper
 now disables tag following explicitly; a native Git regression verifies only
 the requested tag reaches the remote. Targeted verification and the complete
-local gate pass. No new release workflow has run on GitHub; hosted validation
-and the first draft remain pending.
+local gate pass. GitHub CI passed at `421344b`; the first release draft remains
+pending. The final license audit identified Unicode 15.0.0 tables bundled by
+uniseg under Unicode-DFS-2016. `licenses/Unicode-DFS-2016.txt` preserves their
+separate notice; COPR packaging installs it alongside dependency notices.
 
 ### COPR bootstrap preparation, 2026-09-07
 
 The owner made Nimbus, dotfiles, and COPR public. Both current-file and
-all-ref Git-history Gitleaks scans found no secrets. Nimbus PR 9 still points
-at `299d041`, whose CI failed on ShellCheck SC2015 and which conflicts with
-current main. The local integration checkout fixes those guards and passes
-`just check` with Go 1.26.7; this is not current hosted CI evidence.
+all-ref Git-history Gitleaks scans found no secrets. Nimbus PR 9 integrates
+current main, fixes the ShellCheck SC2015 guards, and passes `just check` with
+Go 1.26.7. GitHub CI passed at `421344b`.
 
 Bootstrap now uses the DNF-owned engine path and verifies a fresh COPR RPM
 with the pinned public key in an isolated RPM keyring before any engine/source
@@ -162,9 +163,12 @@ key, and rejects both an unknown signer and the previously built unsigned RPM
 when signature and digest verification are both required. The test key existed
 only inside the disposable offline container and is not a release key.
 
-The COPR project API and public-key URL return 404. No real project key or
-placeholder pin has been added. Project creation, release publication, the
-signed build, and final VM validation remain pending.
+COPR PR 1 is merged. Manual Actions run `34154509727` created the public
+`furyfree/nimbus` project for Fedora 44 x86_64 with build networking disabled.
+The project API succeeds; its public-key URL still returns 404. COPR exports
+the signing key during a build. Release publication and the signed build
+therefore precede adding the verified bootstrap pin and the final VM drill.
+No placeholder pin has been added.
 
 The restored Fedora 44 VM contains no Nimbus receipts or Chezmoi state. Its
 old manual engine and checkout were moved, without deletion, to
