@@ -3,11 +3,11 @@
 ## Current phase: 6. System resources and desktop recovery
 
 Plan: [System resources and desktop recovery](ROADMAP.md#6-system-resources-and-desktop-recovery).
-Phase 6 implementation is prepared for review on
-`feat/phase6-system-integration`. The owner completed the first candidate
-installation on the clean VM and confirmed reboot through Noctalia into
-Hyprland. The 0.2.0 release is authorized; its signed package trial and the
-remaining recovery/portal drills are separate, uncompleted gates.
+Phase 6 is merged on main and published as `v0.2.0`. The owner completed the
+first candidate installation on the clean VM and confirmed reboot through
+Noctalia into
+Hyprland. The signed COPR build is verified; its VM installation trial and
+the remaining recovery/portal drills are separate, uncompleted gates.
 Phase 5 is complete; its prompt improvements are included below.
 
 ### First milestone: login and recovery
@@ -159,6 +159,33 @@ The owner authorized publication with these residual tests visible. Normal
 login success does not establish recovery-session independence or a restore
 claim. Noctalia preferences and application theme integration belong to the
 separate dotfiles repository; its root `NOCTALIA.md` records the mapping.
+
+### Published 0.2.0, 2026-09-08
+
+[Nimbus PR #14](https://github.com/Furyfree/nimbus/pull/14) and
+[dotfiles PR #17](https://github.com/Furyfree/dotfiles/pull/17) merged after
+passing their final CI. No hosted review was requested. Nimbus's final local
+CodeRabbit review had no findings; dotfiles' test-helper finding was corrected
+and its full gate passed. Fable's final scoped follow-up hit its session limit;
+primary validation continued with the existing independent review evidence.
+
+[Release v0.2.0](https://github.com/Furyfree/nimbus/releases/tag/v0.2.0) targets
+`12781bcc2673123b0f97dd7b4f9ae1216d648815`. Its full release gate and offline
+vendored build/tests passed. Archive SHA-256:
+`b52ecbab8e3b7d197ba449f986c062cf7c3fcf4c4e801be33d46a3037ed5adc2`.
+[COPR build 10961922](https://copr.fedorainfracloud.org/coprs/furyfree/nimbus/build/10961922/)
+succeeded for Fedora 44 x86_64 with build networking disabled. The SRPM's
+source archive matches the release byte for byte.
+
+Native RPM verification with only the pinned project key passed signatures
+and digests. The RPM has no scriptlets and contains only the engine and license
+notices. Its extracted engine reports `nimbus 0.2.0` and validates all three
+machine definitions in an isolated, unprivileged container. The final VM
+manifest has 142 packages, including the added keyring PAM dependency. This is
+artifact verification, not a new VM installation or keyring/login drill.
+
+Phase 7 remains uncommitted in its existing separate worktree. Merged topic
+branches were removed; the unrelated detached Ghostty worktree was preserved.
 
 ## Phase 5 evidence
 

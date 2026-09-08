@@ -11,7 +11,7 @@ configuration below the home directory.
 The first target is Fedora 44 on x86_64. Nimbus does not initially install the
 operating system, repartition disks, or configure full-disk encryption.
 
-Nimbus is implementing Phase 6: owned system resources, Noctalia login, and
+Nimbus 0.2.0 delivers Phase 6: owned system resources, Noctalia login, and
 a separate recovery session. The candidate installation, reboot, and normal
 login passed. Recovery/portal validation and the signed package trial remain
 in [TASKS.md](docs/TASKS.md).
@@ -97,7 +97,7 @@ The engine is distributed through the signed
 [`furyfree/nimbus` COPR](https://copr.fedorainfracloud.org/coprs/furyfree/nimbus/).
 Bootstrap verifies its RPM against the checked-in public key and fingerprint
 before asking DNF to install it. Phase 6 requires engine 0.2.0 or a local
-development candidate; use the candidate guide until that release is available.
+development candidate. The signed 0.2.0 build is published in COPR.
 
 The delivered commands are `init`, `sync`, `validate`, `doctor`, `status`,
 `managed`, `unmanaged`, `why`, the `profiles`, `components`, and `packages`
