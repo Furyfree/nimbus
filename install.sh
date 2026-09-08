@@ -250,7 +250,7 @@ say "Nimbus origin: ${ORIGIN}"
 say "checkout:      ${CHECKOUT}"
 
 prerequisites=()
-command -v git >/dev/null 2>&1 || prerequisites+=(git)
+command -v git >/dev/null 2>&1 || prerequisites+=(git-core)
 [ -x /usr/bin/python3 ] || prerequisites+=(python3)
 if [ "${#prerequisites[@]}" -gt 0 ]; then
   say "Installing missing bootstrap prerequisites: ${prerequisites[*]}"

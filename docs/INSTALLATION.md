@@ -123,13 +123,17 @@ curl -fsSL https://raw.githubusercontent.com/Furyfree/nimbus/main/install.sh | b
 ~~~
 
 The signed `furyfree/nimbus` COPR channel and its reviewed key are available.
-This checkout requires engine 0.1.1 or newer for the improved installation
-flow; publish that engine build before repeating the clean VM drill. Bootstrap
-checks compatibility and stops if the installed engine is too old.
+The Phase 6 checkout requires engine 0.2.0 or a local development candidate;
+the published 0.1.1 engine predates its resource providers. Until a reviewed
+release is published, use the [candidate guide](../tools/vm/README.md).
+Bootstrap stops if the installed engine is too old.
 
-The installer starts private logs, asks for sudo once, obtains its displayed
-prerequisites (Git, GnuPG, system Python 3, and Nimbus), then offers
-machine/profile selection as soon as the engine is ready. One workstation plan
+The installer starts private logs, asks for sudo, and prepares the engine.
+Choose the machine from the engine's searchable picker before reviewing the
+plan. There is no separate free-text machine-ID question. `--machine ID` and
+`--new ID` select directly; a new machine uses the engine's profile dialogue.
+Bootstrap initially obtains only `git-core`, GnuPG, system Python 3, and Nimbus
+as needed. One workstation plan
 approval covers system installation, repository reconciliation, Chezmoi apply,
 and its declared user tools. Fresh Chezmoi setup leaves optional 1Password SSH
 integration disabled without asking; append `| bash -s -- --onepassword-ssh`

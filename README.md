@@ -11,8 +11,10 @@ configuration below the home directory.
 The first target is Fedora 44 on x86_64. Nimbus does not initially install the
 operating system, repartition disks, or configure full-disk encryption.
 
-Nimbus is at Phase 5 of its roadmap: bootstrap, `nimbus init`, and the
-Chezmoi handoff.
+Nimbus is implementing Phase 6: owned system resources, Noctalia login, and
+a separate recovery session. The candidate installation, reboot, and normal
+login passed. Recovery/portal validation and the signed package trial remain
+in [TASKS.md](docs/TASKS.md).
 
 ## Repository model
 
@@ -87,17 +89,19 @@ It runs `gofmt`, `go vet`, `go test`, `git diff --check`, markdownlint, and
 ShellCheck for the installation and release scripts.
 `just validate` runs `nimbus validate` against this checkout, `just build`
 produces a static `nimbus` binary that runs on any x86_64 Linux, and
-`just vm-push` copies that binary and the definitions to the drill VM.
+`just vm-stage` builds and stages an isolated unpublished candidate on the
+drill VM without replacing its installed Nimbus. See the
+[candidate testing guide](tools/vm/README.md).
 
 The engine is distributed through the signed
 [`furyfree/nimbus` COPR](https://copr.fedorainfracloud.org/coprs/furyfree/nimbus/).
 Bootstrap verifies its RPM against the checked-in public key and fingerprint
-before asking DNF to install it. The clean VM drill remains the final Phase 5
-gate.
+before asking DNF to install it. Phase 6 requires engine 0.2.0 or a local
+development candidate; use the candidate guide until that release is available.
 
 The delivered commands are `init`, `sync`, `validate`, `doctor`, `status`,
 `managed`, `unmanaged`, `why`, the `profiles`, `components`, and `packages`
-groups, and `version`. `sync` is the one command that changes the system: it
+groups, `files accept`, and `version`. `sync` changes the managed system: it
 shows what it will do, asks once, prepares the declared sources, installs and
 removes what the definitions say, upgrades the system, verifies, records
 receipts under `/var/lib/nimbus`, and reports what differed from the plan.
@@ -118,8 +122,8 @@ list what Nimbus manages. The first VM drills are recorded in TASKS.md.
 
 ## Releases
 
-Releases are manual. After merging reviewed changes, run `just tag v0.1.1`
-from clean, up-to-date main, then `just release v0.1.1`. The workflow tests
+Releases are manual. After merging reviewed changes, run `just tag v0.2.0`
+from clean, up-to-date main, then `just release v0.2.0`. The workflow tests
 and packages vendored source, then creates a draft release for you to inspect
 and publish. Pushes to main or tags never start it. The COPR build is a separate
 manual action after publication.

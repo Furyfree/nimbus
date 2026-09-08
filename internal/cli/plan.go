@@ -41,6 +41,7 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 	}
 
 	var sources, problems, notes, userTools []string
+	var resources []plan.Operation
 	var installTx *plan.Operation
 	var pendingNames, flatpaks, removals []string
 	adopted, kept := 0, 0
@@ -65,9 +66,14 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 			continue
 		case plan.ActionAdopt:
 			adopted++
+			if isSystemResource(op.Kind) {
+				resources = append(resources, *op)
+			}
 			continue
 		}
 		switch {
+		case isSystemResource(op.Kind):
+			resources = append(resources, *op)
 		case op.Kind == plan.KindDNFConfig || op.Kind == plan.KindRepository || op.Kind == plan.KindFlatpakRemote:
 			summary := op.Summary
 			if op.Action == plan.ActionEnable {
@@ -159,6 +165,35 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 			writeWrapped(&b, "  ", strings.Fields(line), " ", "", "    ")
 		}
 	}
+	if len(resources) > 0 {
+		b.WriteString("\nsystem resources:\n")
+		for _, op := range resources {
+			fmt.Fprintf(&b, "  %s\n", op.Summary)
+			if op.After != "" {
+				fmt.Fprintf(&b, "    after %s\n", describeAfter(p, op.After))
+			}
+			if op.File != nil {
+				fmt.Fprintf(&b, "    %s: owner %s, group %s, mode %s; present %t\n", op.File.Target, op.File.After.Owner, op.File.After.Group, op.File.After.Mode, op.File.After.Exists)
+				if !bytes.Equal(op.File.Before.Content, op.File.After.Content) {
+					b.WriteString(acceptanceDiff(op.File.Target, op.File.Before.Content, op.File.After.Content))
+				}
+			}
+			for _, step := range op.Steps {
+				if op.File != nil {
+					fmt.Fprintf(&b, "    %s\n", step.Description)
+					continue
+				}
+				fmt.Fprintf(&b, "    %s", step.Description)
+				if len(step.Argv) > 0 {
+					fmt.Fprintf(&b, ": %s", strings.Join(step.Argv, " "))
+				}
+				if step.Privileged {
+					b.WriteString(" (privileged)")
+				}
+				b.WriteByte('\n')
+			}
+		}
+	}
 	if len(removals) > 0 {
 		b.WriteString("\n")
 		for _, r := range removals {
@@ -199,6 +234,14 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 		b.WriteString("incomplete: fix the problems above\n")
 	}
 	return b.Bytes()
+}
+
+func isSystemResource(kind string) bool {
+	switch kind {
+	case plan.KindFile, plan.KindService, plan.KindGroup, plan.KindTarget, plan.KindTrigger:
+		return true
+	}
+	return false
 }
 
 // describeAfter names what an operation waits for in the plan's own words:

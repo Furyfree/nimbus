@@ -7,7 +7,12 @@ lives in [SPEC.md](SPEC.md). Current checkboxes and evidence live in
 [DECISIONS.md](DECISIONS.md); this roadmap places the gates that affect each
 phase.
 
-Current phase: **5. Bootstrap, initialization, and Chezmoi handoff**.
+Current phase: **6. System resources and desktop recovery**, release
+preparation after successful candidate installation, reboot, and normal login.
+The owner authorized publication; recovery and portal drills remain explicit
+follow-up gates, not completed validation.
+Phase 5 is complete following the 0.1.1 installation. Its remaining prompt
+order and redundant-confirmation improvements now belong to Phase 6.
 
 ## Principles
 
@@ -298,9 +303,10 @@ project key verifies that RPM. Bootstrap stops before engine installation if
 its reviewed key files are absent. It verifies the key fingerprint and RPM
 signature with an isolated keyring before native DNF installation. Existing
 engines must be DNF-owned at `/usr/bin/nimbus`, with no other engine shadowing
-that path. The public one-liner completed on the restored VM. The resulting prompt,
-logging, binary-provider, and repository-convergence improvements require
-a repeat clean drill with the next engine build before closing this follow-up.
+that path. The public one-liner and the 0.1.1 logging, binary-provider, and
+repository-convergence follow-up passed on the restored VM. Prompt order and
+redundant-confirmation follow-ups move to Phase 6; TASKS.md records their gates
+and the installation evidence.
 
 Source release preparation is a manually dispatched workflow on main, taking
 an existing version tag on that branch. It runs the tagged commit's local gate
@@ -444,6 +450,94 @@ workflow:
 nimbus files accept /etc/PATH
 ~~~
 
+The first milestone is a reboot into Noctalia greeter, a working normal
+desktop, and an independent recovery session. Workstation defaults follow
+that milestone. Installing the greeter package alone does not meet it.
+Retain Phase 5's installer and ownership architecture; these resources belong
+in the existing inspect, plan, apply, verify, and remove lifecycle.
+
+### Delivery order
+
+1. Inspect the Fedora VM's boot target, greetd unit, display-manager selection,
+   greeter command, package-provided session entries, and journal. Compare them
+   with the shipped package files and upstream documentation. Record the actual
+   activation failure before selecting configuration.
+2. Extend the strict definitions, resolver, facts, planner, executor, and
+   receipts for the system units, memberships, files, and triggers the desktop
+   needs. Build on the existing file provider. Define enabled and running unit
+   state separately, preserve pre-existing memberships, and report logout or
+   reboot needs. Unknown ownership blocks removal; failed verification writes
+   no successful receipt. Read-only commands never start services or use sudo.
+3. Provide and test the system-owned recovery session and a documented TTY
+   restoration route before activating the normal graphical login. Choose a
+   native package or narrow typed integration for files under /usr; generic
+   system-file declarations remain limited to /etc.
+4. Declare greetd/Noctalia activation, session discovery, required memberships,
+   and portal selection in the desktop component. Include any boot-target or
+   display-manager changes in the plan and verification. Chezmoi continues to
+   own normal Hyprland/Noctalia user configuration. Do not silently displace a
+   foreign display manager or interrupt an active graphical session.
+5. Extend doctor for these resources and prove login, logout, portals, repeat
+   sync, failure recovery, and removal on the graphical VM. Stop at this first
+   milestone to record evidence before adding workstation tuning.
+6. Deliver remaining service/group/file ownership and retirement behavior,
+   fixed-argv trigger deduplication, and `files accept`. Then evaluate the
+   workstation-default candidates below through the same resource lifecycle.
+
+### Login keyring and desktop appearance
+
+The first graphical VM login exposed a missing `gnome-keyring-pam` package.
+Use Fedora's packaged greetd PAM integration to create/unlock the login
+keyring during password authentication; preserve the packaged PAM files.
+Verify fresh initialization and subsequent logout/login, including an existing
+user-created default keyring. Do not store a login password in configuration,
+remove keyrings, or disable their encryption. Passwordless authentication is a
+separate integration question and must not be claimed from this test.
+
+Chezmoi owns the selected Noctalia preferences and application theme hooks for
+`hyprland-noctalia`; Noctalia owns generated palettes and theme outputs. Track
+the white keyring dialog as a GTK appearance issue independently of unlocking.
+Dotfiles' root `NOCTALIA.md` records template IDs, paths, application variants,
+and visual checks. Validate the dialog and selected applications after a new
+session rather than assuming that a generated CSS file proves adoption.
+
+### Installer prompt polish
+
+Phase 6 carries the final installation prompt improvements from Phase 5.
+Keep one searchable machine picker in the engine, after minimal prerequisites
+and before the workstation plan. Remove the redundant shell machine-ID prompt
+and the reported redundant yes prompt while retaining the workstation-plan
+approval. Explicit selection flags remain supported. Verify the complete
+prompt order and count on a clean VM installation before closing Phase 6.
+The bootstrap obtains only Git transport before the checkout.
+
+### Candidate testing
+
+Use a locally built candidate and its matching uncommitted definitions in a
+new private VM directory. `just vm-stage` leaves stable delivery and the
+selector intact; explicit checkout/machine flags select the candidate. A
+candidate sync still changes the VM and shared receipts, so snapshot recovery
+is the reset boundary. Test login/recovery before claiming the first milestone.
+The [candidate guide](../tools/vm/README.md) records commands and limitations.
+A separate beta COPR is reserved for later native RPM delivery drills, with
+its own reviewed key and explicit opt-in; stable publication stays manual.
+
+### Workstation defaults
+
+Inspect Fedora's shipped and effective defaults before declaring overrides.
+Candidates are ZRAM, justified sysctl settings, inotify and file-descriptor
+limits, `vm.max_map_count`, systemd-oomd policy, journald limits, SSD trim,
+hardware-specific udev/storage rules, laptop power/suspend behavior, Docker
+defaults/log rotation, and selected gaming settings with a demonstrated need.
+
+Each accepted setting needs an observed problem or owner requirement, evidence
+for its value, machine/component scope, verification, and a removal/recovery
+path. Record retained Fedora defaults and rejected candidates as decisions;
+the list is not a requirement to override every setting. No global tuning
+bundle or numeric values are approved by this plan. Hardware-specific changes
+need checks on matching hardware, not just the VM. Doctor explains effective
+state and owned drift without applying a setting.
+
 ### Context and decisions
 
 Generic system file changes use sources below system/root/etc with targets
@@ -465,11 +559,21 @@ session under /usr. It never writes a seed configuration into the user's home.
 Those files use a native package or a separately specified typed integration;
 they do not widen the generic system-file provider.
 
+Before implementation, resolve the package-provided greeter/session launch
+contract, recovery-session packaging, adoption of existing units and group
+memberships, and how activation preserves a working console. Bind each choice
+to inspected files and tests rather than guessing service names or commands.
+Snapper recovery points, update orchestration, runtime launchers, the dashboard,
+TPM unlock, UKIs, and owner Secure Boot keys are outside this phase.
+
 ### Risks and recovery
 
 Service, greeter, portal, and compositor changes can prevent login. The recovery
 session and removal path must be proven before the normal session is managed.
 Report .rpmnew and .rpmsave files without modifying them.
+Record the prior boot target, unit state, and owned file contents needed for
+manual restoration; exercise that route from a console after a failed greeter
+activation. Do not claim Snapper rollback before Phase 7's restore drill.
 
 Reverse capture can accidentally preserve a bad manual edit or secret. Limit it
 to proven-owned, non-symlinked, user-readable files, show the entire reverse
@@ -486,6 +590,15 @@ changed-input refusal, atomic source replacement, subsequent adoption receipt,
 and rejection of foreign, unknown, unselected, unreadable, symlinked,
 non-regular, multiple, and non-`/etc` targets. Prove that accept uses no sudo,
 does not modify the live target or metadata, and leaves Git untouched.
+
+The first milestone must prove reboot to greeter, normal login, logout and
+relogin, portal file picking and screen sharing, recovery with absent or broken
+user configuration, and a second sync with no pending changes. Exercise failed
+activation and removal without losing console access. Run the complete
+`just check` gate and the native checks for each provider. VM success does not
+prove laptop suspend or hardware-specific defaults. Close the full phase only
+after the remaining ownership, `files accept`, selected-default, and installer
+prompt gates pass.
 
 ## 7. Updates, constraints, and recovery points
 

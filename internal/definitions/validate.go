@@ -306,6 +306,7 @@ func validateProfile(c *Checkout, p *Profile, errs *ErrorList) {
 
 func validateComponent(c *Checkout, comp *Component, errs *ErrorList) {
 	where := "components/" + comp.ID + ".toml"
+	validateResources(comp, where, errs)
 	if err := ValidateID(comp.ID); err != nil {
 		errs.Add(where, "id: %v", err)
 	}

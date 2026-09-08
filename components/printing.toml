@@ -12,3 +12,18 @@ packages = [
   "simple-scan",
 ]
 removes = []
+
+[[services]]
+unit = "cups.socket"
+enabled = true
+running = true
+
+[[services]]
+unit = "cups.path"
+enabled = true
+running = true
+
+[[services]]
+unit = "avahi-daemon.service"
+enabled = true
+running = true

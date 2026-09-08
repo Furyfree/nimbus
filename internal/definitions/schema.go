@@ -68,13 +68,17 @@ type Profile struct {
 
 // Component is components/<id>.toml.
 type Component struct {
-	Schema    int        `toml:"schema"`
-	ID        string     `toml:"id"`
-	Requires  []string   `toml:"requires"`
-	Conflicts []string   `toml:"conflicts"`
-	Packages  []string   `toml:"packages"`
-	Removes   []string   `toml:"removes"`
-	Files     []FileDecl `toml:"files"`
+	Schema        int           `toml:"schema"`
+	ID            string        `toml:"id"`
+	Requires      []string      `toml:"requires"`
+	Conflicts     []string      `toml:"conflicts"`
+	Packages      []string      `toml:"packages"`
+	Removes       []string      `toml:"removes"`
+	Files         []FileDecl    `toml:"files"`
+	Services      []ServiceDecl `toml:"services"`
+	Groups        []GroupDecl   `toml:"groups"`
+	DefaultTarget string        `toml:"default_target"`
+	Recovery      *RecoveryDecl `toml:"recovery"`
 	// Detect says which hardware makes init propose this component.
 	Detect *Detect `toml:"detect"`
 	// Installer is a user-scope tool the maker's installer script places
@@ -103,8 +107,27 @@ type Detect struct {
 // FileDecl is one generic system file below /etc. Source is relative to
 // system/root/ and the target is the same path below /.
 type FileDecl struct {
-	Source string `toml:"source"`
-	Owner  string `toml:"owner"`
-	Group  string `toml:"group"`
-	Mode   string `toml:"mode"`
+	Source   string   `toml:"source"`
+	Owner    string   `toml:"owner"`
+	Group    string   `toml:"group"`
+	Mode     string   `toml:"mode"`
+	Triggers []string `toml:"triggers"`
+}
+
+// ServiceDecl keeps persistent enablement separate from current activation.
+type ServiceDecl struct {
+	Unit    string `toml:"unit" json:"unit"`
+	Enabled *bool  `toml:"enabled" json:"enabled,omitempty"`
+	Running *bool  `toml:"running" json:"running,omitempty"`
+}
+
+// GroupDecl adds one supplementary membership, preserving prior membership.
+type GroupDecl struct {
+	Name string `toml:"name" json:"name"`
+	User string `toml:"user" json:"user"`
+}
+
+// RecoveryDecl selects the fixed Nimbus recovery-session integration.
+type RecoveryDecl struct {
+	Enabled bool `toml:"enabled"`
 }

@@ -7,13 +7,16 @@ import (
 
 // Resolved is the deterministic desired graph of one machine.
 type Resolved struct {
-	Machine      string              `json:"machine"`
-	Profiles     []string            `json:"profiles"`
-	Components   []ResolvedComponent `json:"components"`
-	Packages     []ResolvedPackage   `json:"packages"`
-	Removes      []string            `json:"removes"`
-	Files        []ResolvedFile      `json:"files"`
-	Repositories []string            `json:"repositories"`
+	Machine       string              `json:"machine"`
+	Profiles      []string            `json:"profiles"`
+	Components    []ResolvedComponent `json:"components"`
+	Packages      []ResolvedPackage   `json:"packages"`
+	Removes       []string            `json:"removes"`
+	Files         []ResolvedFile      `json:"files"`
+	Services      []ResolvedService   `json:"services,omitempty"`
+	Groups        []ResolvedGroup     `json:"groups,omitempty"`
+	DefaultTarget string              `json:"default_target,omitempty"`
+	Repositories  []string            `json:"repositories"`
 	// Installers are the user-scope tools of the selected components.
 	Installers []ResolvedInstaller `json:"installers"`
 }
@@ -41,12 +44,15 @@ type ResolvedPackage struct {
 
 // ResolvedFile is one generic system file with its derived target.
 type ResolvedFile struct {
-	Target    string `json:"target"`
-	Source    string `json:"source"`
-	Owner     string `json:"owner"`
-	Group     string `json:"group"`
-	Mode      string `json:"mode"`
-	Component string `json:"component"`
+	Target    string   `json:"target"`
+	Source    string   `json:"source"`
+	Owner     string   `json:"owner"`
+	Group     string   `json:"group"`
+	Mode      string   `json:"mode"`
+	Component string   `json:"component"`
+	Content   []byte   `json:"content"`
+	Triggers  []string `json:"triggers,omitempty"`
+	Recovery  bool     `json:"recovery,omitempty"`
 }
 
 // Resolve computes the desired graph of one machine from configuration only.
@@ -213,7 +219,8 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 				errs.Add(where, "components %q and %q both declare %s", prev.Component, cid, target)
 				continue
 			}
-			files[target] = ResolvedFile{Target: target, Source: "system/root/" + f.Source, Owner: f.Owner, Group: f.Group, Mode: f.Mode, Component: cid}
+			entry, _ := c.Entry("system/root/" + f.Source)
+			files[target] = ResolvedFile{Target: target, Source: "system/root/" + f.Source, Owner: f.Owner, Group: f.Group, Mode: f.Mode, Component: cid, Content: entry.Content, Triggers: f.Triggers}
 		}
 	}
 
@@ -243,6 +250,7 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 		r.Files = append(r.Files, files[target])
 	}
 	r.Repositories = sortedKeys(repos)
+	resolveResources(c, r, &errs)
 	for _, rc := range r.Components {
 		if comp := c.Components[rc.ID]; comp != nil && comp.Installer != nil {
 			r.Installers = append(r.Installers, ResolvedInstaller{Component: rc.ID, Installer: *comp.Installer, Paths: rc.Paths})

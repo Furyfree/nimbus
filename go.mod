@@ -9,6 +9,7 @@ require (
 	github.com/pelletier/go-toml/v2 v2.4.3
 	// Command tree and flags for the CLI.
 	github.com/spf13/cobra v1.10.2
+	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
 )
 
@@ -33,6 +34,5 @@ require (
 	// Pulled in by Cobra: its flag parser.
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
-	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.3.8 // indirect
 )

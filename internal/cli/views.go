@@ -211,7 +211,7 @@ func newWhy(opts *options) *cobra.Command {
 	var flags machineFlags
 	cmd := &cobra.Command{
 		Use:   "why RESOURCE",
-		Short: "Explain every path that selects a package, component, or profile",
+		Short: "Explain the selection paths for a package, system resource, component, or profile",
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
 				return usageError{fmt.Errorf("why takes exactly one resource")}
@@ -251,6 +251,50 @@ type whyResult struct {
 
 func explain(s *selected, resource string) (*whyResult, error) {
 	r := s.Resolved
+	owned := func(kind, id, component string) *whyResult {
+		paths := []string{"component:" + component}
+		for _, c := range r.Components {
+			if c.ID == component {
+				paths = append(paths, c.Paths...)
+			}
+		}
+		return &whyResult{Kind: kind, ID: id, Paths: paths}
+	}
+	for _, file := range r.Files {
+		if resource == "file:"+file.Target {
+			return owned("system-file", resource, file.Component), nil
+		}
+		for _, trigger := range file.Triggers {
+			if resource == "trigger:"+trigger {
+				var paths []string
+				for _, f := range r.Files {
+					for _, id := range f.Triggers {
+						if id == trigger {
+							paths = addUnique(paths, append([]string{"file:" + f.Target}, owned("", "", f.Component).Paths...)...)
+						}
+					}
+				}
+				return &whyResult{Kind: "trigger", ID: resource, Paths: paths}, nil
+			}
+		}
+	}
+	for _, service := range r.Services {
+		if resource == "service:"+service.Unit {
+			return owned("service", resource, service.Component), nil
+		}
+	}
+	for _, group := range r.Groups {
+		if resource == "group:"+group.Name || resource == "group:"+group.Name+":"+group.User {
+			return owned("group", "group:"+group.Name+":"+group.User, group.Component), nil
+		}
+	}
+	if resource == "default-target" && r.DefaultTarget != "" {
+		for _, c := range r.Components {
+			if s.Checkout.Components[c.ID].DefaultTarget != "" {
+				return owned("default-target", resource, c.ID), nil
+			}
+		}
+	}
 	for _, p := range r.Profiles {
 		if p == resource {
 			return &whyResult{Kind: "profile", ID: p, Paths: []string{"machine"}}, nil

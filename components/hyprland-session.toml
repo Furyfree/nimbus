@@ -1,6 +1,5 @@
 # Hyprland from its COPR, Noctalia from Fedora, the greeter from Terra, and
-# the portals, audio, and session helpers they need. The greeter service,
-# session entries, and recovery session arrive with the desktop phase.
+# the portals, audio, and session helpers they need.
 schema = 1
 id = "hyprland-session"
 
@@ -21,6 +20,7 @@ packages = [
   "xdg-user-dirs",
   "xdg-terminal-exec",
   "gnome-keyring",
+  "gnome-keyring-pam",
   "accountsservice",
   "udiskie",
   "udisks2",
@@ -30,5 +30,45 @@ packages = [
   "pipewire-alsa",
   "wireplumber",
   "bluez",
+  "foot",
 ]
 removes = []
+default_target = "graphical.target"
+
+[recovery]
+enabled = true
+
+# Enable for the next boot; do not interrupt an active graphical session.
+[[services]]
+unit = "greetd.service"
+enabled = true
+
+[[services]]
+unit = "bluetooth.service"
+enabled = true
+
+[[files]]
+source = "etc/greetd/nimbus.toml"
+owner = "root"
+group = "root"
+mode = "0644"
+
+[[files]]
+source = "etc/systemd/system/greetd.service.d/nimbus.conf"
+owner = "root"
+group = "root"
+mode = "0644"
+triggers = ["systemd-daemon-reload"]
+
+[[files]]
+source = "etc/tmpfiles.d/nimbus-noctalia-greeter.conf"
+owner = "root"
+group = "root"
+mode = "0644"
+triggers = ["noctalia-state-directory"]
+
+[[files]]
+source = "etc/xdg/xdg-desktop-portal/hyprland-portals.conf"
+owner = "root"
+group = "root"
+mode = "0644"

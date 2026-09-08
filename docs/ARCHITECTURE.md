@@ -24,13 +24,15 @@ install.sh, bootstrap  the remote entry point and the checkout-owned handoff
 nimbus.toml            schema, supported Fedora releases, repositories
 machines/              one manifest per workstation
 profiles/              user-facing bundles: packages and components
-components/            shared capabilities: packages, removals, files
+components/            packages, removals, files, units, memberships, triggers
 system/root/etc/       sources of Nimbus-owned files below /etc
+system/recovery/       exact sources for the typed /usr recovery integration
 system/keys/           single pinned repository signing keys stored locally
 
 docs/                  contracts, policy, roadmap, tasks, decisions
 tools/install/         Linux handoff supervision and terminal regression tests
 tools/package-query/   throwaway Fedora container for package research
+tools/vm/              unpublished candidate build and isolated VM staging
 ~~~
 
 The shell handoffs use system Python 3 and `tools/install/handoff.py` to keep
@@ -43,7 +45,8 @@ helper; inspection and ordinary engine commands do not invoke it.
 
 Everything under `internal/` is private to this module. Dependencies point
 one way: `cli` uses `definitions`, `facts`, `doctor`, `plan`, `apply`,
-`state`, `selector`, and `version`; `doctor` uses `facts`; `plan` uses
+`state`, `selector`, and `version`; `doctor` uses `facts`, `definitions`, and
+`state`; `plan` uses
 `definitions`, `facts`, and `state`; `apply` uses `plan`, `facts`, and
 `state`;
 `version` reads supported receipt and baseline schemas from `state`;
@@ -93,6 +96,8 @@ selector (or --checkout)  -> canonical root, definitions loaded for the
                              supported releases; failures become checks
 facts.Inspect(Source)     -> one Section per fact family, unknown on error
 doctor.Run(facts, config) -> ten checks with observation, impact, fix
+doctor.SystemResources  -> selected files, units, memberships, boot target,
+                           and native default observations, using receipts
 render                    -> human lines or the JSON envelope; exit 1 on fail
 ~~~
 
@@ -143,8 +148,10 @@ verified with `gpg` before any privileged command touches them. A DNF
 install is one `dnf5 install`; afterwards the installed set is compared
 with the preview and the differences are reported, not refused. Receipts go
 through the hidden `nimbus internal record` action, which validates the
-stage against the plan digest and writes atomically below `/var/lib/nimbus`;
-it is the one privileged action of this phase. DNF receipts also record the
+stage against the plan digest and writes atomically below `/var/lib/nimbus`.
+The other narrow privileged action, `internal system-file`, installs one
+approved file payload through anchored directory descriptors and atomic
+replacement. DNF receipts also record the
 native name and architecture separately from the requested package reference;
 ambiguous legacy ownership blocks removal. Every DNF transaction, including
 removal and upgrade, compares the installed set before and after execution.
@@ -160,6 +167,8 @@ and then write the file and sync without system updates.
   selector and a new manifest, the selection commands write the manifest.
   Explicit `dotfiles apply` and `dotfiles update` delegate user mutations to
   Chezmoi; `dotfiles diff` only inspects local state.
+  `files accept` writes only an approved source file after locking and
+  rechecking its inputs; its `--plan` path writes nothing.
   `definitions` and `selector` run no command at all;
   `facts` and `plan` run native read-only commands only through `Source`,
   so a test can see every one of them. Tests run the loader against a

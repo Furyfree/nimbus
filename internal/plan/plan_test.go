@@ -30,6 +30,11 @@ func repository(t *testing.T) (*definitions.Checkout, *definitions.Resolved) {
 	if len(errs) > 0 {
 		t.Fatal(errs)
 	}
+	// These package-provider tests isolate resources covered by resources_test.go.
+	r.Files = nil
+	r.Services = nil
+	r.Groups = nil
+	r.DefaultTarget = ""
 	return c, r
 }
 

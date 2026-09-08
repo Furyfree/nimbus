@@ -313,6 +313,16 @@ func publicInstallCommand(name string, args []string) bool {
 		}
 		return publicInstallCommand(args[0], args[1:])
 	}
+	if name == "systemctl" && len(args) > 0 {
+		if slices.Contains([]string{"enable", "disable", "start", "stop", "try-restart", "daemon-reload", "get-default", "set-default"}, args[0]) {
+			return true
+		}
+		// Other show properties and status output can contain service secrets.
+		return len(args) >= 2 && args[0] == "show" && args[1] == "--property=LoadState,UnitFileState,ActiveState"
+	}
+	if name == "systemd-tmpfiles" {
+		return slices.Equal(args, []string{"--create", "/etc/tmpfiles.d/nimbus-noctalia-greeter.conf"})
+	}
 	return slices.Contains([]string{"dnf5", "rpm", "rpmkeys", "gpg", "flatpak"}, name)
 }
 

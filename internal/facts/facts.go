@@ -32,6 +32,7 @@ type Facts struct {
 // User is the user-scope tool state: the home directory, whether Cargo is
 // present, and the crates it has installed.
 type User struct {
+	Name   string   `json:"name,omitempty"`
 	Home   string   `json:"home"`
 	Cargo  bool     `json:"cargo"`
 	Crates []string `json:"crates"`

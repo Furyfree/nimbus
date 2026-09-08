@@ -106,6 +106,17 @@ checkout. Embedded data is never the live personal desired state.
 Engine packaging and the checkout may be delivered separately. Their
 compatibility is explicit and verified; Nimbus never updates either itself.
 
+Unpublished development candidates use a separate local binary and checkout
+with explicit `--checkout` and `--machine` arguments. Staging never replaces
+the installed RPM, stable checkout, or selector. Candidate sync still changes
+the disposable VM's real system and receipts; snapshot recovery separates
+tests. Stable COPR publication remains an independent manual release action.
+Phase 6 requires engine 0.2.0; development builds are explicitly labelled.
+The engine reads legacy state schema 1 and current schema 2. Its first
+successful state write upgrades the marker to 2, causing older engines to
+refuse that state. A failure before that write still requires snapshot
+recovery; the marker is not isolation or a rollback mechanism.
+
 ## Configuration model
 
 The local selector is:
@@ -541,6 +552,27 @@ declaration define how each resource is inspected, applied, verified,
 updated, and removed. Provenance
 records every profile, component, or explicit machine path that selected it.
 
+Components declare system units through `[[services]]` with `unit` and
+optional `enabled` and `running` booleans. Omission leaves that aspect alone.
+Nimbus records the original state and restores it on removal; masked units
+and unsupported native states require an explicit migration. Greeter
+enablement applies on the next boot and never displaces a foreign display
+manager or stops an active graphical session implicitly.
+
+`[[groups]]` declares an existing native group `name` and its member `user`;
+`<user>` means the invoking normal user. Packages retain ownership of their
+system accounts and groups. Nimbus removes only memberships it added, never
+pre-existing or primary membership, and reports the required new login.
+`default_target` selects `graphical.target` or `multi-user.target` for the
+next boot, with the prior target retained for restoration.
+
+Source retirement requires verified native identity and original enablement.
+Installed consumers retain their source, including adopted RPMs and Flatpak
+runtimes. Nimbus-created unused remotes may be removed without force; DNF
+sources are disabled while retaining their files, keys, and release packages.
+Pre-existing enabled sources remain intact when tracking is retired. Legacy
+receipts without sufficient evidence report unsupported retirement.
+
 ## Ownership
 
 Nimbus owns:
@@ -805,6 +837,11 @@ checkout change remains uncommitted. The user runs validation and the normal
 plan and apply flow afterward; apply verifies and adopts the now-matching live
 file under the new definition identity before recording a receipt.
 
+`files accept --plan` previews without writing; JSON capture requires explicit
+`--yes`. Capture is limited to text files up to 4 MiB with unchanged declared
+metadata. It preserves the source's executable state and refuses linked Git
+worktrees until their separate Git-directory identity can be checked safely.
+
 The generic provider never targets `/usr`, `/boot`, `/var`, `/run`, `/tmp`,
 `/home`, `/root`, `/proc`, `/sys`, `/dev`, or any other root. Files below
 `/usr` are delivered by a native package or by a separately specified typed
@@ -857,7 +894,7 @@ Running it explicitly trusts the current `install.sh` on the approved Nimbus
 
 1. requires a controlling terminal and refuses root
 2. verifies the supported Fedora release and architecture
-3. starts private installation logs and obtains sudo once for prerequisites
+3. starts private logs and obtains sudo
 4. obtains the required Git transport through DNF when absent
 5. clones the approved origin to `~/.local/share/nimbus`, or validates and
    reuses an existing checkout there without changing it
@@ -890,8 +927,11 @@ file, import the key, and install the verified local RPM and its dependencies
 through DNF with `-y`. Git, GPG, system Python 3, and the engine are bootstrap
 prerequisites; their displayed commands need no separate yes prompt. The
 normal-user shell supervises a bounded sudo keepalive through init and stops it
-on exit. The engine asks for machine/profile selection as soon as it is
-available, then shows the workstation plan and asks once before installing its
+on exit. The engine's searchable machine picker is the only interactive
+machine-selection step; the shell never asks for a free-text machine ID.
+Explicit `--machine` or `--new` selects directly. Machine/profile dialogues
+remain after the minimal engine prerequisites and before the plan. The
+engine then shows the workstation plan and asks once before installing its
 resources. Existing bootstrap files must match exactly; foreign files and
 symlinks are left untouched. The source is restricted to `nimbus`.
 
@@ -1170,13 +1210,50 @@ The hyprland-noctalia profile owns the system requirements for Hyprland,
 Noctalia, the greeter, portals, session entries, and compatibility-sensitive
 updates. Chezmoi owns normal user configuration for Hyprland and Noctalia.
 
+Desktop readiness requires the declared greeter to appear after reboot and
+launch the selected normal session. Required system units, memberships,
+display-manager selection, boot-target changes, and portal integration are
+owned resources with visible plans, native verification, and recovery behavior.
+Installing their packages alone is not proof of desktop readiness. Existing
+foreign display-manager configuration is not silently replaced.
+
+The desktop includes GNOME Keyring's PAM module for Fedora's packaged greetd
+login integration. Password login should initialize and unlock the login
+keyring without an additional application prompt. Existing user keyrings and
+their secrets remain user-owned; Nimbus never copies their contents, stores
+login passwords, or disables encryption. Passwordless login requires separate
+unlocking support. Chezmoi owns the normal-session appearance preferences and
+application theme hooks; Noctalia owns generated theme outputs.
+
 Nimbus installs a separate minimal system-owned recovery session under /usr.
 It uses an explicit system configuration, opens a terminal, provides minimal
 recovery bindings, and does not depend on user dotfiles. It works before and
 after Chezmoi apply and is removed with its owning component.
 
+The typed `[recovery]` integration fixes its two paths: the compositor
+configuration at `/usr/local/lib/nimbus/recovery/hyprland.lua` and its session
+entry at `/usr/share/wayland-sessions/nimbus-recovery.desktop`. It uses the
+packaged launcher with an explicit configuration and a terminal/shell that
+skip user configuration. The greeter uses its own Nimbus configuration and
+unit drop-in while preserving packaged configuration and PAM files. Generated
+greeter state and empty parent directories remain on component removal.
+
 Nimbus never writes a seed compositor configuration into the user's home
 directory.
+
+### Workstation defaults
+
+Nimbus may declare workstation policy through its normal system-resource
+model. It inspects Fedora's shipped and effective defaults first and preserves
+them when they already satisfy the owner's requirement. Each override has an
+explicit reason, selected machine/component scope, observable verification,
+and ownership-aware removal and recovery. Configuration remains typed desired
+data; no hidden tuning scripts or independent apply path are introduced.
+
+Memory pressure and limits, logging, storage maintenance, laptop power,
+container defaults, and justified gaming or hardware settings follow this
+rule. Candidate settings do not imply universal overrides or approved numeric
+values. Doctor reports effective state and owned drift without changing it.
 
 ## Manual tasks and runtime commands
 

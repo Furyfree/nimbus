@@ -17,8 +17,9 @@ import (
 	"time"
 )
 
-// Schema is the state schema this engine reads and writes.
-const Schema = 1
+// Schema 2 protects system-resource ownership from older package-only engines.
+// Reads accept schema 1, but every new write upgrades the state to schema 2.
+const Schema = 2
 
 // Version 2 records native RPM identity; version 1 remains readable.
 const ReceiptSchema = 2
@@ -40,24 +41,27 @@ const (
 // resource is replaced by the next operation on it and deleted by its
 // removal; the journal keeps every entry.
 type Receipt struct {
-	Schema        int         `json:"schema"`
-	Engine        string      `json:"engine"`
-	Definitions   Definitions `json:"definitions"`
-	Machine       string      `json:"machine"`
-	Resource      string      `json:"resource"`          // operation ID, such as package:dnf:ripgrep
-	Provider      string      `json:"provider"`          // dnf, flatpak, repository, flatpak-remote
-	Package       string      `json:"package,omitempty"` // verified native RPM name.arch
-	Paths         []string    `json:"paths,omitempty"`
-	Previous      string      `json:"previous"`
-	Intended      string      `json:"intended"`
-	Operation     string      `json:"operation"` // install, adopt, remove, enable, repair
-	PlanDigest    string      `json:"plan_digest"`
-	Verified      bool        `json:"verified"`
-	Verification  string      `json:"verification"`
-	RecoveryPoint string      `json:"recovery_point,omitempty"`
-	Timestamp     time.Time   `json:"timestamp"`
-	Reboot        bool        `json:"reboot,omitempty"`
-	Logout        bool        `json:"logout,omitempty"`
+	Source        *SourceOwnership `json:"source,omitempty"`
+	Schema        int              `json:"schema"`
+	Engine        string           `json:"engine"`
+	Definitions   Definitions      `json:"definitions"`
+	Machine       string           `json:"machine"`
+	Resource      string           `json:"resource"`          // operation ID, such as package:dnf:ripgrep
+	Provider      string           `json:"provider"`          // dnf, flatpak, repository, flatpak-remote
+	Package       string           `json:"package,omitempty"` // verified native RPM name.arch
+	Paths         []string         `json:"paths,omitempty"`
+	Previous      string           `json:"previous"`
+	Intended      string           `json:"intended"`
+	Operation     string           `json:"operation"` // install, adopt, remove, enable, repair
+	PlanDigest    string           `json:"plan_digest"`
+	Verified      bool             `json:"verified"`
+	Verification  string           `json:"verification"`
+	RecoveryPoint string           `json:"recovery_point,omitempty"`
+	Timestamp     time.Time        `json:"timestamp"`
+	ChangedAt     time.Time        `json:"changed_at,omitempty"`
+	Reboot        bool             `json:"reboot,omitempty"`
+	Logout        bool             `json:"logout,omitempty"`
+	Triggers      []string         `json:"triggers,omitempty"`
 }
 
 // Definitions identifies the checkout a receipt came from.
@@ -108,8 +112,8 @@ func Read(root string) (*Applied, error) {
 		}
 		return nil, fmt.Errorf("read state: %w", err)
 	}
-	if strings.TrimSpace(string(schemaData)) != fmt.Sprint(Schema) {
-		return nil, fmt.Errorf("state schema %q is not supported; this engine reads %d", strings.TrimSpace(string(schemaData)), Schema)
+	if err := checkStateSchema(schemaData); err != nil {
+		return nil, err
 	}
 	a.Present = true
 	if data, err := os.ReadFile(filepath.Join(root, BaselineFile)); err == nil {
@@ -191,6 +195,14 @@ func Record(root, planDigest string, st *Stage) error {
 			return fmt.Errorf("receipt %s is incomplete", r.Resource)
 		}
 	}
+	// Reject newer or corrupt existing state before writing a schema marker.
+	if data, err := os.ReadFile(filepath.Join(root, SchemaFile)); err == nil {
+		if err := checkStateSchema(data); err != nil {
+			return err
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("read state schema before recording: %w", err)
+	}
 	if err := os.MkdirAll(filepath.Join(root, ReceiptsDir), 0o755); err != nil {
 		return err
 	}
@@ -261,4 +273,23 @@ func writeAtomic(path string, data []byte, mode fs.FileMode) error {
 		return err
 	}
 	return os.Rename(name, path)
+}
+
+func checkStateSchema(data []byte) error {
+	value := strings.TrimSpace(string(data))
+	if value != "1" && value != fmt.Sprint(Schema) {
+		return fmt.Errorf("state schema %q is not supported; this engine reads 1 and %d", value, Schema)
+	}
+	return nil
+}
+
+// ChangeTime excludes receipt-only adoption from resource mutation history.
+func (r Receipt) ChangeTime() time.Time {
+	if !r.ChangedAt.IsZero() {
+		return r.ChangedAt
+	}
+	if r.Operation == "install" || r.Operation == "repair" {
+		return r.Timestamp
+	}
+	return time.Time{}
 }

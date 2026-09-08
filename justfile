@@ -31,15 +31,10 @@ tag version:
 release tag:
     gh workflow run release.yml --repo Furyfree/nimbus --ref main -f {{quote("tag=" + tag)}}
 
-# The .git directory goes along so the selector can read the origin; the VM
-# has no git. A running binary cannot be overwritten, so the new one is moved
-# into place.
-
-# Push the build and definitions to the drill VM; run nimbus init there yourself.
-vm-push host="pby@127.0.0.1" port="2222": build
-    scp -P {{port}} nimbus {{host}}:.local/bin/nimbus.new
-    ssh -p {{port}} {{host}} 'mv .local/bin/nimbus.new .local/bin/nimbus'
-    tar cz nimbus.toml machines profiles components system install.sh bootstrap .git | ssh -p {{port}} {{host}} 'rm -rf .local/share/nimbus && mkdir -p .local/share/nimbus && tar xz -C .local/share/nimbus'
+# Build unpublished source and stage it in a new private VM directory.
+# This does not replace the installed engine/checkout or execute the candidate.
+vm-stage host="pby@127.0.0.1" port="2222":
+    python3 -I -B tools/vm/stage.py --host {{quote(host)}} --port {{quote(port)}}
 
 package-search query:
     docker build --platform linux/amd64 -t nimbus-fedora-packages tools/package-query

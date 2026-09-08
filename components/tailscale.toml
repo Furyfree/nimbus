@@ -1,5 +1,4 @@
-# Tailscale from Fedora. tailscaled.service arrives with the service
-# resource type.
+# Tailscale from Fedora. Authentication remains a manual task.
 schema = 1
 id = "tailscale"
 
@@ -7,3 +6,8 @@ requires = []
 conflicts = []
 packages = ["tailscale"]
 removes = []
+
+[[services]]
+unit = "tailscaled.service"
+enabled = true
+running = true
