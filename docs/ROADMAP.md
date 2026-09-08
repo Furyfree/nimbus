@@ -7,10 +7,10 @@ lives in [SPEC.md](SPEC.md). Current checkboxes and evidence live in
 [DECISIONS.md](DECISIONS.md); this roadmap places the gates that affect each
 phase.
 
-Current phase: **6. System resources and desktop recovery**, release
-preparation after successful candidate installation, reboot, and normal login.
-The owner authorized publication; recovery and portal drills remain explicit
-follow-up gates, not completed validation.
+Phase 6 is published as **Nimbus 0.2.0** after successful candidate
+installation, reboot, and normal login. Recovery, portals, keyring unlocking,
+and the signed-package VM trial remain explicit follow-up gates. Phase 7 is
+prepared on its separate branch and is not included in this release.
 Phase 5 is complete following the 0.1.1 installation. Its remaining prompt
 order and redundant-confirmation improvements now belong to Phase 6.
 
