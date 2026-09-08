@@ -28,6 +28,8 @@ packages = [
   "flatpak:com.spotify.Client",
   "flatpak:md.obsidian.Obsidian",
   "flatpak:com.fastmail.Fastmail",
+  # Voxtype typing backend; the upstream RPM is installed manually.
+  "wtype",
   # Terminal
   "terra:ghostty",
   # Theming

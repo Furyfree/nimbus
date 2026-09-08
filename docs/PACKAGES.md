@@ -61,6 +61,42 @@ source order. This list feeds the definitions and shrinks as they land.
 - GNOME Disks (`DNF/Fedora: gnome-disk-utility`)
 - Flatseal (`DNF/Fedora: flatseal`)
 
+## Voxtype
+
+Voxtype 1.0.1 uses the owner's selected upstream x86_64 RPM installation
+for now, following the [Fedora instructions][voxtype-install]. It is a manual
+post-install step, not an automated Nimbus package resource or a COPR package.
+
+The `hyprland-noctalia` composition supplies all four requested Fedora helpers:
+`wtype` in the profile, `wl-clipboard` through `common`, `libnotify` in the
+profile, and `pipewire-alsa` through `hyprland-session`.
+
+After Nimbus installation, download the official release RPM, check its pinned
+SHA-256, and install it through native DNF:
+
+~~~sh
+release=https://github.com/peteonrails/voxtype/releases/download/v1.0.1
+rpm_file=voxtype-1.0.1-1.x86_64.rpm
+rpm_sha256=be103de733f376030180ac734bb845779bf6ee963419a8e72518b5df150525bf
+wget "$release/$rpm_file"
+printf '%s  %s\n' "$rpm_sha256" "$rpm_file" | sha256sum --check &&
+  sudo dnf install "./$rpm_file"
+~~~
+
+The digest is recorded on the [upstream 1.0.1 release][voxtype-release]. Nimbus
+does not download this RPM, record ownership, or update it. Future Voxtype
+upgrades require another explicit upstream RPM installation. DNF owns the
+installed RPM and can remove it with `sudo dnf remove voxtype`. A manual
+installation can appear in Nimbus's unmanaged/prune candidates; review
+`sync --prune` before approving removal.
+
+Model selection/download, user-service setup, and compositor keybindings remain
+separate user configuration. Package installation alone does not configure
+dictation, grant input-group access, or prove microphone and typing behavior.
+
+[voxtype-install]: https://github.com/peteonrails/voxtype/blob/v1.0.1/docs/INSTALL.md
+[voxtype-release]: https://github.com/peteonrails/voxtype/releases/tag/v1.0.1
+
 ## Gaming
 
 - Proton-GE, managed through ProtonPlus (`DNF/Terra: protonplus`)

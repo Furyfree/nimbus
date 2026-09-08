@@ -115,7 +115,13 @@ Rules:
   `passt`, and `virt-viewer` gives SPICE clipboard sharing with a guest.
   Guest disks live below `~/vm-space` on the `home` subvolume, outside
   Nimbus.
-- AppImages and manually downloaded binaries are not managed and not trusted.
+- AppImages and manually downloaded binaries are not managed and not trusted,
+  except for the owner's explicit manual Voxtype 1.0.1 upstream RPM choice.
+  [PACKAGES.md](PACKAGES.md#voxtype) records its exact URL and SHA-256. Native
+  DNF installs and removes it; this exception adds no Nimbus provider, COPR,
+  automatic updater, or signature-check bypass. Nimbus owns only its selected
+  Fedora helpers. Voxtype remains unmanaged by Nimbus and may be offered by
+  explicit pruning; the owner must review that plan.
 - Container images are pinned by digest and never run privileged. The Windows
   guest needs `/dev/kvm`, `/dev/net/tun`, and `NET_ADMIN`, nothing more.
 - Docker comes from Docker's own Fedora repository, declared in `nimbus.toml`
