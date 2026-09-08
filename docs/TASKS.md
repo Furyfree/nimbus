@@ -6,8 +6,8 @@ Plan: [System resources and desktop recovery](ROADMAP.md#6-system-resources-and-
 Phase 6 is merged on main and published as `v0.2.0`. The owner completed the
 first candidate installation on the clean VM and confirmed reboot through
 Noctalia into
-Hyprland. The signed COPR build is verified; its VM installation trial and
-the remaining recovery/portal drills are separate, uncompleted gates.
+Hyprland. The signed COPR build and its VM installation trial passed; the
+remaining recovery/portal drills are separate, uncompleted gates.
 Phase 5 is complete; its prompt improvements are included below.
 
 ### First milestone: login and recovery
@@ -38,13 +38,16 @@ Phase 5 is complete; its prompt improvements are included below.
 ### Installer prompt polish carried from Phase 5
 
 - [x] Make the already-key-verified isolated DNF engine download noninteractive.
-  Preserve the workstation-plan and selector-trust approvals.
-- [x] Keep the engine's searchable machine picker as the single selection
-  step before the plan. The VM trial showed the shell's free-text ID prompt
-  was redundant; remove it. Preserve explicit selection flags and use
-  `git-core` for initial transport instead of the full Git package.
-- [ ] Verify the actual source of the reported extra prompt and the final
-  prompt count/order on a clean VM; local tests do not prove native UX.
+  Use `git-core` for initial transport instead of the full Git package.
+- [x] Remove the confirmed `Proceed?` prompt from init by default, preserving
+  full plan rendering and ordinary sync confirmation. Accept existing `--yes`
+  commands without requiring the flag.
+- [x] Require `--machine ID` or reuse an existing trusted selector instead of
+  opening a machine picker. Keep `--new ID` explicitly interactive. Refuse
+  unexpected checkout/origin changes without prompting or replacing trust.
+- [ ] Verify the final prompt count/order on a clean VM: sudo authentication
+  and any Chezmoi questions, without an init confirmation or implicit picker.
+  Local tests do not prove native UX.
 
 ### Remaining Phase 6 work
 
@@ -153,7 +156,8 @@ password protection to hide the prompt.
 - [ ] Test file-picker and screen-sharing portals and actual audio playback.
 - [ ] Complete recovery-session, failed-activation/removal, file capture, and
   second mutating-sync drills retained above.
-- [ ] Test the signed 0.2.0 COPR engine on the disposable VM.
+- [x] Test the signed 0.2.0 COPR engine on the disposable VM; see the
+  published-install follow-up below.
 
 The owner authorized publication with these residual tests visible. Normal
 login success does not establish recovery-session independence or a restore
@@ -186,6 +190,71 @@ artifact verification, not a new VM installation or keyring/login drill.
 
 Phase 7 remains uncommitted in its existing separate worktree. Merged topic
 branches were removed; the unrelated detached Ghostty worktree was preserved.
+
+### Published-install follow-up, 2026-09-08
+
+The signed `0.2.0-0.1.fc44.x86_64` engine completed the fresh VM installation
+with status 0 in 459 seconds. After reboot the VM runs
+`7.1.13-200.fc44.x86_64`, greetd is active, and PAM reports that the login
+keyring started and unlocked successfully. The owner saw no keyring prompt.
+The subsequent plain-Hyprland logout/relogin also unlocked the keyring.
+Password-change and passwordless authentication remain separate tests.
+
+The remaining light application windows expose incomplete toolkit adoption.
+Fedora 44 cache-only repoquery verifies `adw-gtk3-theme` and `qt5ct`; both are
+now declared alongside the existing Qt6ct package in `hyprland-noctalia`.
+Chezmoi owns GTK and Qt settings for that profile, while Noctalia owns generated
+palettes. The `hyprland-guiutils` warning occurred despite the package being
+installed; verify executable discovery rather than adding a duplicate entry.
+
+- [x] Verify the native GTK theme and Qt5 configuration package providers.
+- [x] Record successful kernel, greetd, and password-login keyring activation.
+- [ ] Verify Chezmoi's toolkit settings and all selected application theme
+  consumers on a fresh login, including Brave Origin and dark/light changes.
+- [x] Declare `hyprland-copr:hyprland-uwsm` and default Noctalia Greeter to the
+  exact native session name `Hyprland (uwsm-managed)`. The VM already has the
+  native subpackage, but its selected plain Hyprland session left
+  `graphical-session.target` inactive and blocked portal activation.
+- [x] Extend doctor to inspect the UWSM compositor service and graphical target
+  without activating either. No managed session is unknown; an active
+  compositor with an inactive target fails readiness.
+- [ ] Test a fresh UWSM login, portal activation, orderly logout/relogin, and
+  compositor-failure cleanup. Confirm the recovery entry remains selectable.
+- [ ] Verify the Hyprland dependency warning is absent after session startup.
+- [ ] Complete the promptless-init VM drill described above before publication.
+- [x] Replace the recovery session's Foot dependency with Ghostty, bypassing
+  user terminal, shell, and GTK configuration. The VM terminal smoke test
+  opened Bash, wrote its success marker, and exited with status 0. Full recovery
+  login with broken user configuration remains untested.
+- [x] Declare removal of Foot, Kitty, and nwg-panel. RPM metadata identifies
+  Kitty as a Hyprland recommendation and nwg-panel as a Hyprland supplement.
+  The VM's DNF removal preview removes exactly those three packages with
+  automatic dependency cleanup disabled.
+- [x] Apply the replacement recovery configuration and remove those packages
+  through the unpublished candidate on the VM (2026-09-09).
+
+The final candidate apply completed with status 0. It installed
+`adw-gtk3-theme` and `qt5ct`, configured the UWSM greeter default, replaced the
+recovery terminal, and removed Foot, Kitty, and nwg-panel. Noctalia's native
+GTK hook selected `adw-gtk3-dark` and `prefer-dark`; the owner confirmed the
+result works. Selected Chezmoi desktop files had no drift. A subsequent
+`sync --plan --no-upgrade` reported 163 managed resources unchanged.
+
+The owner selected plain Hyprland after login, so the graphical session target
+and desktop portal remain inactive. UWSM login, portal interactions, recovery
+login, failure/removal drills, and the clean-init prompt drill remain pending.
+UWSM is Nimbus's current integration choice, not a universal Hyprland default.
+Do not mark these checks passed from the successful package/configuration apply.
+The candidate binary SHA-256 is
+`1faf2992f120df6e23f0520df22b82c6f305fc32ebcd69e110da953e823016cd`.
+Candidate metadata and the apply log are retained privately outside the VM.
+The follow-up is being prepared for review; no new release or COPR build is
+authorized.
+
+Google Maps and FotMob are still intentionally excluded by Chezmoi. Their
+prepared desktop entries call `nimbus launch webapp`, which the installed
+0.2.0 engine and current source do not implement. They cannot be enabled until
+the Phase 8 launcher is available; this is not a Noctalia discovery problem.
 
 ## Phase 5 evidence
 
@@ -279,10 +348,10 @@ VM retry recorded below.
   SMBIOS chassis type, and display adapters by PCI vendor and device, read
   from sysfs through the source.
 - [x] Typed detection: `[detect]` on the hardware components, `hardware` on
-  the tracked machines, `plan.ProposeComponents` and `plan.MatchMachine`
-  with laptop, desktop, and VM fixtures.
-- [x] `nimbus init`: validates the checkout, reads its origin, asks which
-  machine with the matching one pre-selected, runs the new-machine dialog
+  the tracked machines, `plan.ProposeComponents` with laptop, desktop, and VM
+  fixtures. The old machine matcher was retired with the implicit init picker.
+- [x] `nimbus init`: validates the checkout, reads its origin, uses an explicit
+  machine or existing trusted selector, runs the new-machine dialog
   for `--new`, writes the manifest and the selector, syncs, hands off to
   Chezmoi once, and reports its configuration and tool installation together.
   A second user-only pass runs only for explicit Nimbus-owned declarations.

@@ -42,12 +42,15 @@ configuration and invokes Mise to install its declared runtimes and tools.
 Standalone use requires Mise already installed; normal diff, apply, edit, and
 update operations remain direct Chezmoi commands.
 
-Fresh installation asks for sudo, selects the machine as soon as the engine
-is ready, then asks once after showing the workstation plan. Optional
-1Password SSH integration is off for fresh init. To opt in explicitly:
+Fresh installation asks for sudo and shows the complete workstation plan
+before applying it without a confirmation. Pass `--machine ID` (`desktop`,
+`laptop`, or `vm`) on first installation; reruns can reuse the existing selector.
+`--new ID` explicitly opens the new-machine dialogue. Chezmoi may ask for
+input. Optional 1Password SSH integration is off for fresh init. For a VM with
+that integration explicitly enabled:
 
 ~~~sh
-curl -fsSL https://raw.githubusercontent.com/Furyfree/nimbus/main/install.sh | bash -s -- --onepassword-ssh
+curl -fsSL https://raw.githubusercontent.com/Furyfree/nimbus/main/install.sh | bash -s -- --machine vm --onepassword-ssh
 ~~~
 
 The installer prints its private log directory and elapsed time. Logs live

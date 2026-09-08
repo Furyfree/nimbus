@@ -927,13 +927,14 @@ file, import the key, and install the verified local RPM and its dependencies
 through DNF with `-y`. Git, GPG, system Python 3, and the engine are bootstrap
 prerequisites; their displayed commands need no separate yes prompt. The
 normal-user shell supervises a bounded sudo keepalive through init and stops it
-on exit. The engine's searchable machine picker is the only interactive
-machine-selection step; the shell never asks for a free-text machine ID.
-Explicit `--machine` or `--new` selects directly. Machine/profile dialogues
-remain after the minimal engine prerequisites and before the plan. The
-engine then shows the workstation plan and asks once before installing its
-resources. Existing bootstrap files must match exactly; foreign files and
-symlinks are left untouched. The source is restricted to `nimbus`.
+on exit. Init uses explicit `--machine ID` or reuses an existing trusted
+selector. Missing selection fails with the available IDs instead of opening a
+picker or guessing from hardware. Explicit `--new ID` opens the machine/profile
+dialogue after the minimal engine prerequisites. The engine shows the complete
+workstation plan and applies it without a confirmation. Sudo authentication
+and Chezmoi may still ask for input. Existing bootstrap files must match
+exactly; foreign files and symlinks are left untouched. The source is
+restricted to `nimbus`.
 
 The bootstrap key and repository remain for native DNF updates. Temporary
 downloads and the isolated verification keyring are removed on success or
@@ -941,11 +942,12 @@ failure. A failed DNF transaction leaves any completed source preparation in
 place for inspection and retry. With the engine present, bootstrap runs:
 
 ~~~text
-nimbus init --checkout ~/.local/share/nimbus
+nimbus init --checkout ~/.local/share/nimbus --machine vm
 ~~~
 
 Neither installation script installs Chezmoi, applies workstation resources,
-or duplicates Nimbus planning. The reviewed first Nimbus sync installs
+or duplicates Nimbus planning. The explicit init request authorizes its first
+Nimbus sync, which installs
 Chezmoi when desired, after which init initializes it if needed and applies
 its local source. Git and repository resources installed during bootstrap may be
 adopted when they belong to desired state. The running Nimbus engine remains a
@@ -971,10 +973,10 @@ nimbus init:
    Git origin, which becomes the selector's approved origin
 2. reads the hardware: the DMI product and board names, the chassis kind,
    and the display adapters by PCI vendor and device
-3. asks which machine this is, listing the tracked manifests with the one
-   whose declared `hardware` appears in the DMI names pre-selected, plus
-   "new"; `--machine ID` answers without the menu, and an existing selector
-   for the same checkout is reused
+3. selects `--machine ID`, or reuses the existing selector for the same
+   checkout and origin; missing selection stops with the available machine
+   IDs before selector writes or system mutation, without a picker or a
+   hardware-based guess
 4. for a new machine, given as `--new ID`, asks for its profiles, its
    components with the ones the hardware detection rules propose
    pre-selected, and its dotfiles repository, defaulting to the one every
@@ -982,11 +984,13 @@ nimbus init:
    last question and are rejected without `--new`; it then writes
    `machines/<id>.toml` with the DMI product as `hardware` and leaves the Git
    change to the user
-5. writes ~/.config/nimbus/config.toml; replacing an existing checkout or
-   approved origin requires a separate trust confirmation with an explicit
-   yes, even with `-y`
-6. runs `nimbus sync` for the machine, which shows the plan and asks once;
-   `-y` answers yes
+5. writes ~/.config/nimbus/config.toml; an existing checkout or approved
+   origin mismatch stops without prompting or changing the selector. Use the
+   existing trusted checkout, or inspect the new checkout and explicitly edit
+   the selector's checkout and origin before retrying
+6. runs the first sync for the machine, showing the complete plan and applying
+   it without confirmation. `-y` remains accepted for compatibility; ordinary
+   `nimbus sync` still asks once unless its own `-y` or `--json` is supplied
 7. initializes Chezmoi when the manifest names a dotfiles repository and
    no source is initialized yet, then runs `chezmoi apply`; an existing
    source is applied locally without fetching or forcing overwrites, after
@@ -1000,7 +1004,7 @@ nimbus init:
 
 The new manifest is validated before writing. Init holds the operation lock
 from the manifest and selector writes through its final stage. Platform checks
-precede every mutation. Definitions are reloaded after approval and between
+precede every mutation. Definitions are reloaded before execution and between
 execution passes; changed selection or definitions require a new run. Selection
 edits carry the reviewed plan digest into sync. EOF without an answer is never
 approval.
@@ -1229,6 +1233,8 @@ Nimbus installs a separate minimal system-owned recovery session under /usr.
 It uses an explicit system configuration, opens a terminal, provides minimal
 recovery bindings, and does not depend on user dotfiles. It works before and
 after Chezmoi apply and is removed with its owning component.
+It reuses Ghostty with user configuration and shell integration disabled;
+the desktop component removes Foot, Kitty, and nwg-panel.
 
 The typed `[recovery]` integration fixes its two paths: the compositor
 configuration at `/usr/local/lib/nimbus/recovery/hyprland.lua` and its session
@@ -1254,6 +1260,15 @@ Memory pressure and limits, logging, storage maintenance, laptop power,
 container defaults, and justified gaming or hardware settings follow this
 rule. Candidate settings do not imply universal overrides or approved numeric
 values. Doctor reports effective state and owned drift without changing it.
+
+The `hyprland-noctalia` desktop uses the packaged Hyprland UWSM session as the
+Noctalia Greeter default. UWSM owns the compositor's user-service lifecycle and
+its binding to `graphical-session.target`, including cleanup after exit or
+failure. Nimbus declares the native session package and greeter selection;
+it never weakens portal unit dependencies or adds a competing session target.
+The system-owned recovery session stays independent. Doctor inspects the
+managed compositor and graphical target read-only; no managed login is unknown,
+and an active managed compositor without its target is a failed check.
 
 ## Manual tasks and runtime commands
 

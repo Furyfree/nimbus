@@ -88,9 +88,11 @@ func SystemResources(src facts.Source, r *defs.Resolved, applied *state.Applied,
 		add("default-target", "default-target", "default boot target: "+have, have == r.DefaultTarget, err)
 	}
 	for _, profile := range r.Profiles {
-		if profile == "common" {
+		switch profile {
+		case "common":
 			checks = append(checks, workstationDefaults(src)...)
-			break
+		case "hyprland-noctalia":
+			checks = append(checks, graphicalSession(src))
 		}
 	}
 	return checks
@@ -122,4 +124,33 @@ func workstationDefaults(src facts.Source) []Check {
 		checks = append(checks, c)
 	}
 	return checks
+}
+
+// An installed greeter alone does not activate the user's portal session.
+func graphicalSession(src facts.Source) Check {
+	c := Check{ID: "graphical-session", Status: Unknown,
+		Remediation: "log in through Hyprland (uwsm-managed), then run doctor again; inspect systemctl --user status wayland-wm@hyprland.desktop.service graphical-session.target if startup fails"}
+	out, err := src.Run("systemctl", "--user", "show", "--property=ActiveState", "--value", "--", "wayland-wm@hyprland.desktop.service", "graphical-session.target")
+	if err != nil {
+		c.Observation = "cannot inspect the user graphical session: " + err.Error()
+		return c
+	}
+	states := strings.Fields(string(out))
+	if len(states) != 2 {
+		c.Observation = "user session inspection returned incomplete state"
+		return c
+	}
+	c.Observation = fmt.Sprintf("Hyprland UWSM service: %s; graphical-session.target: %s", states[0], states[1])
+	if states[0] != "active" {
+		c.Observation += "; a managed desktop session is not active"
+		return c
+	}
+	if states[1] != "active" {
+		c.Status = Fail
+		c.Impact = "desktop portals require the graphical session target"
+		return c
+	}
+	c.Status = Pass
+	c.Remediation = ""
+	return c
 }

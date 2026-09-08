@@ -7,5 +7,6 @@ vt = 1
 source_profile = false
 
 [default_session]
-command = "/usr/bin/noctalia-greeter-session"
+# Use the packaged UWSM session; recovery remains a separate picker entry.
+command = "/usr/bin/noctalia-greeter-session -- --session 'Hyprland (uwsm-managed)'"
 user = "greetd"

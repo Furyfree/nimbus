@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# curl -fsSL https://raw.githubusercontent.com/Furyfree/nimbus/main/install.sh | bash
+# curl -fsSL https://raw.githubusercontent.com/Furyfree/nimbus/main/install.sh | bash -s -- --machine vm
 # The entry point also supplies the checked-out bootstrap shell helpers.
 set -euo pipefail
 installer_log_ready=false
@@ -32,6 +32,7 @@ installer_arguments() {
       -y|--yes) ;;
       -h|--help)
         printf '%s\n' 'Usage: install.sh [--machine ID | --new ID] [--dotfiles URL | --no-dotfiles] [--onepassword-ssh] [-y]'
+        printf '%s\n' 'First installation requires --machine ID or --new ID; reruns reuse the trusted selector.' 'Init shows and applies its plan without confirmation; --new opens a dialogue.' 'Sudo and Chezmoi may ask for input. --yes is accepted for compatibility.'
         exit 0;;
       *) fail "unsupported installer argument: ${arg}";;
     esac

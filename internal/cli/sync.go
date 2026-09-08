@@ -85,20 +85,15 @@ var (
 		return func() { close(done); <-stopped }, nil
 	}
 	// approver reads the interactive answer. Tests replace it.
-	approver = func(in io.Reader, out io.Writer, context string) bool {
-		trust := context == "selector trust"
-		if trust {
-			fmt.Fprint(out, "Approve this trust change? [y/N] ")
-		} else {
-			fmt.Fprint(out, "Proceed? [Y/n] ")
-		}
+	approver = func(in io.Reader, out io.Writer, _ string) bool {
+		fmt.Fprint(out, "Proceed? [Y/n] ")
 		reader := bufio.NewReader(in)
 		line, err := reader.ReadString('\n')
 		if err != nil && !(errors.Is(err, io.EOF) && strings.TrimSpace(line) != "") {
 			return false
 		}
 		answer := strings.TrimSpace(strings.ToLower(line))
-		return (!trust && answer == "") || answer == "y" || answer == "yes"
+		return (answer == "") || answer == "y" || answer == "yes"
 	}
 )
 
