@@ -1,3 +1,4 @@
 {
-  "selinux-enabled": true
+  "selinux-enabled": true,
+  "log-driver": "local"
 }

@@ -61,6 +61,9 @@ func user(src Source) (User, error) {
 		return User{}, err
 	}
 	u := User{Home: home, Crates: []string{}}
+	if name, err := src.Run("id", "-un"); err == nil {
+		u.Name = strings.TrimSpace(string(name))
+	}
 	cargo := filepath.Join(home, ".cargo", "bin", "cargo")
 	if names, err := src.ReadDir(filepath.Dir(cargo)); err != nil || !contains(names, "cargo") {
 		return u, nil

@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Hyprland (Nimbus recovery)
+Comment=Minimal Hyprland session with a bare terminal and no user configuration
+Exec=/usr/bin/start-hyprland -- --config /usr/local/lib/nimbus/recovery/hyprland.lua
+Type=Application
+DesktopNames=Hyprland

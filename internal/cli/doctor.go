@@ -11,6 +11,7 @@ import (
 	"github.com/Furyfree/nimbus/internal/doctor"
 	"github.com/Furyfree/nimbus/internal/facts"
 	"github.com/Furyfree/nimbus/internal/selector"
+	"github.com/Furyfree/nimbus/internal/state"
 )
 
 // newSource builds the inspector's source. Tests replace it with recorded
@@ -25,7 +26,7 @@ type doctorResult struct {
 }
 
 func newDoctor(opts *options) *cobra.Command {
-	var checkout string
+	var checkout, machine string
 	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Check the host and the selected checkout; report, never repair",
@@ -35,17 +36,19 @@ impact and remediation. It never repairs, never invokes sudo, and never uses
 the network.`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDoctor(cmd, opts, checkout)
+			return runDoctor(cmd, opts, checkout, machine)
 		},
 	}
 	cmd.Flags().StringVar(&checkout, "checkout", "", "checkout to inspect instead of the selector's")
+	cmd.Flags().StringVar(&machine, "machine", "", "machine whose system resources to inspect")
 	return cmd
 }
 
-func runDoctor(cmd *cobra.Command, opts *options, override string) error {
+func runDoctor(cmd *cobra.Command, opts *options, override, machine string) error {
 	cfg := doctor.Config{CheckoutOverride: override != ""}
 	root := ""
 	var sel *selector.Selector
+	var resolved *definitions.Resolved
 	if override != "" {
 		r, err := canonical(override)
 		if err != nil {
@@ -87,17 +90,41 @@ func runDoctor(cmd *cobra.Command, opts *options, override string) error {
 			cfg.SupportedReleases = c.Root_.Compatibility.Fedora
 		}
 		// The Chezmoi check needs the selected machine's profiles.
-		if c != nil && len(errs) == 0 && sel != nil {
-			if m, ok := c.Machines[sel.Machine]; ok {
-				if r, rerrs := definitions.Resolve(c, sel.Machine); len(rerrs) == 0 {
-					cfg.Machine, cfg.Profiles, cfg.Dotfiles = sel.Machine, r.Profiles, m.Dotfiles != nil
+		if machine == "" && sel != nil {
+			machine = sel.Machine
+		}
+		if c != nil && len(errs) == 0 && machine != "" {
+			if m, ok := c.Machines[machine]; ok {
+				if r, rerrs := definitions.Resolve(c, machine); len(rerrs) == 0 {
+					cfg.Machine, cfg.Profiles, cfg.Dotfiles = machine, r.Profiles, m.Dotfiles != nil
+					resolved = r
 				}
+			} else {
+				return usageError{fmt.Errorf("unknown machine %q", machine)}
 			}
 		}
 	}
 
-	f := facts.Inspect(newSource(), root)
+	src := newSource()
+	f := facts.Inspect(src, root)
 	report := doctor.Run(f, cfg)
+	if resolved != nil && (len(resolved.Files) > 0 || len(resolved.Services) > 0 || len(resolved.Groups) > 0 || resolved.DefaultTarget != "") {
+		applied, err := state.Read(stateRoot)
+		checks := []doctor.Check{}
+		if err != nil {
+			checks = append(checks, doctor.Check{ID: "system-resources", Status: doctor.Unknown, Observation: "cannot read ownership receipts: " + err.Error()})
+		} else {
+			checks = doctor.SystemResources(src, resolved, applied, f.User.Value.Name)
+		}
+		for _, check := range checks {
+			report.Checks = append(report.Checks, check)
+			if check.Status == doctor.Fail {
+				report.Failed++
+			} else if check.Status == doctor.Unknown {
+				report.Unknown++
+			}
+		}
+	}
 	result := doctorResult{Platform: f.Platform, Checks: report.Checks, Failed: report.Failed, Unknown: report.Unknown}
 	out := cmd.OutOrStdout()
 	if opts.json {

@@ -14,3 +14,8 @@ removes = []
 
 [detect]
 chassis = "laptop"
+
+[[services]]
+unit = "power-profiles-daemon.service"
+enabled = true
+running = true

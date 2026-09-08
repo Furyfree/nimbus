@@ -73,6 +73,7 @@ func TestBootstrapCOPR(t *testing.T) {
 			write("bin/dnf5", `#!/usr/bin/env bash
 printf 'download %s\n' "$*" >> "$TRACE"
 if [ "$FAILURE" = download ]; then echo 'download failed' >&2; exit 1; fi
+[ "$1" = -y ] || { echo 'download would prompt for confirmation' >&2; exit 1; }
 for arg in "$@"; do
   case "$arg" in --destdir=*) printf fixture > "${arg#--destdir=}/nimbus.rpm";; esac
 done

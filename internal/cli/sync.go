@@ -146,6 +146,8 @@ type syncResult struct {
 	Executed    []string        `json:"executed"`
 	Differences []string        `json:"differences"`
 	Upgraded    bool            `json:"upgraded"`
+	Reboot      bool            `json:"reboot_required,omitempty"`
+	Logout      bool            `json:"logout_required,omitempty"`
 	Failed      string          `json:"failed,omitempty"`
 	Error       string          `json:"error,omitempty"`
 	Steps       []runStep       `json:"steps"`
@@ -202,6 +204,12 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 				}
 			} else {
 				renderRunSummary(out, "sync", result.Steps)
+				if result.Reboot {
+					fmt.Fprintln(out, "Reboot required to use the configured boot target or greeter.")
+				}
+				if result.Logout {
+					fmt.Fprintln(out, "Log out and log in again to use changed group memberships.")
+				}
 				if len(result.Differences) > 0 {
 					fmt.Fprintln(out, "differences from the plan:")
 					for _, d := range result.Differences {
@@ -410,6 +418,8 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 		}
 		if len(prep) > 0 {
 			r := apply.Run(&plan.Plan{Machine: p.Machine, Definitions: p.Definitions, Checkout: p.Checkout, Complete: true, Digest: p.Digest, Operations: prep}, options(p))
+			result.Reboot = result.Reboot || r.Reboot
+			result.Logout = result.Logout || r.Logout
 			result.Executed = append(result.Executed, r.Executed...)
 			result.Differences = append(result.Differences, r.Differences...)
 			result.Failures = append(result.Failures, r.Failures...)
@@ -442,6 +452,8 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			}
 		}
 		r := apply.Run(executable, options(p))
+		result.Reboot = result.Reboot || r.Reboot
+		result.Logout = result.Logout || r.Logout
 		result.Executed = append(result.Executed, r.Executed...)
 		result.Differences = append(result.Differences, r.Differences...)
 		result.Failures = append(result.Failures, r.Failures...)
@@ -533,7 +545,7 @@ func sourceOperations(p *plan.Plan) []plan.Operation {
 	for _, op := range p.Operations {
 		switch op.Kind {
 		case plan.KindDNFConfig, plan.KindRepository, plan.KindFlatpakRemote:
-			if op.After == "" && op.Blocked == "" && op.Action != plan.ActionKeep {
+			if op.After == "" && op.Blocked == "" && op.Action != plan.ActionKeep && op.Action != plan.ActionRemove && op.Action != plan.ActionRetire {
 				ops = append(ops, op)
 			}
 		}

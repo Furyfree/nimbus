@@ -62,6 +62,8 @@ type Failure struct {
 // Result preserves completed work and every failure. Independent user tools
 // continue after a failure; a system operation failure stops the run.
 type Result struct {
+	Reboot   bool      `json:"reboot,omitempty"`
+	Logout   bool      `json:"logout,omitempty"`
 	Failures []Failure `json:"failures,omitempty"`
 	Executed []string  `json:"executed"`
 	Pending  []string  `json:"pending"`
@@ -93,6 +95,7 @@ func Run(p *plan.Plan, opts Options) *Result {
 		r.Error = err.Error()
 		return r
 	}
+	var deferredFileRemovals []string
 	for _, op := range p.Operations {
 		if op.After != "" {
 			r.Pending = append(r.Pending, op.ID)
@@ -116,6 +119,14 @@ func Run(p *plan.Plan, opts Options) *Result {
 			}
 			return r
 		}
+		for _, receipt := range receipts {
+			r.Reboot = r.Reboot || receipt.Reboot
+			r.Logout = r.Logout || receipt.Logout
+		}
+		if op.Kind == plan.KindFile && op.Action == plan.ActionRemove && op.File != nil && len(op.File.Triggers) > 0 {
+			deferredFileRemovals = append(deferredFileRemovals, remove...)
+			remove = nil
+		}
 		st := &state.Stage{Schema: state.Schema, PlanDigest: p.Digest, Receipts: receipts, Remove: remove, Time: ex.opts.Now().UTC()}
 		if ex.opts.FirstApply && !ex.baselineDone {
 			st.Baseline = &state.Baseline{Schema: state.BaselineSchema, Recorded: st.Time, Packages: ex.baseline()}
@@ -124,12 +135,24 @@ func Run(p *plan.Plan, opts Options) *Result {
 		if len(receipts) > 0 || len(remove) > 0 || st.Baseline != nil {
 			if err := ex.opts.Record(p.Digest, st); err != nil {
 				r.Failed = op.ID
-				r.Error = "record receipt: " + err.Error()
+				r.Error = "operation applied and verified, but its receipt was not recorded: " + err.Error()
+				fmt.Fprintf(ex.opts.Out, "   %s; inspect the live resource and restore its reviewed previous state before retrying.\n", r.Error)
 				r.Failures = append(r.Failures, Failure{ID: op.ID, Error: r.Error})
 				return r
 			}
 		}
 		r.Executed = append(r.Executed, op.ID)
+	}
+	if len(deferredFileRemovals) > 0 {
+		if err := ex.opts.Record(p.Digest, &state.Stage{Schema: state.Schema, PlanDigest: p.Digest, Remove: deferredFileRemovals, Time: ex.opts.Now().UTC()}); err != nil {
+			r.Failed = deferredFileRemovals[0]
+			r.Executed = slices.DeleteFunc(r.Executed, func(id string) bool { return slices.Contains(deferredFileRemovals, id) })
+			r.Error = "file retirement was applied but not recorded; inspect the live resource and restore its reviewed previous state before retrying: " + err.Error()
+			for _, id := range deferredFileRemovals {
+				r.Failures = append(r.Failures, Failure{ID: id, Error: r.Error})
+			}
+			fmt.Fprintf(ex.opts.Out, "   %s\n", r.Error)
+		}
 	}
 	return r
 }
@@ -194,6 +217,10 @@ func (ex *executor) receipt(op plan.Operation, provider, previous, intended, ver
 
 func (ex *executor) execute(op plan.Operation) (receipts []state.Receipt, remove []string, err error) {
 	switch {
+	case (op.Kind == plan.KindRepository || op.Kind == plan.KindFlatpakRemote) && (op.Action == plan.ActionRemove || op.Action == plan.ActionRetire):
+		return ex.sourceRetirement(op)
+	case op.Kind == plan.KindFile || op.Kind == plan.KindService || op.Kind == plan.KindGroup || op.Kind == plan.KindTarget || op.Kind == plan.KindTrigger:
+		return ex.systemResource(op)
 	case op.Kind == plan.KindUser:
 		return nil, nil, ex.userTool(op)
 	case op.Kind == plan.KindDNFConfig:
@@ -374,7 +401,9 @@ func (ex *executor) repository(op plan.Operation) ([]state.Receipt, []string, er
 		}
 		return nil, nil, fmt.Errorf("verification: repository %s is not as declared after the operation: %s", id, reason)
 	}
-	return []state.Receipt{ex.receipt(op, "repository", "absent", "enabled with key "+definitions.NormalizeFingerprint(r.Key), "repository enabled, signature checking on, local key fingerprint and priority as declared")}, nil, nil
+	receipt := ex.receipt(op, "repository", "absent", "enabled with key "+definitions.NormalizeFingerprint(r.Key), "repository enabled, signature checking on, local key fingerprint and priority as declared")
+	recordSourceOwnership(&receipt, op, plan.DNFRepoIDs(id, r), f)
+	return []state.Receipt{receipt}, nil, nil
 }
 
 func (ex *executor) enableBaseURL(id string, r definitions.Repository, op plan.Operation) error {
@@ -558,7 +587,9 @@ func (ex *executor) flatpakRemote(op plan.Operation) ([]state.Receipt, []string,
 			if url == "" || strings.TrimSuffix(remote.URL, "/") != strings.TrimSuffix(url, "/") {
 				return nil, nil, fmt.Errorf("verification: remote %s URL differs from the verified remote definition", id)
 			}
-			return []state.Receipt{ex.receipt(op, "flatpak-remote", "absent", "present with key "+definitions.NormalizeFingerprint(r.Key), "remote URL, signature checking and installed key match")}, nil, nil
+			receipt := ex.receipt(op, "flatpak-remote", "absent", "present with key "+definitions.NormalizeFingerprint(r.Key), "remote URL, signature checking and installed key match")
+			recordSourceOwnership(&receipt, op, []string{id}, f)
+			return []state.Receipt{receipt}, nil, nil
 		}
 	}
 	return nil, nil, fmt.Errorf("verification: remote %s is not present after the operation", id)

@@ -10,12 +10,18 @@ import (
 	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/facts"
 	"github.com/Furyfree/nimbus/internal/plan"
+	"github.com/Furyfree/nimbus/internal/state"
 )
 
 // fixtureSource replays a healthy Fedora 44 host whose checkout is the
 // repository itself.
 func fixtureSource(t *testing.T, root string) *facts.FakeSource {
 	t.Helper()
+	if stateRoot == state.Root {
+		saved := stateRoot
+		stateRoot = filepath.Join(t.TempDir(), "state")
+		t.Cleanup(func() { stateRoot = saved })
+	}
 	repoDir := filepath.Join("..", "facts", "testdata", "fedora44")
 	read := func(name string) []byte {
 		data, err := os.ReadFile(filepath.Join(repoDir, name))
@@ -55,6 +61,24 @@ func fixtureSource(t *testing.T, root string) *facts.FakeSource {
 	}
 	for _, name := range facts.RequiredCommands {
 		src.Paths[name] = "/usr/bin/" + name
+	}
+	// This baseline predates system-resource ownership. Record native facts
+	// explicitly so package/selection tests can reach their intended boundary.
+	src.Dirs["/"] = []string{"etc", "usr", "var"}
+	src.Dirs["/etc"] = []string{"systemd", "yum.repos.d"}
+	src.Dirs["/etc/systemd"] = []string{"system"}
+	src.Dirs["/etc/systemd/system"] = []string{}
+	src.Dirs["/usr"] = []string{}
+	src.Dirs["/var"] = []string{"lib"}
+	src.Dirs["/var/lib"] = []string{}
+	for _, path := range []string{"/etc", "/etc/systemd", "/etc/systemd/system", "/usr", "/var", "/var/lib"} {
+		src.Commands[facts.Key("stat", "--format=%F|%U|%G|%a|%h", "--", path)] = []byte("directory|root|root|755|1\n")
+	}
+	src.Commands[facts.Key("id", "-un")] = []byte("test\n")
+	src.Commands[facts.Key("id", "-nG", "--", "test")] = []byte("test wheel\n")
+	src.Commands[facts.Key("systemctl", "get-default")] = []byte("multi-user.target\n")
+	for _, unit := range []string{"greetd.service", "bluetooth.service", "avahi-daemon.service", "cups.socket", "cups.path", "docker.service", "containerd.service", "tailscaled.service", "power-profiles-daemon.service"} {
+		src.Commands[facts.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", unit)] = []byte("LoadState=loaded\nUnitFileState=disabled\nActiveState=inactive\n")
 	}
 	return src
 }

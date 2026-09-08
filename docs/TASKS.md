@@ -1,10 +1,171 @@
 # Nimbus tasks
 
-## Current phase: Bootstrap, initialization, and Chezmoi handoff
+## Current phase: 6. System resources and desktop recovery
+
+Plan: [System resources and desktop recovery](ROADMAP.md#6-system-resources-and-desktop-recovery).
+Phase 6 implementation is prepared for review on
+`feat/phase6-system-integration`. The owner completed the first candidate
+installation on the clean VM and confirmed reboot through Noctalia into
+Hyprland. The 0.2.0 release is authorized; its signed package trial and the
+remaining recovery/portal drills are separate, uncompleted gates.
+Phase 5 is complete; its prompt improvements are included below.
+
+### First milestone: login and recovery
+
+- [x] Inspect the VM's boot target, greetd unit/configuration, greeter launch
+  command, session entries, portals, and journal. The new candidate boots
+  successfully; the earlier installation's exact failure remains unproven.
+- [x] Resolve the packaged greeter launch contract, exact recovery-file
+  integration, and ownership rules. [Research](PHASE6-RESEARCH.md) records the
+  package evidence and retained defaults; console restoration needs the VM.
+- [x] Extend strict definitions, facts, plans, apply, verification, and receipts
+  for the required system units, memberships, files, and fixed-argv triggers.
+  Preserve existing memberships and reject unknown or foreign removal.
+- [ ] Test a system-owned recovery session independent of Chezmoi and a manual
+  TTY restoration route. Normal graphical login has already been enabled;
+  independent recovery remains a release follow-up risk.
+- [x] Declare greetd/Noctalia activation, session discovery, portal selection,
+  and required memberships through the normal resource lifecycle. Show any
+  boot-target or display-manager change; preserve foreign configuration.
+- [x] Extend doctor for the new resources, including actionable explanations
+  of missing activation, effective configuration, and owned drift.
+- [ ] Pass reboot to greeter, normal login, logout/relogin, file-picker and
+  screen-sharing portals, and recovery with absent/broken user configuration.
+- [ ] Prove second-sync convergence, failed-activation recovery, and component
+  removal without losing console access. Run focused provider tests and
+  `just check`; record the actual graphical VM evidence before proceeding.
+
+### Installer prompt polish carried from Phase 5
+
+- [x] Make the already-key-verified isolated DNF engine download noninteractive.
+  Preserve the workstation-plan and selector-trust approvals.
+- [x] Keep the engine's searchable machine picker as the single selection
+  step before the plan. The VM trial showed the shell's free-text ID prompt
+  was redundant; remove it. Preserve explicit selection flags and use
+  `git-core` for initial transport instead of the full Git package.
+- [ ] Verify the actual source of the reported extra prompt and the final
+  prompt count/order on a clean VM; local tests do not prove native UX.
+
+### Remaining Phase 6 work
+
+- [x] Implement remaining service/group/file ownership, repository/remote
+  retirement, system Flatpak lifecycle, and trigger verification/deduplication.
+- [x] Deliver `nimbus files accept /etc/PATH` with reverse diff, approval,
+  proven ownership, changed-input refusal, and atomic source replacement;
+  verify that the live target is untouched and no Git commands run.
+- [x] Evaluate the [workstation-default candidates](ROADMAP.md#workstation-defaults)
+  against Fedora's shipped defaults. Record each retained default, accepted
+  override, or deferred candidate with its reason and machine scope.
+- [x] Declare Docker's native rotating `local` log driver through the managed
+  file lifecycle and planned restart; retain other defaults pending evidence.
+- [ ] Verify effective defaults, Docker's running logging policy and a new
+  container, and selected laptop services on matching hardware. Prove removal
+  and recovery on the VM before closing the phase.
+
+### Unpublished candidate and validation
+
+- [x] Replace destructive `vm-push` with `just vm-stage`: isolated source
+  snapshot, candidate binary/checksum, fresh private destination, and no
+  stable binary, checkout, selector, or COPR replacement.
+- [x] Use Claude Code `claude-fable-5-1` for recovery-file writing and scoped
+  validation alongside native subagents and primary review.
+- [x] Complete the full Fable review, integrate findings, and pass the final
+  `just check` gate plus local candidate build/validation.
+- [x] Stage the candidate and complete its first installation after owner
+  authorization; follow [the candidate guide](../tools/vm/README.md).
+- [ ] Complete the graphical and ownership-recovery drills. A direct binary drill
+  does not validate RPM distribution. A separate beta COPR can test that
+  later without altering stable publication.
+
+Local validation uses Go 1.26.7: `just check`, resource/CLI race tests, and a
+static candidate build that validates desktop, laptop, and VM definitions.
+Fable's full review produced five findings, all addressed and covered by
+focused checks: unrelated Docker restarts, missing-unit retirement, partial
+file-write diagnostics, deferred-receipt failure reporting, and the internal
+helper's displayed arguments. Further regressions cover activation after
+`files accept`, retry after a newly associated trigger fails, and greeter
+removal that retains runtime data without rerunning its creation trigger.
+
+Native package inspection and Lua syntax checks support the recovery session;
+the generic desktop-file validator rejects its session-specific `DesktopNames`
+key. Only the graphical VM drill can establish session discovery and login.
+
+### Candidate installation, 2026-09-08: before reboot
+
+The owner ran the unpublished candidate based on `e3298e5efc3f` in the clean
+Fedora 44 VM. Its binary SHA-256 is
+`5977076cd408474f8a87c885498758986a759b0a8cb4833a8cf8ef46cc1fe7e4`;
+definition digest is
+`sha256:61210719235d4fa7c0ece12a8ebc64711af483091e88887113314c3845864494`.
+The launcher completed with status 0 in 7m56s, including operator input:
+selection 22.637s, system installation 6m23.124s, dotfiles/tools 51.949s.
+All 20 Mise tools installed; Typst is a Terra RPM. Four Fedora mirror 404s
+recovered, and all four affected packages are installed. DNF's local-package
+OpenPGP warning concerns the RPM Fusion release RPM; Nimbus checked its pinned
+archive checksum and bundled key fingerprint before installation.
+
+Read-only status and `sync --plan --no-upgrade` report all 141 desired packages
+satisfied, 160 managed operations unchanged, no pending or blocked changes,
+no prune candidates, and no cached updates. All three Flatpaks are installed.
+The seven system files match content and metadata. Docker/containerd,
+Tailscale, Avahi, and CUPS activation pass; Docker reports the `local` log
+driver and a fresh SSH session has Docker group membership. State schema is 2.
+
+Greetd is enabled through the display-manager alias with the intended config;
+its state directory is `greetd:greetd` mode 0750 and the next boot target is
+graphical. It has not started yet, as intended before reboot. The actual
+Hyprland 0.56.2 verifier accepts both normal and recovery Lua configurations.
+Doctor passes 32 of 34 checks: Secure Boot remains disabled, and graphical
+login awaits reboot. The pre-existing failed `mcelog` unit remains separate.
+Audio and portals are installed; their session behavior remains untested.
+
+`validate`, status/list JSON, `managed`, `unmanaged`, package/resource `why`,
+`files accept --plan`, and `dotfiles diff` exit successfully. Chezmoi
+`verify --exclude=scripts` passes; its remaining diff is the rerunnable Mise
+script. Logs have a 0700 directory, 0600 files, stage timings, and closing
+setup notes. This proves pre-reboot convergence, not a second mutating sync,
+graphical login, file-capture mutation, or destructive ownership recovery.
+
+### Candidate reboot and desktop, 2026-09-08
+
+The owner confirmed successful greeter login. Read-only inspection verifies
+kernel `7.1.13-200.fc44.x86_64`, enabled/running greetd, the graphical boot
+target, and an active Hyprland Wayland session. A fresh
+`sync --plan --no-upgrade` reports 160 managed operations unchanged. Doctor
+passes 33 of 34 checks; Secure Boot is disabled. No user units have failed;
+the pre-existing `mcelog.service` failure remains separate. PipeWire and
+WirePlumber run, but audio and portal functionality still need manual tests.
+
+The first desktop use prompted to create a "Default keyring". The installed
+`gnome-keyring` package did not supply `pam_gnome_keyring.so`, although the
+packaged greetd PAM stack already references it for authentication and session
+startup. The desktop component now selects `gnome-keyring-pam`. This package
+addition has not yet been applied to the VM. The existing default keyring
+requires a separate migration/unlock check; never delete it or weaken its
+password protection to hide the prompt.
+
+- [x] Confirm reboot into Noctalia and normal Hyprland login.
+- [x] Record post-reboot native health and read-only plan convergence.
+- [ ] Test creation and automatic unlocking of the login keyring on a fresh
+  password login, then logout/relogin; inspect the existing default keyring
+  without reading or publishing its contents.
+- [ ] Verify keyring dialog colors after the Noctalia GTK integration applies.
+- [ ] Test file-picker and screen-sharing portals and actual audio playback.
+- [ ] Complete recovery-session, failed-activation/removal, file capture, and
+  second mutating-sync drills retained above.
+- [ ] Test the signed 0.2.0 COPR engine on the disposable VM.
+
+The owner authorized publication with these residual tests visible. Normal
+login success does not establish recovery-session independence or a restore
+claim. Noctalia preferences and application theme integration belong to the
+separate dotfiles repository; its root `NOCTALIA.md` records the mapping.
+
+## Phase 5 evidence
 
 Plan: [Bootstrap, initialization, and Chezmoi
 handoff](ROADMAP.md#5-bootstrap-initialization-and-chezmoi-handoff).
 Phases 1 to 4 are merged. Phase 4's checklist is in the evidence section.
+The following records retain Phase 5 implementation and validation history.
 
 ### Integration readiness
 
@@ -28,8 +189,8 @@ Phase 5's installation and failure-retry milestone passed on the Fedora VM.
 All three repositories are public and their integration PRs are merged. The
 manual `v0.1.0` release and signed COPR build passed; the verified public key
 is supplied by this checkout. The clean one-liner drill with the COPR engine
-completed. Its follow-up
-improvements below need a new clean VM drill before publication readiness.
+completed. The 0.1.1 follow-up also passed package and user-configuration
+installation on the recovered VM; graphical login remains a Phase 6 gate.
 
 ### Installation follow-up, 2026-09-07
 
@@ -44,14 +205,8 @@ improvements below need a new clean VM drill before publication readiness.
 - [x] Add private bootstrap, engine, and Mise logs, command/stage timings,
   bounded retention, and explicit secret-output exclusions.
 - [x] Complete integrated validation and the requested Fable 5.1 review.
-- [ ] Publish engine 0.1.1 or newer and the reviewed definitions, rebuild
-  COPR, and repeat the clean VM drill. The compatibility floor rejects 0.1.0.
-- [ ] Deferred: investigate the extra yes prompt reported during the 0.1.1
-  VM installation. Identify its source and remove redundant confirmations
-  while preserving the required workstation-plan approval.
-- [ ] Deferred: bring machine/profile selection into the opening interaction,
-  next to sudo authentication, instead of after lengthy prerequisite setup.
-  Verify the complete prompt order and count on a clean VM run.
+- [x] Publish engine 0.1.1 and reviewed definitions, rebuild COPR, and verify
+  the recovered VM installation. The compatibility floor rejects 0.1.0.
 
 Validation: `just check` passes in Nimbus with Go 1.26.7 and in dotfiles
 (121 tests, three existing optional skips, plus the Bash gate). Nimbus also
@@ -67,11 +222,11 @@ Claude Code's exact `claude-fable-5-1` model completed a full read-only review
 and focused follow-ups alongside primary validation; the final verdict is
 clean. Probe noise, missing native failure diagnostics, path normalization,
 early failure logging, and integration-test gaps were addressed. Strict
-refusal of symlinked log ancestors remains intentional. Draft PRs are
-published. Hosted review found an ARM-only asset selection in dotfiles,
+refusal of symlinked log ancestors remains intentional. The delivery PRs are
+merged. Hosted review found an ARM-only asset selection in dotfiles,
 PID-only shell cancellation, and protected logs consuming retention slots.
-All three findings are fixed. Dotfiles and COPR CI pass their updated heads;
-Nimbus needs CI on this follow-up commit.
+All three findings are fixed and their threads resolved. Dotfiles, Nimbus,
+and COPR CI passed the final PR heads and merged main commits.
 
 The handoff supervisor uses system Python 3 to preserve the terminal and reap
 cancelled descendants. Nine isolated regression tests pass locally and in a
@@ -79,7 +234,8 @@ Fedora 44 container, including nested cancellation, terminal input, Ctrl-Z,
 background/foreground resume, initial background launch, and successful native
 background services. Retention tests preserve 20 completed runs alongside
 active or protected directories. `just check` and ShellCheck 0.9.0 pass.
-The manual release and the next clean VM drill remain separate delivery gates.
+The manual 0.1.1 release, COPR build, and installation evidence are below;
+they do not validate graphical login or desktop recovery.
 
 The previous VM run installed all system packages and 22 Mise tools. Native
 DNF logs show three recovered mirror 404s; they did not leave those packages
@@ -87,8 +243,8 @@ missing. Observable timestamps span approximately 33 minutes, including the
 source builds, without an exact complete-run transcript. The read-only plan
 then requested two duplicate repository repairs from ChatGPT and 1Password
 RPM scriptlets. New tests cover that convergence and the next run will have
-native timing evidence. The VM remains installed; it has not been reset or
-modified for this follow-up.
+native timing evidence. This describes the earlier run, before the recovered
+VM retry recorded below.
 
 ### Initialization
 
@@ -152,9 +308,9 @@ unsafe
   the picker and prompt hooks, the handoff command, the doctor check, the
   user-scope planner and executor.
 - [x] Run `just check`.
-- [ ] Fresh-VM drill of the one-liner, owner's action: restore the
-  snapshot, run `install.sh` from a served copy of the branch, reach the
-  first sync, the Chezmoi handoff, and the user-scope steps.
+- [x] Recovered-VM public one-liner reaches system sync, the Chezmoi handoff,
+  and all selected user tools with the signed 0.1.1 COPR engine. The stale
+  checkout and manually built engine were preserved before retrying.
 
 ### Manual source release
 
@@ -165,7 +321,7 @@ unsafe
   manual publication and a separate COPR dispatch. Preserve existing releases.
 - [x] Document the operator steps and first signing-key/VM prerequisites in
   [the release guide](../tools/release/README.md).
-- [ ] Exercise the hosted workflow after merge with the first approved tag,
+- [x] Exercise the hosted workflow after merge with the first approved tag,
   inspect and publish its draft, then obtain the signed COPR build.
 
 ### Outside this repository
@@ -183,10 +339,40 @@ unsafe
   after reviewing current files and reachable Git history with Gitleaks.
 - [x] Create the COPR project, verify its real public signing key, publish the
   approved release source, and obtain a successful signed engine build.
-- [ ] Ship the verified COPR key and fingerprint, then repeat the public
+- [x] Ship the verified COPR key and fingerprint, then repeat the public
   one-liner from the restored VM without a manually supplied engine.
 
 ## Evidence
+
+### Version 0.1.1 delivery and VM installation, 2026-09-08
+
+[Nimbus 0.1.1](https://github.com/Furyfree/nimbus/releases/tag/v0.1.1) was
+published from `58ba0d215f01ca5b1242536e01a9d8939a83d6bf` after the full gate
+and vendored offline build/tests. The source archive SHA-256 is
+`ce57889bbc3ed03569d76e469b0716161727ae0eb5fa77f09f9a3dccb50c109d`.
+[COPR build 10958410](https://copr.fedorainfracloud.org/coprs/furyfree/nimbus/build/10958410/)
+passed. Its source RPM contains that archive; native signature/digest checks
+against the pinned key passed, and the packaged engine reports 0.1.1 and
+validates all three machine definitions. The RPM contains the engine and
+license notices, with no scriptlets.
+
+The recovered VM initially retained a modified Phase 4 checkout without
+bootstrap and a manually built engine on PATH. Both were moved to a private
+backup without discarding changes. The retry completed with status 0 in
+7m02s: selection 8.5s, system installation 5m23s, and dotfiles/tools 57.8s.
+All 140 desired packages, three Flatpaks, and 20 Mise tools were present.
+Typst came from Terra; no Cargo tool declarations remained. Status and the
+read-only plan reported no pending/blocked changes, repairs, or cached updates.
+All 17 mirror 404s recovered, with affected packages confirmed installed.
+Setup notes appeared at completion; the run directory was 0700 and logs 0600.
+
+Doctor passed nine of ten checks; Secure Boot was disabled in the VM.
+The pre-existing mcelog failure reports an unsupported AMD CPU and predates
+installation. The user later reported no Noctalia greeter after boot.
+Package delivery therefore passed, but graphical login and desktop recovery
+remain unverified. The last attempted SSH inspection was refused; the exact
+live greeter failure has not been diagnosed. Prompt count and timing remain
+the Phase 6 installer prompt tasks above.
 
 ### First source release and signed COPR engine, 2026-09-07
 
@@ -637,12 +823,12 @@ skips
 - Sync refreshes the user metadata cache with `dnf5 makecache`; root's
   cache is refreshed by `dnf5 install` itself. The two can differ for a
   moment, which surfaces in the differences report, never silently.
-- A repository or Flatpak remote whose last selected package leaves keeps
-  its receipt and stays enabled at its declared low priority; retiring it
-  needs the repository ownership rule Phase 6 defines, since an adopted
-  package may still take updates from it.
-- The picker is untested interactively; its model logic is small and the
-  commands accept explicit IDs without it.
+- Source retirement now requires proven native ownership and no remaining
+  consumers. Legacy receipts without that evidence block retirement; an
+  adopted package can still need the source for updates. Native removal and
+  retry behavior remain disposable-VM gates.
+- The VM installation exercised selection, but its prompt order and redundant
+  confirmation remain unresolved in the Phase 6 installer prompt tasks above.
 
 - The hosted Codex review of pull request 7 found eight problems on
   2026-09-03; seven are fixed in the third commit (pending operations so a
@@ -657,17 +843,19 @@ skips
 
 - The declared repository URLs for 1Password, Brave, VSCodium, and Terra are
   taken from the makers' documentation and the container's repository files;
-  they are exercised only when Phase 3 planning reads them.
-- User-scope steps are implemented through `[installer]` and `cargo:`
-references.
-  Services remain a later phase.
+  the installation evidence above covers the selected native sources.
+- User-scope steps support `[installer]` and `cargo:` references. The current
+  dotfiles tool configuration uses release binaries instead of Cargo builds.
+  Service integration is implemented locally; native activation and recovery
+  remain Phase 6 VM gates.
 - Definition validation checks armored key-file form; planning checks observed
   active trust and execution verifies downloaded or declared keys before import.
 - Development engine builds (`0.0.0-dev`) skip the `min_engine` comparison;
   release builds enforce it.
 
 - The current repository declarations include their key URLs or files and pins.
-  Real native reconciliation and Flatpak repair still need disposable-VM drills.
+  Native reconciliation passed the 0.1.1 VM run; adverse repair and ownership
+  retirement paths still need their own disposable-VM evidence.
 - A maker's installer script cannot be pinned to a version; Nimbus downloads
   it, shows the file's digest, and runs that file.
 - Exact DNF5 constraint and desktop-session update behavior remains deliberately
@@ -677,10 +865,10 @@ references.
 
 ## Completion rule
 
-Complete the phase only when the required installation and validation tasks
-pass, the evidence is recorded, and a disposable Fedora VM reaches applied
-user configuration and the selected user tools. Native system ownership needs
-verified receipts; user tools retain their explicit no-receipt lifecycle.
-Public repository visibility is a separate publication action.
-
-Stop before starting the services and remaining system resources phase.
+This work stops before commits, pushes, or publication. VM testing is now
+authorized; its remaining gates are recorded above. Complete
+the first Phase 6 milestone only with the graphical login and recovery evidence
+listed above; package installation alone is insufficient. Close the full phase
+after the remaining resource ownership, `files accept`, selected-default, and
+installer prompt gates pass. Native system ownership requires verified
+receipts; user tools retain their explicit no-receipt lifecycle.

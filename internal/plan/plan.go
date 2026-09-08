@@ -20,6 +20,11 @@ import (
 
 // Operation kinds, actions, and risk classes.
 const (
+	KindFile          = "system-file"
+	KindService       = "service"
+	KindGroup         = "group"
+	KindTarget        = "default-target"
+	KindTrigger       = "trigger"
 	KindDNFConfig     = "dnf-config"
 	KindUser          = "user" // a user-scope tool: installer, runtimes, crate
 	KindRepository    = "repository"
@@ -50,12 +55,15 @@ type Step struct {
 
 // Operation is one reviewed unit of the plan.
 type Operation struct {
-	ID      string   `json:"id"`
-	Kind    string   `json:"kind"`
-	Action  string   `json:"action"`
-	Risk    string   `json:"risk"`
-	Summary string   `json:"summary"`
-	Paths   []string `json:"paths,omitempty"`
+	Source   *state.SourceOwnership `json:"source,omitempty"`
+	File     *FileChange            `json:"file,omitempty"`
+	Resource *ResourceChange        `json:"resource,omitempty"`
+	ID       string                 `json:"id"`
+	Kind     string                 `json:"kind"`
+	Action   string                 `json:"action"`
+	Risk     string                 `json:"risk"`
+	Summary  string                 `json:"summary"`
+	Paths    []string               `json:"paths,omitempty"`
 	// Items are the package references a merged transaction installs, one
 	// receipt each; Paths then explains the transaction as a whole.
 	Items []string `json:"items,omitempty"`
@@ -154,10 +162,20 @@ func Build(in Inputs) (*Plan, error) {
 	}
 	p.Operations = append(p.Operations, b.dnfConfig()...)
 	p.Operations = append(p.Operations, b.repositories()...)
-	p.Operations = append(p.Operations, b.packages()...)
+	var declaredRemovals []Operation
+	for _, op := range b.packages() {
+		if op.Kind == KindPackage && op.Action == ActionRemove {
+			declaredRemovals = append(declaredRemovals, op)
+		} else {
+			p.Operations = append(p.Operations, op)
+		}
+	}
 	p.Operations = append(p.Operations, b.flatpaks()...)
 	p.Operations = append(p.Operations, b.userTools()...)
+	p.Operations = append(p.Operations, b.systemResources(p.Operations)...)
+	p.Operations = append(p.Operations, declaredRemovals...)
 	p.Operations = append(p.Operations, b.ownedRemovals()...)
+	p.Operations = append(p.Operations, b.sourceRetirements(p.Operations)...)
 	p.Prune = b.prune()
 	if in.Prune && (in.Applied == nil || in.Applied.Baseline == nil) {
 		p.PruneUnavailable = "prune needs the baseline the first sync records; run sync once first"
@@ -165,6 +183,7 @@ func Build(in Inputs) (*Plan, error) {
 	if in.Prune && len(p.Prune) > 0 {
 		p.Operations = append(p.Operations, b.pruneTransaction(p.Prune))
 	}
+	deferPackageRemovalForResources(p.Operations)
 	p.Updates = b.updates()
 	for _, op := range p.Operations {
 		if op.Blocked != "" {
@@ -254,6 +273,28 @@ func (b *builder) inspectRepo(id string, r definitions.Repository) (ready bool, 
 		}
 	}
 	if len(enabled) == 0 {
+		// An earlier retirement may have retained the native files while
+		// disabling them. Check their identity through the normal inspector
+		// before proposing an explicit enable/key reconciliation.
+		virtual := *b
+		virtual.repos = make(map[string][]facts.Repository, len(b.repos))
+		found := false
+		for host, repositories := range b.repos {
+			virtual.repos[host] = slices.Clone(repositories)
+			if slices.Contains(ids, host) {
+				for i := range virtual.repos[host] {
+					virtual.repos[host][i].Enabled = true
+					found = true
+				}
+			}
+		}
+		if found {
+			_, _, blocked := virtual.inspectRepo(id, r)
+			if blocked != "" {
+				return false, "", blocked
+			}
+			return false, "reconcile signing key: repository is disabled", ""
+		}
 		if r.Kind == "dnf" && r.ReleasePackage == "" {
 			for _, have := range b.repos[id] {
 				if have.Enabled {
@@ -517,6 +558,7 @@ func (b *builder) repositories() []Operation {
 		if op.Blocked == "" {
 			b.repoChanges = append(b.repoChanges, op.ID)
 		}
+		op.Source = b.sourceOwnership(op, DNFRepoIDs(id, r))
 		ops = append(ops, op)
 	}
 	return ops
@@ -543,7 +585,7 @@ func KeyPath(id string) string { return "/etc/pki/rpm-gpg/RPM-GPG-KEY-nimbus-" +
 func PrioritySteps(id string, r definitions.Repository) []Step {
 	var opts []string
 	for _, host := range DNFRepoIDs(id, r) {
-		opts = append(opts, host+".gpgcheck=1", host+".gpgkey=file://"+KeyPath(id))
+		opts = append(opts, host+".enabled=1", host+".gpgcheck=1", host+".gpgkey=file://"+KeyPath(id))
 		if r.Priority != nil {
 			opts = append(opts, fmt.Sprintf("%s.priority=%d", host, *r.Priority))
 		}
@@ -673,6 +715,7 @@ func (b *builder) flatpakRemote(id string, r definitions.Repository) (Operation,
 			{Description: "verify the installed remote URL, signature checking and key fingerprint"},
 		},
 	}
+	op.Source = b.sourceOwnership(op, []string{id})
 	if !b.in.Facts.Flatpak.Known() {
 		if b.in.Facts.Commands["flatpak"] == "" && b.installsPackage("flatpak") {
 			// flatpak itself arrives with this plan's install transaction;

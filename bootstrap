@@ -93,7 +93,7 @@ EOF
   say "Downloading the Nimbus engine from furyfree/nimbus for Fedora 44 x86_64."
   # Download only the engine from an isolated source configuration. Dependencies
   # are resolved by the final native DNF transaction against the host's sources.
-  installer_run dnf5 --setopt="reposdir=${work}/repos" --setopt="cachedir=${work}/cache" \
+  installer_run dnf5 -y --setopt="reposdir=${work}/repos" --setopt="cachedir=${work}/cache" \
     --setopt="nimbus-engine.gpgkey=file://${work}/key.asc" \
     download --arch=x86_64 --destdir="${work}/packages" nimbus
   shopt -s nullglob

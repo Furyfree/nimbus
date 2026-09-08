@@ -1,6 +1,5 @@
 # Docker from Docker's own Fedora repository. Shared by development and
-# windows-vm. docker.service and the group membership arrive with the
-# service and group resource types.
+# windows-vm.
 schema = 1
 id = "docker"
 
@@ -25,3 +24,18 @@ source = "etc/docker/daemon.json"
 owner = "root"
 group = "root"
 mode = "0644"
+triggers = ["docker-restart"]
+
+[[services]]
+unit = "docker.service"
+enabled = true
+running = true
+
+[[services]]
+unit = "containerd.service"
+enabled = true
+running = true
+
+[[groups]]
+name = "docker"
+user = "<user>"

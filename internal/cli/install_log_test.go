@@ -323,3 +323,22 @@ func TestInstallLogKeepsRecorderAndKeyExtractionFailuresVisible(t *testing.T) {
 		})
 	}
 }
+
+func TestSystemResourceLoggingExcludesSecretCapableProperties(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{"systemctl", []string{"show", "--property=LoadState,UnitFileState,ActiveState", "--", "greetd.service"}, true},
+		{"sudo", []string{"systemctl", "enable", "--", "greetd.service"}, true},
+		{"systemctl", []string{"show", "--property=Environment", "docker.service"}, false},
+		{"systemctl", []string{"status", "docker.service"}, false},
+		{"systemd-tmpfiles", []string{"--create", "/etc/tmpfiles.d/nimbus-noctalia-greeter.conf"}, true},
+		{"systemd-tmpfiles", []string{"--create"}, false},
+	} {
+		if got := publicInstallCommand(tc.name, tc.args); got != tc.want {
+			t.Fatalf("%s %v: %t", tc.name, tc.args, got)
+		}
+	}
+}

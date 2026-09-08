@@ -56,7 +56,7 @@ func TestRepositoryDefinitionsValidate(t *testing.T) {
 	if !contains(r.Removes, "ffmpeg-free") {
 		t.Fatalf("removes = %v", r.Removes)
 	}
-	if len(r.Files) != 1 || r.Files[0].Target != "/etc/docker/daemon.json" || r.Files[0].Source != "system/root/etc/docker/daemon.json" {
+	if len(r.Files) < 1 || r.Files[0].Target != "/etc/docker/daemon.json" || r.Files[0].Source != "system/root/etc/docker/daemon.json" {
 		t.Fatalf("files = %+v", r.Files)
 	}
 	if !contains(r.Repositories, "flathub") || !contains(r.Repositories, "hyprland-copr") {

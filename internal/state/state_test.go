@@ -83,7 +83,7 @@ func TestRecordRefusesUnboundOrUnverifiedData(t *testing.T) {
 			r.Verified = false
 			return &Stage{Schema: Schema, PlanDigest: "sha256:a", Receipts: []Receipt{r}}
 		}(), "sha256:a", "never gets a receipt"},
-		{"wrong schema", &Stage{Schema: 2, PlanDigest: "sha256:a"}, "sha256:a", "schema 2"},
+		{"wrong schema", &Stage{Schema: 3, PlanDigest: "sha256:a"}, "sha256:a", "schema 3"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -100,7 +100,7 @@ func TestRecordRefusesUnboundOrUnverifiedData(t *testing.T) {
 
 func TestReadRejectsUnsupportedSchema(t *testing.T) {
 	root := t.TempDir()
-	os.WriteFile(filepath.Join(root, SchemaFile), []byte("2\n"), 0o644)
+	os.WriteFile(filepath.Join(root, SchemaFile), []byte("3\n"), 0o644)
 	if _, err := Read(root); err == nil || !strings.Contains(err.Error(), "schema") {
 		t.Fatalf("unsupported schema accepted: %v", err)
 	}
@@ -130,5 +130,63 @@ func TestNativeIdentityStateIsVersionedAndLegacyRemainsReadable(t *testing.T) {
 		if r := got.Receipts[receipt.Resource]; r.Schema != schema || r.Package != receipt.Package {
 			t.Fatalf("receipt lost identity: %+v", r)
 		}
+	}
+}
+
+func TestLegacyStateUpgradePreservesReceiptsAndRejectsOldReader(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ReceiptsDir), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, SchemaFile), []byte("1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"schema":1,"resource":"package:dnf:foot","provider":"dnf","operation":"install","plan_digest":"old","verified":true}`
+	file := filepath.Join(root, ReceiptsDir, FileName("package:dnf:foot"))
+	if err := os.WriteFile(file, []byte(legacy), 0644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := Read(root)
+	if err != nil || !before.Receipts["package:dnf:foot"].Verified {
+		t.Fatalf("legacy read: %+v %v", before, err)
+	}
+	if err := Record(root, "approved", &Stage{Schema: Schema, PlanDigest: "approved"}); err != nil {
+		t.Fatal(err)
+	}
+	marker, err := os.ReadFile(filepath.Join(root, SchemaFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(marker)) != "2" {
+		t.Fatalf("upgraded marker = %q", marker)
+	}
+	// This is the v0.1.1 reader's exact schema acceptance condition. The
+	// marker must fail it before that engine can plan package removals.
+	legacyReaderAccepts := strings.TrimSpace(string(marker)) == "1"
+	if legacyReaderAccepts {
+		t.Fatal("package-only engine would accept system-resource state")
+	}
+	after, err := Read(root)
+	if err != nil || after.Receipts["package:dnf:foot"].Resource != "package:dnf:foot" {
+		t.Fatalf("upgraded read: %+v %v", after, err)
+	}
+	unchanged, err := os.ReadFile(file)
+	if err != nil || string(unchanged) != legacy {
+		t.Fatalf("legacy receipt changed during schema upgrade: %q %v", unchanged, err)
+	}
+}
+
+func TestRecordNeverDowngradesFutureState(t *testing.T) {
+	root := t.TempDir()
+	marker := filepath.Join(root, SchemaFile)
+	if err := os.WriteFile(marker, []byte("3\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Record(root, "approved", &Stage{Schema: Schema, PlanDigest: "approved"}); err == nil {
+		t.Fatal("future state was overwritten")
+	}
+	data, err := os.ReadFile(marker)
+	if err != nil || string(data) != "3\n" {
+		t.Fatalf("future marker changed: %q %v", data, err)
 	}
 }

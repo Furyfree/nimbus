@@ -494,9 +494,9 @@ func TestInstallerPrerequisitesDoNotAsk(t *testing.T) {
 		name, gitStatus, want string
 		python                bool
 	}{
-		{"missing Git", "1", "sudo dnf5 -y install git", true},
+		{"missing Git", "1", "sudo dnf5 -y install git-core", true},
 		{"missing Python", "0", "sudo dnf5 -y install python3", false},
-		{"missing both", "1", "sudo dnf5 -y install git python3", false},
+		{"missing both", "1", "sudo dnf5 -y install git-core python3", false},
 		{"already installed", "0", "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
