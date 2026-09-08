@@ -46,6 +46,12 @@ improvements below need a new clean VM drill before publication readiness.
 - [x] Complete integrated validation and the requested Fable 5.1 review.
 - [ ] Publish engine 0.1.1 or newer and the reviewed definitions, rebuild
   COPR, and repeat the clean VM drill. The compatibility floor rejects 0.1.0.
+- [ ] Deferred: investigate the extra yes prompt reported during the 0.1.1
+  VM installation. Identify its source and remove redundant confirmations
+  while preserving the required workstation-plan approval.
+- [ ] Deferred: bring machine/profile selection into the opening interaction,
+  next to sudo authentication, instead of after lengthy prerequisite setup.
+  Verify the complete prompt order and count on a clean VM run.
 
 Validation: `just check` passes in Nimbus with Go 1.26.7 and in dotfiles
 (121 tests, three existing optional skips, plus the Bash gate). Nimbus also
