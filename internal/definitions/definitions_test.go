@@ -141,6 +141,12 @@ func TestInvalidTrees(t *testing.T) {
 		{"same name from two repositories", func(f map[string]string) {
 			f["profiles/extra.toml"] = strings.Replace(f["profiles/extra.toml"], `packages = []`, `packages = ["terra:git"]`, 1)
 		}, "more than one repository"},
+		{"unselected profile has overlapping RPM sources", func(f map[string]string) {
+			f["profiles/unused.toml"] = "schema = 1\nid = \"unused\"\npackages = [\"git\", \"terra:git.x86_64\"]\n"
+		}, "one package has one source"},
+		{"unselected component has overlapping RPM sources", func(f map[string]string) {
+			f["components/unused.toml"] = "schema = 1\nid = \"unused\"\npackages = [\"git.x86_64\", \"terra:git\"]\n"
+		}, "one package has one source"},
 		{"exclusion matches nothing", func(f map[string]string) {
 			f["machines/one.toml"] = strings.Replace(f["machines/one.toml"], `package_exclusions = []`, `package_exclusions = ["absent"]`, 1)
 		}, "matches no selected package"},
@@ -312,6 +318,59 @@ func TestTwoDotsInsideANameAreAllowed(t *testing.T) {
 	tree["system/root/etc/example..conf"] = "x\n"
 	if errs := loadAndValidate(t, writeTree(t, tree)); len(errs) > 0 {
 		t.Fatal(errs)
+	}
+}
+
+func TestRPMSourceConflictsUseNativeRequests(t *testing.T) {
+	for _, tc := range []struct {
+		name, first, second string
+		conflict            bool
+	}{
+		{"bare and qualified", "git", "terra:git.x86_64", true},
+		{"qualified and bare", "git.x86_64", "terra:git", true},
+		{"bare and multilib", "git", "terra:git.i686", true},
+		{"same architecture", "git.x86_64", "terra:git.x86_64", true},
+		{"different architectures", "git.x86_64", "terra:git.i686", false},
+		{"same Fedora source", "git", "dnf:git.x86_64", false},
+		{"same declared source", "terra:git", "terra:git.x86_64", false},
+		{"different dotted names", "python3", "terra:python3.14", false},
+		{"qualified dotted name", "python3.14", "terra:python3.14.x86_64", true},
+		{"Cargo is not an RPM request", "cargo:demo", "terra:demo.x86_64", false},
+		{"Flatpak is not an RPM request", "flatpak:org.control.App", "terra:org.control.App.x86_64", false},
+		{"exact Cargo name still conflicts", "cargo:demo", "terra:demo", true},
+		{"exact Flatpak name still conflicts", "flatpak:org.control.App", "terra:org.control.App", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := Load(writeTree(t, baseTree()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			c.Profiles["common"].Packages = []string{tc.first}
+			c.Profiles["extra"].Packages = []string{tc.second}
+			r, resolvedErrors := Resolve(c, "one")
+			for _, errs := range []ErrorList{Validate(c), resolvedErrors} {
+				if tc.conflict {
+					requireError(t, errs, "more than one repository")
+				} else if len(errs) > 0 {
+					t.Fatalf("independent sources conflict: %s", errs.Error())
+				}
+			}
+			if !tc.conflict {
+				for _, raw := range []string{tc.first, tc.second} {
+					ref, _ := ParseRef(raw)
+					if !slices.ContainsFunc(r.Packages, func(p ResolvedPackage) bool { return p.Canonical == ref.Canonical() }) {
+						t.Fatalf("selected package %q was lost: %+v", raw, r.Packages)
+					}
+				}
+			}
+			c.Profiles["common"].Packages = []string{tc.first, tc.second}
+			c.Profiles["extra"].Packages = nil
+			if errs := Validate(c); tc.conflict {
+				requireError(t, errs, "one package has one source")
+			} else if len(errs) > 0 {
+				t.Fatalf("independent sources in one list conflict: %s", errs.Error())
+			}
+		})
 	}
 }
 

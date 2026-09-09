@@ -205,6 +205,7 @@ func (c *Checkout) FlatpakRepository() string {
 func (c *Checkout) validateRefs(where string, raws []string, errs *ErrorList) {
 	seen := map[string]bool{}
 	prefixByName := map[string]string{}
+	var sources []Ref
 	for _, raw := range raws {
 		ref, err := ParseRef(raw)
 		if err != nil {
@@ -233,6 +234,12 @@ func (c *Checkout) validateRefs(where string, raws []string, errs *ErrorList) {
 			errs.Add(where, "%q is also listed as %s:%s; one package has one source", raw, prev, ref.Name)
 		}
 		prefixByName[ref.Name] = ref.Prefix
+		for _, prev := range sources {
+			if prev.Name != ref.Name && conflictingSources(prev, ref) {
+				errs.Add(where, "%q overlaps %s; one package has one source", raw, prev.Canonical())
+			}
+		}
+		sources = append(sources, ref)
 	}
 }
 

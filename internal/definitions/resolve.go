@@ -158,6 +158,18 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 			errs.Add(where, "package %q is selected from more than one repository: %s", name, strings.Join(slices.Sorted(maps.Keys(byName[name])), ", "))
 		}
 	}
+	var sources []Ref
+	for _, key := range slices.Sorted(maps.Keys(pkgs)) {
+		p := pkgs[key]
+		ref := Ref{Prefix: p.Prefix, Name: p.Name}
+		for _, other := range sources {
+			// Equal names already have a source-conflict diagnostic above.
+			if ref.Name != other.Name && conflictingSources(other, ref) {
+				errs.Add(where, "packages %q and %q are selected from more than one repository: %s, %s", other.Name, p.Name, other.Prefix, p.Prefix)
+			}
+		}
+		sources = append(sources, ref)
+	}
 
 	// Exclusions: only a package a selected profile or component installs,
 	// never a package of a component that another selected component

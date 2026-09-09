@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/Furyfree/nimbus/internal/rpm"
 )
 
 // Ref is a parsed package reference. Prefix is "dnf" for a bare Fedora name,
@@ -15,6 +17,21 @@ type Ref struct {
 
 // Canonical is the provider-qualified identity, such as "dnf:ripgrep".
 func (r Ref) Canonical() string { return r.Prefix + ":" + r.Name }
+
+func conflictingSources(a, b Ref) bool {
+	if a.Prefix == b.Prefix {
+		return false
+	}
+	if a.Name == b.Name {
+		return true
+	}
+	if a.Prefix == PrefixFlatpak || a.Prefix == PrefixCargo || b.Prefix == PrefixFlatpak || b.Prefix == PrefixCargo {
+		return false
+	}
+	aName, aArch := rpm.SplitRequest(a.Name)
+	bName, bArch := rpm.SplitRequest(b.Name)
+	return aName == bName && (aArch == "" || bArch == "" || aArch == bArch)
+}
 
 // Reserved prefixes.
 const (
