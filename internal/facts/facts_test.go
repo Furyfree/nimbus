@@ -155,6 +155,48 @@ func TestParsersRejectMalformedOutput(t *testing.T) {
 	}
 }
 
+func TestPlatformReadsPastLongComments(t *testing.T) {
+	src := &FakeSource{
+		Files: map[string][]byte{OSReleasePath: []byte(strings.Join([]string{
+			"ID=fedora", "VERSION_ID=\"44\"", "#" + strings.Repeat("x", 70*1024), "ID=other",
+		}, "\r\n"))},
+		Commands: map[string][]byte{Key("uname", "-m"): []byte("x86_64\n")},
+	}
+	if err := CheckPlatform(src, []string{"44"}); err == nil || !strings.Contains(err.Error(), "unsupported platform other 44") {
+		t.Fatalf("platform override after long comment was ignored: %v", err)
+	}
+}
+
+func TestRepositoriesReadPastLongComments(t *testing.T) {
+	src := &FakeSource{
+		Dirs: map[string][]string{RepoDir: {"maker.repo"}},
+		Files: map[string][]byte{filepath.Join(RepoDir, "maker.repo"): []byte(strings.Join([]string{
+			"[maker]", "enabled=1", "#" + strings.Repeat("x", 70*1024), "enabled=0", "[other]", "enabled=0",
+		}, "\r\n"))},
+	}
+	repos, err := repositories(src)
+	if err != nil || len(repos) != 2 {
+		t.Fatalf("repository sections after long comment were lost: %+v, %v", repos, err)
+	}
+	if repos[0].ID != "maker" || repos[0].Enabled || repos[1].ID != "other" || repos[1].Enabled {
+		t.Fatalf("repository settings after long comment were ignored: %+v", repos)
+	}
+}
+
+func TestFlatpakTrustReadsPastLongComments(t *testing.T) {
+	src := &FakeSource{
+		Files: map[string][]byte{filepath.Join(FlatpakRepoPath, "config"): []byte(strings.Join([]string{
+			`[remote "flathub"]`, "gpg-verify=true", "#" + strings.Repeat("x", 70*1024), "gpg-verify=false",
+		}, "\r\n"))},
+		Commands: map[string][]byte{Key("gpg", KeyInspectArgs(filepath.Join(FlatpakRepoPath, "flathub.trustedkeys.gpg"))...): keyOutput(keyA)},
+	}
+	remote := FlatpakRemote{Name: "flathub"}
+	inspectRemoteTrust(src, &remote)
+	if remote.GPGVerify || remote.KeyError != "" || !slices.Equal(remote.KeyFingerprints, []string{keyA}) {
+		t.Fatalf("trust settings after long comment were ignored: %+v", remote)
+	}
+}
+
 func TestExecSourceReturnsOutputOnFailure(t *testing.T) {
 	out, err := (ExecSource{}).Run("sh", "-c", "echo inactive; exit 3")
 	if err == nil {

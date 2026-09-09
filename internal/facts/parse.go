@@ -13,9 +13,8 @@ import (
 // parseOSRelease reads the KEY=value pairs of /etc/os-release.
 func parseOSRelease(data []byte) map[string]string {
 	values := map[string]string{}
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	for line := range strings.SplitSeq(string(data), "\n") {
+		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
@@ -86,9 +85,8 @@ func normalizeReason(raw string) string {
 func parseRepoFile(file string, data []byte) []Repository {
 	var repos []Repository
 	var current *Repository
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	for line := range strings.SplitSeq(string(data), "\n") {
+		line = strings.TrimSpace(line)
 		if line == "" || line[0] == '#' || line[0] == ';' {
 			continue
 		}
