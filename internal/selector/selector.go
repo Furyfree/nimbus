@@ -238,13 +238,14 @@ func CheckoutOrigin(root string) (string, error) {
 }
 
 // ParseOriginURL extracts remote.origin.url from Git configuration text.
-// Include directives are rejected so the value is always what the file says.
+// Include directives and multiline values are not supported.
 func ParseOriginURL(data []byte) (string, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	section, subsection := "", ""
 	origin := ""
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+		raw := scanner.Text()
+		line := strings.TrimSpace(raw)
 		if line == "" || line[0] == '#' || line[0] == ';' {
 			continue
 		}
@@ -258,6 +259,9 @@ func ParseOriginURL(data []byte) (string, error) {
 				return "", fmt.Errorf("include directives are not supported; set remote.origin.url directly")
 			}
 			continue
+		}
+		if gitValueContinues(raw) {
+			return "", fmt.Errorf("Git configuration line continuations are not supported; write each value on one line")
 		}
 		if section != "remote" || subsection != "origin" {
 			continue
@@ -278,6 +282,29 @@ func ParseOriginURL(data []byte) (string, error) {
 		return "", fmt.Errorf("remote.origin.url is not set")
 	}
 	return origin, nil
+}
+
+// gitValueContinues distinguishes a continuation from an escaped backslash
+// or a backslash inside an inline comment. Only double quotes quote Git values.
+func gitValueContinues(line string) bool {
+	quoted, escaped := false, false
+	for _, char := range line {
+		if escaped {
+			escaped = false
+			continue
+		}
+		switch char {
+		case '\\':
+			escaped = true
+		case '"':
+			quoted = !quoted
+		case '#', ';':
+			if !quoted {
+				return false
+			}
+		}
+	}
+	return escaped
 }
 
 var sectionHeaderRe = regexp.MustCompile(`^\[([A-Za-z0-9.-]+)(?:[ \t]+"((?:[^"\\]|\\.)*)")?\][ \t]*(?:[#;].*)?$`)

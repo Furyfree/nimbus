@@ -356,3 +356,47 @@ func TestVerifyRejectsDottedOriginUsedByGit(t *testing.T) {
 		})
 	}
 }
+
+func TestOriginValueContinuations(t *testing.T) {
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git unavailable:", err)
+	}
+	const wantURL = "https://github.com/Furyfree/nimbus.git"
+	base := "[remote \"origin\"]\nurl=" + wantURL + "\n"
+	for _, tc := range []struct {
+		name      string
+		config    string
+		continued bool
+	}{
+		{"unrelated description", base + "[core]\ndescription=first\\\nsecond\n", true},
+		{"quoted description", base + "[core]\ndescription=\"first #;\\\nsecond\"\n", true},
+		{"origin URL", "[remote \"origin\"]\nurl=https://github.com/Furyfree/\\\nnimbus.git\n", true},
+		{"escaped backslashes", base + "[core]\ndescription=two\\\\\n", false},
+		{"quoted backslashes", base + "[core]\ndescription=\"two\\\\\"\n", false},
+		{"hash comment", base + "[core]\ndescription=text # comment \\\n", false},
+		{"semicolon comment", base + "[core]\ndescription=text ; comment \\\n", false},
+		{"quoted comment characters", base + "[core]\ndescription=\"escaped\\\" #; text\" # comment \\\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, ending := range []struct{ name, value string }{{"LF", "\n"}, {"CRLF", "\r\n"}} {
+				t.Run(ending.name, func(t *testing.T) {
+					root := gitCheckout(t, strings.ReplaceAll(tc.config, "\n", ending.value))
+					configPath := filepath.Join(root, ".git", "config")
+					out, err := exec.CommandContext(t.Context(), git, "config", "--file", configPath, "--get", "remote.origin.url").CombinedOutput()
+					if err != nil || strings.TrimSpace(string(out)) != wantURL {
+						t.Fatalf("native Git origin = %q, %v", out, err)
+					}
+					err = Verify(&Selector{Origin: "github.com/Furyfree/nimbus"}, root)
+					if tc.continued {
+						if err == nil || !strings.Contains(err.Error(), "line continuations are not supported") {
+							t.Fatalf("continued Git value was accepted: %v", err)
+						}
+					} else if err != nil {
+						t.Fatalf("ordinary backslash or comment was rejected: %v", err)
+					}
+				})
+			}
+		})
+	}
+}
