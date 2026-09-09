@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/pelletier/go-toml/v2"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
@@ -358,6 +359,30 @@ func TestProfilesAddShowsDiffAndPlanThenWrites(t *testing.T) {
 	}
 	if code, out, _ := run(t, "profiles", "add", "common", "--checkout", root, "--machine", "laptop"); code != ExitOK || !strings.Contains(out, "already says that") {
 		t.Fatalf("no-op edit: %d\n%s", code, out)
+	}
+}
+
+func TestPickerBackspaceRemovesLastRune(t *testing.T) {
+	for _, tc := range []struct {
+		name, input, want string
+	}{
+		{"empty", "", ""},
+		{"ASCII", "a", ""},
+		{"two bytes", "co\u00e5", "co"},
+		{"three bytes", "co\u754c", "co"},
+		{"four bytes", "co\U0001f600", "co"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var model tea.Model = pickerModel{items: []pickItem{{ID: "common"}}}
+			for _, r := range tc.input {
+				model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+			}
+			model, _ = model.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+			got := model.(pickerModel)
+			if got.filter != tc.want || len(got.visible()) != 1 {
+				t.Fatalf("typing %q then Backspace: filter = %q, visible = %v; want filter %q and common visible", tc.input, got.filter, got.visible(), tc.want)
+			}
+		})
 	}
 }
 
