@@ -59,9 +59,11 @@ func TestResourceDoctorRequiresDisabledNativeEnablement(t *testing.T) {
 		{"runtime enablement", "enabled-runtime", Fail, new(false)},
 		{"missing enablement", "", Fail, new(false)},
 		{"enablement not selected", "static", Pass, nil},
+		{"masked with enablement not selected", "masked", Fail, nil},
+		{"runtime mask with enablement not selected", "masked-runtime", Fail, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := &defs.Resolved{Machine: "vm", Services: []defs.ResolvedService{{ServiceDecl: defs.ServiceDecl{Unit: "demo.service", Enabled: tc.enabled}}}}
+			r := &defs.Resolved{Machine: "vm", Services: []defs.ResolvedService{{ServiceDecl: defs.ServiceDecl{Unit: "demo.service", Enabled: tc.enabled, Running: new(false)}}}}
 			src := &facts.FakeSource{Commands: map[string][]byte{
 				facts.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", "demo.service"): []byte("LoadState=loaded\nUnitFileState=" + tc.native + "\nActiveState=inactive\n"),
 			}}

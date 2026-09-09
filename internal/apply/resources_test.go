@@ -45,6 +45,80 @@ func TestServiceAdoptionRecordsOriginalState(t *testing.T) {
 	}
 }
 
+type serviceCommandSource struct {
+	*facts.FakeSource
+	before, after facts.Service
+	mutated       bool
+}
+
+func (s *serviceCommandSource) Run(name string, args ...string) ([]byte, error) {
+	if facts.Key(name, args...) == facts.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", s.before.Unit) {
+		have := s.before
+		if s.mutated {
+			have = s.after
+		}
+		return fmt.Appendf(nil, "LoadState=%s\nUnitFileState=%s\nActiveState=%s\n", have.Load, have.Enabled, have.Active), nil
+	}
+	return s.FakeSource.Run(name, args...)
+}
+
+func (s *serviceCommandSource) Stream(out, errOut io.Writer, name string, args ...string) error {
+	if err := s.FakeSource.Stream(out, errOut, name, args...); err != nil {
+		return err
+	}
+	s.mutated = true
+	return nil
+}
+
+func TestServiceVerificationRequiresSupportedNativeEnablement(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		enabled *bool
+		after   string
+		valid   bool
+	}{
+		{"disabled", new(false), "disabled", true},
+		{"still enabled", new(false), "enabled", false},
+		{"runtime enabled", new(false), "enabled-runtime", false},
+		{"static", new(false), "static", false},
+		{"masked", new(false), "masked", false},
+		{"runtime masked", new(false), "masked-runtime", false},
+		{"enabled", new(true), "enabled", true},
+		{"only runtime enabled", new(true), "enabled-runtime", false},
+		{"unmanaged static", nil, "static", true},
+		{"unmanaged masked", nil, "masked", false},
+		{"unmanaged runtime masked", nil, "masked-runtime", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := facts.Service{Unit: "demo.service", Load: "loaded", Enabled: "enabled", Active: "inactive"}
+			want := definitions.ServiceDecl{Unit: before.Unit, Enabled: tc.enabled}
+			verb := "disable"
+			if tc.enabled == nil {
+				before.Enabled = "static"
+				want.Running = new(true)
+				verb = "start"
+			} else if *tc.enabled {
+				before.Enabled = "disabled"
+				verb = "enable"
+			}
+			after := before
+			after.Enabled = tc.after
+			if want.Running != nil {
+				after.Active = "active"
+			}
+			argv := []string{"systemctl", verb, "--", before.Unit}
+			src := &serviceCommandSource{before: before, after: after, FakeSource: &facts.FakeSource{Commands: map[string][]byte{facts.Key("sudo", argv...): nil}}}
+			op := plan.Operation{ID: "service:" + before.Unit, Kind: plan.KindService, Action: plan.ActionRepair,
+				Resource: &plan.ResourceChange{Name: before.Unit, Before: encodeTest(before), After: encodeTest(want), Previous: encodeTest(before), Enabled: want.Enabled, Running: want.Running},
+				Steps:    []plan.Step{{Argv: argv, Privileged: true}}}
+			receipts, _, err := resourceExecutor(src).systemResource(op)
+			if (err == nil) != tc.valid || (len(receipts) == 1) != tc.valid || !src.mutated {
+				t.Fatalf("verification: receipts=%+v err=%v mutated=%t", receipts, err, src.mutated)
+			}
+		})
+	}
+}
+
 func TestGreeterDirectoryTriggerVerifiesTypeAndOwnership(t *testing.T) {
 	for _, observation := range []string{"symbolic link|greetd|greetd|750|1", "directory|root|root|750|2", "directory|greetd|greetd|755|2", "directory|greetd|greetd|750|2"} {
 		t.Run(observation, func(t *testing.T) {

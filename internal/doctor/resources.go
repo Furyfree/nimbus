@@ -63,7 +63,7 @@ func SystemResources(src facts.Source, r *defs.Resolved, applied *state.Applied,
 	}
 	for _, service := range r.Services {
 		have, err := facts.ObserveService(src, service.Unit)
-		matches := have.Load == "loaded"
+		matches := have.Load == "loaded" && have.Enabled != "masked" && have.Enabled != "masked-runtime"
 		if service.Enabled != nil {
 			want := "disabled"
 			if *service.Enabled {

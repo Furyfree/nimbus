@@ -134,8 +134,17 @@ func (ex *executor) verifyResource(op plan.Operation, after bool) error {
 		if have.Load != "loaded" {
 			return fmt.Errorf("unit is not loaded")
 		}
-		if c.Enabled != nil && (have.Enabled == "enabled") != *c.Enabled {
+		if have.Enabled == "masked" || have.Enabled == "masked-runtime" {
 			return fmt.Errorf("unit enablement is %s", have.Enabled)
+		}
+		if c.Enabled != nil {
+			want := "disabled"
+			if *c.Enabled {
+				want = "enabled"
+			}
+			if have.Enabled != want {
+				return fmt.Errorf("unit enablement is %s", have.Enabled)
+			}
 		}
 		if c.Running != nil && (have.Active == "active") != *c.Running {
 			return fmt.Errorf("unit activity is %s", have.Active)
