@@ -202,12 +202,11 @@ the engine version and output schema number.
 ~~~text
 loadCheckout, CheckoutOrigin  -> validated definitions, the approved origin
 facts.Inspect(Source).Hardware -> DMI names, chassis kind, display adapters
-plan.MatchMachine, pick one    -> a tracked manifest, or --new with the dialog:
+--machine or trusted selector -> a tracked manifest, or --new with the dialog:
 plan.ProposeComponents            profiles, components pre-selected by the
                                   detection rules, the dotfiles repository
 validate, lock, write           -> manifest and selector, lock held through init
-runSyncWith                    -> first sync, one question, defer dependent
-tools
+runSyncWith(yes, deferUser)     -> show and apply the first plan without asking
 chezmoiHandoff                 -> init, then apply local source and its tools
 runSyncWith(userOnly)          -> only explicit Nimbus tool declarations, if any
 report                        -> stage outcomes and retry information

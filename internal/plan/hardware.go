@@ -37,23 +37,3 @@ func hasDisplayVendor(hw facts.Hardware, vendor string) bool {
 	}
 	return false
 }
-
-// MatchMachine returns the one tracked machine whose declared hardware
-// identity appears in the DMI product or board name, or "" when none or
-// more than one does. A match is a default for init, never a decision.
-func MatchMachine(machines map[string]*definitions.Machine, hw facts.Hardware) string {
-	var matches []string
-	for id, m := range machines {
-		if m.Hardware == "" {
-			continue
-		}
-		needle := strings.ToLower(m.Hardware)
-		if strings.Contains(strings.ToLower(hw.Product), needle) || strings.Contains(strings.ToLower(hw.Board), needle) {
-			matches = append(matches, id)
-		}
-	}
-	if len(matches) != 1 {
-		return ""
-	}
-	return matches[0]
-}

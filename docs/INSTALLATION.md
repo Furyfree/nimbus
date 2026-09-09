@@ -116,10 +116,11 @@ sudo btrfs subvolume list /
 Confirm that networking and `sudo` work. Do not manually install the desktop or
 duplicate resources that Nimbus will own.
 
-Continue with:
+For the disposable VM, continue with (use `desktop` or `laptop` as appropriate
+on those machines):
 
 ~~~sh
-curl -fsSL https://raw.githubusercontent.com/Furyfree/nimbus/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Furyfree/nimbus/main/install.sh | bash -s -- --machine vm
 ~~~
 
 The signed `furyfree/nimbus` COPR channel and its reviewed key are available.
@@ -129,15 +130,20 @@ release is published, use the [candidate guide](../tools/vm/README.md).
 Bootstrap stops if the installed engine is too old.
 
 The installer starts private logs, asks for sudo, and prepares the engine.
-Choose the machine from the engine's searchable picker before reviewing the
-plan. There is no separate free-text machine-ID question. `--machine ID` and
-`--new ID` select directly; a new machine uses the engine's profile dialogue.
-Bootstrap initially obtains only `git-core`, GnuPG, system Python 3, and Nimbus
-as needed. One workstation plan
-approval covers system installation, repository reconciliation, Chezmoi apply,
-and its declared user tools. Fresh Chezmoi setup leaves optional 1Password SSH
-integration disabled without asking; append `| bash -s -- --onepassword-ssh`
-instead of `| bash` to opt in explicitly.
+Pass `--machine ID` on first installation, or `--new ID` to create a manifest;
+reruns reuse the trusted selector.
+Missing selection stops with the available IDs. Explicit `--new ID` opens the
+new-machine dialogue. Bootstrap initially obtains only `git-core`, GnuPG,
+system Python 3, and Nimbus as needed. Init shows and applies its complete
+plan without a confirmation, including system installation, repository
+reconciliation, Chezmoi apply, and its declared user tools. Ordinary sync
+retains its confirmation. Fresh Chezmoi setup leaves optional 1Password SSH
+integration disabled without asking; add `--onepassword-ssh` after the machine
+ID to opt in explicitly.
+
+After reboot, use the normal `Hyprland` session. `Hyprland (Nimbus recovery)`
+remains available independently. UWSM adoption is deferred for further research;
+portal activation in the plain session remains a documented follow-up.
 
 The closing report includes setup instructions, stage results, elapsed time,
 and the log directory. Logs retain the latest 20 completed runs below

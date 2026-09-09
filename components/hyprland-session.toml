@@ -30,9 +30,9 @@ packages = [
   "pipewire-alsa",
   "wireplumber",
   "bluez",
-  "foot",
+  "terra:ghostty",
 ]
-removes = []
+removes = ["foot", "kitty", "nwg-panel"]
 default_target = "graphical.target"
 
 [recovery]

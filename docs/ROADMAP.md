@@ -336,7 +336,7 @@ after script verifies replacements before targeted obsolete Cargo cleanup;
 `cargo-update` is removed. Fresh init disables the optional SSH integration
 without prompting unless `--onepassword-ssh` is supplied. Bootstrap gathers
 sudo before prerequisites, keeps the credential alive through init, and
-leaves one workstation-plan approval. Private native logs retain the latest
+shows and applies the init plan without confirmation. Private logs retain the
 20 completed runs, with stage timings and secret-capable output excluded.
 System Python 3 supervises handoff process groups while preserving the terminal;
 cancellation must reap descendants before completion or temporary-file cleanup.
@@ -349,8 +349,8 @@ Standalone dotfiles use requires Mise already installed. Missing Mise and
 native install failures fail apply, while diff and preview install nothing.
 
 nimbus init writes only the local selector and a new machine manifest when
-requested. It asks which machine this is, with the tracked manifest whose
-`hardware` identity the DMI names contain pre-selected. For a new machine it
+requested. It uses `--machine ID` or an existing trusted selector; missing
+selection stops with available IDs. For an explicit `--new ID` it
 proposes the components whose `[detect]` rules match the chassis kind and
 the display adapters, asks for profiles and the dotfiles repository, and
 writes only the accepted answers into that manifest. Existing tracked
@@ -501,14 +501,34 @@ Dotfiles' root `NOCTALIA.md` records template IDs, paths, application variants,
 and visual checks. Validate the dialog and selected applications after a new
 session rather than assuming that a generated CSS file proves adoption.
 
+The signed-install follow-up boots kernel `7.1.13-200.fc44.x86_64`, runs
+greetd, and reports successful PAM login-keyring unlocking. Complete repeat
+login and appearance checks independently. The `hyprland-noctalia` profile
+supplies Fedora's verified `adw-gtk3-theme` and `qt5ct` alongside Qt6ct.
+Chezmoi supplies native GTK/Qt settings scoped to that profile. A fresh login
+must prove toolkit selection, Brave Origin adoption, and dark/light switching
+for the selected applications before the appearance follow-up is complete.
+
+Fedora's portal service requires an active user `graphical-session.target`.
+The owner accepted the tested plain Hyprland session for this release and
+explicitly deferred UWSM adoption on 2026-09-09. Research native Hyprland session
+integration and UWSM before choosing a lifecycle manager or adding a
+session-specific doctor check. The tested VM's plain session left its graphical
+target and portal inactive; retain this limitation without weakening Fedora's
+portal dependencies. The final candidate package/configuration apply and repeat
+no-upgrade plan passed. Recovery and portal interaction drills remain recorded
+follow-ups rather than completed tests.
+
 ### Installer prompt polish
 
 Phase 6 carries the final installation prompt improvements from Phase 5.
-Keep one searchable machine picker in the engine, after minimal prerequisites
-and before the workstation plan. Remove the redundant shell machine-ID prompt
-and the reported redundant yes prompt while retaining the workstation-plan
-approval. Explicit selection flags remain supported. Verify the complete
-prompt order and count on a clean VM installation before closing Phase 6.
+Init must show and apply its complete plan without a yes/no confirmation.
+Use `--machine ID` or an existing trusted selector; missing selection stops
+instead of opening a picker. Only explicit `--new ID` opens a machine/profile
+dialogue. Sudo authentication and Chezmoi questions remain. Refuse unexpected
+selector trust changes without prompting or overwriting trust. Ordinary sync
+keeps its confirmation. Verify the complete prompt order and count on a clean
+VM installation before closing Phase 6.
 The bootstrap obtains only Git transport before the checkout.
 
 ### Candidate testing
@@ -556,6 +576,9 @@ under the new definition identity.
 
 The desktop component installs a separate system-owned Hyprland recovery
 session under /usr. It never writes a seed configuration into the user's home.
+Reuse Ghostty with user configuration disabled instead of installing Foot.
+Explicitly remove Foot, Kitty, and nwg-panel; verify the recovery terminal
+before removing Foot on an existing installation.
 Those files use a native package or a separately specified typed integration;
 they do not widen the generic system-file provider.
 

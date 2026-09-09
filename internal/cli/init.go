@@ -25,7 +25,6 @@ import (
 
 // Test hooks for the interactive parts of init.
 var (
-	pickOneFn = runPickOne
 	// promptLineFn asks one line with a default and returns the answer.
 	promptLineFn = func(in io.Reader, out io.Writer, prompt, def string) string {
 		if def != "" {
@@ -47,7 +46,7 @@ const DefaultCheckout = "~/.local/share/nimbus"
 
 type initFlags struct {
 	checkout, machine, newMachine, dotfiles string
-	noDotfiles, yes, onePasswordSSH         bool
+	noDotfiles, onePasswordSSH              bool
 }
 
 func newInit(opts *options) *cobra.Command {
@@ -55,19 +54,19 @@ func newInit(opts *options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init [--checkout DIR] [--machine ID | --new ID] [--dotfiles URL | --no-dotfiles] [-y]",
 		Short: "Select the machine, write the selector, sync, apply dotfiles, and install user tools",
-		Long: `Init is the first run on a machine. It validates the checkout, asks which
-tracked machine this is or describes a new one from the hardware it detects,
-writes the selector at ~/.config/nimbus/config.toml, runs the first sync, and
-initializes Chezmoi when needed, applies its local source, and installs the
-selected user tools when the manifest names a dotfiles repository. It is rerunnable: an existing selector for the same checkout is
-reused.
+		Long: `Init installs the machine selected by --machine or an existing selector.
+It validates the checkout, writes ~/.config/nimbus/config.toml, shows and runs
+the complete system plan without a confirmation, then initializes and applies
+Chezmoi and its selected user tools when the manifest names a dotfiles repository.
+Sudo authentication and Chezmoi may still ask for input. Explicit --new opens
+the new-machine dialogue. Existing checkout or origin trust cannot change in init.
 
   --checkout DIR   the Nimbus checkout (default ` + DefaultCheckout + `)
-  --machine ID     a tracked machine; otherwise init asks
+  --machine ID     a tracked machine; otherwise reuse the existing selector
   --new ID         describe a new machine and write its manifest
   --dotfiles URL   the dotfiles repository for a new machine
   --no-dotfiles    a new machine without a Chezmoi handoff
-  -y, --yes        answer the sync question with yes`,
+  -y, --yes        accepted for compatibility; init already proceeds without confirmation`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runInit(cmd, opts, f)
@@ -79,14 +78,14 @@ reused.
 	cmd.Flags().StringVar(&f.dotfiles, "dotfiles", "", "the dotfiles repository for a new machine")
 	cmd.Flags().BoolVar(&f.noDotfiles, "no-dotfiles", false, "a new machine without a Chezmoi handoff")
 	cmd.Flags().BoolVar(&f.onePasswordSSH, "onepassword-ssh", false, "enable 1Password SSH integration during initial Chezmoi setup")
-	cmd.Flags().BoolVarP(&f.yes, "yes", "y", false, "answer the sync question with yes")
+	cmd.Flags().BoolP("yes", "y", false, "accepted for compatibility; init already proceeds without confirmation")
 	return cmd
 }
 
 func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	out, in := cmd.OutOrStdout(), cmd.InOrStdin()
 	if opts.json {
-		return usageError{errors.New("init is interactive; it has no JSON form")}
+		return usageError{errors.New("init has no JSON form; sudo and Chezmoi may require a terminal")}
 	}
 	if f.machine != "" && f.newMachine != "" {
 		return usageError{errors.New("--machine and --new exclude each other")}
@@ -193,9 +192,7 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	}
 	if existingSelector != nil && (existingSelector.Checkout != root || existingSelector.Origin != origin) {
 		fmt.Fprintf(out, "Selector trust change:\n  previous: %s (%s)\n  requested: %s (%s)\n", existingSelector.Checkout, existingSelector.Origin, root, origin)
-		if !approver(in, out, "selector trust") {
-			return errors.New("selector trust change not approved; the selector is unchanged")
-		}
+		return fmt.Errorf("selector trust change refused; %s is unchanged; use the existing trusted checkout, or inspect and explicitly update the selector's checkout and origin before retrying", selectorPath)
 	}
 	machine := f.machine
 	var newManifest []byte
@@ -227,13 +224,7 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 		}
 	}
 	if machine == "" {
-		machine, err = chooseMachine(c, hw.Value)
-		if err != nil {
-			return err
-		}
-		if machine == "new" {
-			return usageError{errors.New("describe the new machine with --new ID; the dialog then asks the rest")}
-		}
+		return usageError{fmt.Errorf("no machine selected; pass --machine ID (available: %s), or explicitly create one with --new ID", strings.Join(sortedKeysOf(c.Machines), ", "))}
 	}
 	if f.onePasswordSSH && c.Machines[machine] != nil && c.Machines[machine].Dotfiles == nil {
 		return usageError{errors.New("--onepassword-ssh requires a machine with dotfiles")}
@@ -312,7 +303,7 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	stageStarted = time.Now()
 	active = 1
 	flags := machineFlags{checkout: root, machine: machine}
-	if err := runSyncWith(cmd, opts, flags, syncFlags{yes: f.yes, deferUser: true}, lock); err != nil {
+	if err := runSyncWith(cmd, opts, flags, syncFlags{yes: true, deferUser: true}, lock); err != nil {
 		for i := 2; i < len(steps); i++ {
 			steps[i].Detail = "system installation did not complete"
 		}
@@ -387,28 +378,6 @@ func describeHardware(hw facts.Hardware) string {
 		return "unknown"
 	}
 	return strings.Join(parts, ", ")
-}
-
-// chooseMachine lists the tracked machines with the one the hardware
-// matches pre-selected, plus "new".
-func chooseMachine(c *definitions.Checkout, hw facts.Hardware) (string, error) {
-	match := plan.MatchMachine(c.Machines, hw)
-	var items []pickItem
-	for _, id := range sortedKeysOf(c.Machines) {
-		items = append(items, pickItem{ID: id, Detail: manifestComment(c, id), Selected: id == match})
-	}
-	items = append(items, pickItem{ID: "new", Detail: "describe a new machine", Selected: match == ""})
-	return pickOneFn("which machine is this?", items)
-}
-
-// manifestComment is the first comment line of a manifest, its description.
-func manifestComment(c *definitions.Checkout, id string) string {
-	entry, ok := c.Entry("machines/" + id + ".toml")
-	if !ok {
-		return ""
-	}
-	first, _, _ := strings.Cut(string(entry.Content), "\n")
-	return strings.TrimSpace(strings.TrimPrefix(first, "#"))
 }
 
 // newMachineDialog asks for what a manifest needs beyond its ID: profiles,

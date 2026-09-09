@@ -53,9 +53,9 @@ special cases hidden in control flow when the behavior belongs in typed data.
 
 A user must be able to see what Nimbus observed and what it intends to
 install, upgrade, and remove before it runs, and to learn afterwards what
-differed from that. Preparing declared sources needs no question; a change to
-packages does, once. A mutation that neither the plan nor the report shows is
-a bug.
+differed from that. Every mutation path must follow the preview and approval
+contract in `docs/SPEC.md`. A mutation that neither the plan nor the report
+shows is a bug.
 
 Read-only work stays read-only. Do not add incidental writes, privilege
 escalation, network access, or native-tool mutation to validation, inspection,

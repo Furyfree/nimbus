@@ -36,14 +36,18 @@ Hyprland configuration; interactive shells load their own configuration.
 Recovery uses the [Hyprland 0.55 Lua API], matching the existing dotfiles.
 The desktop entry calls the [native start-hyprland launcher] with an explicit
 system-owned Lua file. Noctalia's [session discovery] reads the selected
-system session directory. The recovery configuration starts only Foot with
-`--config=/dev/null` and Bash with `--noprofile --norc`; no user compositor,
-terminal, or shell configuration is sourced by those declarations. Foot's
-Fedora package manual confirms the explicit config and command arguments.
+system session directory. Recovery reuses Ghostty instead of installing Foot.
+It disables default terminal configuration, single-instance forwarding and
+shell integration, then runs Bash with `--noprofile --norc`. Its XDG config
+root points at the system recovery directory and GTK override variables are
+unset, avoiding user GTK configuration. The [Ghostty option reference] owns
+these command-line settings; full recovery login remains a VM gate.
 Super+Return opens another terminal, Super+Shift+Q closes its window, and
 Super+Shift+E exits. Native compositor startup, user-service interference,
 keyboard behavior, and independence from broken dotfiles still need the VM
 drill; syntax checks alone cannot establish recovery.
+
+[Ghostty option reference]: https://ghostty.org/docs/config/reference
 
 The generic file provider remains limited to `/etc`. The separate recovery
 resource owns exactly the Lua configuration under `/usr/local/lib/nimbus`

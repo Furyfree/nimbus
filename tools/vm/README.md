@@ -70,8 +70,10 @@ sync must show no unexpected changes. Exercise failed activation and safe
 removal while preserving console access. Record the candidate checksum,
 definition digest, native service state, logs, and observed results.
 
-For the first-install flow, use the candidate binary's `init --checkout`
-explicitly in a clean VM. Init writes a selector and may ask for a separate
-trust change if one already exists. Testing the public shell/RPM bootstrap is
+For the first-install flow, use the candidate binary's
+`init --checkout "$candidate/checkout" --machine vm` in a clean VM. Init shows
+and applies its plan without confirmation. It writes a selector and refuses
+an existing selector with a different checkout or origin without changing it.
+Testing the public shell/RPM bootstrap is
 a separate packaging drill; a direct binary candidate does not prove COPR
 publication or signed RPM installation.

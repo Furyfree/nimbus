@@ -395,22 +395,51 @@ func TestInstallerRequiresAnOpenableControllingTerminal(t *testing.T) {
 	}
 }
 
-func TestInitTrustChangeNeedsSeparateApproval(t *testing.T) {
-	root, src := installerFixture(t)
-	path, _ := selector.DefaultPath()
-	old := &selector.Selector{Schema: selector.CurrentSchema, Checkout: root, Machine: "vm", Origin: "github.com/previous/nimbus"}
-	if err := selector.Write(path, old); err != nil {
-		t.Fatal(err)
+func TestInitTrustChangeRefusesWithoutPrompt(t *testing.T) {
+	for _, field := range []string{"origin", "checkout"} {
+		for _, yes := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/yes=%t", field, yes), func(t *testing.T) {
+				root, src := installerFixture(t)
+				path, _ := selector.DefaultPath()
+				old := &selector.Selector{Schema: selector.CurrentSchema, Checkout: root, Machine: "vm", Origin: "github.com/Furyfree/nimbus"}
+				if field == "origin" {
+					old.Origin = "github.com/previous/nimbus"
+				} else {
+					old.Checkout = t.TempDir()
+				}
+				if err := selector.Write(path, old); err != nil {
+					t.Fatal(err)
+				}
+				before, _ := os.ReadFile(path)
+				saved := approver
+				t.Cleanup(func() { approver = saved })
+				approver = func(io.Reader, io.Writer, string) bool {
+					t.Fatal("init asked to change selector trust")
+					return true
+				}
+				args := []string{"init", "--checkout", root, "--machine", "vm"}
+				if yes {
+					args = append(args, "--yes")
+				}
+				code, out, errOut := run(t, args...)
+				after, _ := os.ReadFile(path)
+				if code != ExitFailure || string(before) != string(after) || len(src.calls) != 0 || !strings.Contains(out+errOut, "selector trust change refused") || !strings.Contains(out+errOut, "explicitly update the selector") {
+					t.Fatalf("trust refusal: code=%d calls=%v output=%s%s", code, src.calls, out, errOut)
+				}
+			})
+		}
 	}
-	before, _ := os.ReadFile(path)
+}
+
+func TestSyncStillRequiresConfirmation(t *testing.T) {
+	root, src := installerFixture(t)
 	saved := approver
 	t.Cleanup(func() { approver = saved })
 	var asked bool
 	approver = func(io.Reader, io.Writer, string) bool { asked = true; return false }
-	code, out, _ := run(t, "init", "--checkout", root, "--machine", "vm", "-y")
-	after, _ := os.ReadFile(path)
-	if code != ExitFailure || !asked || string(before) != string(after) || len(src.calls) != 0 || !strings.Contains(out, "previous/nimbus") {
-		t.Fatalf("trust silently replaced: code=%d asked=%v calls=%v output=%s", code, asked, src.calls, out)
+	code, out, errOut := run(t, "sync", "--checkout", root, "--machine", "vm")
+	if code != ExitFailure || !asked || len(src.calls) != 0 || !strings.Contains(out+errOut, "not applied") {
+		t.Fatalf("sync applied without confirmation: %d asked=%t calls=%v output=%s%s", code, asked, src.calls, out, errOut)
 	}
 }
 
@@ -432,15 +461,6 @@ func TestInitRefreshPreservesEnabledSSH(t *testing.T) {
 	code, out, errOut := run(t, "init", "--checkout", root, "--machine", "vm", "-y")
 	if code != ExitFailure || !strings.Contains(out+errOut, "'Enable 1Password SSH integration=true'") || contains(src.calls, "chezmoi apply") {
 		t.Fatalf("refresh lost SSH: %d %s%s", code, out, errOut)
-	}
-}
-
-func TestTrustApprovalRequiresExplicitYes(t *testing.T) {
-	for _, input := range []string{"", "\n", " \n", "n\n", "yes\n", "y\n"} {
-		want := strings.TrimSpace(input) == "yes" || strings.TrimSpace(input) == "y"
-		if got := approver(strings.NewReader(input), io.Discard, "selector trust"); got != want {
-			t.Errorf("input %q approved=%t", input, got)
-		}
 	}
 }
 

@@ -22,43 +22,41 @@ func withHardware(src *facts.FakeSource) {
 	src.Files[filepath.Join(facts.PCIDir, "0000:c1:00.0", "device")] = []byte("0x150e\n")
 }
 
-func TestInitPicksTheMatchingMachineWritesTheSelectorAndSyncs(t *testing.T) {
-	applyEnv(t)
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	root := editableCheckout(t)
-	src := fixtureSource(t, root)
-	withHardware(src)
-	withSource(t, src)
-	var offered []pickItem
-	saved := pickOneFn
-	pickOneFn = func(title string, items []pickItem) (string, error) {
-		offered = items
-		for _, it := range items {
-			if it.Selected {
-				return it.ID, nil
-			}
-		}
-		return "", nil
+func TestInitUsesExplicitMachineAndReusesSelectorWithoutConfirmation(t *testing.T) {
+	root, src := installerFixture(t)
+	saved := approver
+	approver = func(io.Reader, io.Writer, string) bool {
+		t.Fatal("init requested confirmation")
+		return false
 	}
-	t.Cleanup(func() { pickOneFn = saved })
-	code, out, _ := run(t, "init", "--checkout", root, "-y")
-	// The sync that follows stops at the first repository, which needs the
-	// network; everything before it must have happened.
-	if code != ExitFailure || !strings.Contains(out, "hardware: HP EliteBook X G1a") || !strings.Contains(out, "selected laptop; selector written to") || !strings.Contains(out, "failed     repository:brave") {
-		t.Fatalf("init: %d\n%s", code, out)
-	}
-	if len(offered) != 4 || offered[0].ID != "desktop" || offered[1].ID != "laptop" || !offered[1].Selected || offered[3].ID != "new" || offered[3].Selected {
-		t.Fatalf("offered = %+v", offered)
+	t.Cleanup(func() { approver = saved })
+	code, out, errOut := run(t, "init", "--checkout", root, "--machine", "vm")
+	if code != ExitOK || !strings.Contains(out, "selected vm; selector written to") || !strings.Contains(out, "plan for vm") || !contains(src.calls, "chezmoi apply") {
+		t.Fatalf("init: %d\n%s%s", code, out, errOut)
 	}
 	path, _ := selector.DefaultPath()
 	sel, err := selector.Load(path)
-	if err != nil || sel.Machine != "laptop" || sel.Checkout != root || sel.Origin != "github.com/Furyfree/nimbus" {
+	if err != nil || sel.Machine != "vm" || sel.Checkout != root || sel.Origin != "github.com/Furyfree/nimbus" {
 		t.Fatalf("selector = %+v %v", sel, err)
 	}
-	// A rerun reuses the selector without asking.
-	offered = nil
-	if _, out, _ := run(t, "init", "--checkout", root, "-y"); !strings.Contains(out, "the selector already names laptop") || offered != nil {
-		t.Fatalf("rerun asked again:\n%s", out)
+	// Both default reruns and older commands with --yes retain the selection.
+	for _, extra := range [][]string{nil, {"--yes"}} {
+		args := append([]string{"init", "--checkout", root}, extra...)
+		if code, out, errOut := run(t, args...); code != ExitOK || !strings.Contains(out, "the selector already names vm") {
+			t.Fatalf("rerun: %d\n%s%s", code, out, errOut)
+		}
+	}
+}
+
+func TestInitRequiresExplicitSelectionBeforeMutation(t *testing.T) {
+	root, src := installerFixture(t)
+	code, out, errOut := run(t, "init", "--checkout", root)
+	if code != ExitUsage || !strings.Contains(out+errOut, "pass --machine ID (available: vm)") || len(src.calls) != 0 {
+		t.Fatalf("missing selection: %d calls=%v\n%s%s", code, src.calls, out, errOut)
+	}
+	path, _ := selector.DefaultPath()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("missing selection wrote a selector: %v", err)
 	}
 }
 

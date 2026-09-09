@@ -28,12 +28,12 @@ packages = [
   "flatpak:com.spotify.Client",
   "flatpak:md.obsidian.Obsidian",
   "flatpak:com.fastmail.Fastmail",
-  # Terminal
-  "terra:ghostty",
   # Theming
+  "adw-gtk3-theme",
   "papirus-icon-theme",
   "terra:bibata-cursor-theme",
   "qt6ct",
+  "qt5ct",
   "jetbrains-mono-fonts-all",
   "terra:jetbrainsmono-nerd-fonts",
   "rsms-inter-fonts",
