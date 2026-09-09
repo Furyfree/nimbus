@@ -707,6 +707,7 @@ func TestARequestedProvideMayResolveToAnotherName(t *testing.T) {
 	p := answerInstall(t, src, in, func(rows []TxPackage) []TxPackage {
 		requested = rows[0].Name
 		rows[0].Name = requested + "-real"
+		src.Commands[facts.Key("dnf5", "--cacheonly", "repoquery", "--available", "--whatprovides", requested, "--queryformat", "%{name}|%{arch}|%{evr}|%{repoid}\\n")] = []byte(rows[0].Name + "|" + rows[0].Arch + "|" + rows[0].EVR + "|" + rows[0].Repository + "\n")
 		return rows
 	})
 	op := find(p, "packages:install")

@@ -890,24 +890,31 @@ func (b *builder) installTransaction(pkgs []definitions.ResolvedPackage) Operati
 		// The size summary is on stderr, which Run folds into the error.
 		tx.Download = DownloadSize(err.Error())
 	}
-	// A requested name may be a provide that DNF resolves to a package with
-	// another name; such rows are accepted only while a requested name is
-	// still unaccounted for, and each substitution is noted for review.
-	seen := map[string]bool{}
+	if tx.NothingToDo {
+		op.Blocked = "dnf5 reports nothing to do although packages are missing"
+		return op
+	}
+	// Direct names bind to their installing rows. Provides need native
+	// evidence for the exact reviewed package, independent of row order.
+	op.Resolved = map[string]string{}
+	var installing []facts.Package
 	for _, row := range tx.Packages {
 		if row.Section == "installing" {
-			for _, n := range names {
-				if (facts.Package{Name: row.Name, Arch: row.Arch}).Matches(n) {
-					seen[n] = true
-				}
-			}
+			installing = append(installing, facts.Package{Name: row.Name, Arch: row.Arch})
 		}
 	}
-	var unmatched []string
 	for _, n := range names {
-		if !seen[n] {
-			unmatched = append(unmatched, n)
+		if direct, ok := facts.FindPackage(installing, n); ok {
+			op.Resolved[n] = direct.ID()
+			continue
 		}
+		provider, err := b.resolveProvide(n, tx)
+		if err != nil {
+			op.Blocked = err.Error()
+			return op
+		}
+		op.Resolved[n] = facts.PackageID(provider.Name, provider.Arch)
+		op.Notes = append(op.Notes, fmt.Sprintf("%s resolves to the package %s", n, provider.Name))
 	}
 	var problems, needed []string
 	upgraded := map[string]bool{}
@@ -919,30 +926,19 @@ func (b *builder) installTransaction(pkgs []definitions.ResolvedPackage) Operati
 	for _, row := range tx.Packages {
 		switch row.Section {
 		case "installing":
-			p, wanted := byName[facts.PackageID(row.Name, row.Arch)]
-			if !wanted {
-				p, wanted = byName[row.Name]
-			}
-			if !wanted {
-				if len(unmatched) == 0 {
-					problems = append(problems, "would install "+row.Name+", which nothing selects")
+			wanted := false
+			for _, n := range names {
+				if op.Resolved[n] != facts.PackageID(row.Name, row.Arch) {
 					continue
 				}
-				requested := unmatched[0]
-				unmatched = unmatched[1:]
-				p = byName[requested]
-				if op.Resolved == nil {
-					op.Resolved = map[string]string{}
+				wanted = true
+				p := byName[n]
+				if !slices.Contains(b.expectedRepos(p.Prefix), row.Repository) {
+					problems = append(problems, fmt.Sprintf("%s would come from repository %s, not %s", row.Name, row.Repository, strings.Join(b.expectedRepos(p.Prefix), " or ")))
 				}
-				op.Resolved[requested] = facts.PackageID(row.Name, row.Arch)
-				op.Notes = append(op.Notes, fmt.Sprintf("%s resolves to the package %s", requested, row.Name))
 			}
-			if op.Resolved == nil {
-				op.Resolved = map[string]string{}
-			}
-			op.Resolved[p.Name] = facts.PackageID(row.Name, row.Arch)
-			if !slices.Contains(b.expectedRepos(p.Prefix), row.Repository) {
-				problems = append(problems, fmt.Sprintf("%s would come from repository %s, not %s", row.Name, row.Repository, strings.Join(b.expectedRepos(p.Prefix), " or ")))
+			if !wanted {
+				problems = append(problems, "would install "+row.Name+", which nothing selects")
 			}
 		case "installing dependencies", "installing weak dependencies":
 		case "removing", "removing dependent packages", "removing unused dependencies":
@@ -973,10 +969,39 @@ func (b *builder) installTransaction(pkgs []definitions.ResolvedPackage) Operati
 	for _, problem := range problems {
 		op.Notes = append(op.Notes, "beyond the definitions: "+problem)
 	}
-	if tx.NothingToDo {
-		op.Blocked = "dnf5 reports nothing to do although packages are missing"
-	}
 	return op
+}
+
+func (b *builder) resolveProvide(request string, tx *Transaction) (TxPackage, error) {
+	out, err := b.in.Source.Run("dnf5", "--cacheonly", "repoquery", "--available", "--whatprovides", request, "--queryformat", "%{name}|%{arch}|%{evr}|%{repoid}\\n")
+	if err != nil {
+		return TxPackage{}, fmt.Errorf("resolve provider for %s: %w", request, err)
+	}
+	var matches []TxPackage
+	for line := range strings.SplitSeq(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.Split(line, "|")
+		if len(fields) != 4 || slices.Contains(fields, "") {
+			return TxPackage{}, fmt.Errorf("resolve provider for %s: invalid provider row %q", request, line)
+		}
+		for _, row := range tx.Packages {
+			if row.Section == "installing" && row.Name == fields[0] && row.Arch == fields[1] &&
+				strings.TrimPrefix(row.EVR, "0:") == strings.TrimPrefix(fields[2], "0:") && row.Repository == fields[3] &&
+				!slices.Contains(matches, row) {
+				matches = append(matches, row)
+			}
+		}
+	}
+	if len(matches) == 0 {
+		return TxPackage{}, fmt.Errorf("resolve provider for %s: no reviewed package matches the native provider evidence", request)
+	}
+	if len(matches) != 1 {
+		return TxPackage{}, fmt.Errorf("resolve provider for %s: multiple reviewed packages match the native provider evidence", request)
+	}
+	return matches[0], nil
 }
 
 // removeTransaction previews the removal of declared removes that are still
