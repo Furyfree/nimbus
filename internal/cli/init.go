@@ -28,14 +28,18 @@ import (
 // Test hooks for the interactive parts of init.
 var (
 	// promptLineFn asks one line with a default and returns the answer.
-	promptLineFn = func(in io.Reader, out io.Writer, prompt, def string) string {
+	promptLineFn = func(in io.Reader, out io.Writer, prompt, def string) (string, error) {
 		if def != "" {
-			fmt.Fprintf(out, "%s [%s]: ", prompt, def)
-		} else {
-			fmt.Fprintf(out, "%s: ", prompt)
+			prompt += " [" + def + "]"
 		}
-		line, _ := bufio.NewReader(in).ReadString('\n')
-		return cmp.Or(strings.TrimSpace(line), def)
+		if _, err := fmt.Fprintf(out, "%s: ", prompt); err != nil {
+			return "", err
+		}
+		line, err := bufio.NewReader(in).ReadString('\n')
+		if err != nil && !(errors.Is(err, io.EOF) && strings.TrimSpace(line) != "") {
+			return "", err
+		}
+		return cmp.Or(strings.TrimSpace(line), def), nil
 	}
 )
 
@@ -170,8 +174,13 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 		}
 		steps[active].DurationMS = time.Since(stageStarted).Milliseconds()
 		log.event("stage end name=%s status=%s elapsed_ms=%d", steps[active].Name, steps[active].Status, steps[active].DurationMS)
-		renderRunSummary(out, "init", steps)
-		notes.render(out)
+		if err := errors.Join(renderRunSummary(out, "init", steps), notes.render(out)); err != nil {
+			if errors.Is(retErr, reported{}) {
+				retErr = err
+			} else {
+				retErr = errors.Join(retErr, err)
+			}
+		}
 	}()
 	originalDigest := c.Digest()
 	hw := facts.Inspect(src, root).Hardware
@@ -287,7 +296,9 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	log.event("selection machine=%s profiles=%s definitions=%s", machine, strings.Join(r.Profiles, ","), c.Digest())
 	m := c.Machines[machine]
 	if m.Dotfiles != nil {
-		fmt.Fprintf(out, "Installation will initialize Chezmoi from %s if needed, then run chezmoi apply, including its declared user-tool installation scripts.\n", m.Dotfiles.Repo)
+		if _, err := fmt.Fprintf(out, "Installation will initialize Chezmoi from %s if needed, then run chezmoi apply, including its declared user-tool installation scripts.\n", m.Dotfiles.Repo); err != nil {
+			return err
+		}
 	} else {
 		steps[2].Detail = "no dotfiles repository declared"
 	}
@@ -412,7 +423,10 @@ func newMachineDialog(in io.Reader, out io.Writer, c *definitions.Checkout, hw f
 	case f.dotfiles != "":
 		m.Dotfiles = &definitions.Dotfiles{Repo: f.dotfiles}
 	default:
-		repo := promptLineFn(in, out, "dotfiles repository for Chezmoi (empty for none)", sharedDotfiles(c))
+		repo, err := promptLineFn(in, out, "dotfiles repository for Chezmoi (empty for none)", sharedDotfiles(c))
+		if err != nil {
+			return nil, err
+		}
 		if repo != "" {
 			m.Dotfiles = &definitions.Dotfiles{Repo: repo}
 		}
@@ -442,8 +456,8 @@ func sharedDotfiles(c *definitions.Checkout) string {
 // Chezmoi owns conflict handling and secrets; Nimbus never forces overwrites.
 func chezmoiHandoff(src facts.Source, out io.Writer, machine string, profiles []string, dotfiles *definitions.Dotfiles, onePasswordSSH bool) error {
 	if dotfiles == nil {
-		fmt.Fprintln(out, "no dotfiles repository is declared; dotfiles skipped")
-		return nil
+		_, err := fmt.Fprintln(out, "no dotfiles repository is declared; dotfiles skipped")
+		return err
 	}
 	wantOrigin, err := selector.NormalizeOrigin(dotfiles.Repo)
 	if err != nil {
@@ -460,12 +474,16 @@ func chezmoiHandoff(src facts.Source, out io.Writer, machine string, profiles []
 	if !facts.ChezmoiInitialized(src, home) {
 		flags = append(flags, "--promptBool", fmt.Sprintf("Enable 1Password SSH integration=%t", onePasswordSSH))
 		argv := append([]string{"init"}, append(flags, "--", dotfiles.Repo)...)
-		fmt.Fprintf(out, "-> initialize Chezmoi from %s\n   $ chezmoi %s\n", dotfiles.Repo, strings.Join(argv, " "))
+		if _, err := fmt.Fprintf(out, "-> initialize Chezmoi from %s\n   $ chezmoi %s\n", dotfiles.Repo, strings.Join(argv, " ")); err != nil {
+			return err
+		}
 		if err := src.Stream(out, out, "chezmoi", argv...); err != nil {
 			return fmt.Errorf("chezmoi init: %w", err)
 		}
 	} else {
-		fmt.Fprintln(out, "Chezmoi is already initialized; applying its existing local source")
+		if _, err := fmt.Fprintln(out, "Chezmoi is already initialized; applying its existing local source"); err != nil {
+			return err
+		}
 	}
 	sourcePath, err := src.Run("chezmoi", "source-path")
 	if err != nil {
@@ -500,8 +518,12 @@ func chezmoiHandoff(src facts.Source, out io.Writer, machine string, profiles []
 	if onePasswordSSH && !selection.OnePasswordSSH {
 		return fmt.Errorf("the existing Chezmoi configuration has 1Password SSH disabled; enable it explicitly with: %s", doctor.ChezmoiRefresh(machine, profiles, true))
 	}
-	fmt.Fprintf(out, "Setup note: To change your Chezmoi answers, run: %s\n", doctor.ChezmoiRefresh(machine, profiles, selection.OnePasswordSSH))
-	fmt.Fprintln(out, "-> apply user configuration and install its declared tools\n   $ chezmoi apply")
+	if _, err := fmt.Fprintf(out, "Setup note: To change your Chezmoi answers, run: %s\n", doctor.ChezmoiRefresh(machine, profiles, selection.OnePasswordSSH)); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(out, "-> apply user configuration and install its declared tools\n   $ chezmoi apply"); err != nil {
+		return err
+	}
 	if err := src.Stream(out, out, "chezmoi", "apply"); err != nil {
 		return fmt.Errorf("chezmoi apply: %w", err)
 	}

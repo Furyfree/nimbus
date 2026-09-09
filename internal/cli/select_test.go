@@ -14,6 +14,67 @@ import (
 	"github.com/Furyfree/nimbus/internal/definitions"
 )
 
+func TestSelectionStopsWhenReviewCannotBeWritten(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		yes, asJSON bool
+		after       int
+	}{
+		{name: "interactive diff"},
+		{name: "interactive plan", after: 1},
+		{name: "interactive approval notice", after: 2},
+		{name: "interactive prompt", after: 3},
+		{name: "automatic diff", yes: true},
+		{name: "automatic plan", yes: true, after: 1},
+		{name: "JSON diff", asJSON: true},
+		{name: "JSON plan", asJSON: true, after: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, src := installerFixture(t)
+			if err := os.WriteFile(filepath.Join(root, "profiles/common.toml"), []byte("schema = 1\nid = \"common\"\npackages = []\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "components/demo.toml"), []byte("schema = 1\nid = \"demo\"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			path := manifestPath(root, "vm")
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeErr := errors.New("review output unavailable")
+			writer := &previewErrorWriter{after: tc.after, err: writeErr}
+			cmd := newComponents(&options{json: tc.asJSON})
+			cmd.SilenceErrors, cmd.SilenceUsage = true, true
+			args := []string{"add", "demo", "--checkout", root, "--machine", "vm"}
+			if tc.yes {
+				args = append(args, "--yes")
+			}
+			cmd.SetArgs(args)
+			cmd.SetIn(strings.NewReader("yes\n"))
+			cmd.SetOut(writer)
+			cmd.SetErr(io.Discard)
+			if tc.asJSON {
+				cmd.SetOut(io.Discard)
+				cmd.SetErr(writer)
+			}
+			if err := cmd.Execute(); err == nil || tc.after < 3 && !errors.Is(err, writeErr) {
+				t.Fatalf("review failure not reported: %v", err)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil || string(after) != string(before) {
+				t.Fatalf("failed review changed manifest: %q, %v", after, err)
+			}
+			if len(src.calls) != 0 {
+				t.Fatalf("failed review reached native mutation: %v", src.calls)
+			}
+			if _, err := os.Stat(filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), "nimbus", "operation.lock")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("failed review reached mutation lock: %v", err)
+			}
+		})
+	}
+}
+
 func TestWriteManifestCleansTemporaryFileOnRenameFailure(t *testing.T) {
 	dir := t.TempDir()
 	destination := filepath.Join(dir, "machine.toml")

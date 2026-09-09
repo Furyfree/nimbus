@@ -1,8 +1,11 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -19,7 +22,9 @@ func TestSetupNotesPreserveLiveOutputAndCollectOnlyInstructions(t *testing.T) {
 			t.Fatalf("write = %d, %v", n, err)
 		}
 	}
-	w.render(&footer)
+	if err := w.render(&footer); err != nil {
+		t.Fatal(err)
+	}
 	if live.String() != strings.Join(chunks, "") {
 		t.Fatal("native output was changed")
 	}
@@ -40,8 +45,32 @@ func TestSetupNotesBoundCaptureWithoutTruncatingLiveOutput(t *testing.T) {
 	if _, err := w.Write([]byte(input.String())); err != nil {
 		t.Fatal(err)
 	}
-	w.render(&footer)
+	if err := w.render(&footer); err != nil {
+		t.Fatal(err)
+	}
 	if live.String() != input.String() || len(w.notes) != 32 || strings.Contains(footer.String(), "control") {
 		t.Fatalf("capture bounds or live output failed: %q", footer.String())
+	}
+}
+
+func TestRunSummaryPreservesFormattingAndReportsOutputFailure(t *testing.T) {
+	steps := []runStep{{Name: "system installation", Status: "succeeded", DurationMS: 1500}, {Name: "dotfiles", Status: "failed", Detail: "hook failed"}}
+	var out strings.Builder
+	if err := renderRunSummary(&out, "init", steps); err != nil {
+		t.Fatal(err)
+	}
+	want := "\ninit summary:\n  succeeded  system installation (1.5s)\n  failed     dotfiles: hook failed\n"
+	if out.String() != want {
+		t.Fatalf("summary = %q, want %q", out.String(), want)
+	}
+	if err := renderRunSummary(&previewErrorWriter{err: syscall.ENOSPC}, "init", steps); !errors.Is(err, syscall.ENOSPC) {
+		t.Fatalf("summary error = %v", err)
+	}
+	w := &setupNoteWriter{out: io.Discard}
+	if _, err := io.WriteString(w, "Setup note: Sign in to 1Password.\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.render(&previewErrorWriter{err: syscall.ENOSPC}); !errors.Is(err, syscall.ENOSPC) {
+		t.Fatalf("setup notes error = %v", err)
 	}
 }

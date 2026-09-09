@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,47 @@ import (
 
 	"github.com/Furyfree/nimbus/internal/state"
 )
+
+func TestFilesAcceptStopsWhenPreviewCannotBeWritten(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		yes   bool
+		after int
+	}{
+		{name: "interactive preview"},
+		{name: "automatic preview", yes: true},
+		{name: "interactive prompt", after: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			checkout, source, _ := acceptanceFixture(t)
+			before, err := os.ReadFile(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeErr := errors.New("preview output unavailable")
+			cmd := newFiles(&options{})
+			cmd.SilenceErrors, cmd.SilenceUsage = true, true
+			args := []string{"accept", "/etc/nimbus-test.conf", "--checkout", checkout, "--machine", "test"}
+			if tc.yes {
+				args = append(args, "--yes")
+			}
+			cmd.SetArgs(args)
+			cmd.SetIn(strings.NewReader("yes\n"))
+			cmd.SetOut(&previewErrorWriter{after: tc.after, err: writeErr})
+			cmd.SetErr(io.Discard)
+			if err := cmd.Execute(); err == nil || tc.after == 0 && !errors.Is(err, writeErr) {
+				t.Fatalf("preview failure not reported: %v", err)
+			}
+			after, err := os.ReadFile(source)
+			if err != nil || string(after) != string(before) {
+				t.Fatalf("failed preview changed source: %q, %v", after, err)
+			}
+			if _, err := os.Stat(filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), "nimbus", "operation.lock")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("failed preview reached mutation lock: %v", err)
+			}
+		})
+	}
+}
 
 func acceptanceFixture(t *testing.T) (string, string, string) {
 	t.Helper()

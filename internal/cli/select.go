@@ -355,13 +355,19 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 	if opts.json {
 		review, yes = cmd.ErrOrStderr(), true
 	}
-	fmt.Fprintf(review, "%s: %s\n\n%s\n", edit.cmdName, edit.summary, unifiedDiff(path, before, append(after, '\n')))
-	review.Write(renderPlan(p, false, false))
+	if _, err := fmt.Fprintf(review, "%s: %s\n\n%s\n", edit.cmdName, edit.summary, unifiedDiff(path, before, append(after, '\n'))); err != nil {
+		return fmt.Errorf("write selection diff: %w", err)
+	}
+	if _, err := review.Write(renderPlan(p, false, false)); err != nil {
+		return fmt.Errorf("write selection plan: %w", err)
+	}
 	if !p.Complete {
 		return errors.New("the plan for the edited manifest is incomplete; resolve the blocked operations first")
 	}
 	if !yes {
-		fmt.Fprintln(review, "proceeding writes the manifest change shown and then applies the plan")
+		if _, err := fmt.Fprintln(review, "proceeding writes the manifest change shown and then applies the plan"); err != nil {
+			return fmt.Errorf("write selection approval notice: %w", err)
+		}
 		if !approver(cmd.InOrStdin(), out, p.Digest) {
 			return errors.New("not applied; the manifest is unchanged")
 		}

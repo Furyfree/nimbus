@@ -7,12 +7,145 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
+	"testing/iotest"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/facts"
 	"github.com/Furyfree/nimbus/internal/selector"
 )
+
+type handoffOutputSource struct {
+	facts.Source
+	afterStream func(string, []string)
+}
+
+func (s handoffOutputSource) Stream(out, errOut io.Writer, name string, args ...string) error {
+	err := s.Source.Stream(out, errOut, name, args...)
+	s.afterStream(name, args)
+	return err
+}
+
+func TestInitPromptPreservesEnteredAnswersAndReportsReadErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   io.Reader
+		want string
+		err  error
+	}{
+		{"blank answer", strings.NewReader("\n"), "default", nil},
+		{"answer", strings.NewReader(" custom \n"), "custom", nil},
+		{"final answer", strings.NewReader("custom"), "custom", nil},
+		{"empty EOF", strings.NewReader(""), "", io.EOF},
+		{"blank EOF", strings.NewReader("  "), "", io.EOF},
+		{"read error", iotest.ErrReader(syscall.EIO), "", syscall.EIO},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := promptLineFn(tc.in, io.Discard, "repository", "default")
+			if got != tc.want || !errors.Is(err, tc.err) {
+				t.Fatalf("answer = %q, %v; want %q, %v", got, err, tc.want, tc.err)
+			}
+		})
+	}
+}
+
+func TestInitPromptFailureStopsBeforeReadingOrWritingSelection(t *testing.T) {
+	root, src := installerFixture(t)
+	in := strings.NewReader("https://example.invalid/dotfiles.git\n")
+	out := &previewErrorWriter{after: -1, err: syscall.ENOSPC}
+	saved := pickerFn
+	pickerFn = func(title string, _ []pickItem) ([]string, error) {
+		if strings.HasPrefix(title, "profiles") {
+			return []string{"common"}, nil
+		}
+		out.after = 0
+		return nil, nil
+	}
+	t.Cleanup(func() { pickerFn = saved })
+	cmd := New()
+	cmd.SetArgs([]string{"init", "--checkout", root, "--new", "newbox"})
+	cmd.SetIn(in)
+	cmd.SetOut(out)
+	cmd.SetErr(io.Discard)
+	if err := cmd.Execute(); !errors.Is(err, syscall.ENOSPC) {
+		t.Fatalf("init error = %v", err)
+	}
+	if in.Len() != len("https://example.invalid/dotfiles.git\n") || len(src.calls) != 0 {
+		t.Fatalf("failed prompt consumed input or ran commands: unread=%d, calls=%v", in.Len(), src.calls)
+	}
+	path, err := selector.DefaultPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{path, manifestPath(root, "newbox")} {
+		if _, err := os.Stat(target); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("selection written after prompt failure: %s: %v", target, err)
+		}
+	}
+}
+
+func TestChezmoiHandoffRequiresEveryDisclosureBeforeMutation(t *testing.T) {
+	for _, after := range []int{0, 1, 2} {
+		t.Run([]string{"initialize", "setup note", "apply"}[after], func(t *testing.T) {
+			_, src := installerFixture(t)
+			if after > 0 {
+				src.Dirs[filepath.Join(os.Getenv("HOME"), ".local", "share", "chezmoi")] = []string{".git"}
+			}
+			calls := 0
+			tracked := handoffOutputSource{Source: src.FakeSource, afterStream: func(string, []string) { calls++ }}
+			err := chezmoiHandoff(tracked, &previewErrorWriter{after: after, err: syscall.ENOSPC}, "vm", []string{"common"}, &definitions.Dotfiles{Repo: "https://github.com/Furyfree/dotfiles.git"}, false)
+			if !errors.Is(err, syscall.ENOSPC) || calls != 0 {
+				t.Fatalf("handoff error = %v, mutations = %d", err, calls)
+			}
+		})
+	}
+}
+
+func TestInitDisclosesDotfilesBeforeSystemWork(t *testing.T) {
+	root, src := installerFixture(t)
+	withHardware(src.FakeSource)
+	cmd := New()
+	cmd.SetArgs([]string{"init", "--checkout", root, "--machine", "vm"})
+	// The log location, hardware, and selected-machine lines precede the
+	// dotfiles and tool-script disclosure.
+	cmd.SetOut(&previewErrorWriter{after: 3, err: syscall.ENOSPC})
+	cmd.SetErr(io.Discard)
+	if err := cmd.Execute(); !errors.Is(err, syscall.ENOSPC) {
+		t.Fatalf("init error = %v", err)
+	}
+	if len(src.calls) != 0 || slices.Contains(src.reads, "dnf5 makecache") {
+		t.Fatalf("system work preceded the failed disclosure: calls=%v, reads=%v", src.calls, src.reads)
+	}
+}
+
+func TestInitReturnsSummaryFailureAndPreservesNativeFailure(t *testing.T) {
+	for _, failed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "success", true: "native failure"}[failed], func(t *testing.T) {
+			root, src := installerFixture(t)
+			if err := os.WriteFile(filepath.Join(root, "profiles", "common.toml"), []byte("schema = 1\nid = \"common\"\npackages = []\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			if failed {
+				src.Failures["chezmoi apply"] = "tool installation failed"
+			}
+			out := &previewErrorWriter{after: -1, err: syscall.ENOSPC}
+			withSource(t, handoffOutputSource{Source: src, afterStream: func(name string, args []string) {
+				if name == "chezmoi" && slices.Equal(args, []string{"apply"}) {
+					out.after = 0
+				}
+			}})
+			cmd := New()
+			cmd.SetArgs([]string{"init", "--checkout", root, "--machine", "vm"})
+			cmd.SetOut(out)
+			cmd.SetErr(io.Discard)
+			err := cmd.Execute()
+			if !errors.Is(err, syscall.ENOSPC) || !slices.Contains(src.calls, "chezmoi apply") || failed && !strings.Contains(err.Error(), "chezmoi apply: chezmoi failed") {
+				t.Fatalf("summary error = %v, calls = %v", err, src.calls)
+			}
+		})
+	}
+}
 
 func withHardware(src *facts.FakeSource) {
 	src.Files[filepath.Join(facts.DMIDir, "product_name")] = []byte("HP EliteBook X G1a 14 inch Notebook Next Gen AI PC\n")
@@ -89,9 +222,9 @@ func TestInitDescribesANewMachineFromTheHardware(t *testing.T) {
 	t.Cleanup(func() { pickerFn = savedPick })
 	var asked string
 	savedPrompt := promptLineFn
-	promptLineFn = func(_ io.Reader, _ io.Writer, prompt, def string) string {
+	promptLineFn = func(_ io.Reader, _ io.Writer, prompt, def string) (string, error) {
 		asked = prompt + " [" + def + "]"
-		return def
+		return def, nil
 	}
 	t.Cleanup(func() { promptLineFn = savedPrompt })
 

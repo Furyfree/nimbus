@@ -67,7 +67,9 @@ func newFiles(opts *options) *cobra.Command {
 			}
 			out := cmd.OutOrStdout()
 			if !opts.json {
-				fmt.Fprintf(out, "Capture %s into %s\nSystem-file sources must not contain secrets.\n%s", before.result.Target, before.result.Source, before.result.Diff)
+				if _, err := fmt.Fprintf(out, "Capture %s into %s\nSystem-file sources must not contain secrets.\n%s", before.result.Target, before.result.Source, before.result.Diff); err != nil {
+					return fmt.Errorf("write file acceptance preview: %w", err)
+				}
 			}
 			if !bytes.Equal(before.source, before.target) && !preview {
 				if opts.json && !yes {

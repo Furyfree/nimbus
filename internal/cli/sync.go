@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -86,7 +87,9 @@ var (
 	}
 	// approver reads the interactive answer. Tests replace it.
 	approver = func(in io.Reader, out io.Writer, _ string) bool {
-		fmt.Fprint(out, "Proceed? [Y/n] ")
+		if _, err := fmt.Fprint(out, "Proceed? [Y/n] "); err != nil {
+			return false
+		}
 		reader := bufio.NewReader(in)
 		line, err := reader.ReadString('\n')
 		if err != nil && !(errors.Is(err, io.EOF) && strings.TrimSpace(line) != "") {
@@ -192,25 +195,32 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 					result.Steps = append(result.Steps, runStep{Name: op.ID, Status: "skipped", Detail: detail})
 				}
 			}
+			var reportErr error
 			if opts.json {
-				if err := writeJSON(out, result, nil); err != nil {
-					retErr = err
-					return
-				}
+				reportErr = writeJSON(out, result, nil)
 			} else {
-				renderRunSummary(out, "sync", result.Steps)
+				var summary bytes.Buffer
+				renderRunSummary(&summary, "sync", result.Steps)
 				if result.Reboot {
-					fmt.Fprintln(out, "Reboot required to use the configured boot target or greeter.")
+					fmt.Fprintln(&summary, "Reboot required to use the configured boot target or greeter.")
 				}
 				if result.Logout {
-					fmt.Fprintln(out, "Log out and log in again to use changed group memberships.")
+					fmt.Fprintln(&summary, "Log out and log in again to use changed group memberships.")
 				}
 				if len(result.Differences) > 0 {
-					fmt.Fprintln(out, "differences from the plan:")
+					fmt.Fprintln(&summary, "differences from the plan:")
 					for _, d := range result.Differences {
-						fmt.Fprintf(out, "  %s\n", d)
+						fmt.Fprintf(&summary, "  %s\n", d)
 					}
 				}
+				_, reportErr = summary.WriteTo(out)
+			}
+			if reportErr != nil {
+				if errors.Is(retErr, reported{}) {
+					retErr = errors.New(result.Error)
+				}
+				retErr = errors.Join(retErr, reportErr)
+				return
 			}
 			if retErr != nil {
 				retErr = reported{}
@@ -312,7 +322,9 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	// host that names the packages; DNF prints the exact transaction as it
 	// starts, and the report at the end names what differed.
 	if !opts.json {
-		out.Write(renderPlan(p, sf.prune, !sf.noUpgrade))
+		if _, err := out.Write(renderPlan(p, sf.prune, !sf.noUpgrade)); err != nil {
+			return fmt.Errorf("show plan: %w", err)
+		}
 		if !sf.yes && !approver(cmd.InOrStdin(), out, p.Digest) {
 			return errors.New("not applied")
 		}
@@ -401,7 +413,9 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 				execOut.Write(renderPlan(p, sf.prune, false))
 				return errors.New("the plan has problems; see above")
 			}
-			showReplanned(execOut, p, sf.prune, &result)
+			if err := showReplanned(execOut, p, sf.prune, &result); err != nil {
+				return err
+			}
 			if nothingToRun(p) {
 				break
 			}
@@ -437,7 +451,9 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			}
 		}
 		if len(prep) > 0 {
-			showReplanned(execOut, p, sf.prune, &result)
+			if err := showReplanned(execOut, p, sf.prune, &result); err != nil {
+				return err
+			}
 		}
 		currentPlan = p
 		executable := syncOperations(p, sf)
@@ -623,9 +639,13 @@ func onlyUserFailures(r *apply.Result, p *plan.Plan) bool {
 	})
 }
 
-func showReplanned(out io.Writer, p *plan.Plan, prune bool, result *syncResult) {
-	fmt.Fprintln(out, "updated plan after completed operations:")
-	out.Write(renderPlan(p, prune, false))
+func showReplanned(out io.Writer, p *plan.Plan, prune bool, result *syncResult) error {
+	if _, err := fmt.Fprintln(out, "updated plan after completed operations:"); err != nil {
+		return fmt.Errorf("show updated plan: %w", err)
+	}
+	if _, err := out.Write(renderPlan(p, prune, false)); err != nil {
+		return fmt.Errorf("show updated plan: %w", err)
+	}
 	for _, op := range p.Operations {
 		for _, note := range op.Notes {
 			message := "replanned " + op.ID + ": " + note
@@ -634,4 +654,5 @@ func showReplanned(out io.Writer, p *plan.Plan, prune bool, result *syncResult) 
 			}
 		}
 	}
+	return nil
 }

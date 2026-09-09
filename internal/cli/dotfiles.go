@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -43,20 +44,26 @@ func newDotfiles(opts *options) *cobra.Command {
 				out = cmd.ErrOrStderr()
 			}
 			if action != "diff" {
-				fmt.Fprintln(out, "Chezmoi will apply configuration and run its declared user-tool installation scripts.")
+				if _, err := fmt.Fprintln(out, "Chezmoi will apply configuration and run its declared user-tool installation scripts."); err != nil {
+					return err
+				}
 			}
-			fmt.Fprintf(out, "$ chezmoi %s\n", action)
+			if _, err := fmt.Fprintf(out, "$ chezmoi %s\n", action); err != nil {
+				return err
+			}
 			err := src.Stream(out, cmd.ErrOrStderr(), "chezmoi", action)
 			step := runStep{Name: "chezmoi " + action, Status: "succeeded"}
 			if err != nil {
 				step.Status, step.Detail = "failed", err.Error()
 			}
 			if opts.json {
-				if err := writeJSON(cmd.OutOrStdout(), []runStep{step}, nil); err != nil {
-					return err
+				if reportErr := writeJSON(cmd.OutOrStdout(), []runStep{step}, nil); reportErr != nil {
+					return errors.Join(err, reportErr)
 				}
 			} else if action != "diff" || err != nil {
-				renderRunSummary(out, "dotfiles", []runStep{step})
+				if reportErr := renderRunSummary(out, "dotfiles", []runStep{step}); reportErr != nil {
+					return errors.Join(err, reportErr)
+				}
 			}
 			if err != nil {
 				return reported{}

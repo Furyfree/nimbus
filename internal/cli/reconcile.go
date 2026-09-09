@@ -29,8 +29,12 @@ func reconcileRepositories(s *selected, flags machineFlags, src facts.Source, ap
 	if len(repairs.Operations) == 0 {
 		return nil
 	}
-	fmt.Fprintln(out, "repository reconciliation after package transaction:")
-	out.Write(renderPlan(repairs, false, false))
+	if _, err := fmt.Fprintln(out, "repository reconciliation after package transaction:"); err != nil {
+		return fmt.Errorf("show repository reconciliation: %w", err)
+	}
+	if _, err := out.Write(renderPlan(repairs, false, false)); err != nil {
+		return fmt.Errorf("show repository reconciliation: %w", err)
+	}
 	r := apply.Run(repairs, options(p))
 	result.Executed = append(result.Executed, r.Executed...)
 	result.Differences = append(result.Differences, r.Differences...)
