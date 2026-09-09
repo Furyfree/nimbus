@@ -28,7 +28,7 @@ func TestInstallLogPrivateLifecycleAndRetention(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("NIMBUS_INSTALL_LOG_DIR", "")
 	var first, last string
-	for i := 0; i < 23; i++ {
+	for i := range 23 {
 		l, err := openInstallLog()
 		if err != nil {
 			t.Fatal(err)

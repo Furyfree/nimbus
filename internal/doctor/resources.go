@@ -3,6 +3,7 @@ package doctor
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"strings"
 
 	defs "github.com/Furyfree/nimbus/internal/definitions"
@@ -87,11 +88,8 @@ func SystemResources(src facts.Source, r *defs.Resolved, applied *state.Applied,
 		have := strings.TrimSpace(string(out))
 		add("default-target", "default-target", "default boot target: "+have, have == r.DefaultTarget, err)
 	}
-	for _, profile := range r.Profiles {
-		if profile == "common" {
-			checks = append(checks, workstationDefaults(src)...)
-			break
-		}
+	if slices.Contains(r.Profiles, "common") {
+		checks = append(checks, workstationDefaults(src)...)
 	}
 	return checks
 }

@@ -3,8 +3,10 @@ package facts
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/Furyfree/nimbus/internal/selector"
@@ -28,7 +30,7 @@ const (
 // checkout is selected; the checkout section then records that.
 func Inspect(src Source, checkoutRoot string) *Facts {
 	f := &Facts{Commands: map[string]string{}}
-	for _, name := range append(append([]string(nil), RequiredCommands...), OptionalCommands...) {
+	for _, name := range append(slices.Clone(RequiredCommands), OptionalCommands...) {
 		if p, err := src.LookPath(name); err == nil {
 			f.Commands[name] = p
 		} else {
@@ -65,7 +67,7 @@ func user(src Source) (User, error) {
 		u.Name = strings.TrimSpace(string(name))
 	}
 	cargo := filepath.Join(home, ".cargo", "bin", "cargo")
-	if names, err := src.ReadDir(filepath.Dir(cargo)); err != nil || !contains(names, "cargo") {
+	if names, err := src.ReadDir(filepath.Dir(cargo)); err != nil || !slices.Contains(names, "cargo") {
 		return u, nil
 	}
 	u.Cargo = true
@@ -75,15 +77,6 @@ func user(src Source) (User, error) {
 	}
 	u.Crates = parseCargoList(out)
 	return u, nil
-}
-
-func contains(list []string, want string) bool {
-	for _, s := range list {
-		if s == want {
-			return true
-		}
-	}
-	return false
 }
 
 // ChezmoiDataArgs reads Chezmoi's template data without changing anything.
@@ -247,9 +240,7 @@ func repositories(src Source) ([]Repository, error) {
 					if repos[i].OverrideOptions == nil {
 						repos[i].OverrideOptions = map[string]string{}
 					}
-					for key, value := range o.Options {
-						repos[i].OverrideOptions[key] = value
-					}
+					maps.Copy(repos[i].OverrideOptions, o.Options)
 					if value, ok := o.Options["baseurl"]; ok {
 						repos[i].BaseURL = value
 					}
@@ -403,10 +394,11 @@ func checkoutOrigin(src Source, root string) (string, error) {
 	switch {
 	case err == nil:
 		line := strings.TrimSpace(string(data))
-		if !strings.HasPrefix(line, "gitdir: ") {
+		dir, ok := strings.CutPrefix(line, "gitdir: ")
+		if !ok {
 			return "", fmt.Errorf("%s is not a worktree pointer", gitPath)
 		}
-		gitDir = strings.TrimPrefix(line, "gitdir: ")
+		gitDir = dir
 		if !filepath.IsAbs(gitDir) {
 			gitDir = filepath.Join(root, gitDir)
 		}

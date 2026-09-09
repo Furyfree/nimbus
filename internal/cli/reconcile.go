@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"cmp"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/Furyfree/nimbus/internal/apply"
@@ -34,7 +36,7 @@ func reconcileRepositories(s *selected, flags machineFlags, src facts.Source, ap
 	result.Differences = append(result.Differences, r.Differences...)
 	result.Failures = append(result.Failures, r.Failures...)
 	for _, op := range repairs.Operations {
-		if contains(r.Executed, op.ID) {
+		if slices.Contains(r.Executed, op.ID) {
 			result.Differences = append(result.Differences, "after package transaction: "+op.Summary)
 		}
 	}
@@ -81,10 +83,7 @@ func duplicateRepositoryRepairs(p *plan.Plan) (*plan.Plan, error) {
 			}
 		}
 		if !allowed {
-			reason := op.Summary
-			if op.Blocked != "" {
-				reason = op.Blocked
-			}
+			reason := cmp.Or(op.Blocked, op.Summary)
 			return nil, fmt.Errorf("repository changed beyond duplicate reconciliation: %s; run sync again", reason)
 		}
 		repairs.Operations = append(repairs.Operations, op)

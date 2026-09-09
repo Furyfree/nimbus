@@ -1,6 +1,7 @@
 package plan
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -37,7 +38,7 @@ func TestSourceRetirementUsesOwnedIdentityAndPreservesPreexistingSources(t *test
 			if strings.Contains(strings.Join(ops[0].Steps[0].Argv, " "), "--force") {
 				t.Fatal("remote deletion can never force past installed refs")
 			}
-			receipt.Source.Original = append([]state.NativeSource(nil), receipt.Source.Applied...)
+			receipt.Source.Original = slices.Clone(receipt.Source.Applied)
 			b.in.Applied.Receipts[receipt.Resource] = receipt
 			ops = b.sourceRetirements()
 			if ops[0].Action != ActionRetire || len(ops[0].Steps) != 0 || ops[0].Blocked != "" {

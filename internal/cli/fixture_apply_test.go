@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -135,10 +136,7 @@ func answerLaptopInstall(t *testing.T, src *facts.FakeSource, root string) {
 	var b strings.Builder
 	b.WriteString("Repositories loaded.\nPackage Arch Version Repository Size\nInstalling:\n")
 	for _, n := range names {
-		repo := repoOf[n]
-		if repo == "" {
-			repo = "fedora"
-		}
+		repo := cmp.Or(repoOf[n], "fedora")
 		fmt.Fprintf(&b, " %s x86_64 0:1-1.fc44 %s 1.0 KiB\n", n, repo)
 	}
 	b.WriteString("\nTransaction Summary:\n Installing: 1 package\n\nOperation aborted by the user.\n")

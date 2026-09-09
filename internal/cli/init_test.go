@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -31,7 +32,7 @@ func TestInitUsesExplicitMachineAndReusesSelectorWithoutConfirmation(t *testing.
 	}
 	t.Cleanup(func() { approver = saved })
 	code, out, errOut := run(t, "init", "--checkout", root, "--machine", "vm")
-	if code != ExitOK || !strings.Contains(out, "selected vm; selector written to") || !strings.Contains(out, "plan for vm") || !contains(src.calls, "chezmoi apply") {
+	if code != ExitOK || !strings.Contains(out, "selected vm; selector written to") || !strings.Contains(out, "plan for vm") || !slices.Contains(src.calls, "chezmoi apply") {
 		t.Fatalf("init: %d\n%s%s", code, out, errOut)
 	}
 	path, _ := selector.DefaultPath()
@@ -176,7 +177,7 @@ func TestInitOnePasswordSSHIsExplicitAndPreservesExistingSelection(t *testing.T)
 	src.Commands[initial+"true -- https://github.com/Furyfree/dotfiles.git"] = nil
 	src.Commands[facts.Key("chezmoi", facts.ChezmoiDataArgs...)] = []byte(`{"Machine":"vm","ManagedByNimbus":true,"Profiles":["common"],"onePasswordSsh":true}`)
 	code, out, errOut := run(t, "init", "--checkout", root, "--machine", "vm", "--onepassword-ssh", "-y")
-	if code != ExitOK || !contains(src.calls, initial+"true -- https://github.com/Furyfree/dotfiles.git") {
+	if code != ExitOK || !slices.Contains(src.calls, initial+"true -- https://github.com/Furyfree/dotfiles.git") {
 		t.Fatalf("opt-in failed: %d %s%s", code, out, errOut)
 	}
 	src.Dirs[filepath.Join(os.Getenv("HOME"), ".local", "share", "chezmoi")] = []string{".git"}

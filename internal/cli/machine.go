@@ -58,8 +58,8 @@ func loadSelected(flags machineFlags) (*selected, error) {
 		}
 	}
 	c, err := definitions.Load(root)
-	var errs definitions.ErrorList
-	if err != nil && !errors.As(err, &errs) {
+	errs, ok := errors.AsType[definitions.ErrorList](err)
+	if err != nil && !ok {
 		return nil, err
 	}
 	if len(errs) == 0 {

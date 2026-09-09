@@ -9,7 +9,6 @@ import (
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
-func boolPtr(v bool) *bool { return &v }
 func resourceBuilder() (*builder, *facts.FakeSource) {
 	src := &facts.FakeSource{Commands: map[string][]byte{}, Files: map[string][]byte{}, Dirs: map[string][]string{"/": {"etc"}, "/etc": {}, "/etc/systemd/system": {}}, Failures: map[string]string{}}
 	src.Commands[facts.Key("stat", "--format=%F|%U|%G|%a|%h", "--", "/etc")] = []byte("directory|root|root|755|1")
@@ -56,7 +55,7 @@ func TestSystemFilesRequireOwnershipAndBindFullPayload(t *testing.T) {
 func TestServiceEnablementDoesNotStartGreeterAndRejectsForeignManager(t *testing.T) {
 	b, src := resourceBuilder()
 	answerUnit(src, "greetd.service", "disabled", "inactive")
-	want := definitions.ServiceDecl{Unit: "greetd.service", Enabled: boolPtr(true)}
+	want := definitions.ServiceDecl{Unit: "greetd.service", Enabled: new(true)}
 	op := b.serviceOperation("service:greetd.service", want, "desktop", "")
 	if op.Blocked != "" || len(op.Steps) != 1 || op.Steps[0].Argv[1] != "enable" {
 		t.Fatalf("enable only: %+v", op)
@@ -109,7 +108,7 @@ func TestRetirementWaitsForReplanBeforePackageRemoval(t *testing.T) {
 	b, src := resourceBuilder()
 	answerUnit(src, "demo.service", "enabled", "inactive")
 	previous := facts.Service{Unit: "demo.service", Load: "loaded", Enabled: "disabled", Active: "inactive"}
-	b.in.Applied.Receipts["service:demo.service"] = state.Receipt{Resource: "service:demo.service", Provider: KindService, Machine: "vm", Verified: true, Previous: encodeResource(previous), Intended: encodeResource(definitions.ServiceDecl{Unit: "demo.service", Enabled: boolPtr(true)})}
+	b.in.Applied.Receipts["service:demo.service"] = state.Receipt{Resource: "service:demo.service", Provider: KindService, Machine: "vm", Verified: true, Previous: encodeResource(previous), Intended: encodeResource(definitions.ServiceDecl{Unit: "demo.service", Enabled: new(true)})}
 	ops := b.systemResources([]Operation{{ID: "packages:install", Kind: KindPackage, Action: ActionInstall}})
 	if len(ops) != 1 || ops[0].After != "packages:install" {
 		t.Fatalf("retirement must wait for package state: %+v", ops)

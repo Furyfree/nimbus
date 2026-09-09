@@ -131,7 +131,7 @@ func logParents(path string, create bool) error {
 		return errors.New("installation log path must be absolute and clean")
 	}
 	current := string(filepath.Separator)
-	for _, part := range strings.Split(strings.TrimPrefix(path, current), string(filepath.Separator)) {
+	for part := range strings.SplitSeq(strings.TrimPrefix(path, current), string(filepath.Separator)) {
 		current = filepath.Join(current, part)
 		i, err := os.Lstat(current)
 		if errors.Is(err, os.ErrNotExist) && create {
@@ -369,8 +369,7 @@ func (l *installLog) commandEnd(label string, start time.Time, err error) {
 	status := "0"
 	if err != nil {
 		status = "unavailable"
-		var exit *exec.ExitError
-		if errors.As(err, &exit) {
+		if exit, ok := errors.AsType[*exec.ExitError](err); ok {
 			status = fmt.Sprint(exit.ExitCode())
 		}
 	}

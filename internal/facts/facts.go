@@ -45,7 +45,7 @@ type Chezmoi struct {
 	OnePasswordSSH  bool     `json:"one_password_ssh"`
 	Initialized     bool     `json:"initialized"`
 	Machine         string   `json:"machine,omitempty"`
-	ManagedByNimbus bool     `json:"managed_by_nimbus,omitempty"`
+	ManagedByNimbus bool     `json:"managed_by_nimbus,omitzero"`
 	Profiles        []string `json:"profiles,omitempty"`
 }
 

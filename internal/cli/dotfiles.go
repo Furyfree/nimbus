@@ -14,7 +14,6 @@ import (
 func newDotfiles(opts *options) *cobra.Command {
 	cmd := &cobra.Command{Use: "dotfiles", Short: "Inspect, apply, or update user configuration and tools through Chezmoi", Args: noArgs}
 	for _, action := range []string{"diff", "apply", "update"} {
-		action := action
 		short := map[string]string{"diff": "Show the local Chezmoi changes", "apply": "Apply the local Chezmoi source, including user-tool scripts", "update": "Pull and apply the Chezmoi source, including user-tool scripts"}[action]
 		cmd.AddCommand(&cobra.Command{Use: action, Short: short, Args: noArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 			src := newSource()

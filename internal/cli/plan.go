@@ -3,7 +3,7 @@ package cli
 import (
 	"bytes"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -78,8 +78,8 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 			summary := op.Summary
 			if op.Action == plan.ActionEnable {
 				// The location is in nimbus.toml; the line is for scanning.
-				if i := strings.Index(summary, " ("); i > 0 {
-					summary = summary[:i]
+				if before, _, found := strings.Cut(summary, " ("); found && before != "" {
+					summary = before
 				}
 			}
 			sources = append(sources, summary)
@@ -108,13 +108,13 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 			writeWrapped(&b, "  ", strings.Fields(src), " ", "", "    ")
 		}
 	}
-	names := append([]string(nil), pendingNames...)
+	names := slices.Clone(pendingNames)
 	if installTx != nil {
 		for _, item := range installTx.Items {
 			names = append(names, plan.PackageName(item))
 		}
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	switch {
 	case installTx != nil && installTx.Transaction != nil:
 		tx := installTx.Transaction
@@ -156,7 +156,7 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 		writeWrapped(&b, "  ", names, ", ", ",", "  ")
 	}
 	if len(flatpaks) > 0 {
-		sort.Strings(flatpaks)
+		slices.Sort(flatpaks)
 		writeWrapped(&b, fmt.Sprintf("\ninstall %d Flatpaks: ", len(flatpaks)), flatpaks, ", ", ",", "  ")
 	}
 	if len(userTools) > 0 {

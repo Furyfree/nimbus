@@ -1,6 +1,7 @@
 package definitions
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,7 +89,7 @@ func loadAndValidate(t *testing.T, root string) ErrorList {
 	t.Helper()
 	c, err := Load(root)
 	if err != nil {
-		if errs, ok := err.(ErrorList); ok {
+		if errs, ok := errors.AsType[ErrorList](err); ok {
 			return errs
 		}
 		t.Fatalf("load: %v", err)

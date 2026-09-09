@@ -1,12 +1,13 @@
 package plan
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -145,9 +146,7 @@ func answerInstall(t *testing.T, src *facts.FakeSource, in Inputs, mutate func([
 			}
 		}
 		native, arch := facts.SplitPackageRequest(name)
-		if arch == "" {
-			arch = "x86_64"
-		}
+		arch = cmp.Or(arch, "x86_64")
 		rows = append(rows, TxPackage{Name: native, Arch: arch, EVR: "0:1-1.fc44", Repository: repo, Section: "installing"})
 	}
 	if mutate != nil {
@@ -163,10 +162,8 @@ func answerInstall(t *testing.T, src *facts.FakeSource, in Inputs, mutate func([
 }
 
 func find(p *Plan, id string) *Operation {
-	for i := range p.Operations {
-		if p.Operations[i].ID == id {
-			return &p.Operations[i]
-		}
+	if i := slices.IndexFunc(p.Operations, func(op Operation) bool { return op.ID == id }); i >= 0 {
+		return &p.Operations[i]
 	}
 	return nil
 }
@@ -233,7 +230,7 @@ func TestPlanOnFreshFedora(t *testing.T) {
 	in := Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src}
 	p = answerInstall(t, src, in, nil)
 	inst := find(p, "packages:install")
-	if inst.Blocked != "" || inst.After != "" || inst.Transaction == nil || !contains(inst.Steps[0].Argv, "--allowerasing") || !contains(inst.Steps[0].Argv, "docker-ce") || !strings.Contains(inst.Summary, "packages through one DNF transaction") {
+	if inst.Blocked != "" || inst.After != "" || inst.Transaction == nil || !slices.Contains(inst.Steps[0].Argv, "--allowerasing") || !slices.Contains(inst.Steps[0].Argv, "docker-ce") || !strings.Contains(inst.Summary, "packages through one DNF transaction") {
 		t.Fatalf("install = %+v", inst)
 	}
 	if len(inst.Steps) != 1 || !strings.HasPrefix(strings.Join(inst.Steps[0].Argv, " "), "dnf5 -y install --allowerasing ") || !inst.Steps[0].Privileged {
@@ -271,15 +268,13 @@ func TestPlanOnFreshFedora(t *testing.T) {
 		case KindDNFConfig, KindRepository, KindFlatpakRemote:
 			lastRepo = i
 		default:
-			if i < firstPkg {
-				firstPkg = i
-			}
+			firstPkg = min(firstPkg, i)
 		}
 	}
 	if lastRepo > firstPkg {
 		t.Fatalf("repository operation after a package operation: %d > %d", lastRepo, firstPkg)
 	}
-	if !sort.SliceIsSorted(p.Prune, func(i, j int) bool { return p.Prune[i].Name < p.Prune[j].Name }) {
+	if !slices.IsSortedFunc(p.Prune, func(a, b Prune) int { return cmp.Compare(a.Name, b.Name) }) {
 		t.Fatal("prune candidates are not sorted")
 	}
 }
@@ -454,7 +449,7 @@ func readyHost(t *testing.T, c *definitions.Checkout) (*facts.FakeSource, *facts
 	t.Helper()
 	src, f := host(t)
 	withoutTerraFile(f)
-	for _, id := range sortedKeys(c.Definitions().Repositories) {
+	for _, id := range slices.Sorted(maps.Keys(c.Definitions().Repositories)) {
 		r := c.Definitions().Repositories[id]
 		switch {
 		case r.Kind == "flatpak":
@@ -600,7 +595,7 @@ func TestAppliedStateShapesThePlan(t *testing.T) {
 	for _, p := range f.Packages.Value {
 		baseline = append(baseline, p.Name)
 	}
-	sort.Strings(baseline)
+	slices.Sort(baseline)
 	a.Baseline = &state.Baseline{Schema: state.Schema, Packages: baseline}
 	f.Packages.Value = append(f.Packages.Value,
 		facts.Package{Name: "no-longer-wanted", Version: "1", Release: "1", Arch: "x86_64", FromRepo: "fedora", Reason: "user"},
@@ -616,7 +611,7 @@ func TestAppliedStateShapesThePlan(t *testing.T) {
 		t.Fatalf("managed package = %+v", op)
 	}
 	owned := find(p, "packages:remove-owned")
-	if owned == nil || owned.Blocked != "" || strings.Join(owned.Steps[0].Argv, " ") != "dnf5 -y remove --no-autoremove no-longer-wanted.x86_64" || !contains(owned.Paths, "package:dnf:no-longer-wanted") {
+	if owned == nil || owned.Blocked != "" || strings.Join(owned.Steps[0].Argv, " ") != "dnf5 -y remove --no-autoremove no-longer-wanted.x86_64" || !slices.Contains(owned.Paths, "package:dnf:no-longer-wanted") {
 		t.Fatalf("owned removal = %+v", owned)
 	}
 	names := map[string]bool{}
@@ -638,7 +633,7 @@ func TestAppliedStateShapesThePlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if op := find(p, "packages:prune"); op == nil || op.Action != ActionPrune || op.Blocked != "" || !contains(op.Paths, "unmanaged:hand-installed.x86_64") {
+	if op := find(p, "packages:prune"); op == nil || op.Action != ActionPrune || op.Blocked != "" || !slices.Contains(op.Paths, "unmanaged:hand-installed.x86_64") {
 		t.Fatalf("prune transaction = %+v", op)
 	}
 	if find(p, "packages:remove-owned") == nil {

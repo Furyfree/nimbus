@@ -61,7 +61,7 @@ func TestShellLogRetentionPreservesUnknownAndActiveRuns(t *testing.T) {
 	if err := os.Mkdir(root, 0700); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		dir := filepath.Join(root, fmt.Sprintf("run-%03d", i))
 		if err := os.Mkdir(dir, 0700); err != nil {
 			t.Fatal(err)
@@ -99,7 +99,7 @@ func TestShellLogRetentionPreservesUnknownAndActiveRuns(t *testing.T) {
 		t.Fatalf("prune: %v %s", err, out)
 	}
 	// Keep all six protected directories plus the newest 20 completed runs.
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		name := fmt.Sprintf("run-%03d", i)
 		_, err := os.Stat(filepath.Join(root, name))
 		if i >= 3 && i <= 6 {
@@ -332,7 +332,7 @@ printf 'exported-log=%s\n' "$NIMBUS_INSTALL_LOG_DIR"
 				t.Fatalf("slash normalization: %v %s", err, out)
 			}
 			found := false
-			for _, line := range strings.Split(string(out), "\n") {
+			for line := range strings.SplitSeq(string(out), "\n") {
 				if path, ok := strings.CutPrefix(line, "exported-log="); ok {
 					found = true
 					if path != filepath.Clean(path) {

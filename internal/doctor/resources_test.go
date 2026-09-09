@@ -10,8 +10,7 @@ import (
 )
 
 func TestResourceDoctorReportsGreeterReadinessAndUnknownState(t *testing.T) {
-	enabled := true
-	r := &defs.Resolved{Machine: "vm", Services: []defs.ResolvedService{{ServiceDecl: defs.ServiceDecl{Unit: "greetd.service", Enabled: &enabled}}}}
+	r := &defs.Resolved{Machine: "vm", Services: []defs.ResolvedService{{ServiceDecl: defs.ServiceDecl{Unit: "greetd.service", Enabled: new(true)}}}}
 	src := &facts.FakeSource{Commands: map[string][]byte{
 		facts.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", "greetd.service"): []byte("LoadState=loaded\nUnitFileState=enabled\nActiveState=inactive\n"),
 	}}

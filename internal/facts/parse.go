@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -142,14 +142,14 @@ func normalizeRepo(v string) string {
 // "name vX.Y.Z:" at the start of a line, its binaries indented below.
 func parseCargoList(out []byte) []string {
 	var crates []string
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		if line == "" || line[0] == ' ' || line[0] == '\t' {
 			continue
 		}
 		name, _, _ := strings.Cut(line, " ")
 		crates = append(crates, name)
 	}
-	sort.Strings(crates)
+	slices.Sort(crates)
 	return crates
 }
 

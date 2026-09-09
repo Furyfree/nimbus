@@ -3,6 +3,7 @@ package facts
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -67,10 +68,8 @@ func TestInspectFedora44Fixture(t *testing.T) {
 }
 
 func findPackage(f *Facts, name string) *Package {
-	for i := range f.Packages.Value {
-		if f.Packages.Value[i].Name == name {
-			return &f.Packages.Value[i]
-		}
+	if i := slices.IndexFunc(f.Packages.Value, func(p Package) bool { return p.Name == name }); i >= 0 {
+		return &f.Packages.Value[i]
 	}
 	return nil
 }

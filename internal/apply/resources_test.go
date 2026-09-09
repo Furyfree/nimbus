@@ -23,13 +23,12 @@ func resourceExecutor(src facts.Source) *executor {
 }
 
 func TestServiceNoopMutationNeverGetsSuccessReceipt(t *testing.T) {
-	enabled := true
 	before := facts.Service{Unit: "demo.service", Load: "loaded", Enabled: "disabled", Active: "inactive"}
 	src := &facts.FakeSource{Commands: map[string][]byte{
 		facts.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", "demo.service"): []byte("LoadState=loaded\nUnitFileState=disabled\nActiveState=inactive\n"),
 		facts.Key("sudo", "systemctl", "enable", "--", "demo.service"):                                         nil,
 	}}
-	op := plan.Operation{ID: "service:demo.service", Kind: plan.KindService, Action: plan.ActionRepair, Resource: &plan.ResourceChange{Name: before.Unit, Before: encodeTest(before), After: encodeTest(definitions.ServiceDecl{Unit: before.Unit, Enabled: &enabled}), Previous: encodeTest(before), Enabled: &enabled}, Steps: []plan.Step{{Argv: []string{"systemctl", "enable", "--", before.Unit}}}}
+	op := plan.Operation{ID: "service:demo.service", Kind: plan.KindService, Action: plan.ActionRepair, Resource: &plan.ResourceChange{Name: before.Unit, Before: encodeTest(before), After: encodeTest(definitions.ServiceDecl{Unit: before.Unit, Enabled: new(true)}), Previous: encodeTest(before), Enabled: new(true)}, Steps: []plan.Step{{Argv: []string{"systemctl", "enable", "--", before.Unit}}}}
 	receipts, _, err := resourceExecutor(src).systemResource(op)
 	if err == nil || len(receipts) != 0 {
 		t.Fatalf("no-effect enable: receipts=%v err=%v", receipts, err)
@@ -37,10 +36,9 @@ func TestServiceNoopMutationNeverGetsSuccessReceipt(t *testing.T) {
 }
 
 func TestServiceAdoptionRecordsOriginalState(t *testing.T) {
-	enabled := true
 	before := facts.Service{Unit: "demo.service", Load: "loaded", Enabled: "enabled", Active: "inactive"}
 	src := &facts.FakeSource{Commands: map[string][]byte{facts.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", before.Unit): []byte("LoadState=loaded\nUnitFileState=enabled\nActiveState=inactive\n")}}
-	op := plan.Operation{ID: "service:demo.service", Kind: plan.KindService, Action: plan.ActionAdopt, Resource: &plan.ResourceChange{Name: before.Unit, Before: encodeTest(before), After: encodeTest(definitions.ServiceDecl{Unit: before.Unit, Enabled: &enabled}), Previous: encodeTest(before), Enabled: &enabled}}
+	op := plan.Operation{ID: "service:demo.service", Kind: plan.KindService, Action: plan.ActionAdopt, Resource: &plan.ResourceChange{Name: before.Unit, Before: encodeTest(before), After: encodeTest(definitions.ServiceDecl{Unit: before.Unit, Enabled: new(true)}), Previous: encodeTest(before), Enabled: new(true)}}
 	receipts, _, err := resourceExecutor(src).systemResource(op)
 	if err != nil || len(receipts) != 1 || receipts[0].Previous != encodeTest(before) || !receipts[0].Verified {
 		t.Fatalf("adoption: %v %v", receipts, err)

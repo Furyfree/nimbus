@@ -1,7 +1,8 @@
 package definitions
 
 import (
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 )
 
@@ -52,7 +53,7 @@ type ResolvedFile struct {
 	Component string   `json:"component"`
 	Content   []byte   `json:"content"`
 	Triggers  []string `json:"triggers,omitempty"`
-	Recovery  bool     `json:"recovery,omitempty"`
+	Recovery  bool     `json:"recovery,omitzero"`
 }
 
 // Resolve computes the desired graph of one machine from configuration only.
@@ -85,21 +86,21 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 	}
 	for changed := true; changed; {
 		changed = false
-		for _, cid := range sortedKeys(compPaths) {
+		for _, cid := range slices.Sorted(maps.Keys(compPaths)) {
 			comp := c.Components[cid]
 			if comp == nil {
 				continue
 			}
 			for _, req := range comp.Requires {
 				path := "component:" + cid
-				if !contains(compPaths[req], path) {
+				if !slices.Contains(compPaths[req], path) {
 					add(req, path)
 					changed = true
 				}
 			}
 		}
 	}
-	for _, cid := range sortedKeys(compPaths) {
+	for _, cid := range slices.Sorted(maps.Keys(compPaths)) {
 		comp := c.Components[cid]
 		if comp == nil {
 			continue
@@ -125,7 +126,7 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 			rp = &ResolvedPackage{Canonical: key, Prefix: ref.Prefix, Name: ref.Name}
 			pkgs[key] = rp
 		}
-		if !contains(rp.Paths, path) {
+		if !slices.Contains(rp.Paths, path) {
 			rp.Paths = append(rp.Paths, path)
 		}
 		if byName[ref.Name] == nil {
@@ -140,7 +141,7 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 			}
 		}
 	}
-	for _, cid := range sortedKeys(compPaths) {
+	for _, cid := range slices.Sorted(maps.Keys(compPaths)) {
 		if comp := c.Components[cid]; comp != nil {
 			for _, raw := range comp.Packages {
 				addPkg(raw, "component:"+cid)
@@ -150,9 +151,9 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 	for _, raw := range m.Packages {
 		addPkg(raw, "machine")
 	}
-	for _, name := range sortedKeys(byName) {
+	for _, name := range slices.Sorted(maps.Keys(byName)) {
 		if len(byName[name]) > 1 {
-			errs.Add(where, "package %q is selected from more than one repository: %s", name, strings.Join(sortedKeys(byName[name]), ", "))
+			errs.Add(where, "package %q is selected from more than one repository: %s", name, strings.Join(slices.Sorted(maps.Keys(byName[name])), ", "))
 		}
 	}
 
@@ -160,7 +161,7 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 	// never a package of a component that another selected component
 	// requires, whatever other paths also select it.
 	required := map[string]bool{}
-	for cid := range compPaths {
+	for cid := range maps.Keys(compPaths) {
 		if comp := c.Components[cid]; comp != nil {
 			for _, req := range comp.Requires {
 				required[req] = true
@@ -195,14 +196,14 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 	// Removes and files. A removal names a native package, so it conflicts
 	// with the same name selected from any RPM repository.
 	selectedRPM := map[string]string{}
-	for _, rp := range pkgs {
+	for rp := range maps.Values(pkgs) {
 		if rp.Prefix != PrefixFlatpak && rp.Prefix != PrefixCargo {
 			selectedRPM[rp.Name] = rp.Canonical
 		}
 	}
 	removes := map[string]bool{}
 	files := map[string]ResolvedFile{}
-	for _, cid := range sortedKeys(compPaths) {
+	for _, cid := range slices.Sorted(maps.Keys(compPaths)) {
 		comp := c.Components[cid]
 		if comp == nil {
 			continue
@@ -225,15 +226,15 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 	}
 
 	r := &Resolved{Machine: m.ID, Profiles: append([]string(nil), m.Profiles...)}
-	for _, cid := range sortedKeys(compPaths) {
-		paths := append([]string(nil), compPaths[cid]...)
-		sort.Strings(paths)
+	for _, cid := range slices.Sorted(maps.Keys(compPaths)) {
+		paths := slices.Clone(compPaths[cid])
+		slices.Sort(paths)
 		r.Components = append(r.Components, ResolvedComponent{ID: cid, Paths: paths})
 	}
 	repos := map[string]bool{}
-	for _, key := range sortedKeys(pkgs) {
+	for _, key := range slices.Sorted(maps.Keys(pkgs)) {
 		rp := pkgs[key]
-		sort.Strings(rp.Paths)
+		slices.Sort(rp.Paths)
 		r.Packages = append(r.Packages, *rp)
 		switch rp.Prefix {
 		case PrefixDNF, PrefixCargo:
@@ -245,11 +246,11 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 			repos[rp.Prefix] = true
 		}
 	}
-	r.Removes = sortedKeys(removes)
-	for _, target := range sortedKeys(files) {
+	r.Removes = slices.Sorted(maps.Keys(removes))
+	for _, target := range slices.Sorted(maps.Keys(files)) {
 		r.Files = append(r.Files, files[target])
 	}
-	r.Repositories = sortedKeys(repos)
+	r.Repositories = slices.Sorted(maps.Keys(repos))
 	resolveResources(c, r, &errs)
 	for _, rc := range r.Components {
 		if comp := c.Components[rc.ID]; comp != nil && comp.Installer != nil {
@@ -275,13 +276,4 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 		r.Repositories = []string{}
 	}
 	return r, errs
-}
-
-func contains(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }

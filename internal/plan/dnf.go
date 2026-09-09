@@ -25,7 +25,7 @@ type TxPackage struct {
 type Transaction struct {
 	Packages []TxPackage `json:"packages"`
 	// NothingToDo is set when DNF reported nothing to change.
-	NothingToDo bool `json:"nothing_to_do,omitempty"`
+	NothingToDo bool `json:"nothing_to_do,omitzero"`
 	// Download is DNF's own estimate of the inbound size, such as "3 GiB",
 	// when the preview printed one.
 	Download string `json:"download,omitempty"`
@@ -109,8 +109,8 @@ func ParsePreview(out []byte) (*Transaction, error) {
 		if !inTable {
 			continue
 		}
-		if strings.HasSuffix(trimmed, ":") && !strings.HasPrefix(line, " ") {
-			section = strings.ToLower(strings.TrimSuffix(trimmed, ":"))
+		if heading, ok := strings.CutSuffix(trimmed, ":"); ok && !strings.HasPrefix(line, " ") {
+			section = strings.ToLower(heading)
 			if !knownSections[section] {
 				return nil, fmt.Errorf("unknown preview section %q", trimmed)
 			}
@@ -151,14 +151,14 @@ func ParsePreview(out []byte) (*Transaction, error) {
 // "Total size of inbound packages is 3 GiB. Need to download 3 GiB.", which
 // DNF prints on stderr and so may reach the planner outside the table.
 func DownloadSize(text string) string {
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		line = strings.TrimSpace(line)
 		size, ok := strings.CutPrefix(line, "Total size of inbound packages is ")
 		if !ok {
 			continue
 		}
-		if i := strings.Index(size, ". "); i > 0 {
-			size = size[:i]
+		if before, _, ok := strings.Cut(size, ". "); ok && before != "" {
+			size = before
 		}
 		return strings.TrimSuffix(size, ".")
 	}

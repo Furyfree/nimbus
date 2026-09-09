@@ -117,10 +117,7 @@ func (m pickerModel) View() string {
 		fmt.Fprintf(&b, "filter: %s\n", m.filter)
 	}
 	vis := m.visible()
-	start := 0
-	if m.cursor >= 20 {
-		start = m.cursor - 19
-	}
+	start := max(0, m.cursor-19)
 	for n, i := range vis {
 		if n < start || n >= start+20 {
 			continue

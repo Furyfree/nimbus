@@ -3,6 +3,7 @@ package plan
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -45,15 +46,14 @@ func (b *builder) sourceOwnership(op Operation, ids []string) *state.SourceOwner
 		if receipt.Source == nil || !receipt.Verified || receipt.Machine != b.in.Resolved.Machine {
 			return nil // Repair does not invent ownership for legacy/foreign state.
 		}
-		copy := *receipt.Source
-		return &copy
+		return new(*receipt.Source)
 	}
 	return &state.SourceOwnership{Original: SourceSnapshot(op.Kind, ids, b.in.Facts)}
 }
 
 func (b *builder) sourceRetirements(prior ...[]Operation) []Operation {
 	var result []Operation
-	for _, id := range sortedKeys(b.in.Applied.Receipts) {
+	for _, id := range slices.Sorted(maps.Keys(b.in.Applied.Receipts)) {
 		r := b.in.Applied.Receipts[id]
 		if r.Provider != KindRepository && r.Provider != KindFlatpakRemote {
 			continue
@@ -86,8 +86,7 @@ func (b *builder) sourceRetirements(prior ...[]Operation) []Operation {
 			continue
 		}
 		if err := CheckSourceRetirement(op, b.in.Facts, b.in.Source); err != nil {
-			var inUse sourceInUse
-			if errors.As(err, &inUse) {
+			if inUse, ok := errors.AsType[sourceInUse](err); ok {
 				var earlier []Operation
 				if len(prior) > 0 {
 					earlier = prior[0]
@@ -132,10 +131,9 @@ func (b *builder) sourceRetirements(prior ...[]Operation) []Operation {
 }
 
 func sourceOriginal(ownership *state.SourceOwnership, id string) *state.NativeSource {
-	for i := range ownership.Original {
-		if ownership.Original[i].ID == id {
-			return &ownership.Original[i]
-		}
+	i := slices.IndexFunc(ownership.Original, func(source state.NativeSource) bool { return source.ID == id })
+	if i >= 0 {
+		return &ownership.Original[i]
 	}
 	return nil
 }
@@ -178,13 +176,14 @@ func sourceRemovalDependency(inUse sourceInUse, ops []Operation) string {
 			}
 		}
 		if op.Kind == KindFlatpak {
-			for consumer := range pending {
+			maps.DeleteFunc(pending, func(consumer string, _ bool) bool {
 				parts := strings.Split(consumer, "/")
 				if len(parts) == 4 && parts[0] == "app" && op.ID == "flatpak:"+parts[1] {
-					delete(pending, consumer)
 					last = op.ID
+					return true
 				}
-			}
+				return false
+			})
 		}
 	}
 	if len(pending) == 0 {
@@ -276,7 +275,7 @@ func CheckSourceRetirement(op Operation, f *facts.Facts, src facts.Source) error
 		return fmt.Errorf("inspect all Flatpak refs before retirement: %w", err)
 	}
 	var consumers []string
-	for _, line := range strings.Split(strings.TrimSuffix(string(out), "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSuffix(string(out), "\n"), "\n") {
 		if line == "" {
 			continue
 		}

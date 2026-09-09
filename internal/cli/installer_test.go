@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -117,7 +118,7 @@ func (s *installerSource) Stream(out, errOut io.Writer, name string, args ...str
 		return errors.New("required secret unavailable")
 	}
 	if name == filepath.Join(home, ".cargo/bin/cargo") {
-		if !contains(s.calls, "chezmoi apply") {
+		if !slices.Contains(s.calls, "chezmoi apply") {
 			s.t.Fatal("Cargo ran before user configuration was applied")
 		}
 		s.Commands[facts.Key(name, facts.CargoListArgs...)] = []byte("demo v1.0.0:\n    demo\n")
@@ -206,7 +207,7 @@ func TestInitAppliesDotfilesBeforeCargoAndRetriesAFailure(t *testing.T) {
 	if code != ExitOK || !strings.Contains(out, "succeeded  remaining Nimbus user tools") {
 		t.Fatalf("%d %s%s", code, out, errOut)
 	}
-	if !contains(src.calls, facts.Key(filepath.Join(os.Getenv("HOME"), ".cargo/bin/cargo"), "install", "demo")) {
+	if !slices.Contains(src.calls, facts.Key(filepath.Join(os.Getenv("HOME"), ".cargo/bin/cargo"), "install", "demo")) {
 		t.Fatal("Cargo was not installed")
 	}
 }
@@ -238,7 +239,7 @@ func TestUnsupportedPlatformDoesNotRefreshMetadataOrWriteSelector(t *testing.T) 
 			if code != ExitFailure || !strings.Contains(out+errOut, "unsupported platform") {
 				t.Fatalf("%d %s%s", code, out, errOut)
 			}
-			if len(src.calls) > 0 || contains(src.reads, "dnf5 makecache") {
+			if len(src.calls) > 0 || slices.Contains(src.reads, "dnf5 makecache") {
 				t.Fatalf("mutation calls: %v", src.calls)
 			}
 			path, _ := selector.DefaultPath()
@@ -361,7 +362,7 @@ func TestInitRefusesUnrelatedChezmoiStateBeforeApplying(t *testing.T) {
 			if code != ExitFailure || !strings.Contains(out+errOut, want) {
 				t.Fatalf("%d %s%s", code, out, errOut)
 			}
-			if contains(src.calls, "chezmoi apply") {
+			if slices.Contains(src.calls, "chezmoi apply") {
 				t.Fatal("unrelated source was applied")
 			}
 		})
@@ -459,7 +460,7 @@ func TestInitRefreshPreservesEnabledSSH(t *testing.T) {
 	root, src := installerFixture(t)
 	src.Commands[facts.Key("chezmoi", facts.ChezmoiDataArgs...)] = []byte(`{"Machine":"other","ManagedByNimbus":true,"Profiles":["common"],"onePasswordSsh":true}`)
 	code, out, errOut := run(t, "init", "--checkout", root, "--machine", "vm", "-y")
-	if code != ExitFailure || !strings.Contains(out+errOut, "'Enable 1Password SSH integration=true'") || contains(src.calls, "chezmoi apply") {
+	if code != ExitFailure || !strings.Contains(out+errOut, "'Enable 1Password SSH integration=true'") || slices.Contains(src.calls, "chezmoi apply") {
 		t.Fatalf("refresh lost SSH: %d %s%s", code, out, errOut)
 	}
 }

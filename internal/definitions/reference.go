@@ -50,14 +50,13 @@ func ParseRef(raw string) (Ref, error) {
 	if strings.TrimSpace(raw) != raw {
 		return Ref{}, fmt.Errorf("package reference %q has surrounding whitespace", raw)
 	}
-	i := strings.IndexByte(raw, ':')
-	if i < 0 {
+	prefix, name, qualified := strings.Cut(raw, ":")
+	if !qualified {
 		if !rpmNameRe.MatchString(raw) {
 			return Ref{}, fmt.Errorf("invalid Fedora package name %q", raw)
 		}
 		return Ref{Prefix: PrefixDNF, Name: raw}, nil
 	}
-	prefix, name := raw[:i], raw[i+1:]
 	switch {
 	case prefix == "":
 		return Ref{}, fmt.Errorf("package reference %q has an empty prefix", raw)

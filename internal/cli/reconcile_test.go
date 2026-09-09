@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -149,7 +150,7 @@ func (s *transactionReconcileSource) Stream(out, errOut io.Writer, name string, 
 	s.calls = append(s.calls, call)
 	host := "vendor-install"
 	if call == "sudo dnf5 -y upgrade" {
-		if !contains(s.calls, "sudo dnf5 config-manager setopt vendor-install.enabled=0") {
+		if !slices.Contains(s.calls, "sudo dnf5 config-manager setopt vendor-install.enabled=0") {
 			return errors.New("upgrade started while install-created duplicate remained enabled")
 		}
 		host = "vendor-upgrade"

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -74,7 +75,7 @@ func newInternalSystemFile() *cobra.Command {
 		if err := dec.Decode(&payload); err != nil {
 			return fmt.Errorf("file payload: %w", err)
 		}
-		if dec.Decode(new(any)) != io.EOF {
+		if !errors.Is(dec.Decode(new(any)), io.EOF) {
 			return fmt.Errorf("file payload contains trailing data")
 		}
 		if payload.PlanDigest != digest {

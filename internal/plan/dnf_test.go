@@ -16,14 +16,19 @@ func fixture(t *testing.T, name string) []byte {
 		t.Fatal(err)
 	}
 	marker := "##### " + name + "\n"
-	i := strings.Index(string(data), marker)
-	if i < 0 {
+	_, rest, ok := strings.Cut(string(data), marker)
+	if !ok {
 		t.Fatalf("fixture %s not recorded", name)
 	}
-	rest := string(data)[i+len(marker):]
-	rest = rest[strings.IndexByte(rest, '\n')+1:] // drop the "$ dnf5 ..." line
-	end := strings.Index(rest, "##### exit")
-	return []byte(rest[:end])
+	_, rest, ok = strings.Cut(rest, "\n") // drop the "$ dnf5 ..." line
+	if !ok {
+		t.Fatalf("fixture %s has no command line", name)
+	}
+	out, _, ok := strings.Cut(rest, "##### exit")
+	if !ok {
+		t.Fatalf("fixture %s has no exit marker", name)
+	}
+	return []byte(out)
 }
 
 func TestParsePreviewInstall(t *testing.T) {
@@ -56,11 +61,12 @@ func TestParsePreviewOutcomes(t *testing.T) {
 	if err != nil || !tx.NothingToDo || len(tx.Packages) != 0 {
 		t.Fatalf("nothing to do: %+v %v", tx, err)
 	}
-	var resolveErr *ResolveError
-	if _, err := ParsePreview(fixture(t, "no-match")); !errors.As(err, &resolveErr) || !strings.Contains(err.Error(), "No match for argument: this-package-does-not-exist") {
+	_, err = ParsePreview(fixture(t, "no-match"))
+	if _, ok := errors.AsType[*ResolveError](err); !ok || !strings.Contains(err.Error(), "No match for argument: this-package-does-not-exist") {
 		t.Fatalf("no match: %v", err)
 	}
-	if _, err := ParsePreview(fixture(t, "remove-with-dependents")); !errors.As(err, &resolveErr) || len(resolveErr.Problems) < 2 || !strings.Contains(resolveErr.Problems[0], "protected packages") {
+	_, err = ParsePreview(fixture(t, "remove-with-dependents"))
+	if resolveErr, ok := errors.AsType[*ResolveError](err); !ok || len(resolveErr.Problems) < 2 || !strings.Contains(resolveErr.Problems[0], "protected packages") {
 		t.Fatalf("protected: %v", err)
 	}
 	if _, err := ParsePreview([]byte("Package Arch Version Repository Size\nSurprising:\n foo x86_64 0:1-1 fedora 1 KiB\n")); err == nil || !strings.Contains(err.Error(), "unknown preview section") {

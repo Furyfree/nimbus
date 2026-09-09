@@ -1,10 +1,11 @@
 package definitions
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"sort"
+	"slices"
 )
 
 // DigestVersion frames the digest input so a later format cannot collide.
@@ -21,9 +22,8 @@ type Entry struct {
 // sorted bytewise by path; each is framed as u64 path length, path, u32 mode,
 // u64 content length, content.
 func Digest(entries []Entry) string {
-	sorted := make([]Entry, len(entries))
-	copy(sorted, entries)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Path < sorted[j].Path })
+	sorted := slices.Clone(entries)
+	slices.SortFunc(sorted, func(a, b Entry) int { return cmp.Compare(a.Path, b.Path) })
 
 	h := sha256.New()
 	h.Write([]byte(DigestVersion))

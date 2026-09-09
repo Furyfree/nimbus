@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -71,13 +72,12 @@ var (
 		stopped := make(chan struct{})
 		go func() {
 			defer close(stopped)
-			t := time.NewTicker(time.Minute)
-			defer t.Stop()
+			ticks := time.Tick(time.Minute)
 			for {
 				select {
 				case <-done:
 					return
-				case <-t.C:
+				case <-ticks:
 					_, _ = src.Run("sudo", "-n", "-v")
 				}
 			}
@@ -141,8 +141,8 @@ type syncResult struct {
 	Executed    []string        `json:"executed"`
 	Differences []string        `json:"differences"`
 	Upgraded    bool            `json:"upgraded"`
-	Reboot      bool            `json:"reboot_required,omitempty"`
-	Logout      bool            `json:"logout_required,omitempty"`
+	Reboot      bool            `json:"reboot_required,omitzero"`
+	Logout      bool            `json:"logout_required,omitzero"`
 	Failed      string          `json:"failed,omitempty"`
 	Error       string          `json:"error,omitempty"`
 	Steps       []runStep       `json:"steps"`
@@ -180,7 +180,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			}
 			if currentPlan != nil {
 				for _, op := range syncOperations(currentPlan, sf).Operations {
-					if op.Action == plan.ActionKeep || contains(result.Executed, op.ID) || failedIDs[op.ID] {
+					if op.Action == plan.ActionKeep || slices.Contains(result.Executed, op.ID) || failedIDs[op.ID] {
 						continue
 					}
 					detail := "an earlier stage did not complete"
@@ -391,7 +391,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	// Sources first, so the transactions that follow resolve against them;
 	// then whatever the plan holds, in passes until nothing waits.
 	phase = "apply"
-	for pass := 0; pass < 4; pass++ {
+	for pass := range 4 {
 		if pass > 0 {
 			if p, applied, err = replanUnchanged(s, flags, src, sf.prune, approvedCheckout); err != nil {
 				return err
@@ -442,7 +442,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 		currentPlan = p
 		executable := syncOperations(p, sf)
 		for i := range executable.Operations {
-			if executable.Operations[i].Kind == plan.KindUser && contains(result.Executed, executable.Operations[i].ID) {
+			if executable.Operations[i].Kind == plan.KindUser && slices.Contains(result.Executed, executable.Operations[i].ID) {
 				executable.Operations[i].Action = plan.ActionKeep
 			}
 		}
@@ -489,7 +489,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 		return reported{}
 	}
 	for _, op := range syncOperations(p, sf).Operations {
-		if op.After != "" && op.Action != plan.ActionKeep && !contains(result.Executed, op.ID) {
+		if op.After != "" && op.Action != plan.ActionKeep && !slices.Contains(result.Executed, op.ID) {
 			return fail("dependencies", waitingLine(syncOperations(p, sf)))
 		}
 	}
@@ -596,7 +596,7 @@ func waitingLine(p *plan.Plan) string {
 			continue
 		}
 		n++
-		if d := describeAfter(p, op.After); !contains(targets, d) {
+		if d := describeAfter(p, op.After); !slices.Contains(targets, d) {
 			targets = append(targets, d)
 		}
 	}
@@ -654,7 +654,7 @@ func showReplanned(out io.Writer, p *plan.Plan, prune bool, result *syncResult) 
 	for _, op := range p.Operations {
 		for _, note := range op.Notes {
 			message := "replanned " + op.ID + ": " + note
-			if !contains(result.Differences, message) {
+			if !slices.Contains(result.Differences, message) {
 				result.Differences = append(result.Differences, message)
 			}
 		}

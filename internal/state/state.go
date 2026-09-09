@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -59,8 +60,8 @@ type Receipt struct {
 	RecoveryPoint string           `json:"recovery_point,omitempty"`
 	Timestamp     time.Time        `json:"timestamp"`
 	ChangedAt     time.Time        `json:"changed_at,omitempty"`
-	Reboot        bool             `json:"reboot,omitempty"`
-	Logout        bool             `json:"logout,omitempty"`
+	Reboot        bool             `json:"reboot,omitzero"`
+	Logout        bool             `json:"logout,omitzero"`
 	Triggers      []string         `json:"triggers,omitempty"`
 }
 
@@ -213,7 +214,7 @@ func Record(root, planDigest string, st *Stage) error {
 		if _, err := os.Stat(filepath.Join(root, BaselineFile)); errors.Is(err, fs.ErrNotExist) {
 			b := *st.Baseline
 			b.Schema = BaselineSchema
-			sort.Strings(b.Packages)
+			slices.Sort(b.Packages)
 			data, _ := json.MarshalIndent(b, "", "  ")
 			if err := writeAtomic(filepath.Join(root, BaselineFile), data, 0o644); err != nil {
 				return err

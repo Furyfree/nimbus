@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
@@ -16,7 +16,7 @@ import (
 // from the manifest so the file always says exactly what it means.
 func renderManifest(existing []byte, m *definitions.Machine) []byte {
 	var b bytes.Buffer
-	for _, line := range strings.Split(string(existing), "\n") {
+	for line := range strings.SplitSeq(string(existing), "\n") {
 		if strings.HasPrefix(line, "#") {
 			b.WriteString(line + "\n")
 			continue
@@ -93,10 +93,8 @@ func unifiedDiff(path string, before, after []byte) string {
 		for j := m - 1; j >= 0; j-- {
 			if a[i] == b[j] {
 				lcs[i][j] = lcs[i+1][j+1] + 1
-			} else if lcs[i+1][j] >= lcs[i][j+1] {
-				lcs[i][j] = lcs[i+1][j]
 			} else {
-				lcs[i][j] = lcs[i][j+1]
+				lcs[i][j] = max(lcs[i+1][j], lcs[i][j+1])
 			}
 		}
 	}
@@ -149,7 +147,7 @@ func removeAll(list []string, items ...string) []string {
 }
 
 func sortedCopy(list []string) []string {
-	out := append([]string(nil), list...)
-	sort.Strings(out)
+	out := slices.Clone(list)
+	slices.Sort(out)
 	return out
 }

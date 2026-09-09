@@ -1,16 +1,17 @@
 package apply
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -62,8 +63,8 @@ type Failure struct {
 // Result preserves completed work and every failure. Independent user tools
 // continue after a failure; a system operation failure stops the run.
 type Result struct {
-	Reboot   bool      `json:"reboot,omitempty"`
-	Logout   bool      `json:"logout,omitempty"`
+	Reboot   bool      `json:"reboot,omitzero"`
+	Logout   bool      `json:"logout,omitzero"`
 	Failures []Failure `json:"failures,omitempty"`
 	Executed []string  `json:"executed"`
 	Pending  []string  `json:"pending"`
@@ -175,10 +176,10 @@ func (ex *executor) snapshotPackages() error {
 	// The baseline is what existed before this run, frozen here: a
 	// transaction later in the run updates seen, never before.
 	ex.before = make([]string, 0, len(ex.seen))
-	for _, p := range ex.seen {
+	for p := range maps.Values(ex.seen) {
 		ex.before = append(ex.before, p.ID())
 	}
-	sort.Strings(ex.before)
+	slices.Sort(ex.before)
 	ex.before = slices.Compact(ex.before)
 	return nil
 }
@@ -242,7 +243,7 @@ func (ex *executor) execute(op plan.Operation) (receipts []state.Receipt, remove
 		if resolved := op.Resolved[name]; resolved != "" {
 			name = resolved
 		}
-		inst, ok := facts.FindPackage(packageValues(ex.seen), name)
+		inst, ok := facts.FindPackage(slices.Collect(maps.Values(ex.seen)), name)
 		if !ok {
 			return nil, nil, fmt.Errorf("%s is no longer installed", name)
 		}
@@ -392,13 +393,7 @@ func (ex *executor) repository(op plan.Operation) ([]state.Receipt, []string, er
 	}
 	ready, repair, blocked := plan.CheckRepository(ex.opts.Root, id, f.Repositories.Value)
 	if !ready {
-		reason := repair
-		if blocked != "" {
-			reason = blocked
-		}
-		if reason == "" {
-			reason = "not enabled"
-		}
+		reason := cmp.Or(blocked, repair, "not enabled")
 		return nil, nil, fmt.Errorf("verification: repository %s is not as declared after the operation: %s", id, reason)
 	}
 	receipt := ex.receipt(op, "repository", "absent", "enabled with key "+definitions.NormalizeFingerprint(r.Key), "repository enabled, signature checking on, local key fingerprint and priority as declared")
@@ -547,9 +542,9 @@ func (ex *executor) flatpakRemote(op plan.Operation) ([]state.Receipt, []string,
 		return nil, nil, fmt.Errorf("download remote definition: %w", err)
 	}
 	encoded := ""
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(line, "GPGKey=") {
-			encoded = strings.TrimPrefix(line, "GPGKey=")
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if value, ok := strings.CutPrefix(line, "GPGKey="); ok {
+			encoded = value
 		}
 	}
 	if encoded == "" {
@@ -579,7 +574,7 @@ func (ex *executor) flatpakRemote(op plan.Operation) ([]state.Receipt, []string,
 				return nil, nil, fmt.Errorf("verification: remote %s: %s", id, reason)
 			}
 			url := ""
-			for _, line := range strings.Split(string(data), "\n") {
+			for line := range strings.SplitSeq(string(data), "\n") {
 				if value, ok := strings.CutPrefix(line, "Url="); ok {
 					url = strings.TrimSpace(value)
 				}
@@ -596,14 +591,6 @@ func (ex *executor) flatpakRemote(op plan.Operation) ([]state.Receipt, []string,
 }
 
 // --- packages --------------------------------------------------------------
-
-func packageValues(packages map[string]facts.Package) []facts.Package {
-	out := make([]facts.Package, 0, len(packages))
-	for _, p := range packages {
-		out = append(out, p)
-	}
-	return out
-}
 
 // packageTransaction always inspects the result, including a native failure
 // after partial work. Unknown verification never becomes an empty success.
@@ -650,9 +637,9 @@ func (ex *executor) installTransaction(op plan.Operation) ([]state.Receipt, []st
 // architectures and simultaneous installonly versions. A preview describes
 // changes to the initial set; every other package must remain as observed.
 func transactionDifferences(tx *plan.Transaction, before, after map[string]facts.Package) []string {
-	before = facts.PackageMap(packageValues(before))
-	after = facts.PackageMap(packageValues(after))
-	expected := facts.PackageMap(packageValues(before))
+	before = facts.PackageMap(slices.Collect(maps.Values(before)))
+	after = facts.PackageMap(slices.Collect(maps.Values(after)))
+	expected := maps.Clone(before)
 	shown := map[string]bool{}
 	if tx != nil {
 		for _, row := range tx.Packages {
@@ -665,11 +652,9 @@ func transactionDifferences(tx *plan.Transaction, before, after map[string]facts
 			// Upgrade and downgrade replace the installed version. Explicit
 			// replacing rows also cover obsoletes and installonly changes.
 			if row.Section == "upgrading" || row.Section == "downgrading" {
-				for key, p := range expected {
-					if p.ID() == id {
-						delete(expected, key)
-					}
-				}
+				maps.DeleteFunc(expected, func(_ string, p facts.Package) bool {
+					return p.ID() == id
+				})
 			}
 			version, release, _ := strings.Cut(strings.TrimPrefix(row.EVR, "0:"), "-")
 			epoch := ""
@@ -682,22 +667,22 @@ func transactionDifferences(tx *plan.Transaction, before, after map[string]facts
 	}
 	ids := map[string]bool{}
 	for _, set := range []map[string]facts.Package{before, expected, after} {
-		for _, p := range set {
+		for p := range maps.Values(set) {
 			ids[p.ID()] = true
 		}
 	}
 	versions := func(set map[string]facts.Package, id string) []string {
 		var out []string
-		for _, p := range set {
+		for p := range maps.Values(set) {
 			if p.ID() == id {
 				out = append(out, p.EVR())
 			}
 		}
-		sort.Strings(out)
+		slices.Sort(out)
 		return out
 	}
 	var diffs []string
-	for _, id := range sortedNames(ids) {
+	for _, id := range slices.Sorted(maps.Keys(ids)) {
 		want, got := versions(expected, id), versions(after, id)
 		if slices.Equal(want, got) {
 			continue
@@ -731,17 +716,8 @@ func transactionDifferences(tx *plan.Transaction, before, after map[string]facts
 			}
 		}
 	}
-	sort.Strings(diffs)
+	slices.Sort(diffs)
 	return diffs
-}
-
-func sortedNames(set map[string]bool) []string {
-	names := make([]string, 0, len(set))
-	for n := range set {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	return names
 }
 
 func pathsFor(p *plan.Plan, id string) []string {
@@ -815,15 +791,6 @@ func (ex *executor) flatpakRemove(op plan.Operation) ([]state.Receipt, []string,
 	return nil, []string{op.ID}, nil
 }
 
-func contains(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
-}
-
 // Upgrade brings the installed system current through the native tools,
 // with their output on the terminal: dnf5 upgrade, and flatpak update when
 // a Flatpak remote is declared and the tool is present. Upgrades change no
@@ -847,7 +814,7 @@ func Upgrade(opts Options, root definitions.Root) *Result {
 	} else {
 		r.Executed = append(r.Executed, "upgrade:dnf")
 	}
-	for _, repo := range root.Repositories {
+	for repo := range maps.Values(root.Repositories) {
 		if repo.Kind != "flatpak" {
 			continue
 		}
@@ -882,12 +849,7 @@ func Upgrade(opts Options, root definitions.Root) *Result {
 				}
 				delete(old, app.ID)
 			}
-			removed := make([]string, 0, len(old))
-			for id := range old {
-				removed = append(removed, id)
-			}
-			sort.Strings(removed)
-			for _, id := range removed {
+			for _, id := range slices.Sorted(maps.Keys(old)) {
 				r.Differences = append(r.Differences, "Flatpak removed "+id)
 			}
 		}
@@ -979,7 +941,7 @@ func (ex *executor) verifyUserTool(op plan.Operation, home string) error {
 	case strings.HasPrefix(op.ID, "package:cargo:"):
 		crate := strings.TrimPrefix(op.ID, "package:cargo:")
 		f := facts.Inspect(ex.opts.Source, "")
-		if !f.User.Known() || !contains(f.User.Value.Crates, crate) {
+		if !f.User.Known() || !slices.Contains(f.User.Value.Crates, crate) {
 			return fmt.Errorf("verification: cargo install --list does not show %s", crate)
 		}
 	case strings.HasPrefix(op.ID, "user:") && !strings.HasSuffix(op.ID, ":install"):
@@ -987,7 +949,7 @@ func (ex *executor) verifyUserTool(op plan.Operation, home string) error {
 			if rel, ok := strings.CutPrefix(st.Description, "verify ~/"); ok {
 				rel = strings.TrimSuffix(rel, " exists")
 				names, err := ex.opts.Source.ReadDir(filepath.Join(home, filepath.Dir(rel)))
-				if err != nil || !contains(names, filepath.Base(rel)) {
+				if err != nil || !slices.Contains(names, filepath.Base(rel)) {
 					return fmt.Errorf("verification: ~/%s does not exist after the installer ran", rel)
 				}
 			}

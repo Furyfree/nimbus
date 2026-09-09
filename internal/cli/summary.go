@@ -11,7 +11,7 @@ import (
 )
 
 type runStep struct {
-	DurationMS int64  `json:"duration_ms,omitempty"`
+	DurationMS int64  `json:"duration_ms,omitzero"`
 	Name       string `json:"name"`
 	Status     string `json:"status"`
 	Detail     string `json:"detail,omitempty"`

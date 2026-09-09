@@ -1,7 +1,7 @@
 package plan
 
 import (
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
@@ -25,15 +25,12 @@ func ProposeComponents(components map[string]*definitions.Component, hw facts.Ha
 		}
 		ids = append(ids, id)
 	}
-	sort.Strings(ids)
+	slices.Sort(ids)
 	return ids
 }
 
 func hasDisplayVendor(hw facts.Hardware, vendor string) bool {
-	for _, dev := range hw.Display {
-		if strings.EqualFold(dev.Vendor, vendor) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(hw.Display, func(dev facts.PCIDevice) bool {
+		return strings.EqualFold(dev.Vendor, vendor)
+	})
 }

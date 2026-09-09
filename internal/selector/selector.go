@@ -72,8 +72,7 @@ func Load(path string) (*Selector, error) {
 	d := toml.NewDecoder(bytes.NewReader(data))
 	d.DisallowUnknownFields()
 	if err := d.Decode(&s); err != nil {
-		var strict *toml.StrictMissingError
-		if errors.As(err, &strict) {
+		if strict, ok := errors.AsType[*toml.StrictMissingError](err); ok {
 			return nil, fmt.Errorf("selector %s: unknown field: %s", path, strings.TrimSpace(strict.String()))
 		}
 		return nil, fmt.Errorf("selector %s: %w", path, err)
@@ -161,8 +160,7 @@ func NormalizeOrigin(locator string) (string, error) {
 		host, p = m[1], m[2]
 	} else if !strings.Contains(locator, ":") && strings.Count(locator, "/") >= 1 {
 		// Already an identity such as github.com/owner/repo.
-		i := strings.IndexByte(locator, '/')
-		host, p = locator[:i], locator[i:]
+		host, p, _ = strings.Cut(locator, "/")
 	} else {
 		return "", fmt.Errorf("unsupported locator %q", locator)
 	}
@@ -198,10 +196,11 @@ func CheckoutOrigin(root string) (string, error) {
 			return "", err
 		}
 		line := strings.TrimSpace(string(data))
-		if !strings.HasPrefix(line, "gitdir: ") {
+		dir, ok := strings.CutPrefix(line, "gitdir: ")
+		if !ok {
 			return "", fmt.Errorf("%s is not a worktree pointer", gitPath)
 		}
-		gitDir = strings.TrimPrefix(line, "gitdir: ")
+		gitDir = dir
 		if !filepath.IsAbs(gitDir) {
 			gitDir = filepath.Join(root, gitDir)
 		}

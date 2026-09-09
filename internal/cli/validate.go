@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
+	"slices"
 
 	"github.com/spf13/cobra"
 
@@ -79,11 +81,9 @@ func resolveCheckout(override string) (string, error) {
 func runValidate(cmd *cobra.Command, opts *options, root string) error {
 	out := cmd.OutOrStdout()
 	c, err := definitions.Load(root)
-	var errs definitions.ErrorList
-	if err != nil {
-		if !errors.As(err, &errs) {
-			return err
-		}
+	errs, ok := errors.AsType[definitions.ErrorList](err)
+	if err != nil && !ok {
+		return err
 	}
 	if len(errs) == 0 {
 		errs = definitions.Validate(c)
@@ -91,7 +91,7 @@ func runValidate(cmd *cobra.Command, opts *options, root string) error {
 	result := validateResult{Checkout: c.Root}
 	if len(errs) == 0 {
 		result.Digest = c.Digest()
-		for _, id := range sortedMachineIDs(c) {
+		for _, id := range slices.Sorted(maps.Keys(c.Machines)) {
 			r, rerrs := definitions.Resolve(c, id)
 			if len(rerrs) > 0 {
 				errs = append(errs, rerrs...)
@@ -132,17 +132,4 @@ func runValidate(cmd *cobra.Command, opts *options, root string) error {
 		return reported{}
 	}
 	return nil
-}
-
-func sortedMachineIDs(c *definitions.Checkout) []string {
-	ids := make([]string, 0, len(c.Machines))
-	for id := range c.Machines {
-		ids = append(ids, id)
-	}
-	for i := 1; i < len(ids); i++ {
-		for j := i; j > 0 && ids[j] < ids[j-1]; j-- {
-			ids[j], ids[j-1] = ids[j-1], ids[j]
-		}
-	}
-	return ids
 }

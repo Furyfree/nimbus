@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -133,7 +134,7 @@ func (s *scripted) privileged(argv []string) ([]byte, error) {
 	case argv[0] == "dnf5" && argv[1] == "-y" && argv[2] == "remove":
 		var kept []string
 		for _, n := range s.installed {
-			if !contains(argv[4:], n) {
+			if !slices.Contains(argv[4:], n) {
 				kept = append(kept, n)
 			}
 		}
@@ -177,9 +178,8 @@ func (s *scripted) ran(prefix string) bool {
 }
 
 func terra() definitions.Repository {
-	prio := 100
 	return definitions.Repository{Kind: "dnf", BaseURL: "https://repos.fyralabs.com/terra44", KeyURL: "https://repos.fyralabs.com/terra44/key.asc",
-		Key: "AE09 157A 4DE8 8B49 7EA1 D5D3 00CD AB43 DE22 6D6F", Priority: &prio}
+		Key: "AE09 157A 4DE8 8B49 7EA1 D5D3 00CD AB43 DE22 6D6F", Priority: new(100)}
 }
 
 func samplePlan(t *testing.T) *plan.Plan {
@@ -565,8 +565,7 @@ func TestCOPRImportsTheVerifiedKeyBeforeEnabling(t *testing.T) {
 	op := plan.Operation{ID: "repository:hyprland-copr", Kind: plan.KindRepository, Action: plan.ActionEnable, Summary: "enable copr"}
 	ex := &executor{p: &plan.Plan{}, opts: opts, seen: map[string]facts.Package{}}
 	ex.opts.Out = io.Discard
-	priority := 130
-	copr := definitions.Repository{Kind: "copr", Project: "lionheartp/Hyprland", Key: "97E2 3476 C896 3513 5407 C7D5 E9BA 4134 2C4B 2995", Priority: &priority}
+	copr := definitions.Repository{Kind: "copr", Project: "lionheartp/Hyprland", Key: "97E2 3476 C896 3513 5407 C7D5 E9BA 4134 2C4B 2995", Priority: new(130)}
 	if err := ex.enableCOPR("hyprland-copr", copr, op); err != nil {
 		t.Fatal(err)
 	}

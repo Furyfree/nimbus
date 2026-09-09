@@ -76,8 +76,8 @@ func runDoctor(cmd *cobra.Command, opts *options, override, machine string) erro
 		cfg.DefinitionsError = "no checkout selected"
 	} else {
 		c, err := definitions.Load(root)
-		var errs definitions.ErrorList
-		if err != nil && !errors.As(err, &errs) {
+		errs, ok := errors.AsType[definitions.ErrorList](err)
+		if err != nil && !ok {
 			return err
 		}
 		if len(errs) == 0 {

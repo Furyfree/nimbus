@@ -9,7 +9,7 @@ import (
 )
 
 func TestVMCandidateStaging(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "/usr/bin/python3", "-I", "-B", filepath.Join(repoRoot(t), "tools/vm/test_stage.py"))
 	if output, err := cmd.CombinedOutput(); err != nil {

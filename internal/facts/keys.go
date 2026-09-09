@@ -24,7 +24,7 @@ func KeyFingerprints(src Source, path string) ([]string, error) {
 	}
 	var result []string
 	primary := false
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		fields := strings.Split(line, ":")
 		switch fields[0] {
 		case "pub":
@@ -53,7 +53,7 @@ func KeyFingerprints(src Source, path string) ([]string, error) {
 
 func repositoryKeys(src Source, urls string) ([]string, string) {
 	var result []string
-	for _, uri := range strings.Fields(urls) {
+	for uri := range strings.FieldsSeq(urls) {
 		path, local := strings.CutPrefix(uri, "file://")
 		if !local || !filepath.IsAbs(path) || strings.Contains(path, "$") {
 			return nil, "configured signing key is not an explicit local file: " + uri

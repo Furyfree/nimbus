@@ -1,15 +1,16 @@
 package plan
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"path"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -50,7 +51,7 @@ const (
 type Step struct {
 	Description string   `json:"description"`
 	Argv        []string `json:"argv,omitempty"`
-	Privileged  bool     `json:"privileged,omitempty"`
+	Privileged  bool     `json:"privileged,omitzero"`
 }
 
 // Operation is one reviewed unit of the plan.
@@ -356,8 +357,8 @@ func (b *builder) inspectRepo(id string, r definitions.Repository) (ready bool, 
 		}
 	}
 	if r.Kind == "dnf" && r.ReleasePackage == "" {
-		for _, host := range sortedKeys(b.repos) {
-			if contains(ids, host) {
+		for _, host := range slices.Sorted(maps.Keys(b.repos)) {
+			if slices.Contains(ids, host) {
 				continue
 			}
 			for _, have := range b.repos[host] {
@@ -404,7 +405,7 @@ const DisableDuplicateDescription = "disable the duplicate repository through a 
 // package of a declared repository, which Nimbus installs while enabling
 // it and which therefore belongs to that repository, never to prune.
 func IsReleasePackage(root definitions.Root, name string) bool {
-	for _, r := range root.Repositories {
+	for r := range maps.Values(root.Repositories) {
 		if r.ReleasePackage != "" && ReleasePackageName(r.ReleasePackage) == name {
 			return true
 		}
@@ -440,7 +441,7 @@ func DNFDropIn(root definitions.Root) string {
 	}
 	var b strings.Builder
 	b.WriteString("# Written by Nimbus from the [dnf] table of nimbus.toml; edit that instead.\n[main]\n")
-	for _, key := range sortedKeys(root.DNF) {
+	for _, key := range slices.Sorted(maps.Keys(root.DNF)) {
 		fmt.Fprintf(&b, "%s=%s\n", key, dnfValue(root.DNF[key]))
 	}
 	return b.String()
@@ -496,7 +497,7 @@ func (b *builder) dnfConfig() []Operation {
 	default:
 		op.Action, op.Summary = ActionRepair, "rewrite "+facts.DNFDropInPath+", which differs from the declared options"
 	}
-	for _, key := range sortedKeys(b.in.Root.DNF) {
+	for _, key := range slices.Sorted(maps.Keys(b.in.Root.DNF)) {
 		op.Steps = append(op.Steps, Step{Description: "set " + key + "=" + dnfValue(b.in.Root.DNF[key])})
 	}
 	op.Steps = append(op.Steps, Step{Description: "write the drop-in", Argv: []string{"install", "-m", "0644", DNFDropInPlaceholder, facts.DNFDropInPath}, Privileged: true})
@@ -637,7 +638,7 @@ func ownedFileDrift(id string, r definitions.Repository, have facts.Repository) 
 			drift = append(drift, fmt.Sprintf("%s has %s=%s, declared %s", have.File, o.Key, got, o.Value))
 		}
 	}
-	for _, key := range sortedKeys(have.Options) {
+	for _, key := range slices.Sorted(maps.Keys(have.Options)) {
 		if !expected[key] {
 			drift = append(drift, fmt.Sprintf("%s has %s=%s, which Nimbus does not write", have.File, key, have.Options[key]))
 		}
@@ -825,7 +826,7 @@ func PackageName(id string) string {
 func (b *builder) sourceNote(p definitions.ResolvedPackage, inst facts.Package) string {
 	from := inst.FromRepo
 	// The installer and local files record no repository worth noting.
-	if from == "" || from == "anaconda" || strings.HasPrefix(from, "@") || contains(b.expectedRepos(p.Prefix), from) {
+	if from == "" || from == "anaconda" || strings.HasPrefix(from, "@") || slices.Contains(b.expectedRepos(p.Prefix), from) {
 		return ""
 	}
 	return fmt.Sprintf("%s is installed from %s, not from %s", p.Name, from, strings.Join(b.expectedRepos(p.Prefix), " or "))
@@ -848,13 +849,9 @@ func (b *builder) installTransaction(pkgs []definitions.ResolvedPackage) Operati
 			pathSet[path] = true
 		}
 	}
-	sort.Strings(names)
-	sort.Strings(items)
-	paths := make([]string, 0, len(pathSet))
-	for path := range pathSet {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
+	slices.Sort(names)
+	slices.Sort(items)
+	paths := slices.Sorted(maps.Keys(pathSet))
 	args := []string{"install"}
 	removes := map[string]bool{}
 	for _, r := range b.in.Resolved.Removes {
@@ -939,7 +936,7 @@ func (b *builder) installTransaction(pkgs []definitions.ResolvedPackage) Operati
 				op.Resolved = map[string]string{}
 			}
 			op.Resolved[p.Name] = facts.PackageID(row.Name, row.Arch)
-			if !contains(b.expectedRepos(p.Prefix), row.Repository) {
+			if !slices.Contains(b.expectedRepos(p.Prefix), row.Repository) {
 				problems = append(problems, fmt.Sprintf("%s would come from repository %s, not %s", row.Name, row.Repository, strings.Join(b.expectedRepos(p.Prefix), " or ")))
 			}
 		case "installing dependencies", "installing weak dependencies":
@@ -1026,7 +1023,7 @@ func (b *builder) waitsForRepositories(op *Operation) bool {
 func uncachedRepositories(blocked string, byName map[string]definitions.ResolvedPackage) []string {
 	seen := map[string]bool{}
 	var repos []string
-	for _, problem := range strings.Split(strings.TrimPrefix(blocked, "dnf5 could not resolve the transaction: "), "; ") {
+	for problem := range strings.SplitSeq(strings.TrimPrefix(blocked, "dnf5 could not resolve the transaction: "), "; ") {
 		name, ok := strings.CutPrefix(problem, "No match for argument: ")
 		if !ok {
 			continue
@@ -1038,7 +1035,7 @@ func uncachedRepositories(blocked string, byName map[string]definitions.Resolved
 		seen[p.Prefix] = true
 		repos = append(repos, p.Prefix)
 	}
-	sort.Strings(repos)
+	slices.Sort(repos)
 	return repos
 }
 
@@ -1048,8 +1045,7 @@ func uncachedRepositories(blocked string, byName map[string]definitions.Resolved
 func previewFailure(out []byte, runErr, parseErr error) string {
 	if runErr != nil {
 		if _, err := ParsePreview([]byte(runErr.Error())); err != nil {
-			var resolve *ResolveError
-			if errors.As(err, &resolve) {
+			if resolve, ok := errors.AsType[*ResolveError](err); ok {
 				return resolve.Error()
 			}
 		}
@@ -1122,7 +1118,7 @@ func receiptPackage(r state.Receipt, packages []facts.Package) (string, error) {
 	if len(matches) > 1 {
 		return "", fmt.Errorf("legacy receipt for %s does not identify which installed architecture Nimbus owns; select each installed architecture explicitly to establish ownership", request)
 	}
-	for id := range matches {
+	for id := range maps.Keys(matches) {
 		return id, nil
 	}
 	// Old provide receipts recorded a native name only in prose. That is
@@ -1155,7 +1151,7 @@ func (b *builder) ownedRemovals() []Operation {
 	}
 	var names, receiptIDs []string
 	var ops []Operation
-	for _, id := range sortedKeys(b.in.Applied.Receipts) {
+	for _, id := range slices.Sorted(maps.Keys(b.in.Applied.Receipts)) {
 		r := b.in.Applied.Receipts[id]
 		if desired[id] {
 			continue
@@ -1206,7 +1202,7 @@ func (b *builder) ownedRemovals() []Operation {
 		}
 	}
 	if len(names) > 0 {
-		sort.Strings(names)
+		slices.Sort(names)
 		names = slices.Compact(names)
 		op := b.previewRemoval("packages:remove-owned", names, "remove "+strings.Join(names, ", ")+", installed by Nimbus and no longer selected")
 		op.Paths = receiptIDs
@@ -1218,7 +1214,7 @@ func (b *builder) ownedRemovals() []Operation {
 // previewRemoval previews the removal of exactly these packages and blocks
 // when DNF would remove anything else.
 func (b *builder) previewRemoval(id string, names []string, summary string) Operation {
-	sort.Strings(names)
+	slices.Sort(names)
 	op := Operation{ID: id, Kind: KindPackage, Action: ActionRemove, Risk: RiskMedium, Summary: summary,
 		Steps: []Step{{Description: "run the reviewed removal", Argv: append([]string{"dnf5", "-y", "remove", "--no-autoremove"}, names...), Privileged: true}}}
 	if b.waitsForRepositories(&op) {
@@ -1238,7 +1234,7 @@ func (b *builder) previewRemoval(id string, names []string, summary string) Oper
 	var extra []string
 	for _, row := range tx.Packages {
 		matched := false
-		for name := range declared {
+		for name := range maps.Keys(declared) {
 			matched = matched || (facts.Package{Name: row.Name, Arch: row.Arch}).Matches(name)
 		}
 		if !matched {
@@ -1303,7 +1299,7 @@ func (b *builder) prune() []Prune {
 		}
 		out = append(out, Prune{Name: p.ID(), EVR: p.EVR(), Repository: p.FromRepo})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	slices.SortFunc(out, func(a, b Prune) int { return cmp.Compare(a.Name, b.Name) })
 	if out == nil {
 		out = []Prune{}
 	}
@@ -1341,24 +1337,6 @@ func digest(p *Plan) string {
 	data, _ := json.Marshal(canon{Machine: p.Machine, Definitions: p.Definitions, Operations: p.Operations, RepositoryReconciliation: p.RepositoryReconciliation})
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-func contains(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }
 
 // InstallerScript stands for the downloaded installer in a plan step; apply
@@ -1407,7 +1385,7 @@ func (b *builder) userTools() []Operation {
 		}
 		rt := Operation{ID: id + ":install", Kind: KindUser, Action: ActionInstall, Risk: RiskLow, Paths: in.Paths,
 			Summary: fmt.Sprintf("install the %s runtimes declared in ~/%s", in.Component, in.Installer.Config),
-			Steps:   []Step{{Description: "run as the user, repeatable", Argv: append([]string(nil), in.Installer.Install...)}}}
+			Steps:   []Step{{Description: "run as the user, repeatable", Argv: slices.Clone(in.Installer.Install)}}}
 		switch {
 		case !binary:
 			rt.After = id
@@ -1462,5 +1440,5 @@ func (b *builder) hasPrefix(prefix string) bool {
 func (b *builder) userFile(home, rel string) bool {
 	path := filepath.Join(home, rel)
 	names, err := b.in.Source.ReadDir(filepath.Dir(path))
-	return err == nil && contains(names, filepath.Base(path))
+	return err == nil && slices.Contains(names, filepath.Base(path))
 }

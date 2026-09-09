@@ -2,10 +2,11 @@ package plan
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -15,13 +16,13 @@ import (
 )
 
 type FileChange struct {
-	ActivationChanged bool             `json:"activation_changed,omitempty"`
+	ActivationChanged bool             `json:"activation_changed,omitzero"`
 	ChangedAt         time.Time        `json:"changed_at,omitempty"`
 	Target            string           `json:"target"`
 	Before            facts.SystemFile `json:"before"`
 	After             facts.SystemFile `json:"after"`
 	Previous          string           `json:"previous"`
-	Recovery          bool             `json:"recovery,omitempty"`
+	Recovery          bool             `json:"recovery,omitzero"`
 	Triggers          []string         `json:"triggers,omitempty"`
 }
 
@@ -176,7 +177,7 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 		ops = append(ops, op)
 	}
 	// Retirement uses only verified ownership and restores the original state.
-	for _, id := range sortedKeys(b.in.Applied.Receipts) {
+	for _, id := range slices.Sorted(maps.Keys(b.in.Applied.Receipts)) {
 		receipt := b.in.Applied.Receipts[id]
 		if selected[id] {
 			continue
@@ -205,7 +206,7 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 			triggers[id] = true
 		}
 	}
-	for _, id := range sortedKeys(triggers) {
+	for _, id := range slices.Sorted(maps.Keys(triggers)) {
 		triggerID := "trigger:" + id
 		receipt, ok := b.in.Applied.Receipts[triggerID]
 		changed := !ok || !ownedResource(receipt, triggerID, KindTrigger, b.in.Resolved.Machine)
@@ -254,7 +255,7 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 		}
 	}
 	// Files and memberships precede service activation; reload definitions first.
-	sort.SliceStable(ops, func(i, j int) bool {
+	slices.SortStableFunc(ops, func(a, b Operation) int {
 		rank := func(op Operation) int {
 			if op.Action == ActionRemove {
 				switch op.Kind {
@@ -281,7 +282,7 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 				return 4
 			}
 		}
-		return rank(ops[i]) < rank(ops[j])
+		return cmp.Compare(rank(a), rank(b))
 	})
 	return ops
 }
@@ -418,12 +419,10 @@ func (b *builder) retireResource(id string, receipt state.Receipt) Operation {
 				op.Blocked = "unsupported prior enablement state"
 				break
 			}
-			enabled := previous.Enabled == "enabled"
-			desired.Enabled = &enabled
+			desired.Enabled = new(previous.Enabled == "enabled")
 		}
 		if intended.Running != nil {
-			running := previous.Active == "active"
-			desired.Running = &running
+			desired.Running = new(previous.Active == "active")
 		}
 		op = b.serviceOperation(id, desired, "retired", "")
 		op.Action = ActionRemove

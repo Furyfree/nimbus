@@ -2,8 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -64,7 +65,7 @@ func packageViews(s *selected, f *facts.Facts, applied *state.Applied) []package
 				}
 			}
 		} else if p.Prefix == definitions.PrefixCargo {
-			if f.User.Known() && contains(f.User.Value.Crates, p.Name) {
+			if f.User.Known() && slices.Contains(f.User.Value.Crates, p.Name) {
 				v.Installed, v.Repository, v.State = "installed", "cargo", "adopt"
 			}
 		} else if inst, ok := plan.InstalledPackage(p.Name, applied.Receipts[id], f.Packages.Value); ok {
@@ -105,7 +106,7 @@ func packageViews(s *selected, f *facts.Facts, applied *state.Applied) []package
 			views = append(views, packageView{Canonical: "flatpak:" + app.ID, Name: app.ID, State: st, Installed: app.Version, Repository: app.Origin})
 		}
 	}
-	sort.Slice(views, func(i, j int) bool { return views[i].Canonical < views[j].Canonical })
+	slices.SortFunc(views, func(a, b packageView) int { return cmp.Compare(a.Canonical, b.Canonical) })
 	return views
 }
 
@@ -295,10 +296,8 @@ func explain(s *selected, resource string) (*whyResult, error) {
 			}
 		}
 	}
-	for _, p := range r.Profiles {
-		if p == resource {
-			return &whyResult{Kind: "profile", ID: p, Paths: []string{"machine"}}, nil
-		}
+	if slices.Contains(r.Profiles, resource) {
+		return &whyResult{Kind: "profile", ID: resource, Paths: []string{"machine"}}, nil
 	}
 	for _, c := range r.Components {
 		if c.ID == resource {

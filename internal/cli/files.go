@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -128,16 +129,13 @@ func prepareAcceptance(flags machineFlags, target string) (*acceptInput, error) 
 	if err != nil {
 		return nil, err
 	}
-	var decl *definitions.ResolvedFile
-	for i := range s.Resolved.Files {
-		if s.Resolved.Files[i].Target == target {
-			decl = &s.Resolved.Files[i]
-			break
-		}
-	}
-	if decl == nil || !strings.HasPrefix(decl.Source, "system/root/etc/") {
+	i := slices.IndexFunc(s.Resolved.Files, func(file definitions.ResolvedFile) bool {
+		return file.Target == target
+	})
+	if i < 0 || !strings.HasPrefix(s.Resolved.Files[i].Source, "system/root/etc/") {
 		return nil, errors.New("target is not a selected generic system file")
 	}
+	decl := &s.Resolved.Files[i]
 	receiptData, ri, err := readAcceptFile(stateRoot, filepath.Join(state.ReceiptsDir, state.FileName("file:"+target)))
 	if err != nil {
 		return nil, fmt.Errorf("ownership receipt: %w", err)
@@ -177,7 +175,7 @@ func prepareAcceptance(flags machineFlags, target string) (*acceptInput, error) 
 	if !utf8.Valid(source) || !utf8.Valid(live) || bytes.IndexByte(source, 0) >= 0 || bytes.IndexByte(live, 0) >= 0 {
 		return nil, errors.New("file acceptance requires text content without NUL bytes")
 	}
-	entries := append([]definitions.Entry(nil), s.Checkout.Entries...)
+	entries := slices.Clone(s.Checkout.Entries)
 	for i := range entries {
 		if entries[i].Path == decl.Source {
 			entries[i].Content = live
@@ -337,7 +335,7 @@ func acceptanceDiff(path string, before, after []byte) string {
 		if len(side.data) == 0 {
 			continue
 		}
-		for _, line := range strings.Split(strings.TrimSuffix(string(side.data), "\n"), "\n") {
+		for line := range strings.SplitSeq(strings.TrimSuffix(string(side.data), "\n"), "\n") {
 			fmt.Fprintf(&b, "%s%s\n", side.prefix, line)
 		}
 		if side.data[len(side.data)-1] != '\n' {

@@ -2,11 +2,13 @@ package definitions
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -89,7 +91,7 @@ func Load(path string) (*Checkout, error) {
 		errs = append(errs, walkErrs...)
 		c.Entries = append(c.Entries, entries...)
 	}
-	sort.Slice(c.Entries, func(i, j int) bool { return c.Entries[i].Path < c.Entries[j].Path })
+	slices.SortFunc(c.Entries, func(a, b Entry) int { return cmp.Compare(a.Path, b.Path) })
 
 	for _, e := range c.Entries {
 		dir, base := filepath.Split(e.Path)
@@ -136,13 +138,13 @@ func (p *Profile) id() string   { return p.ID }
 func (c *Component) id() string { return c.ID }
 
 func decodeDefinition(e Entry, base string, v identified) error {
-	if !strings.HasSuffix(base, ".toml") {
+	want, ok := strings.CutSuffix(base, ".toml")
+	if !ok {
 		return fmt.Errorf("unexpected file: definitions are .toml files")
 	}
 	if err := decodeStrict(e.Content, v); err != nil {
 		return err
 	}
-	want := strings.TrimSuffix(base, ".toml")
 	if v.id() != want {
 		return fmt.Errorf("id %q does not match filename %q", v.id(), want)
 	}
@@ -153,12 +155,10 @@ func decodeStrict(data []byte, v any) error {
 	d := toml.NewDecoder(bytes.NewReader(data))
 	d.DisallowUnknownFields()
 	err := d.Decode(v)
-	var strict *toml.StrictMissingError
-	if errors.As(err, &strict) {
+	if strict, ok := errors.AsType[*toml.StrictMissingError](err); ok {
 		return fmt.Errorf("unknown field: %s", strings.TrimSpace(strict.String()))
 	}
-	var dec *toml.DecodeError
-	if errors.As(err, &dec) {
+	if dec, ok := errors.AsType[*toml.DecodeError](err); ok {
 		row, col := dec.Position()
 		return fmt.Errorf("line %d column %d: %s", row, col, dec.Error())
 	}

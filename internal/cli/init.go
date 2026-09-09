@@ -2,13 +2,15 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -33,11 +35,7 @@ var (
 			fmt.Fprintf(out, "%s: ", prompt)
 		}
 		line, _ := bufio.NewReader(in).ReadString('\n')
-		line = strings.TrimSpace(line)
-		if line == "" {
-			return def
-		}
-		return line
+		return cmp.Or(strings.TrimSpace(line), def)
 	}
 )
 
@@ -210,8 +208,8 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 		newManifest = renderManifest([]byte(header), m)
 		newManifestPath = path
 		c.Machines[m.ID] = m
-		c.Entries = append(c.Entries, definitions.Entry{Path: "machines/" + m.ID + ".toml", Mode: 0o100644, Content: append(append([]byte(nil), newManifest...), '\n')})
-		sort.Slice(c.Entries, func(i, j int) bool { return c.Entries[i].Path < c.Entries[j].Path })
+		c.Entries = append(c.Entries, definitions.Entry{Path: "machines/" + m.ID + ".toml", Mode: 0o100644, Content: append(bytes.Clone(newManifest), '\n')})
+		slices.SortFunc(c.Entries, func(a, b definitions.Entry) int { return cmp.Compare(a.Path, b.Path) })
 		if errs := definitions.Validate(c); len(errs) > 0 {
 			return fmt.Errorf("the new manifest does not validate: %s", errs[0])
 		}
@@ -224,7 +222,7 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 		}
 	}
 	if machine == "" {
-		return usageError{fmt.Errorf("no machine selected; pass --machine ID (available: %s), or explicitly create one with --new ID", strings.Join(sortedKeysOf(c.Machines), ", "))}
+		return usageError{fmt.Errorf("no machine selected; pass --machine ID (available: %s), or explicitly create one with --new ID", strings.Join(slices.Sorted(maps.Keys(c.Machines)), ", "))}
 	}
 	if f.onePasswordSSH && c.Machines[machine] != nil && c.Machines[machine].Dotfiles == nil {
 		return usageError{errors.New("--onepassword-ssh requires a machine with dotfiles")}
@@ -347,8 +345,8 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 // loadCheckout loads and validates the definitions of a checkout.
 func loadCheckout(root string) (*definitions.Checkout, error) {
 	c, err := definitions.Load(root)
-	var errs definitions.ErrorList
-	if err != nil && !errors.As(err, &errs) {
+	errs, ok := errors.AsType[definitions.ErrorList](err)
+	if err != nil && !ok {
 		return nil, err
 	}
 	if len(errs) == 0 {
@@ -389,7 +387,7 @@ func newMachineDialog(in io.Reader, out io.Writer, c *definitions.Checkout, hw f
 		return nil, fmt.Errorf("machine ID: %w", err)
 	}
 	var profileItems []pickItem
-	for _, pid := range sortedKeysOf(c.Profiles) {
+	for _, pid := range slices.Sorted(maps.Keys(c.Profiles)) {
 		profileItems = append(profileItems, pickItem{ID: pid, Selected: pid == "common"})
 	}
 	profiles, err := pickerFn("profiles for "+id+" (common is always selected)", profileItems)
@@ -399,15 +397,13 @@ func newMachineDialog(in io.Reader, out io.Writer, c *definitions.Checkout, hw f
 	profiles = addUnique(profiles, "common")
 	proposed := plan.ProposeComponents(c.Components, hw)
 	var componentItems []pickItem
-	for _, cid := range sortedKeysOf(c.Components) {
+	for _, cid := range slices.Sorted(maps.Keys(c.Components)) {
 		item := pickItem{ID: cid}
 		if c.Components[cid].Detect != nil {
 			item.Detail = "hardware"
 		}
-		for _, p := range proposed {
-			if p == cid {
-				item.Selected, item.Detail = true, "detected"
-			}
+		if slices.Contains(proposed, cid) {
+			item.Selected, item.Detail = true, "detected"
 		}
 		componentItems = append(componentItems, item)
 	}
@@ -433,7 +429,7 @@ func newMachineDialog(in io.Reader, out io.Writer, c *definitions.Checkout, hw f
 // or "" when they disagree or none names one.
 func sharedDotfiles(c *definitions.Checkout) string {
 	repos := map[string]bool{}
-	for _, m := range c.Machines {
+	for m := range maps.Values(c.Machines) {
 		if m.Dotfiles != nil {
 			repos[m.Dotfiles.Repo] = true
 		}
@@ -441,7 +437,7 @@ func sharedDotfiles(c *definitions.Checkout) string {
 	if len(repos) != 1 {
 		return ""
 	}
-	for repo := range repos {
+	for repo := range maps.Keys(repos) {
 		return repo
 	}
 	return ""
