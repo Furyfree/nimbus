@@ -1,6 +1,7 @@
 package apply
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -62,37 +63,37 @@ func (s *scripted) Run(name string, args ...string) ([]byte, error) {
 	}
 	switch {
 	case name == "dnf5" && len(args) > 2 && args[2] == "repoquery":
-		var b strings.Builder
+		b := []byte{}
 		for _, n := range s.installed {
-			fmt.Fprintf(&b, "%s|0|1|1.fc44|x86_64|fedora|User\n", n)
+			b = fmt.Appendf(b, "%s|0|1|1.fc44|x86_64|fedora|User\n", n)
 		}
-		return []byte(b.String()), nil
+		return b, nil
 	case name == "uname":
 		return []byte("x86_64\n"), nil
 	case name == "gpg":
 		return []byte("pub:::::::::\nfpr:::::::::" + s.fpr + ":\n"), nil
 	case name == "flatpak" && args[0] == "remotes":
-		var b strings.Builder
+		b := []byte{}
 		for _, r := range s.remotes {
-			fmt.Fprintf(&b, "%s\thttps://dl.flathub.org/repo/\n", r)
+			b = fmt.Appendf(b, "%s\thttps://dl.flathub.org/repo/\n", r)
 		}
-		return []byte(b.String()), nil
+		return b, nil
 	case name == "flatpak" && args[0] == "list":
-		var b strings.Builder
+		b := []byte{}
 		for _, a := range s.apps {
-			fmt.Fprintf(&b, "%s\t1.0\tflathub\n", a)
+			b = fmt.Appendf(b, "%s\t1.0\tflathub\n", a)
 		}
-		return []byte(b.String()), nil
+		return b, nil
 	case name == "systemctl":
 		return []byte("active\n"), nil
 	case name == "sudo":
 		return s.privileged(args)
 	case strings.HasSuffix(name, "/.cargo/bin/cargo") && args[0] == "install" && args[1] == "--list":
-		var b strings.Builder
+		b := []byte{}
 		for _, c := range s.crates {
-			fmt.Fprintf(&b, "%s v1.0.0:\n    %s\n", c, c)
+			b = fmt.Appendf(b, "%s v1.0.0:\n    %s\n", c, c)
 		}
-		return []byte(b.String()), nil
+		return b, nil
 	case strings.HasSuffix(name, "/.cargo/bin/cargo") && args[0] == "install":
 		s.crates = append(s.crates, args[1])
 		return nil, nil
@@ -120,16 +121,16 @@ func (s *scripted) privileged(argv []string) ([]byte, error) {
 		// test scripted, which may differ from the preview.
 		s.installed = append(s.installed, s.installs...)
 	case argv[0] == "dnf5" && argv[1] == "config-manager" && argv[2] == "setopt":
-		var override string
+		var override bytes.Buffer
 		for _, a := range argv[3:] {
 			option, value, ok := strings.Cut(a, "=")
 			if dot := strings.LastIndexByte(option, '.'); ok && dot > 0 {
-				override += "[" + option[:dot] + "]\n" + option[dot+1:] + "=" + value + "\n"
+				override.WriteString("[" + option[:dot] + "]\n" + option[dot+1:] + "=" + value + "\n")
 			}
 		}
-		if override != "" {
+		if override.Len() != 0 {
 			s.Dirs[facts.RepoOverride] = []string{"99-config_manager.repo"}
-			s.Files[filepath.Join(facts.RepoOverride, "99-config_manager.repo")] = []byte(override)
+			s.Files[filepath.Join(facts.RepoOverride, "99-config_manager.repo")] = override.Bytes()
 		}
 	case argv[0] == "dnf5" && argv[1] == "-y" && argv[2] == "remove":
 		var kept []string
@@ -141,14 +142,15 @@ func (s *scripted) privileged(argv []string) ([]byte, error) {
 		s.installed = kept
 	case argv[0] == "dnf5" && argv[1] == "config-manager" && argv[2] == "addrepo":
 		s.repoIDs = append(s.repoIDs, strings.TrimPrefix(argv[3], "--id="))
-		file := "[nimbus-terra]\nenabled=1\n"
+		var file bytes.Buffer
+		file.WriteString("[nimbus-terra]\nenabled=1\n")
 		for _, a := range argv[4:] {
 			if value, ok := strings.CutPrefix(a, "--set="); ok {
-				file += value + "\n"
+				file.WriteString(value + "\n")
 			}
 		}
 		s.Dirs[facts.RepoDir] = []string{"nimbus-terra.repo"}
-		s.Files[filepath.Join(facts.RepoDir, "nimbus-terra.repo")] = []byte(file)
+		s.Files[filepath.Join(facts.RepoDir, "nimbus-terra.repo")] = file.Bytes()
 	case argv[0] == "flatpak" && argv[1] == "remote-add":
 		s.remotes = append(s.remotes, argv[5])
 		s.Files[filepath.Join(facts.FlatpakRepoPath, "config")] = []byte("[remote \"" + argv[5] + "\"]\ngpg-verify=true\n")
@@ -440,10 +442,10 @@ func TestDNFDropInIsWrittenThenReadBack(t *testing.T) {
 	if err != nil || string(staged) != want {
 		t.Fatalf("staged content = %q, %v", staged, err)
 	}
-	for _, l := range src.log {
-		if strings.HasPrefix(l, "sudo install") && (strings.Contains(l, plan.DNFDropInPlaceholder) || !strings.Contains(l, opts.Stage)) {
-			t.Fatalf("placeholder not filled: %s", l)
-		}
+	if i := slices.IndexFunc(src.log, func(l string) bool {
+		return strings.HasPrefix(l, "sudo install") && (strings.Contains(l, plan.DNFDropInPlaceholder) || !strings.Contains(l, opts.Stage))
+	}); i >= 0 {
+		t.Fatalf("placeholder not filled: %s", src.log[i])
 	}
 	src.Files[facts.DNFDropInPath] = []byte(want)
 	r := Run(p, opts)
@@ -464,11 +466,12 @@ func TestADuplicateRepositoryIsDisabledAndVerified(t *testing.T) {
 	root := t.TempDir()
 	opts := options(t, src, root)
 	src.Dirs[facts.RepoDir] = []string{"nimbus-terra.repo", "terra-maker.repo"}
-	owned := "[nimbus-terra]\n"
+	var owned bytes.Buffer
+	owned.WriteString("[nimbus-terra]\n")
 	for _, o := range plan.OwnedRepoOptions("terra", opts.Root.Repositories["terra"]) {
-		owned += o.Key + "=" + o.Value + "\n"
+		owned.WriteString(o.Key + "=" + o.Value + "\n")
 	}
-	src.Files[filepath.Join(facts.RepoDir, "nimbus-terra.repo")] = []byte(owned)
+	src.Files[filepath.Join(facts.RepoDir, "nimbus-terra.repo")] = owned.Bytes()
 	src.Files[filepath.Join(facts.RepoDir, "terra-maker.repo")] = []byte("[terra-maker]\nname=Terra\nbaseurl=" + opts.Root.Repositories["terra"].BaseURL + "\nenabled=1\ngpgcheck=1\n")
 	src.privilegedNoop = false
 	p := &plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:dup", Operations: []plan.Operation{
@@ -610,10 +613,8 @@ func TestUserToolsRunAsTheUserAndAreVerifiedByPresence(t *testing.T) {
 			t.Errorf("missing %q\n%s\n%s", want, strings.Join(src.log, "\n"), out.String())
 		}
 	}
-	for _, l := range src.log {
-		if strings.HasPrefix(l, "sudo ") {
-			t.Fatalf("a user-scope step went through sudo: %s", l)
-		}
+	if i := slices.IndexFunc(src.log, func(l string) bool { return strings.HasPrefix(l, "sudo ") }); i >= 0 {
+		t.Fatalf("a user-scope step went through sudo: %s", src.log[i])
 	}
 	if a, _ := state.Read(root); a != nil && len(a.Receipts) != 0 {
 		t.Fatalf("user-scope steps must write no receipt: %v", a.Receipts)

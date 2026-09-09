@@ -103,7 +103,7 @@ esac
 					if string(data) != "preserve existing output" {
 						t.Fatal("overwrote existing output")
 					}
-				} else if _, err := os.Stat(output); !os.IsNotExist(err) {
+				} else if _, err := os.Stat(output); !errors.Is(err, os.ErrNotExist) {
 					t.Fatalf("failed build left output: %v", err)
 				}
 				return

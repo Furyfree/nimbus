@@ -618,12 +618,9 @@ func onlyUserFailures(r *apply.Result, p *plan.Plan) bool {
 	if len(r.Failures) == 0 {
 		return false
 	}
-	for _, failure := range r.Failures {
-		if !slices.ContainsFunc(p.Operations, func(op plan.Operation) bool { return op.ID == failure.ID && op.Kind == plan.KindUser }) {
-			return false
-		}
-	}
-	return true
+	return !slices.ContainsFunc(r.Failures, func(failure apply.Failure) bool {
+		return !slices.ContainsFunc(p.Operations, func(op plan.Operation) bool { return op.ID == failure.ID && op.Kind == plan.KindUser })
+	})
 }
 
 func showReplanned(out io.Writer, p *plan.Plan, prune bool, result *syncResult) {

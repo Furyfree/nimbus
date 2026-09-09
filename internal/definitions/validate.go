@@ -1,6 +1,7 @@
 package definitions
 
 import (
+	"cmp"
 	"maps"
 	"path"
 	"regexp"
@@ -267,11 +268,8 @@ func compareVersions(a, b string) int {
 	for i := range 3 {
 		x, _ := strconv.Atoi(as[i])
 		y, _ := strconv.Atoi(bs[i])
-		if x != y {
-			if x < y {
-				return -1
-			}
-			return 1
+		if order := cmp.Compare(x, y); order != 0 {
+			return order
 		}
 	}
 	return 0
@@ -354,7 +352,7 @@ func validateComponent(c *Checkout, comp *Component, errs *ErrorList) {
 	}
 	sources := map[string]bool{}
 	for i, f := range comp.Files {
-		fw := where + " files[" + itoa(i) + "]"
+		fw := where + " files[" + strconv.Itoa(i) + "]"
 		switch {
 		case f.Source == "":
 			errs.Add(fw, "source is required")
@@ -440,15 +438,3 @@ func validateRequireCycles(c *Checkout, errs *ErrorList) {
 
 func (c *Checkout) hasComponent(id string) bool { _, ok := c.Components[id]; return ok }
 func (c *Checkout) hasProfile(id string) bool   { _, ok := c.Profiles[id]; return ok }
-
-func itoa(i int) string {
-	if i == 0 {
-		return "0"
-	}
-	var b []byte
-	for i > 0 {
-		b = append([]byte{byte('0' + i%10)}, b...)
-		i /= 10
-	}
-	return string(b)
-}

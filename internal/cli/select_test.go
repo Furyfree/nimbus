@@ -4,8 +4,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/pelletier/go-toml/v2"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
 )
@@ -21,9 +24,17 @@ func TestRenderManifestIsCanonicalAndKeepsComments(t *testing.T) {
 	}
 	// The rendered form must decode back to the same manifest.
 	var back definitions.Machine
-	tree := map[string]string{"machines/laptop.toml": out + "\n"}
-	_ = tree
-	_ = back
+	decoder := toml.NewDecoder(strings.NewReader(out))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&back); err != nil {
+		t.Fatalf("decode rendered manifest: %v", err)
+	}
+	if back.Schema != m.Schema || back.ID != m.ID || back.Hardware != m.Hardware ||
+		!slices.Equal(back.Profiles, m.Profiles) || !slices.Equal(back.Components, m.Components) ||
+		!slices.Equal(back.Packages, m.Packages) || !slices.Equal(back.PackageExclusions, m.PackageExclusions) ||
+		back.Dotfiles == nil || *back.Dotfiles != *m.Dotfiles {
+		t.Fatalf("decoded manifest = %+v, want %+v", back, *m)
+	}
 	diff := unifiedDiff("machines/laptop.toml", existing, []byte(out+"\n"))
 	if !strings.Contains(diff, "+  \"development\",") || !strings.Contains(diff, "-profiles = [\"common\"]") {
 		t.Fatalf("diff:\n%s", diff)

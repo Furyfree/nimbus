@@ -314,9 +314,7 @@ func TestGreeterFileRetirementReloadsUnitsWithoutRecreatingStateDirectory(t *tes
 			t.Fatalf("owned file remains: %s", target)
 		}
 	}
-	for _, command := range src.commands {
-		if strings.Contains(command, "systemd-tmpfiles") {
-			t.Fatalf("creation command ran on removal: %s", command)
-		}
+	if i := slices.IndexFunc(src.commands, func(command string) bool { return strings.Contains(command, "systemd-tmpfiles") }); i >= 0 {
+		t.Fatalf("creation command ran on removal: %s", src.commands[i])
 	}
 }

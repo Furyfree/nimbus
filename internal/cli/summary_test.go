@@ -32,15 +32,16 @@ func TestSetupNotesPreserveLiveOutputAndCollectOnlyInstructions(t *testing.T) {
 func TestSetupNotesBoundCaptureWithoutTruncatingLiveOutput(t *testing.T) {
 	var live, footer strings.Builder
 	w := &setupNoteWriter{out: &live}
-	input := "Setup note: " + strings.Repeat("x", 5000) + "\nSetup note: \x1b[31mcontrol\n"
+	var input strings.Builder
+	input.WriteString("Setup note: " + strings.Repeat("x", 5000) + "\nSetup note: \x1b[31mcontrol\n")
 	for i := range 40 {
-		input += fmt.Sprintf("Setup note: instruction %d\n", i)
+		fmt.Fprintf(&input, "Setup note: instruction %d\n", i)
 	}
-	if _, err := w.Write([]byte(input)); err != nil {
+	if _, err := w.Write([]byte(input.String())); err != nil {
 		t.Fatal(err)
 	}
 	w.render(&footer)
-	if live.String() != input || len(w.notes) != 32 || strings.Contains(footer.String(), "control") {
+	if live.String() != input.String() || len(w.notes) != 32 || strings.Contains(footer.String(), "control") {
 		t.Fatalf("capture bounds or live output failed: %q", footer.String())
 	}
 }

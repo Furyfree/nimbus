@@ -1,6 +1,8 @@
 package apply
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -46,7 +48,7 @@ func TestAtomicSystemFileInstallRepairRemove(t *testing.T) {
 	if err := ApplySystemFile(root, c); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "etc/nimbus/config")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, "etc/nimbus/config")); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("removal: %v", err)
 	}
 }

@@ -1,6 +1,7 @@
 package facts
 
 import (
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -11,11 +12,11 @@ const keyA = "1111111111111111111111111111111111111111"
 const keyB = "2222222222222222222222222222222222222222"
 
 func keyOutput(keys ...string) []byte {
-	var out string
+	out := []byte{}
 	for _, key := range keys {
-		out += "pub:::::::::\nfpr:::::::::" + key + ":\n"
+		out = fmt.Appendf(out, "pub:::::::::\nfpr:::::::::%s:\n", key)
 	}
-	return []byte(out)
+	return out
 }
 
 func TestKeyFingerprintsDistinguishPrimaryKeysFromSubkeys(t *testing.T) {
@@ -30,6 +31,37 @@ func TestKeyFingerprintsDistinguishPrimaryKeysFromSubkeys(t *testing.T) {
 	got, err = KeyFingerprints(src, path)
 	if err != nil || !slices.Equal(got, []string{keyA, keyB}) {
 		t.Fatalf("two primary keys = %v, %v", got, err)
+	}
+}
+
+func TestRepeatedPrimaryKeysDoNotHideOtherSigners(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "public.asc")
+	src := &FakeSource{Commands: map[string][]byte{Key("gpg", KeyInspectArgs(path)...): keyOutput(keyB, keyA, keyB, keyA)}}
+	got, err := KeyFingerprints(src, path)
+	if err != nil || !slices.Equal(got, []string{keyA, keyB}) {
+		t.Fatalf("repeated primary keys = %v, %v", got, err)
+	}
+	src.Commands[Key("gpg", KeyInspectArgs(path)...)] = keyOutput(keyA, keyA, "invalid")
+	if _, err := KeyFingerprints(src, path); err == nil {
+		t.Fatal("repeated valid keys hid an invalid primary fingerprint")
+	}
+}
+
+func TestRepositoryKeysDeduplicateFilesWithoutLosingSigners(t *testing.T) {
+	first := filepath.Join(t.TempDir(), "first.asc")
+	second := filepath.Join(t.TempDir(), "second.asc")
+	src := &FakeSource{Commands: map[string][]byte{
+		Key("gpg", KeyInspectArgs(first)...):  keyOutput(keyA, keyA),
+		Key("gpg", KeyInspectArgs(second)...): keyOutput(keyB, keyA),
+	}}
+	urls := "file://" + first + " file://" + second + " file://" + first
+	got, problem := repositoryKeys(src, urls)
+	if problem != "" || !slices.Equal(got, []string{keyA, keyB}) {
+		t.Fatalf("repeated configured keys = %v, %s", got, problem)
+	}
+	delete(src.Commands, Key("gpg", KeyInspectArgs(second)...))
+	if got, problem := repositoryKeys(src, urls); problem == "" || got != nil {
+		t.Fatalf("unreadable key was hidden by repeated known keys: %v, %s", got, problem)
 	}
 }
 

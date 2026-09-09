@@ -279,37 +279,32 @@ func explain(s *selected, resource string) (*whyResult, error) {
 			}
 		}
 	}
-	for _, service := range r.Services {
-		if resource == "service:"+service.Unit {
-			return owned("service", resource, service.Component), nil
-		}
+	if i := slices.IndexFunc(r.Services, func(service definitions.ResolvedService) bool { return resource == "service:"+service.Unit }); i >= 0 {
+		return owned("service", resource, r.Services[i].Component), nil
 	}
-	for _, group := range r.Groups {
-		if resource == "group:"+group.Name || resource == "group:"+group.Name+":"+group.User {
-			return owned("group", "group:"+group.Name+":"+group.User, group.Component), nil
-		}
+	if i := slices.IndexFunc(r.Groups, func(group definitions.ResolvedGroup) bool {
+		return resource == "group:"+group.Name || resource == "group:"+group.Name+":"+group.User
+	}); i >= 0 {
+		group := r.Groups[i]
+		return owned("group", "group:"+group.Name+":"+group.User, group.Component), nil
 	}
 	if resource == "default-target" && r.DefaultTarget != "" {
-		for _, c := range r.Components {
-			if s.Checkout.Components[c.ID].DefaultTarget != "" {
-				return owned("default-target", resource, c.ID), nil
-			}
+		if i := slices.IndexFunc(r.Components, func(c definitions.ResolvedComponent) bool { return s.Checkout.Components[c.ID].DefaultTarget != "" }); i >= 0 {
+			return owned("default-target", resource, r.Components[i].ID), nil
 		}
 	}
 	if slices.Contains(r.Profiles, resource) {
 		return &whyResult{Kind: "profile", ID: resource, Paths: []string{"machine"}}, nil
 	}
-	for _, c := range r.Components {
-		if c.ID == resource {
-			return &whyResult{Kind: "component", ID: c.ID, Paths: c.Paths}, nil
-		}
+	if i := slices.IndexFunc(r.Components, func(c definitions.ResolvedComponent) bool { return c.ID == resource }); i >= 0 {
+		c := r.Components[i]
+		return &whyResult{Kind: "component", ID: c.ID, Paths: c.Paths}, nil
 	}
 	ref, err := definitions.ParseRef(resource)
 	if err == nil {
-		for _, p := range r.Packages {
-			if p.Canonical == ref.Canonical() || p.Name == resource {
-				return &whyResult{Kind: "package", ID: p.Canonical, Paths: p.Paths}, nil
-			}
+		if i := slices.IndexFunc(r.Packages, func(p definitions.ResolvedPackage) bool { return p.Canonical == ref.Canonical() || p.Name == resource }); i >= 0 {
+			p := r.Packages[i]
+			return &whyResult{Kind: "package", ID: p.Canonical, Paths: p.Paths}, nil
 		}
 	}
 	return nil, fmt.Errorf("%q is not selected for machine %s", resource, r.Machine)

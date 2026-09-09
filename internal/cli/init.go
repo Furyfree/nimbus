@@ -406,7 +406,7 @@ func newMachineDialog(in io.Reader, out io.Writer, c *definitions.Checkout, hw f
 	if err != nil {
 		return nil, err
 	}
-	m := &definitions.Machine{Schema: definitions.CurrentSchema, ID: id, Hardware: hw.Product, Profiles: sortedCopy(profiles), Components: sortedCopy(components), Packages: []string{}, PackageExclusions: []string{}}
+	m := &definitions.Machine{Schema: definitions.CurrentSchema, ID: id, Hardware: hw.Product, Profiles: slices.Sorted(slices.Values(profiles)), Components: slices.Sorted(slices.Values(components)), Packages: []string{}, PackageExclusions: []string{}}
 	switch {
 	case f.noDotfiles:
 	case f.dotfiles != "":
@@ -494,7 +494,7 @@ func chezmoiHandoff(src facts.Source, out io.Writer, machine string, profiles []
 	if err != nil {
 		return fmt.Errorf("read Chezmoi selection: %w", err)
 	}
-	if selection.Machine != machine || !selection.ManagedByNimbus || !slices.Equal(sortedCopy(selection.Profiles), sortedCopy(profiles)) {
+	if selection.Machine != machine || !selection.ManagedByNimbus || !slices.Equal(slices.Sorted(slices.Values(selection.Profiles)), slices.Sorted(slices.Values(profiles))) {
 		return fmt.Errorf("Chezmoi's stored selection differs; refresh it before retrying: %s", doctor.ChezmoiRefresh(machine, profiles, selection.OnePasswordSSH))
 	}
 	if onePasswordSSH && !selection.OnePasswordSSH {

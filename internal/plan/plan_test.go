@@ -1,6 +1,7 @@
 package plan
 
 import (
+	"bytes"
 	"cmp"
 	"errors"
 	"fmt"
@@ -78,7 +79,7 @@ func host(t *testing.T) (*facts.FakeSource, *facts.Facts) {
 
 // previewText renders a DNF5 preview table the way the fixture shows it.
 func previewText(rows []TxPackage) []byte {
-	var b strings.Builder
+	var b bytes.Buffer
 	b.WriteString("Updating and loading repositories:\nRepositories loaded.\nPackage Arch Version Repository Size\n")
 	section := ""
 	for _, r := range rows {
@@ -94,7 +95,7 @@ func previewText(rows []TxPackage) []byte {
 		fmt.Fprintf(&b, " %s %s %s %s 1.0 KiB\n", r.Name, r.Arch, r.EVR, r.Repository)
 	}
 	b.WriteString("\nTransaction Summary:\n Installing: 1 package\n\nOperation aborted by the user.\n")
-	return []byte(b.String())
+	return b.Bytes()
 }
 
 // installArgs returns the exact preview argv the planner will run for the
@@ -428,10 +429,8 @@ func TestPlanIsCompleteOnAFreshHostWithoutForeignFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, op := range p.Operations {
-		if op.Blocked != "" {
-			t.Fatalf("blocked on a fresh host: %s: %s", op.ID, op.Blocked)
-		}
+	if i := slices.IndexFunc(p.Operations, func(op Operation) bool { return op.Blocked != "" }); i >= 0 {
+		t.Fatalf("blocked on a fresh host: %s: %s", p.Operations[i].ID, p.Operations[i].Blocked)
 	}
 	if !p.Complete {
 		t.Fatal("a fresh host with pending operations must still produce a complete plan")

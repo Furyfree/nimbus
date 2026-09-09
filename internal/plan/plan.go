@@ -291,10 +291,8 @@ func (b *builder) inspectRepo(id string, r definitions.Repository) (ready bool, 
 			return false, "reconcile signing key: repository is disabled", ""
 		}
 		if r.Kind == "dnf" && r.ReleasePackage == "" {
-			for _, have := range b.repos[id] {
-				if have.Enabled {
-					return false, "", fmt.Sprintf("repository %s is already enabled through %s, which Nimbus does not own; remove that file or keep the repository unmanaged", id, have.File)
-				}
+			if i := slices.IndexFunc(b.repos[id], func(have facts.Repository) bool { return have.Enabled }); i >= 0 {
+				return false, "", fmt.Sprintf("repository %s is already enabled through %s, which Nimbus does not own; remove that file or keep the repository unmanaged", id, b.repos[id][i].File)
 			}
 		}
 		return false, "", ""
@@ -1266,11 +1264,7 @@ func (b *builder) prune() []Prune {
 	managed := map[string]bool{}
 	for id, r := range b.in.Applied.Receipts {
 		if r.Provider == "dnf" {
-			if r.Package != "" {
-				managed[r.Package] = true
-			} else {
-				managed[PackageName(id)] = true
-			}
+			managed[cmp.Or(r.Package, PackageName(id))] = true
 		}
 	}
 	var out []Prune

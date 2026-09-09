@@ -1,6 +1,8 @@
 package plan
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,6 +51,47 @@ func TestSystemFilesRequireOwnershipAndBindFullPayload(t *testing.T) {
 	answerFile(src, target, have)
 	if op := b.systemResources(nil)[0]; op.Blocked == "" {
 		t.Fatal("drifted file removal was allowed")
+	}
+}
+
+func TestFileChangeTimeJSONPreservesPlanDigest(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		changed time.Time
+	}{
+		{"zero", time.Time{}},
+		{"nonzero", time.Unix(5, 0).UTC()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, src := resourceBuilder()
+			target := "/etc/nimbus.conf"
+			have := facts.SystemFile{Exists: true, Content: []byte("same"), Owner: "root", Group: "root", Mode: "0644"}
+			answerFile(src, target, have)
+			b.in.Resolved.Files = []definitions.ResolvedFile{{Target: target, Content: have.Content, Owner: have.Owner, Group: have.Group, Mode: have.Mode}}
+			r := fileReceipt(target, have)
+			r.Operation, r.ChangedAt = ActionAdopt, tc.changed
+			b.in.Applied.Receipts[r.Resource] = r
+			p := &Plan{Machine: b.in.Resolved.Machine, Definitions: b.in.Definitions, Operations: b.systemResources(nil)}
+			p.Digest = digest(p)
+			data, err := json.Marshal(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if present := strings.Contains(string(data), `"changed_at"`); present == tc.changed.IsZero() {
+				t.Fatalf("plan changed_at presence=%t for %s: %s", present, tc.changed, data)
+			}
+			var decoded Plan
+			if err := json.Unmarshal(data, &decoded); err != nil {
+				t.Fatal(err)
+			}
+			if digest(&decoded) != p.Digest || !decoded.Operations[0].File.ChangedAt.Equal(tc.changed) {
+				t.Fatalf("plan lost its change time or digest after JSON round trip: %+v", decoded)
+			}
+			decoded.Operations[0].File.ChangedAt = tc.changed.Add(time.Second)
+			if digest(&decoded) == p.Digest {
+				t.Fatal("plan digest does not bind file change time")
+			}
+		})
 	}
 }
 

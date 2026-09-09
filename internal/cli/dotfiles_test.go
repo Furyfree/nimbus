@@ -2,13 +2,14 @@ package cli
 
 import (
 	"encoding/json"
-	"github.com/Furyfree/nimbus/internal/facts"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/Furyfree/nimbus/internal/facts"
 	"github.com/Furyfree/nimbus/internal/selector"
 )
 
@@ -21,7 +22,7 @@ func TestDotfilesDiffDoesNotNeedASelectorOrOperationLock(t *testing.T) {
 	if code != ExitOK || !strings.Contains(out, "a local configuration diff") {
 		t.Fatalf("%d %s%s", code, out, errOut)
 	}
-	if _, err := os.Stat(filepath.Join(root, "operation.lock")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, "operation.lock")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("diff created a lock")
 	}
 }

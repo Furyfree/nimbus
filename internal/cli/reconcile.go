@@ -69,17 +69,13 @@ func duplicateRepositoryRepairs(p *plan.Plan) (*plan.Plan, error) {
 		if op.Kind != plan.KindRepository || op.Action == plan.ActionKeep {
 			continue
 		}
-		allowed := op.Action == plan.ActionRepair && op.Blocked == "" && op.After == "" && len(op.Steps) > 0
-		for _, step := range op.Steps {
+		allowed := op.Action == plan.ActionRepair && op.Blocked == "" && op.After == "" && len(op.Steps) > 0 && !slices.ContainsFunc(op.Steps, func(step plan.Step) bool {
 			argv := step.Argv
 			if step.Description != plan.DisableDuplicateDescription || !step.Privileged || len(argv) < 4 || strings.Join(argv[:3], " ") != "dnf5 config-manager setopt" {
-				allowed = false
-				continue
+				return true
 			}
-			if slices.ContainsFunc(argv[3:], func(option string) bool { return !strings.HasSuffix(option, ".enabled=0") }) {
-				allowed = false
-			}
-		}
+			return slices.ContainsFunc(argv[3:], func(option string) bool { return !strings.HasSuffix(option, ".enabled=0") })
+		})
 		if !allowed {
 			reason := cmp.Or(op.Blocked, op.Summary)
 			return nil, fmt.Errorf("repository changed beyond duplicate reconciliation: %s; run sync again", reason)

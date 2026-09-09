@@ -330,10 +330,5 @@ func sameSet(a, b []string) bool {
 	for _, x := range a {
 		set[x] = true
 	}
-	for _, y := range b {
-		if !set[y] {
-			return false
-		}
-	}
-	return true
+	return !slices.ContainsFunc(b, func(y string) bool { return !set[y] })
 }

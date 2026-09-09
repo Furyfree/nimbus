@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
@@ -143,11 +142,5 @@ func removeAll(list []string, items ...string) []string {
 			out = append(out, v)
 		}
 	}
-	return out
-}
-
-func sortedCopy(list []string) []string {
-	out := slices.Clone(list)
-	slices.Sort(out)
 	return out
 }

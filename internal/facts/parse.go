@@ -92,8 +92,8 @@ func parseRepoFile(file string, data []byte) []Repository {
 		if line == "" || line[0] == '#' || line[0] == ';' {
 			continue
 		}
-		if line[0] == '[' && strings.HasSuffix(line, "]") {
-			repos = append(repos, Repository{ID: line[1 : len(line)-1], File: filepath.Base(file), Enabled: true, Options: map[string]string{}})
+		if section, ok := strings.CutSuffix(line, "]"); line[0] == '[' && ok {
+			repos = append(repos, Repository{ID: section[1:], File: filepath.Base(file), Enabled: true, Options: map[string]string{}})
 			current = &repos[len(repos)-1]
 			continue
 		}

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -101,10 +102,8 @@ func TestSourceRetirementKeepsReceiptOnNativeFailureOrFalseSuccess(t *testing.T)
 					t.Fatalf("unverified retirement succeeded: %v %v %v", receipts, removed, err)
 				}
 				if which == "changed identity" || which == "new dependency" {
-					for _, call := range src.log {
-						if strings.HasPrefix(call, "sudo ") {
-							t.Fatalf("changed source was mutated: %s", call)
-						}
+					if i := slices.IndexFunc(src.log, func(call string) bool { return strings.HasPrefix(call, "sudo ") }); i >= 0 {
+						t.Fatalf("changed source was mutated: %s", src.log[i])
 					}
 				}
 			})

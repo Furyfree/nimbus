@@ -248,7 +248,6 @@ func pruneInstallLogs(base string, keep int) error {
 			candidates = append(candidates, dir)
 		}
 	}
-	slices.Sort(candidates)
 	for _, dir := range candidates[:max(0, len(candidates)-keep)] {
 		children, err := os.ReadDir(dir)
 		if err != nil {

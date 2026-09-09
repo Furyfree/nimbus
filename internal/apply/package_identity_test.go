@@ -55,11 +55,11 @@ func (s *packageSource) Run(name string, args ...string) ([]byte, error) {
 		if s.ranNative && s.verifyErr != nil {
 			return nil, s.verifyErr
 		}
-		var out strings.Builder
+		out := []byte{}
 		for _, p := range s.packages {
-			fmt.Fprintf(&out, "%s|%s|%s|%s|%s|%s|user\n", p.Name, p.Epoch, p.Version, p.Release, p.Arch, p.FromRepo)
+			out = fmt.Appendf(out, "%s|%s|%s|%s|%s|%s|user\n", p.Name, p.Epoch, p.Version, p.Release, p.Arch, p.FromRepo)
 		}
-		return []byte(out.String()), nil
+		return out, nil
 	}
 	return s.scripted.Run(name, args...)
 }

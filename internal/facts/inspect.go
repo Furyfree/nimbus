@@ -1,6 +1,7 @@
 package facts
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"maps"
@@ -253,12 +254,8 @@ func repositories(src Source) ([]Repository, error) {
 					if _, ok := o.Options["gpgkey"]; ok {
 						repos[i].GPGKey = o.GPGKey
 					}
-					if o.Priority != "" {
-						repos[i].Priority = o.Priority
-					}
-					if o.GPGCheck != "" {
-						repos[i].GPGCheck = o.GPGCheck
-					}
+					repos[i].Priority = cmp.Or(o.Priority, repos[i].Priority)
+					repos[i].GPGCheck = cmp.Or(o.GPGCheck, repos[i].GPGCheck)
 					if _, ok := o.Options["enabled"]; ok {
 						repos[i].Enabled = o.Enabled
 					}

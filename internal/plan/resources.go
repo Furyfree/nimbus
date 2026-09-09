@@ -208,25 +208,21 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 		triggerID := "trigger:" + id
 		receipt, ok := b.in.Applied.Receipts[triggerID]
 		changed := !ok || !ownedResource(receipt, triggerID, KindTrigger, b.in.Resolved.Machine)
-		for _, file := range b.in.Resolved.Files {
-			if slices.Contains(file.Triggers, id) {
-				if recorded, ok := b.in.Applied.Receipts["file:"+file.Target]; ok && (recorded.ChangeTime().After(receipt.Timestamp) || !slices.Contains(recorded.Triggers, id)) {
-					changed = true
-				}
+		changed = changed || slices.ContainsFunc(b.in.Resolved.Files, func(file definitions.ResolvedFile) bool {
+			if !slices.Contains(file.Triggers, id) {
+				return false
 			}
-		}
-		for _, op := range ops {
-			if op.Kind == KindFile && op.Action != ActionKeep && (op.Action != ActionAdopt || (op.File != nil && op.File.ActivationChanged)) {
-				if op.File != nil && slices.Contains(op.File.Triggers, id) {
-					changed = true
-				}
-				for _, file := range b.in.Resolved.Files {
-					if op.ID == "file:"+file.Target && slices.Contains(file.Triggers, id) {
-						changed = true
-					}
-				}
+			recorded, ok := b.in.Applied.Receipts["file:"+file.Target]
+			return ok && (recorded.ChangeTime().After(receipt.Timestamp) || !slices.Contains(recorded.Triggers, id))
+		})
+		changed = changed || slices.ContainsFunc(ops, func(op Operation) bool {
+			if op.Kind != KindFile || op.Action == ActionKeep || (op.Action == ActionAdopt && (op.File == nil || !op.File.ActivationChanged)) {
+				return false
 			}
-		}
+			return (op.File != nil && slices.Contains(op.File.Triggers, id)) || slices.ContainsFunc(b.in.Resolved.Files, func(file definitions.ResolvedFile) bool {
+				return op.ID == "file:"+file.Target && slices.Contains(file.Triggers, id)
+			})
+		})
 		if changed {
 			op := Operation{ID: triggerID, Kind: KindTrigger, Action: ActionRepair, Risk: RiskMedium, Summary: "run trigger " + id, After: pendingPackages, Steps: []Step{{Description: "run fixed trigger", Argv: definitions.TriggerArgs(id), Privileged: true}}}
 			if id == "noctalia-state-directory" {

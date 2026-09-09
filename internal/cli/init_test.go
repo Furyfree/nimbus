@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -56,7 +57,7 @@ func TestInitRequiresExplicitSelectionBeforeMutation(t *testing.T) {
 		t.Fatalf("missing selection: %d calls=%v\n%s%s", code, src.calls, out, errOut)
 	}
 	path, _ := selector.DefaultPath()
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("missing selection wrote a selector: %v", err)
 	}
 }

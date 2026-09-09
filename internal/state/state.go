@@ -206,7 +206,7 @@ func Record(root, planDigest string, st *Stage) error {
 	if err := os.MkdirAll(filepath.Join(root, ReceiptsDir), 0o755); err != nil {
 		return err
 	}
-	if err := writeAtomic(filepath.Join(root, SchemaFile), []byte(fmt.Sprintln(Schema)), 0o644); err != nil {
+	if err := writeAtomic(filepath.Join(root, SchemaFile), fmt.Appendln(nil, Schema), 0o644); err != nil {
 		return err
 	}
 	if st.Baseline != nil {

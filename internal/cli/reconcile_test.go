@@ -130,6 +130,10 @@ func TestDuplicateReconciliationRejectsOtherRepositoryChanges(t *testing.T) {
 		{Action: plan.ActionRepair, Blocked: "foreign file"},
 		{Action: plan.ActionRepair, Steps: []plan.Step{{Description: "write repository", Argv: []string{"install", "new.repo", "owned.repo"}, Privileged: true}}},
 		{Action: plan.ActionRepair, Steps: []plan.Step{{Description: plan.DisableDuplicateDescription, Argv: []string{"dnf5", "config-manager", "setopt", "nimbus-example.gpgcheck=0"}, Privileged: true}}},
+		{Action: plan.ActionRepair, Steps: []plan.Step{
+			{Description: plan.DisableDuplicateDescription, Argv: []string{"dnf5", "config-manager", "setopt", "vendor.enabled=0"}, Privileged: true},
+			{Description: plan.DisableDuplicateDescription, Argv: []string{"dnf5", "config-manager", "setopt", "nimbus-example.gpgcheck=0"}, Privileged: true},
+		}},
 	} {
 		op.Kind = plan.KindRepository
 		if _, err := duplicateRepositoryRepairs(&plan.Plan{Operations: []plan.Operation{op}}); err == nil {

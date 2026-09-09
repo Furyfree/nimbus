@@ -37,9 +37,7 @@ func KeyFingerprints(src Source, path string) ([]string, error) {
 				if _, err := hex.DecodeString(fp); err != nil || len(fp) != 40 && len(fp) != 64 {
 					return nil, fmt.Errorf("invalid primary fingerprint in %s", path)
 				}
-				if !slices.Contains(result, fp) {
-					result = append(result, fp)
-				}
+				result = append(result, fp)
 				primary = false
 			}
 		}
@@ -48,7 +46,7 @@ func KeyFingerprints(src Source, path string) ([]string, error) {
 		return nil, fmt.Errorf("no primary key fingerprint in %s", path)
 	}
 	slices.Sort(result)
-	return result, nil
+	return slices.Compact(result), nil
 }
 
 func repositoryKeys(src Source, urls string) ([]string, string) {
@@ -62,17 +60,13 @@ func repositoryKeys(src Source, urls string) ([]string, string) {
 		if err != nil {
 			return nil, err.Error()
 		}
-		for _, key := range keys {
-			if !slices.Contains(result, key) {
-				result = append(result, key)
-			}
-		}
+		result = append(result, keys...)
 	}
 	if len(result) == 0 {
 		return nil, "repository has no configured signing key"
 	}
 	slices.Sort(result)
-	return result, ""
+	return slices.Compact(result), ""
 }
 
 const FlatpakRepoPath = "/var/lib/flatpak/repo"

@@ -1,6 +1,7 @@
 package state
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -63,6 +64,59 @@ func TestRecordWritesAtomicallyAndReadsBack(t *testing.T) {
 	journal, _ := os.ReadFile(filepath.Join(root, JournalFile))
 	if strings.Count(string(journal), "\n") != 3 || !strings.Contains(string(journal), `"action":"removed"`) {
 		t.Fatalf("journal:\n%s", journal)
+	}
+}
+
+func TestReceiptChangeTimeSurvivesLegacyReadAndRecord(t *testing.T) {
+	for _, operation := range []string{"install", "repair", "adopt"} {
+		for _, tc := range []struct {
+			name    string
+			field   string
+			changed time.Time
+		}{
+			{"omitted", "", time.Time{}},
+			{"legacy-zero", `,"changed_at":"0001-01-01T00:00:00Z"`, time.Time{}},
+			{"nonzero", `,"changed_at":"1970-01-01T00:00:05Z"`, time.Unix(5, 0).UTC()},
+		} {
+			t.Run(operation+"/"+tc.name, func(t *testing.T) {
+				root := t.TempDir()
+				stage := &Stage{Schema: Schema, PlanDigest: "approved", Time: time.Unix(30, 0).UTC()}
+				if err := Record(root, stage.PlanDigest, stage); err != nil {
+					t.Fatal(err)
+				}
+				resource := "file:/etc/nimbus.conf"
+				path := filepath.Join(root, ReceiptsDir, FileName(resource))
+				legacy := fmt.Appendf(nil, `{"schema":2,"resource":%q,"provider":"system-file","machine":"vm","operation":%q,"plan_digest":"approved","verified":true,"timestamp":"1970-01-01T00:00:20Z"%s}`, resource, operation, tc.field)
+				if err := os.WriteFile(path, legacy, 0o644); err != nil {
+					t.Fatal(err)
+				}
+				want := tc.changed
+				if want.IsZero() && operation != "adopt" {
+					want = time.Unix(20, 0).UTC()
+				}
+				for range 2 {
+					applied, err := Read(root)
+					if err != nil {
+						t.Fatal(err)
+					}
+					r := applied.Receipts[resource]
+					if !r.ChangedAt.Equal(tc.changed) || !r.ChangeTime().Equal(want) {
+						t.Fatalf("changed_at=%s, change time=%s; want %s, %s", r.ChangedAt, r.ChangeTime(), tc.changed, want)
+					}
+					stage.Receipts = []Receipt{r}
+					if err := Record(root, stage.PlanDigest, stage); err != nil {
+						t.Fatal(err)
+					}
+				}
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if present := strings.Contains(string(data), `"changed_at"`); present == tc.changed.IsZero() {
+					t.Fatalf("recorded changed_at presence=%t for %s: %s", present, tc.changed, data)
+				}
+			})
+		}
 	}
 }
 
