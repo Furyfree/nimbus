@@ -4,6 +4,8 @@ import (
 	"maps"
 	"slices"
 	"strings"
+
+	"github.com/Furyfree/nimbus/internal/rpm"
 )
 
 // Resolved is the deterministic desired graph of one machine.
@@ -193,12 +195,13 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 		delete(pkgs, ref.Canonical())
 	}
 
-	// Removes and files. A removal names a native package, so it conflicts
-	// with the same name selected from any RPM repository.
-	selectedRPM := map[string]string{}
-	for rp := range maps.Values(pkgs) {
+	// Removes and files. Native RPM requests conflict when their names and
+	// architecture qualifiers overlap, regardless of the selected repository.
+	var selectedRPM []*ResolvedPackage
+	for _, key := range slices.Sorted(maps.Keys(pkgs)) {
+		rp := pkgs[key]
 		if rp.Prefix != PrefixFlatpak && rp.Prefix != PrefixCargo {
-			selectedRPM[rp.Name] = rp.Canonical
+			selectedRPM = append(selectedRPM, rp)
 		}
 	}
 	removes := map[string]bool{}
@@ -209,8 +212,12 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 			continue
 		}
 		for _, name := range comp.Removes {
-			if canonical, selected := selectedRPM[name]; selected {
-				errs.Add(where, "component %q removes %q, which is also selected as %s", cid, name, canonical)
+			removedName, removedArch := rpm.SplitRequest(name)
+			for _, selected := range selectedRPM {
+				selectedName, selectedArch := rpm.SplitRequest(selected.Name)
+				if removedName == selectedName && (removedArch == "" || selectedArch == "" || removedArch == selectedArch) {
+					errs.Add(where, "component %q removes %q, which is also selected as %s", cid, name, selected.Canonical)
+				}
 			}
 			removes[name] = true
 		}

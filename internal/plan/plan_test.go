@@ -15,6 +15,7 @@ import (
 
 	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/rpm"
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
@@ -137,7 +138,7 @@ func answerInstall(t *testing.T, src *facts.FakeSource, in Inputs, mutate func([
 				repo = DNFRepoIDs(p.Prefix, in.Root.Repositories[p.Prefix])[0]
 			}
 		}
-		native, arch := facts.SplitPackageRequest(name)
+		native, arch := rpm.SplitRequest(name)
 		arch = cmp.Or(arch, "x86_64")
 		rows = append(rows, TxPackage{Name: native, Arch: arch, EVR: "0:1-1.fc44", Repository: repo, Section: "installing"})
 	}
