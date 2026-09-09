@@ -161,7 +161,10 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 		case managed:
 			op.Resource.Previous = receipt.Previous
 			if before == target {
-				op.Action = ActionKeep
+				op.Action = ActionAdopt
+				if receipt.Intended == target {
+					op.Action = ActionKeep
+				}
 			}
 		case before == target:
 			op.Action = ActionAdopt
@@ -462,7 +465,9 @@ func (b *builder) retireResource(id string, receipt state.Receipt) Operation {
 			op.Blocked = "boot target changed since last receipt"
 		}
 		op.Resource = &ResourceChange{Name: id, Before: before, After: receipt.Previous, Previous: receipt.Previous}
-		op.Steps = []Step{{Description: "restore prior default target", Argv: []string{"systemctl", "set-default", receipt.Previous}, Privileged: true}}
+		if before != receipt.Previous {
+			op.Steps = []Step{{Description: "restore prior default target", Argv: []string{"systemctl", "set-default", receipt.Previous}, Privileged: true}}
+		}
 	}
 	return op
 }

@@ -127,6 +127,92 @@ func TestServiceIntentAdoptionUpdatesRetirementWithoutNativeMutation(t *testing.
 	}
 }
 
+type targetCommandSource struct {
+	*facts.FakeSource
+	mutations []string
+}
+
+func (s *targetCommandSource) Stream(out, errOut io.Writer, name string, args ...string) error {
+	s.mutations = append(s.mutations, facts.Key(name, args...))
+	if err := s.FakeSource.Stream(out, errOut, name, args...); err != nil {
+		return err
+	}
+	s.Commands[facts.Key("systemctl", "get-default")] = []byte(args[len(args)-1] + "\n")
+	return nil
+}
+
+func TestTargetIntentAdoptionPreservesRecoveryAndConverges(t *testing.T) {
+	for _, original := range []string{"graphical.target", "multi-user.target"} {
+		t.Run(original, func(t *testing.T) {
+			const id = "default-target"
+			const target = "multi-user.target"
+			root := t.TempDir()
+			receipt := state.Receipt{Schema: state.ReceiptSchema, Resource: id, Provider: plan.KindTarget, Machine: "vm", Verified: true,
+				Operation: plan.ActionRepair, PlanDigest: "earlier", Previous: original, Intended: "graphical.target"}
+			if err := state.Record(root, receipt.PlanDigest, &state.Stage{Schema: state.Schema, PlanDigest: receipt.PlanDigest, Receipts: []state.Receipt{receipt}}); err != nil {
+				t.Fatal(err)
+			}
+			src := &targetCommandSource{FakeSource: &facts.FakeSource{Commands: map[string][]byte{
+				facts.Key("systemctl", "get-default"):             []byte(target + "\n"),
+				facts.Key("dnf5", facts.PackageQueryArgs...):      nil,
+				facts.Key("dnf5", "--cacheonly", "check-upgrade"): nil,
+			}}}
+			resolved := &definitions.Resolved{Machine: "vm", DefaultTarget: target}
+			build := func() *plan.Plan {
+				t.Helper()
+				applied, err := state.Read(root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				p, err := plan.Build(plan.Inputs{Resolved: resolved, Facts: &facts.Facts{}, Source: src, Applied: applied})
+				if err != nil || !p.Complete || len(p.Operations) != 1 {
+					t.Fatalf("target plan: %+v %v", p, err)
+				}
+				return p
+			}
+			p := build()
+			if p.Operations[0].Action != plan.ActionAdopt || len(p.Operations[0].Steps) != 0 {
+				t.Fatalf("matching target needs receipt adoption: %+v", p.Operations[0])
+			}
+			opts := Options{Source: src, Record: func(digest string, stage *state.Stage) error { return state.Record(root, digest, stage) }}
+			if result := Run(p, opts); result.Error != "" || len(src.mutations) != 0 || result.Reboot {
+				t.Fatalf("receipt adoption changed the live target or failed: %+v commands=%v", result, src.mutations)
+			}
+			applied, err := state.Read(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := applied.Receipts[id]; got.Intended != target || got.Previous != original || got.Operation != plan.ActionAdopt {
+				t.Fatalf("adoption lost current intent or original recovery target: %+v", got)
+			}
+			if p := build(); p.Operations[0].Action != plan.ActionKeep {
+				t.Fatalf("unchanged target did not converge: %+v", p.Operations[0])
+			}
+			resolved.DefaultTarget = ""
+			p = build()
+			var commands []string
+			if original != target {
+				commands = []string{"sudo systemctl set-default " + original}
+				src.Commands[commands[0]] = nil
+			}
+			var planned []string
+			for _, step := range p.Operations[0].Steps {
+				planned = append(planned, facts.Key("sudo", step.Argv...))
+			}
+			if p.Operations[0].Resource.After != original || !slices.Equal(planned, commands) {
+				t.Fatalf("retirement lost original target or requires unnecessary commands: %+v", p.Operations[0])
+			}
+			if result := Run(p, opts); result.Error != "" || !slices.Equal(src.mutations, commands) {
+				t.Fatalf("target retirement failed: %+v commands=%v", result, src.mutations)
+			}
+			applied, err = state.Read(root)
+			if err != nil || len(applied.Receipts) != 0 {
+				t.Fatalf("retired target receipt remains: %+v %v", applied, err)
+			}
+		})
+	}
+}
+
 type membershipSource struct {
 	*facts.FakeSource
 	observations []string

@@ -274,6 +274,37 @@ func TestGreeterPlanningDistinguishesFailedAndForeignOwnership(t *testing.T) {
 	}
 }
 
+func TestTargetIntentAdoptionRequiresKnownOwnedState(t *testing.T) {
+	for _, tc := range []struct {
+		name, observed, failure, machine string
+		verified                         bool
+		blocked                          string
+	}{
+		{"foreign receipt", "multi-user.target", "", "other", true, "boot-target receipt is invalid or foreign"},
+		{"unverified receipt", "multi-user.target", "", "vm", false, "boot-target receipt is invalid or foreign"},
+		{"read failure", "", "get-default unavailable", "vm", true, "get-default unavailable"},
+		{"unsupported target", "rescue.target", "", "vm", true, "unknown prior boot target; manual migration required"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, src := resourceBuilder()
+			b.in.Resolved.DefaultTarget = "multi-user.target"
+			b.in.Applied.Receipts["default-target"] = state.Receipt{Resource: "default-target", Provider: KindTarget, Machine: tc.machine, Verified: tc.verified, Previous: "graphical.target", Intended: "graphical.target"}
+			key := facts.Key("systemctl", "get-default")
+			src.Commands[key] = []byte(tc.observed + "\n")
+			if tc.failure != "" {
+				src.Failures[key] = tc.failure
+			}
+			p, err := Build(b.in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if op := find(p, "default-target"); p.Complete || op == nil || op.Blocked != tc.blocked {
+				t.Fatalf("invalid target observation or ownership accepted: complete=%t operation=%+v", p.Complete, op)
+			}
+		})
+	}
+}
+
 func TestTargetRetirementDistinguishesFailedObservationAndDrift(t *testing.T) {
 	for _, tc := range []struct {
 		name, target, failure, blocked string
