@@ -760,7 +760,7 @@ func (b *builder) waitOrBlock(repoID, opKind string) (after, blocked string) {
 }
 
 func (b *builder) packages() []Operation {
-	var adopt, pending, blocked []Operation
+	var adopt, pending []Operation
 	var install []definitions.ResolvedPackage
 	for _, p := range b.in.Resolved.Packages {
 		if p.Prefix == definitions.PrefixFlatpak || p.Prefix == definitions.PrefixCargo {
@@ -793,7 +793,7 @@ func (b *builder) packages() []Operation {
 		}
 		install = append(install, p)
 	}
-	ops := append(adopt, blocked...)
+	ops := adopt
 	var installTx *Transaction
 	if len(install) > 0 {
 		op := b.installTransaction(install)

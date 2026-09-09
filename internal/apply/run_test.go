@@ -317,13 +317,9 @@ func TestKeyFingerprintMismatchStopsBeforeAnyPrivilegedCommand(t *testing.T) {
 
 func TestVerificationFailureGetsNoReceipt(t *testing.T) {
 	src := newScripted()
-	src.fail["sudo flatpak install"] = "" // succeeds silently but installs nothing
-	delete(src.fail, "sudo flatpak install")
 	root := t.TempDir()
 	opts := options(t, src, root)
-	// Make the Flatpak install a no-op so verification must catch it.
-	orig := src.privileged
-	_ = orig
+	// Install another application so verification catches the missing request.
 	p := samplePlan(t)
 	p.Operations[5].Steps[0].Argv = []string{"flatpak", "install", "--system", "--noninteractive", "flathub", "org.example.Other"}
 	r := Run(p, opts)
@@ -398,8 +394,7 @@ func TestRepositoryRepairIsVerifiedAsDeclared(t *testing.T) {
 	root := t.TempDir()
 	opts := options(t, src, root)
 	// The scripted addrepo honours every --set, so the enabled repository
-	// verifies as declared; drop the priority from what it writes and the
-	// verification must fail.
+	// verifies as declared.
 	p := &plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:repo", Operations: []plan.Operation{
 		{ID: "repository:terra", Kind: plan.KindRepository, Action: plan.ActionEnable, Summary: "enable terra"},
 	}}
@@ -407,10 +402,7 @@ func TestRepositoryRepairIsVerifiedAsDeclared(t *testing.T) {
 		t.Fatalf("enable failed: %+v", r)
 	}
 	src2 := newScripted()
-	src2.Files = map[string][]byte{}
 	opts2 := options(t, src2, t.TempDir())
-	src2.fail["sudo dnf5 config-manager addrepo"] = ""
-	delete(src2.fail, "sudo dnf5 config-manager addrepo")
 	// Pre-write a file with gpgcheck off that addrepo will not replace.
 	src2.Dirs[facts.RepoDir] = []string{"nimbus-terra.repo"}
 	src2.Files[filepath.Join(facts.RepoDir, "nimbus-terra.repo")] = []byte("[nimbus-terra]\nenabled=1\ngpgcheck=0\nbaseurl=https://repos.fyralabs.com/terra44\npriority=100\n")

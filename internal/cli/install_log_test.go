@@ -276,7 +276,13 @@ func TestReadOnlyCommandsDoNotCreateInstallationLogs(t *testing.T) {
 	root, _ := installerFixture(t)
 	base := os.Getenv("XDG_STATE_HOME")
 	for _, args := range [][]string{{"validate"}, {"status"}, {"doctor"}, {"sync", "--plan"}} {
-		run(t, append(args, "--checkout", root, "--machine", "vm")...)
+		args = append(args, "--checkout", root)
+		if args[0] != "validate" {
+			args = append(args, "--machine", "vm")
+		}
+		if code, out, errOut := run(t, args...); code == ExitUsage {
+			t.Fatalf("inspection arguments were rejected: %v\n%s%s", args, out, errOut)
+		}
 	}
 	entries, err := os.ReadDir(base)
 	if err != nil || len(entries) != 0 {
