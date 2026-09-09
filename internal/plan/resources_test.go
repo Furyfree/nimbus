@@ -2,6 +2,7 @@ package plan
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -72,7 +73,11 @@ func TestFileChangeTimeJSONPreservesPlanDigest(t *testing.T) {
 			r.Operation, r.ChangedAt = ActionAdopt, tc.changed
 			b.in.Applied.Receipts[r.Resource] = r
 			p := &Plan{Machine: b.in.Resolved.Machine, Definitions: b.in.Definitions, Operations: b.systemResources(nil)}
-			p.Digest = digest(p)
+			var err error
+			p.Digest, err = digest(p)
+			if err != nil {
+				t.Fatal(err)
+			}
 			data, err := json.Marshal(p)
 			if err != nil {
 				t.Fatal(err)
@@ -84,12 +89,49 @@ func TestFileChangeTimeJSONPreservesPlanDigest(t *testing.T) {
 			if err := json.Unmarshal(data, &decoded); err != nil {
 				t.Fatal(err)
 			}
-			if digest(&decoded) != p.Digest || !decoded.Operations[0].File.ChangedAt.Equal(tc.changed) {
+			roundTrip, err := digest(&decoded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if roundTrip != p.Digest || !decoded.Operations[0].File.ChangedAt.Equal(tc.changed) {
 				t.Fatalf("plan lost its change time or digest after JSON round trip: %+v", decoded)
 			}
 			decoded.Operations[0].File.ChangedAt = tc.changed.Add(time.Second)
-			if digest(&decoded) == p.Digest {
+			changed, err := digest(&decoded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if changed == p.Digest {
 				t.Fatal("plan digest does not bind file change time")
+			}
+		})
+	}
+}
+
+func TestBuildRejectsUnencodableReceiptChangeTime(t *testing.T) {
+	for _, field := range []string{"changed_at", "timestamp"} {
+		t.Run(field, func(t *testing.T) {
+			b, src := resourceBuilder()
+			target := "/etc/nimbus.conf"
+			have := facts.SystemFile{Exists: true, Content: []byte("observed"), Owner: "root", Group: "root", Mode: "0644"}
+			answerFile(src, target, have)
+			r := fileReceipt(target, have)
+			r.Operation = ActionRepair
+			// Older or externally written receipts can decode a time whose
+			// offset JSON encoding rejects. Both change-time sources matter.
+			if err := json.Unmarshal([]byte(`{"`+field+`":"2026-09-09T12:00:00+24:00"}`), &r); err != nil {
+				t.Fatal(err)
+			}
+			b.in.Applied.Receipts[r.Resource] = r
+			for _, content := range []string{"reviewed change", "different change"} {
+				b.in.Resolved.Files = []definitions.ResolvedFile{{Target: target, Content: []byte(content), Owner: have.Owner, Group: have.Group, Mode: have.Mode}}
+				p, err := Build(b.in)
+				if p != nil || err == nil || !strings.Contains(err.Error(), "encode plan digest") {
+					t.Fatalf("unencodable receipt produced plan %+v, error %v", p, err)
+				}
+				if _, ok := errors.AsType[*json.MarshalerError](err); !ok {
+					t.Fatalf("encoding failure was not preserved: %v", err)
+				}
 			}
 		})
 	}

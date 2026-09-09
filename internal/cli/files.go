@@ -91,7 +91,11 @@ func newFiles(opts *options) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if !sameAcceptance(before, fresh) {
+				same, err := sameAcceptance(before, fresh)
+				if err != nil {
+					return fmt.Errorf("recheck file acceptance approval: %w", err)
+				}
+				if !same {
 					return errors.New("file acceptance inputs changed after approval; review again")
 				}
 				if err := replaceAcceptedSource(before); err != nil {
@@ -201,10 +205,16 @@ func prepareAcceptance(flags machineFlags, target string) (*acceptInput, error) 
 	return &acceptInput{selected: s, decl: *decl, source: source, target: live, sourceInfo: si, targetInfo: ti, receipt: receipt, checkoutIdentity: identity, result: result}, nil
 }
 
-func sameAcceptance(a, b *acceptInput) bool {
-	ar, _ := json.Marshal(a.receipt)
-	br, _ := json.Marshal(b.receipt)
-	return a.selected.Root == b.selected.Root && a.checkoutIdentity == b.checkoutIdentity && a.selected.Checkout.Digest() == b.selected.Checkout.Digest() && a.result.Definitions == b.result.Definitions && bytes.Equal(ar, br) && bytes.Equal(a.source, b.source) && bytes.Equal(a.target, b.target) && os.SameFile(a.sourceInfo, b.sourceInfo) && os.SameFile(a.targetInfo, b.targetInfo) && a.sourceInfo.Mode() == b.sourceInfo.Mode() && a.targetInfo.Mode() == b.targetInfo.Mode()
+func sameAcceptance(a, b *acceptInput) (bool, error) {
+	ar, err := json.Marshal(a.receipt)
+	if err != nil {
+		return false, fmt.Errorf("encode reviewed ownership receipt: %w", err)
+	}
+	br, err := json.Marshal(b.receipt)
+	if err != nil {
+		return false, fmt.Errorf("encode current ownership receipt: %w", err)
+	}
+	return a.selected.Root == b.selected.Root && a.checkoutIdentity == b.checkoutIdentity && a.selected.Checkout.Digest() == b.selected.Checkout.Digest() && a.result.Definitions == b.result.Definitions && bytes.Equal(ar, br) && bytes.Equal(a.source, b.source) && bytes.Equal(a.target, b.target) && os.SameFile(a.sourceInfo, b.sourceInfo) && os.SameFile(a.targetInfo, b.targetInfo) && a.sourceInfo.Mode() == b.sourceInfo.Mode() && a.targetInfo.Mode() == b.targetInfo.Mode(), nil
 }
 
 // Read identity inputs directly: reverse capture never runs Git commands.

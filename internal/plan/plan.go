@@ -136,9 +136,9 @@ type Inputs struct {
 	Prune bool
 }
 
-// Build produces the plan. It returns an error only when the facts needed
-// for any planning are missing; individual problems become blocked
-// operations so the whole picture is still shown.
+// Build produces the plan. Missing required facts and digest encoding failures
+// return errors; individual problems become blocked operations so the whole
+// picture is still shown.
 func Build(in Inputs) (*Plan, error) {
 	if in.Resolved == nil || in.Facts == nil {
 		return nil, fmt.Errorf("planning needs resolved configuration and facts")
@@ -191,7 +191,11 @@ func Build(in Inputs) (*Plan, error) {
 	if slices.ContainsFunc(p.Operations, func(op Operation) bool { return op.Blocked != "" }) {
 		p.Complete = false
 	}
-	p.Digest = digest(p)
+	planDigest, err := digest(p)
+	if err != nil {
+		return nil, err
+	}
+	p.Digest = planDigest
 	return p, nil
 }
 
@@ -1307,16 +1311,19 @@ func (b *builder) updates() Updates {
 // excluded; the checkout commit is reported beside the digest, not inside
 // it, so a documentation-only commit does not invalidate an approved plan
 // while the definition digest still does.
-func digest(p *Plan) string {
+func digest(p *Plan) (string, error) {
 	type canon struct {
 		Machine                  string      `json:"machine"`
 		Definitions              string      `json:"definitions"`
 		Operations               []Operation `json:"operations"`
 		RepositoryReconciliation string      `json:"repository_reconciliation,omitempty"`
 	}
-	data, _ := json.Marshal(canon{Machine: p.Machine, Definitions: p.Definitions, Operations: p.Operations, RepositoryReconciliation: p.RepositoryReconciliation})
+	data, err := json.Marshal(canon{Machine: p.Machine, Definitions: p.Definitions, Operations: p.Operations, RepositoryReconciliation: p.RepositoryReconciliation})
+	if err != nil {
+		return "", fmt.Errorf("encode plan digest: %w", err)
+	}
 	sum := sha256.Sum256(data)
-	return "sha256:" + hex.EncodeToString(sum[:])
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
 // InstallerScript stands for the downloaded installer in a plan step; apply

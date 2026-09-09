@@ -278,6 +278,63 @@ func TestFilesAcceptPreviewCancellationAndChangedInput(t *testing.T) {
 	}
 }
 
+func TestFilesAcceptRejectsUnencodableOwnershipReceipts(t *testing.T) {
+	for _, tc := range []struct {
+		name, want            string
+		malformedBeforeReview bool
+		changePlan            bool
+	}{
+		{"unchanged malformed receipt", "encode reviewed ownership receipt", true, false},
+		{"changed malformed receipt", "encode reviewed ownership receipt", true, true},
+		{"receipt malformed after review", "encode current ownership receipt", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			checkout, source, _ := acceptanceFixture(t)
+			path := filepath.Join(stateRoot, state.ReceiptsDir, state.FileName("file:/etc/nimbus-test.conf"))
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var receipt map[string]json.RawMessage
+			if err := json.Unmarshal(data, &receipt); err != nil {
+				t.Fatal(err)
+			}
+			write := func() {
+				t.Helper()
+				// This offset decodes as time.Time but cannot be encoded again.
+				receipt["timestamp"] = json.RawMessage(`"2026-09-09T12:00:00+24:00"`)
+				data, err := json.Marshal(receipt)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, data, 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.malformedBeforeReview {
+				write()
+			}
+			saved := approver
+			t.Cleanup(func() { approver = saved })
+			approver = func(io.Reader, io.Writer, string) bool {
+				if tc.changePlan {
+					receipt["plan_digest"] = json.RawMessage(`"sha256:changed"`)
+				}
+				write()
+				return true
+			}
+			code, out, errOut := run(t, "files", "accept", "/etc/nimbus-test.conf", "--checkout", checkout, "--machine", "test")
+			if code != ExitFailure || !strings.Contains(errOut, tc.want) {
+				t.Errorf("receipt encoding failure not reported: %d %s%s", code, out, errOut)
+			}
+			data, err = os.ReadFile(source)
+			if err != nil || string(data) != "old\n" {
+				t.Fatalf("receipt encoding failure changed source: %q, %v", data, err)
+			}
+		})
+	}
+}
+
 func TestFilesAcceptRefusesUnsafeTargetsAndOwnership(t *testing.T) {
 	for _, scenario := range []string{"outside", "traversal", "unselected", "symlink", "ancestor", "hardlink", "directory", "unverified", "foreign", "metadata", "binary"} {
 		t.Run(scenario, func(t *testing.T) {

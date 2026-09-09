@@ -22,7 +22,11 @@ func TestRepositoryReconciliationIsApprovedInThePlan(t *testing.T) {
 	}
 	original := p.Digest
 	p.RepositoryReconciliation = ""
-	if digest(p) == original {
+	changed, err := digest(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed == original {
 		t.Fatal("removing post-transaction policy did not change approval digest")
 	}
 	r.Repositories = nil
