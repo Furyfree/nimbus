@@ -315,10 +315,14 @@ func (b *builder) serviceOperation(id string, want definitions.ServiceDecl, comp
 		op.Steps = append(op.Steps, Step{Description: verb + " unit", Argv: []string{"systemctl", verb, "--", want.Unit}, Privileged: true})
 	}
 	if len(op.Steps) == 0 {
-		if managed {
-			op.Action = ActionKeep
-		} else {
-			op.Action = ActionAdopt
+		op.Action = ActionAdopt
+		if managed && op.Blocked == "" {
+			var intended definitions.ServiceDecl
+			if json.Unmarshal([]byte(receipt.Intended), &intended) != nil {
+				op.Blocked = "service receipt lacks desired state"
+			} else if encodeResource(intended) == op.Resource.After {
+				op.Action = ActionKeep
+			}
 		}
 	}
 	if want.Unit == "greetd.service" && want.Enabled != nil && *want.Enabled {
@@ -432,6 +436,10 @@ func (b *builder) retireResource(id string, receipt state.Receipt) Operation {
 			op.Blocked = err.Error()
 		}
 		op.Resource = &ResourceChange{Name: fields[1], User: fields[2], Before: fmt.Sprint(present), After: receipt.Previous, Previous: receipt.Previous}
+		if receipt.Previous == "true" {
+			op.Resource.After = op.Resource.Before
+			op.Summary = "retire tracking of preexisting membership " + id
+		}
 		if present && receipt.Previous == "false" {
 			primary, e := b.in.Source.Run("id", "-gn", "--", fields[2])
 			if e != nil {

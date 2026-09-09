@@ -214,6 +214,36 @@ func TestServicePlanningUsesObservedEnablement(t *testing.T) {
 	}
 }
 
+func TestMatchingServiceIntentUsesSemanticReceiptState(t *testing.T) {
+	for _, tc := range []struct {
+		name, intended string
+		enabled        *bool
+		action         string
+		blocked        bool
+	}{
+		{"equivalent JSON", ` { "running": true, "enabled": false, "unit": "demo.service" } `, new(false), ActionKeep, false},
+		{"omitted aspect", `{"unit":"demo.service","running":true}`, nil, ActionKeep, false},
+		{"null aspect", `{"enabled":null,"running":true,"unit":"demo.service"}`, nil, ActionKeep, false},
+		{"add disabled aspect", `{"unit":"demo.service","running":true}`, new(false), ActionAdopt, false},
+		{"drop disabled aspect", `{"unit":"demo.service","enabled":false,"running":true}`, nil, ActionAdopt, false},
+		{"changed value already matches", `{"unit":"demo.service","enabled":true,"running":true}`, new(false), ActionAdopt, false},
+		{"invalid prior intent", `invalid`, nil, ActionAdopt, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, src := resourceBuilder()
+			const id = "service:demo.service"
+			answerUnit(src, "demo.service", "disabled", "active")
+			previous := encodeResource(facts.Service{Unit: "demo.service", Load: "loaded", Enabled: "enabled", Active: "inactive"})
+			b.in.Applied.Receipts[id] = state.Receipt{Resource: id, Provider: KindService, Machine: "vm", Verified: true, Previous: previous, Intended: tc.intended}
+			want := definitions.ServiceDecl{Unit: "demo.service", Enabled: tc.enabled, Running: new(true)}
+			op := b.serviceOperation(id, want, "demo", "")
+			if op.Action != tc.action || (op.Blocked != "") != tc.blocked || len(op.Steps) != 0 || op.Resource.Previous != previous {
+				t.Fatalf("matching service reconciliation: %+v", op)
+			}
+		})
+	}
+}
+
 func TestGreeterPlanningDistinguishesFailedAndForeignOwnership(t *testing.T) {
 	for _, tc := range []struct {
 		name, target, failure, blocked string
@@ -279,7 +309,19 @@ func TestMembershipRemovalPreservesPreexistingAndPrimaryGroups(t *testing.T) {
 	if op := b.retireResource(receipt.Resource, receipt); op.Blocked != "" || len(op.Steps) != 0 {
 		t.Fatalf("preexisting membership: %+v", op)
 	}
+	src.Commands[facts.Key("id", "-nG", "--", "owner")] = []byte("owner")
+	if op := b.retireResource(receipt.Resource, receipt); op.Blocked != "" || len(op.Steps) != 0 || op.Resource.Before != "false" || op.Resource.After != "false" || op.Resource.Previous != "true" {
+		t.Fatalf("removed preexisting membership: %+v", op)
+	}
 	receipt.Previous = "false"
+	if op := b.retireResource(receipt.Resource, receipt); op.Blocked != "" || len(op.Steps) != 0 || op.Resource.After != "false" {
+		t.Fatalf("absent Nimbus-added membership: %+v", op)
+	}
+	src.Commands[facts.Key("id", "-nG", "--", "owner")] = []byte("owner docker")
+	src.Commands[facts.Key("id", "-gn", "--", "owner")] = []byte("owner")
+	if op := b.retireResource(receipt.Resource, receipt); op.Blocked != "" || len(op.Steps) != 1 || op.Resource.After != "false" {
+		t.Fatalf("Nimbus-added membership: %+v", op)
+	}
 	src.Commands[facts.Key("id", "-gn", "--", "owner")] = []byte("docker")
 	if op := b.retireResource(receipt.Resource, receipt); op.Blocked == "" {
 		t.Fatal("primary group removal allowed")

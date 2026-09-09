@@ -46,6 +46,150 @@ func TestServiceAdoptionRecordsOriginalState(t *testing.T) {
 	}
 }
 
+func TestServiceIntentAdoptionUpdatesRetirementWithoutNativeMutation(t *testing.T) {
+	for _, dropRunning := range []bool{false, true} {
+		t.Run(map[bool]string{false: "add running", true: "drop running"}[dropRunning], func(t *testing.T) {
+			const id = "service:demo.service"
+			original := facts.Service{Unit: "demo.service", Load: "loaded", Enabled: "disabled", Active: "inactive"}
+			have := facts.Service{Unit: original.Unit, Load: "loaded", Enabled: "enabled", Active: "active"}
+			old := definitions.ServiceDecl{Unit: have.Unit, Enabled: new(true)}
+			want := definitions.ServiceDecl{Unit: have.Unit, Enabled: new(true), Running: new(true)}
+			if dropRunning {
+				old, want = want, old
+			}
+			root := t.TempDir()
+			receipt := state.Receipt{Schema: state.ReceiptSchema, Resource: id, Provider: plan.KindService, Machine: "vm", Verified: true,
+				Operation: plan.ActionRepair, PlanDigest: "earlier", Previous: encodeTest(original), Intended: encodeTest(old)}
+			if err := state.Record(root, receipt.PlanDigest, &state.Stage{Schema: state.Schema, PlanDigest: receipt.PlanDigest, Receipts: []state.Receipt{receipt}}); err != nil {
+				t.Fatal(err)
+			}
+			src := &serviceCommandSource{before: have, after: have, FakeSource: &facts.FakeSource{Commands: map[string][]byte{
+				facts.Key("dnf5", facts.PackageQueryArgs...):      nil,
+				facts.Key("dnf5", "--cacheonly", "check-upgrade"): nil,
+			}}}
+			resolved := &definitions.Resolved{Machine: "vm", Services: []definitions.ResolvedService{{ServiceDecl: want}}}
+			build := func() *plan.Plan {
+				t.Helper()
+				applied, err := state.Read(root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				p, err := plan.Build(plan.Inputs{Resolved: resolved, Facts: &facts.Facts{}, Source: src, Applied: applied})
+				if err != nil || !p.Complete || len(p.Operations) != 1 {
+					t.Fatalf("service plan: %+v %v", p, err)
+				}
+				return p
+			}
+			p := build()
+			if p.Operations[0].Action != plan.ActionAdopt || len(p.Operations[0].Steps) != 0 {
+				t.Fatalf("changed intent needs receipt adoption: %+v", p.Operations[0])
+			}
+			opts := Options{Source: src, Record: func(digest string, stage *state.Stage) error { return state.Record(root, digest, stage) }}
+			if result := Run(p, opts); result.Error != "" || src.mutated {
+				t.Fatalf("adoption ran a native mutation or failed: %+v, mutated=%t", result, src.mutated)
+			}
+			applied, err := state.Read(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := applied.Receipts[id]; got.Intended != encodeTest(want) || got.Previous != receipt.Previous || got.Operation != plan.ActionAdopt {
+				t.Fatalf("adoption lost current intent or original recovery state: %+v", got)
+			}
+			if p := build(); p.Operations[0].Action != plan.ActionKeep {
+				t.Fatalf("unchanged intent did not converge: %+v", p.Operations[0])
+			}
+			resolved.Services = nil
+			p = build()
+			commands := []string{"systemctl disable -- demo.service"}
+			src.after.Enabled = "disabled"
+			if !dropRunning {
+				commands = append(commands, "systemctl stop -- demo.service")
+				src.after.Active = "inactive"
+			}
+			var planned []string
+			for _, step := range p.Operations[0].Steps {
+				planned = append(planned, facts.Key(step.Argv[0], step.Argv[1:]...))
+			}
+			if !slices.Equal(planned, commands) {
+				t.Fatalf("retirement uses stale intent: %v, want %v", planned, commands)
+			}
+			for _, command := range commands {
+				src.Commands["sudo "+command] = nil
+			}
+			if result := Run(p, opts); result.Error != "" || !src.mutated {
+				t.Fatalf("retirement failed: %+v", result)
+			}
+			applied, err = state.Read(root)
+			if err != nil || len(applied.Receipts) != 0 {
+				t.Fatalf("retired service receipt remains: %+v %v", applied, err)
+			}
+		})
+	}
+}
+
+type membershipSource struct {
+	*facts.FakeSource
+	observations []string
+}
+
+func (s *membershipSource) Run(name string, args ...string) ([]byte, error) {
+	if facts.Key(name, args...) == "id -nG -- owner" {
+		if len(s.observations) == 0 {
+			return nil, errors.New("unexpected membership inspection")
+		}
+		out := s.observations[0]
+		s.observations = s.observations[1:]
+		return []byte(out), nil
+	}
+	return s.FakeSource.Run(name, args...)
+}
+
+func TestPreexistingMembershipRetirementPreservesObservation(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		observations []string
+		valid        bool
+	}{
+		{"still present", []string{"owner docker", "owner docker", "owner docker"}, true},
+		{"removed externally", []string{"owner", "owner", "owner"}, true},
+		{"changed before execution", []string{"owner", "owner docker"}, false},
+		{"changed during verification", []string{"owner", "owner", "owner docker"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const id = "group:docker:owner"
+			root := t.TempDir()
+			receipt := state.Receipt{Schema: state.ReceiptSchema, Resource: id, Provider: plan.KindGroup, Machine: "vm", Verified: true,
+				Operation: plan.ActionAdopt, PlanDigest: "earlier", Previous: "true", Intended: "true"}
+			if err := state.Record(root, receipt.PlanDigest, &state.Stage{Schema: state.Schema, PlanDigest: receipt.PlanDigest, Receipts: []state.Receipt{receipt}}); err != nil {
+				t.Fatal(err)
+			}
+			src := &membershipSource{observations: tc.observations, FakeSource: &facts.FakeSource{Commands: map[string][]byte{
+				facts.Key("dnf5", facts.PackageQueryArgs...):      nil,
+				facts.Key("dnf5", "--cacheonly", "check-upgrade"): nil,
+			}}}
+			applied, err := state.Read(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p, err := plan.Build(plan.Inputs{Resolved: &definitions.Resolved{Machine: "vm"}, Facts: &facts.Facts{}, Source: src, Applied: applied})
+			if err != nil || !p.Complete || len(p.Operations) != 1 || len(p.Operations[0].Steps) != 0 {
+				t.Fatalf("membership retirement plan: %+v %v", p, err)
+			}
+			result := Run(p, Options{Source: src, Record: func(digest string, stage *state.Stage) error { return state.Record(root, digest, stage) }})
+			if (result.Error == "") != tc.valid || len(src.observations) != 0 {
+				t.Fatalf("retirement verification: %+v, remaining observations=%v", result, src.observations)
+			}
+			applied, err = state.Read(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, retained := applied.Receipts[id]; retained == tc.valid {
+				t.Fatalf("membership receipt retained=%t after valid retirement=%t", retained, tc.valid)
+			}
+		})
+	}
+}
+
 type serviceCommandSource struct {
 	*facts.FakeSource
 	before, after facts.Service
