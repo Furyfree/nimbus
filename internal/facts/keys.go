@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode/utf8"
 )
 
 // KeyInspectArgs examines a public key without creating a GnuPG home or
@@ -83,23 +84,82 @@ func inspectRemoteTrust(src Source, remote *FlatpakRemote) {
 		remote.KeyError = err.Error()
 		return
 	}
-	found := false
-	for _, section := range parseRepoFile("config", data) {
-		if section.ID == `remote "`+remote.Name+`"` {
-			found = true
-			remote.GPGVerify = normalizeBool(section.Options["gpg-verify"]) == "1"
-			if normalizeBool(section.Options["xa.disable"]) == "1" || section.Options["gpgkeypath"] != "" {
-				remote.KeyError = "remote is disabled or uses an additional gpgkeypath"
-				return
-			}
-		}
-	}
-	if !found {
-		remote.KeyError = "remote configuration is missing"
+	options, err := remoteTrustOptions(data, remote.Name)
+	if err != nil {
+		remote.KeyError = err.Error()
 		return
 	}
+	if options["xa.disable"] == "true" || options["gpgkeypath"] != "" {
+		remote.KeyError = "remote is disabled or uses an additional gpgkeypath"
+		return
+	}
+	remote.GPGVerify = options["gpg-verify"] == "true"
 	remote.KeyFingerprints, err = KeyFingerprints(src, filepath.Join(FlatpakRepoPath, remote.Name+".trustedkeys.gpg"))
 	if err != nil {
 		remote.KeyError = err.Error()
 	}
+}
+
+// remoteTrustOptions reads only the signature policy from OSTree's GLib key
+// file. DNF's quoting, continuation, and boolean rules do not apply here.
+func remoteTrustOptions(data []byte, name string) (map[string]string, error) {
+	contents := string(data)
+	if !utf8.ValidString(contents) || strings.ContainsRune(contents, 0) {
+		return nil, fmt.Errorf("remote configuration is not valid UTF-8 text")
+	}
+	const whitespace = " \t\r\v\f"
+	want := `remote "` + name + `"`
+	group := ""
+	found := false
+	options := map[string]string{}
+	lineNumber := 0
+	for raw := range strings.SplitSeq(contents, "\n") {
+		lineNumber++
+		line := strings.TrimLeft(strings.TrimSuffix(raw, "\r"), whitespace)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") {
+			var ok bool
+			group, ok = strings.CutSuffix(strings.TrimRight(line[1:], " \t"), "]")
+			if !ok || group == "" || strings.ContainsAny(group, "[]") || strings.IndexFunc(group, func(r rune) bool { return r < ' ' || r == 0x7f }) >= 0 {
+				return nil, fmt.Errorf("remote configuration line %d: invalid group", lineNumber)
+			}
+			found = found || group == want
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		key = strings.TrimRight(key, whitespace)
+		if !ok || group == "" || key == "" || strings.ContainsAny(key, "[]") {
+			return nil, fmt.Errorf("remote configuration line %d: invalid or unsupported key", lineNumber)
+		}
+		value = strings.TrimLeft(value, whitespace)
+		if key == "Encoding" && !strings.EqualFold(value, "UTF-8") {
+			return nil, fmt.Errorf("remote configuration line %d: unsupported encoding", lineNumber)
+		}
+		if group == want {
+			switch key {
+			case "gpg-verify", "xa.disable", "gpgkeypath":
+				options[key] = value
+			}
+		}
+	}
+	if !found {
+		return nil, fmt.Errorf("remote configuration is missing")
+	}
+	for _, key := range []string{"gpg-verify", "xa.disable"} {
+		value, ok := options[key]
+		if !ok {
+			continue
+		}
+		switch strings.TrimRight(value, whitespace) {
+		case "true", "1":
+			options[key] = "true"
+		case "false", "0":
+			options[key] = "false"
+		default:
+			return nil, fmt.Errorf("remote configuration has an invalid %s boolean", key)
+		}
+	}
+	return options, nil
 }

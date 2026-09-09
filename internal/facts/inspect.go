@@ -219,7 +219,11 @@ func repositories(src Source) ([]Repository, error) {
 		if err != nil {
 			return nil, err
 		}
-		repos = append(repos, parseRepoFile(name, data)...)
+		sections, err := parseRepoFile(name, data)
+		if err != nil {
+			return nil, err
+		}
+		repos = append(repos, sections...)
 	}
 	// dnf5 config-manager setopt writes overrides here; they win over the
 	// repository file, so the effective values are what matter.
@@ -235,9 +239,22 @@ func repositories(src Source) ([]Repository, error) {
 		if err != nil {
 			return nil, err
 		}
-		for _, o := range parseRepoFile(name, data) {
+		sections, err := parseRepoFile(name, data)
+		if err != nil {
+			return nil, err
+		}
+		for _, o := range sections {
+			// DNF uses fnmatch with extended patterns and substitutes variables.
+			// Keep only the syntax whose meaning filepath.Match preserves.
+			if strings.ContainsAny(o.ID, "!()\\$") || strings.Contains(o.ID, "[[") {
+				return nil, fmt.Errorf("%s: unsupported repository override pattern %q; use literal IDs, *, ?, or ordinary bracket classes", name, o.ID)
+			}
 			for i := range repos {
-				if match, _ := filepath.Match(o.ID, repos[i].ID); match {
+				match, err := filepath.Match(o.ID, repos[i].ID)
+				if err != nil {
+					return nil, fmt.Errorf("%s: repository override pattern %q: %w", name, o.ID, err)
+				}
+				if match {
 					if repos[i].OverrideOptions == nil {
 						repos[i].OverrideOptions = map[string]string{}
 					}

@@ -142,9 +142,9 @@ func TestParsersRejectMalformedOutput(t *testing.T) {
 	if _, err := parseColumns([]byte("only-one-column\n"), 2); err == nil {
 		t.Fatal("short column row accepted")
 	}
-	repos := parseRepoFile("x.repo", []byte("junk before section\n[a]\nenabled=0\ngpgcheck=true\n[b]\n"))
-	if len(repos) != 2 || repos[0].Enabled || repos[0].GPGCheck != "1" || !repos[1].Enabled || repos[1].GPGCheck != "" {
-		t.Fatalf("repos = %+v", repos)
+	repos, err := parseRepoFile("x.repo", []byte("[a]\nenabled=0\ngpgcheck=true\n[b]\n"))
+	if err != nil || len(repos) != 2 || repos[0].Enabled || repos[0].GPGCheck != "1" || !repos[1].Enabled || repos[1].GPGCheck != "" {
+		t.Fatalf("repos = %+v, %v", repos, err)
 	}
 	values := parseOSRelease([]byte("ID=fedora\nPRETTY_NAME=\"Fedora Linux 44\"\n# comment\nBROKEN\n"))
 	if values["ID"] != "fedora" || values["PRETTY_NAME"] != "Fedora Linux 44" {

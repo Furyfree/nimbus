@@ -79,51 +79,114 @@ func normalizeReason(raw string) string {
 	}
 }
 
-// parseRepoFile reads every [section] of one .repo file. The keys the
-// engine reasons about are typed, every key is kept in Options, and
-// enabled defaults to true as DNF does.
-func parseRepoFile(file string, data []byte) []Repository {
+// parseRepoFile keeps DNF's continued values and section comments intact.
+// Typed observations derive from the complete, effective options.
+func parseRepoFile(file string, data []byte) ([]Repository, error) {
 	var repos []Repository
 	var current *Repository
-	for line := range strings.SplitSeq(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || line[0] == '#' || line[0] == ';' {
+	sections := map[string]int{}
+	key := ""
+	lineNumber := 0
+	for raw := range strings.SplitSeq(string(data), "\n") {
+		lineNumber++
+		if lineNumber == 1 {
+			raw = strings.TrimPrefix(raw, "\uFEFF")
+		}
+		if strings.ContainsRune(raw, '\x00') {
+			return nil, fmt.Errorf("%s line %d: NUL in configuration", file, lineNumber)
+		}
+		if raw == "" || raw[0] == '#' || raw[0] == ';' {
+			key = ""
 			continue
 		}
-		if section, ok := strings.CutSuffix(line, "]"); line[0] == '[' && ok {
-			repos = append(repos, Repository{ID: section[1:], File: filepath.Base(file), Enabled: true, Options: map[string]string{}})
-			current = &repos[len(repos)-1]
+		line := strings.Trim(raw, " \t\r")
+		if line == "" {
+			if key != "" {
+				current.Options[key] += "\n"
+			}
+			continue
+		}
+		if line[0] == '[' {
+			id, err := repoSection(line)
+			if err != nil {
+				return nil, fmt.Errorf("%s line %d: %w", file, lineNumber, err)
+			}
+			i, ok := sections[id]
+			if !ok {
+				i = len(repos)
+				sections[id] = i
+				repos = append(repos, Repository{ID: id, File: filepath.Base(file), Options: map[string]string{}})
+			}
+			current, key = &repos[i], ""
 			continue
 		}
 		if current == nil {
+			return nil, fmt.Errorf("%s line %d: option without a section", file, lineNumber)
+		}
+		if raw[0] == ' ' || raw[0] == '\t' || raw[0] == '\r' {
+			if key == "" {
+				return nil, fmt.Errorf("%s line %d: continuation without an option", file, lineNumber)
+			}
+			current.Options[key] += "\n" + line
 			continue
 		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
+		name, value, ok := strings.Cut(line, "=")
+		key = strings.Trim(name, " \t")
+		if !ok || key == "" {
+			return nil, fmt.Errorf("%s line %d: expected option=value", file, lineNumber)
 		}
-		key, value = strings.TrimSpace(key), strings.TrimSpace(value)
-		current.Options[key] = value
-		switch key {
-		case "name":
-			current.Name = value
-		case "enabled":
-			current.Enabled = value == "1" || strings.EqualFold(value, "true") || strings.EqualFold(value, "yes")
-		case "gpgcheck":
-			current.GPGCheck = normalizeBool(value)
-		case "gpgkey":
-			current.GPGKey = value
-		case "priority":
-			current.Priority = value
-		case "baseurl":
-			current.BaseURL = value
-		case "metalink":
-			current.Metalink = value
-		case "mirrorlist":
-			current.Mirrorlist = value
+		current.Options[key] = strings.TrimLeft(value, " \t")
+	}
+	for i := range repos {
+		r := &repos[i]
+		for key, value := range r.Options {
+			value = strings.TrimRight(value, "\n")
+			if len(value) > 1 && value[0] == value[len(value)-1] && (value[0] == '"' || value[0] == '\'') {
+				value = value[1 : len(value)-1]
+			}
+			r.Options[key] = value
+		}
+		for _, key := range []string{"enabled", "gpgcheck"} {
+			if value, ok := r.Options[key]; ok && normalizeBool(value) != "0" && normalizeBool(value) != "1" {
+				return nil, fmt.Errorf("%s section %q: invalid %s value %q", file, r.ID, key, value)
+			}
+		}
+		r.Name = r.Options["name"]
+		r.Enabled = true
+		if value, ok := r.Options["enabled"]; ok {
+			r.Enabled = normalizeBool(value) == "1"
+		}
+		r.GPGCheck = normalizeBool(r.Options["gpgcheck"])
+		r.GPGKey = r.Options["gpgkey"]
+		r.Priority = r.Options["priority"]
+		r.BaseURL = r.Options["baseurl"]
+		r.Metalink = r.Options["metalink"]
+		r.Mirrorlist = r.Options["mirrorlist"]
+	}
+	return repos, nil
+}
+
+func repoSection(line string) (string, error) {
+	bracketExpression := false
+	for i := 1; i < len(line); i++ {
+		switch line[i] {
+		case '\r':
+			return "", fmt.Errorf("invalid repository section %q", line)
+		case '[':
+			bracketExpression = true
+		case ']':
+			if bracketExpression {
+				bracketExpression = false
+				continue
+			}
+			rest := strings.Trim(line[i+1:], " \t\r")
+			if i == 1 || (rest != "" && rest[0] != '#' && rest[0] != ';') {
+				return "", fmt.Errorf("invalid repository section %q", line)
+			}
+			return line[1:i], nil
 		}
 	}
-	return repos
+	return "", fmt.Errorf("unclosed repository section %q", line)
 }
 
 // normalizeRepo returns the repository a package came from. A package
@@ -179,9 +242,9 @@ func ParseChezmoiData(out []byte) (Chezmoi, error) {
 
 func normalizeBool(v string) string {
 	switch strings.ToLower(v) {
-	case "1", "true", "yes":
+	case "1", "true", "yes", "on":
 		return "1"
-	case "0", "false", "no":
+	case "0", "false", "no", "off":
 		return "0"
 	}
 	return v
