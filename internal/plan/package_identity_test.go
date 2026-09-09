@@ -1,6 +1,7 @@
 package plan
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -48,7 +49,7 @@ func TestLegacyMultilibOwnershipBlocksRemovalAndMigration(t *testing.T) {
 		t.Fatalf("ambiguous adoption: %+v", ops)
 	}
 	b.in.Resolved.Packages = []definitions.ResolvedPackage{{Name: "driver-libs.x86_64", Prefix: "dnf", Canonical: "dnf:driver-libs.x86_64"}, {Name: "driver-libs.i686", Prefix: "dnf", Canonical: "dnf:driver-libs.i686"}}
-	if ops = b.ownedRemovals(); len(ops) != 1 || ops[0].Action != ActionRetire || ops[0].Blocked != "" {
+	if ops = b.ownedRemovals(); len(ops) != 1 || ops[0].Action != ActionRetire || ops[0].Blocked != "" || ops[0].AbsentPackage != "" {
 		t.Fatalf("explicit architecture migration: %+v", ops)
 	}
 }
@@ -67,11 +68,41 @@ func TestProvideReceiptConvergesAndRemovesNativePackage(t *testing.T) {
 	}
 }
 
-func TestAbsentFlatpakRetiresReceipt(t *testing.T) {
-	id := "flatpak:org.example.App"
-	b, _ := identityBuilder(nil, nil, map[string]state.Receipt{id: {Resource: id, Provider: "flatpak"}})
-	ops := b.ownedRemovals()
-	if len(ops) != 1 || ops[0].Action != ActionRetire || len(ops[0].Steps) != 0 {
-		t.Fatalf("absent app must retire receipt only: %+v", ops)
+func TestAbsentRetirementBindsNativeIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		id, provider, recorded, absent string
+	}{
+		{"package:dnf:driver-libs.i686", "dnf", "driver-libs.i686", "driver-libs.i686"},
+		{"package:dnf:virtual-tool", "dnf", "actual-tool.x86_64", "actual-tool.x86_64"},
+		{"package:dnf:legacy-tool", "dnf", "", "legacy-tool"},
+		{"flatpak:org.example.App", "flatpak", "", "org.example.App"},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			b, _ := identityBuilder([]facts.Package{{Name: "driver-libs", Arch: "x86_64"}}, nil,
+				map[string]state.Receipt{tc.id: {Schema: state.ReceiptSchema, Resource: tc.id, Provider: tc.provider, Package: tc.recorded, Operation: ActionInstall, Verified: true}})
+			p, err := Build(b.in)
+			if err != nil || !p.Complete || len(p.Operations) != 1 {
+				t.Fatalf("retirement plan: %+v %v", p, err)
+			}
+			op := p.Operations[0]
+			if op.Action != ActionRetire || len(op.Steps) != 0 || op.AbsentPackage != tc.absent {
+				t.Fatalf("absent native identity lost: %+v", op)
+			}
+			data, err := json.Marshal(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var decoded Plan
+			if err := json.Unmarshal(data, &decoded); err != nil {
+				t.Fatal(err)
+			}
+			if got, err := digest(&decoded); err != nil || got != p.Digest || decoded.Operations[0].AbsentPackage != tc.absent {
+				t.Fatalf("retirement identity changed on JSON round trip: %+v %v", decoded, err)
+			}
+			decoded.Operations[0].AbsentPackage = ""
+			if got, err := digest(&decoded); err != nil || got == p.Digest {
+				t.Fatalf("removing the absence requirement did not change the digest: %s %v", got, err)
+			}
+		})
 	}
 }

@@ -77,6 +77,9 @@ type Operation struct {
 	Resolved    map[string]string `json:"resolved,omitempty"`
 	Steps       []Step            `json:"steps,omitempty"`
 	Transaction *Transaction      `json:"transaction,omitempty"`
+	// AbsentPackage is the native identity whose absence authorizes receipt
+	// retirement. Ownership transfers leave it empty.
+	AbsentPackage string `json:"absent_package,omitempty"`
 	// After names the operation this one waits for. Apply runs the earlier
 	// operation, then re-plans so the exact transaction can be shown; a
 	// pending operation does not make the plan incomplete.
@@ -1180,7 +1183,11 @@ func (b *builder) ownedRemovals() []Operation {
 			}
 			_, present := facts.FindPackage(b.in.Facts.Packages.Value, name)
 			if desiredNative[name] || !present {
-				ops = append(ops, Operation{ID: id, Kind: KindPackage, Action: ActionRetire, Risk: RiskLow, Summary: "retire the receipt of " + name + ", which is absent or selected by another reference", Paths: []string{"receipt"}})
+				op := Operation{ID: id, Kind: KindPackage, Action: ActionRetire, Risk: RiskLow, Summary: "retire the receipt of " + name + ", which is absent or selected by another reference", Paths: []string{"receipt"}}
+				if !present {
+					op.AbsentPackage = name
+				}
+				ops = append(ops, op)
 				continue
 			}
 			names = append(names, name)
@@ -1193,7 +1200,7 @@ func (b *builder) ownedRemovals() []Operation {
 			}
 			present := slices.ContainsFunc(b.in.Facts.Flatpak.Value.Apps, func(app facts.FlatpakApp) bool { return app.ID == name })
 			if !present {
-				ops = append(ops, Operation{ID: id, Kind: KindFlatpak, Action: ActionRetire, Risk: RiskLow, Summary: "retire the receipt of Flatpak " + name + ", which is absent", Paths: []string{"receipt"}})
+				ops = append(ops, Operation{ID: id, Kind: KindFlatpak, Action: ActionRetire, Risk: RiskLow, Summary: "retire the receipt of Flatpak " + name + ", which is absent", Paths: []string{"receipt"}, AbsentPackage: name})
 				continue
 			}
 			ops = append(ops, Operation{ID: id, Kind: KindFlatpak, Action: ActionRemove, Risk: RiskMedium, Summary: "remove Flatpak " + name + ", no longer selected", Paths: []string{"receipt"}, Steps: []Step{{Description: "remove the application", Argv: []string{"flatpak", "uninstall", "--system", "--noninteractive", name}, Privileged: true}}})

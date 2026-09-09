@@ -234,6 +234,24 @@ func (ex *executor) execute(op plan.Operation) (receipts []state.Receipt, remove
 	case op.Kind == plan.KindFlatpak && op.Action == plan.ActionRemove:
 		return ex.flatpakRemove(op)
 	case (op.Kind == plan.KindPackage || op.Kind == plan.KindFlatpak) && op.Action == plan.ActionRetire:
+		if name := op.AbsentPackage; name != "" {
+			f := facts.Inspect(ex.opts.Source, "")
+			var present bool
+			if op.Kind == plan.KindPackage {
+				if !f.Packages.Known() {
+					return nil, nil, fmt.Errorf("verify absence of %s: installed packages are unknown: %s", name, f.Packages.Error)
+				}
+				_, present = facts.FindPackage(f.Packages.Value, name)
+			} else {
+				if !f.Flatpak.Known() {
+					return nil, nil, fmt.Errorf("verify absence of %s: Flatpak state is unknown: %s", name, f.Flatpak.Error)
+				}
+				present = slices.ContainsFunc(f.Flatpak.Value.Apps, func(app facts.FlatpakApp) bool { return app.ID == name })
+			}
+			if present {
+				return nil, nil, fmt.Errorf("%s is installed again; replan before retiring its receipt", name)
+			}
+		}
 		return nil, []string{op.ID}, nil
 	case op.Kind == plan.KindPackage && op.Action == plan.ActionAdopt:
 		name := op.ID[strings.LastIndexByte(op.ID, ':')+1:]
