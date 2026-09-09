@@ -260,7 +260,6 @@ func applyEnv(t *testing.T) string {
 func TestSyncAsksOnceAndDeclinesCleanly(t *testing.T) {
 	root := applyEnv(t)
 	src := fixtureSource(t, root)
-	withoutTerra(src)
 	readyRepositories(t, src, root)
 	answerLaptopInstall(t, src, root)
 	withSource(t, src)
@@ -277,8 +276,8 @@ func TestSyncAsksOnceAndDeclinesCleanly(t *testing.T) {
 			t.Fatalf("output lacks %q:\n%s", want, out)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(stateRoot, "receipts", "package_dnf_ripgrep.json")); err == nil {
-		t.Fatal("a package was recorded although the question was declined")
+	if _, err := os.Stat(stateRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("state changed although the question was declined: %v", err)
 	}
 }
 
@@ -296,7 +295,6 @@ func TestSyncIncompletePlanIsRefused(t *testing.T) {
 func TestSyncStopsAtTheFirstFailedOperation(t *testing.T) {
 	root := applyEnv(t)
 	src := fixtureSource(t, root)
-	withoutTerra(src)
 	answerLaptopInstall(t, src, root)
 	key := filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), "nimbus", "stage", "key-brave.asc")
 	if src.Failures == nil {
@@ -310,8 +308,15 @@ func TestSyncStopsAtTheFirstFailedOperation(t *testing.T) {
 	}
 	// The drop-in was adopted before brave failed, so state exists; the
 	// failed repository must have no receipt.
-	if _, err := os.Stat(filepath.Join(stateRoot, "receipts", "repository_brave.json")); err == nil {
+	applied, err := state.Read(stateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := applied.Receipts["repository:brave"]; ok {
 		t.Fatal("a receipt was written for the failed operation")
+	}
+	if !applied.Receipts["dnf:config"].Verified {
+		t.Fatal("the completed drop-in adoption has no verified receipt")
 	}
 	lock, _ := os.ReadFile(filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), "nimbus", "operation.lock"))
 	if !strings.Contains(string(lock), `"command":"sync"`) {
@@ -322,7 +327,6 @@ func TestSyncStopsAtTheFirstFailedOperation(t *testing.T) {
 func TestSyncJSONReportsFailureWithExitOne(t *testing.T) {
 	root := applyEnv(t)
 	src := fixtureSource(t, root)
-	withoutTerra(src)
 	answerLaptopInstall(t, src, root)
 	withSource(t, src)
 	code, out, _ := run(t, "sync", "-n", "--checkout", root, "--machine", "laptop", "--json")

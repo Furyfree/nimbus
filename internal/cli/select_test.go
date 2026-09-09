@@ -256,7 +256,6 @@ func TestProfilesAddShowsDiffAndPlanThenWrites(t *testing.T) {
 	applyEnv(t)
 	root := editableCheckout(t)
 	src := fixtureSource(t, root)
-	withoutTerra(src)
 	readyRepositories(t, src, root)
 	withSource(t, src)
 	// Declined approval leaves the manifest untouched.
@@ -298,7 +297,6 @@ func TestPickerIsUsedWhenNoIDsAreGiven(t *testing.T) {
 	applyEnv(t)
 	root := editableCheckout(t)
 	src := fixtureSource(t, root)
-	withoutTerra(src)
 	withSource(t, src)
 	savedPick := pickerFn
 	var offered []string
@@ -322,11 +320,42 @@ func TestPickerIsUsedWhenNoIDsAreGiven(t *testing.T) {
 	}
 }
 
+func TestPackageCommandsRejectExtraQueries(t *testing.T) {
+	for _, action := range []string{"install", "remove"} {
+		t.Run(action, func(t *testing.T) {
+			missing := filepath.Join(t.TempDir(), "missing")
+			code, out, errOut := run(t, "packages", action, "bash", "zsh", "--checkout", missing, "--machine", "vm")
+			if code != ExitUsage || !strings.Contains(errOut, "at most 1") {
+				t.Fatalf("extra query was not rejected before loading the checkout: %d %s%s", code, out, errOut)
+			}
+		})
+	}
+}
+
+func TestSelectionCommandsAcceptMultipleIDs(t *testing.T) {
+	for _, tc := range []struct {
+		group string
+		ids   []string
+	}{
+		{"profiles", []string{"common", "development"}},
+		{"components", []string{"amd-graphics", "laptop-power"}},
+	} {
+		t.Run(tc.group, func(t *testing.T) {
+			root := editableCheckout(t)
+			withSource(t, fixtureSource(t, root))
+			args := append([]string{tc.group, "add"}, tc.ids...)
+			args = append(args, "--checkout", root, "--machine", "laptop")
+			if code, out, errOut := run(t, args...); code != ExitOK || !strings.Contains(out, "already says that") {
+				t.Fatalf("multiple selected IDs rejected: %d %s%s", code, out, errOut)
+			}
+		})
+	}
+}
+
 func TestPackagesInstallNeedsAQueryAndUsesTheCache(t *testing.T) {
 	applyEnv(t)
 	root := editableCheckout(t)
 	src := fixtureSource(t, root)
-	withoutTerra(src)
 	answerLaptopInstall(t, src, root)
 	withSource(t, src)
 	if code, _, errOut := run(t, "packages", "install", "--checkout", root, "--machine", "laptop"); code != ExitUsage || !strings.Contains(errOut, "needs a query") {
@@ -359,7 +388,6 @@ func TestSelectionEditDigestSurvivesTheManifestWrite(t *testing.T) {
 	applyEnv(t)
 	root := editableCheckout(t)
 	src := fixtureSource(t, root)
-	withoutTerra(src)
 	answerLaptopInstall(t, src, root)
 	withSource(t, src)
 	saved := approver

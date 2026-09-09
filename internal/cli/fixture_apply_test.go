@@ -14,18 +14,6 @@ import (
 	"github.com/Furyfree/nimbus/internal/plan"
 )
 
-// withoutTerra drops Terra's own repository file so the fixture host has no
-// foreign file and the plan can be complete.
-func withoutTerra(src *facts.FakeSource) {
-	var kept []string
-	for _, name := range src.Dirs[facts.RepoDir] {
-		if name != "terra.repo" {
-			kept = append(kept, name)
-		}
-	}
-	src.Dirs[facts.RepoDir] = kept
-}
-
 // withForeignTerra adds Terra's own repository file to the fixture host, which
 // Nimbus does not own, so the repository operation blocks and the plan stays
 // incomplete.

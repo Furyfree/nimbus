@@ -16,6 +16,7 @@ import (
 	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/doctor"
 	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/plan"
 )
 
 // The selection commands edit the two manifest lists a user would otherwise
@@ -142,7 +143,7 @@ func newComponents(opts *options) *cobra.Command {
 
 func newPackages(opts *options) *cobra.Command {
 	packages := newPackagesInstalled(opts)
-	packages.AddCommand(newEditCommand(opts, "install [QUERY]", "Add packages to the selected machine and apply", func(s *selected, args []string) (*selectionEdit, error) {
+	install := newEditCommand(opts, "install [QUERY]", "Add packages to the selected machine and apply", func(s *selected, args []string) (*selectionEdit, error) {
 		query := ""
 		if len(args) > 0 {
 			query = args[0]
@@ -153,8 +154,8 @@ func newPackages(opts *options) *cobra.Command {
 		}
 		return &selectionEdit{cmdName: "packages install", summary: "install " + strings.Join(refs, ", "),
 			edit: func(m *definitions.Machine) { m.Packages = addUnique(m.Packages, refs...) }}, nil
-	}))
-	packages.AddCommand(newEditCommand(opts, "remove [QUERY]", "Remove desired packages from the selected machine and apply", func(s *selected, args []string) (*selectionEdit, error) {
+	})
+	remove := newEditCommand(opts, "remove [QUERY]", "Remove desired packages from the selected machine and apply", func(s *selected, args []string) (*selectionEdit, error) {
 		query := ""
 		if len(args) > 0 {
 			query = args[0]
@@ -193,7 +194,16 @@ func newPackages(opts *options) *cobra.Command {
 				}
 				m.PackageExclusions = addUnique(m.PackageExclusions, exclusions...)
 			}}, nil
-	}))
+	})
+	for _, cmd := range []*cobra.Command{install, remove} {
+		cmd.Args = func(cmd *cobra.Command, args []string) error {
+			if err := cobra.MaximumNArgs(1)(cmd, args); err != nil {
+				return usageError{err}
+			}
+			return nil
+		}
+	}
+	packages.AddCommand(install, remove)
 	return packages
 }
 
@@ -243,25 +253,11 @@ func pickAvailable(s *selected, query string) ([]string, error) {
 // "" for Fedora.
 func prefixForRepo(root definitions.Root, repoID string) string {
 	for id, r := range root.Repositories {
-		if slices.Contains(dnfRepoIDs(id, r), repoID) {
+		if slices.Contains(plan.DNFRepoIDs(id, r), repoID) {
 			return id
 		}
 	}
 	return ""
-}
-
-func dnfRepoIDs(id string, r definitions.Repository) []string {
-	switch r.Kind {
-	case "dnf":
-		if r.ReleasePackage != "" {
-			return []string{id, id + "-updates"}
-		}
-		return []string{"nimbus-" + id}
-	case "copr":
-		owner, project, _ := strings.Cut(r.Project, "/")
-		return []string{"copr:copr.fedorainfracloud.org:" + owner + ":" + project}
-	}
-	return nil
 }
 
 // newEditCommand wraps one manifest edit in the shared flow.
