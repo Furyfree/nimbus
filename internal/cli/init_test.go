@@ -332,7 +332,7 @@ func TestInitDescribesANewMachineFromTheHardware(t *testing.T) {
 	}
 	data, _ := os.ReadFile(filepath.Join(root, "machines", "mybox.toml"))
 	manifest := string(data)
-	for _, want := range []string{"# mybox: HP EliteBook X G1a", `hardware = "HP EliteBook X G1a 14 inch Notebook Next Gen AI PC"`, "\"common\",\n  \"development\",\n  \"hyprland-noctalia\",", "\"amd-graphics\",\n  \"laptop-power\",", "[dotfiles]\nrepo = \"https://github.com/Furyfree/dotfiles.git\""} {
+	for _, want := range []string{"# mybox: HP EliteBook X G1a", "hardware = 'HP EliteBook X G1a 14 inch Notebook Next Gen AI PC'", "'common',\n  'development',\n  'hyprland-noctalia'", "'amd-graphics',\n  'laptop-power'", "[dotfiles]\nrepo = 'https://github.com/Furyfree/dotfiles.git'"} {
 		if !strings.Contains(manifest, want) {
 			t.Errorf("manifest lacks %q:\n%s", want, manifest)
 		}
@@ -413,5 +413,77 @@ func TestInitRejectsOnePasswordWithoutDotfilesBeforeMutation(t *testing.T) {
 	code, _, errOut := run(t, "init", "--checkout", root, "--new", "newbox", "--no-dotfiles", "--onepassword-ssh")
 	if code != ExitUsage || !strings.Contains(errOut, "exclude each other") || len(src.calls) != 0 {
 		t.Fatalf("conflicting flags reached mutation: %d %s %v", code, errOut, src.calls)
+	}
+}
+
+func TestInitPreservesHardwareAndKeepsItsCommentOnOneLine(t *testing.T) {
+	root, src := installerFixture(t)
+	withHardware(src.FakeSource)
+	const hardware = "fixture\a\v\x7f\nidentity"
+	src.Files[filepath.Join(facts.DMIDir, "product_name")] = []byte(hardware)
+	src.Files[filepath.Join(facts.DMIDir, "board_name")] = []byte("invalid\xffboard")
+	if err := os.WriteFile(filepath.Join(root, "profiles/common.toml"), []byte("schema=1\nid='common'\npackages=[]\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	saved := pickerFn
+	t.Cleanup(func() { pickerFn = saved })
+	pickerFn = func(title string, _ []pickItem) ([]string, error) {
+		if strings.HasPrefix(title, "profiles") {
+			return []string{"common"}, nil
+		}
+		return nil, nil
+	}
+	code, out, errOut := run(t, "init", "--checkout", root, "--new", "newbox", "--no-dotfiles")
+	if code != ExitOK {
+		t.Fatalf("init failed: %d %s%s", code, out, errOut)
+	}
+	checkout, err := loadCheckout(root)
+	if err != nil || checkout.Machines["newbox"].Hardware != hardware {
+		t.Fatalf("hardware did not survive initialization: %+v, %v", checkout, err)
+	}
+	data, err := os.ReadFile(manifestPath(root, "newbox"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	comment, rest, _ := strings.Cut(string(data), "\n")
+	if !strings.Contains(comment, "identity") || !strings.HasPrefix(rest, "schema = 1\n") {
+		t.Fatalf("hardware comment is not one complete line: %q", data)
+	}
+}
+
+func TestInitRejectsInvalidManifestTextBeforeSelectionWrites(t *testing.T) {
+	for _, field := range []string{"hardware", "dotfiles"} {
+		t.Run(field, func(t *testing.T) {
+			root, src := installerFixture(t)
+			withHardware(src.FakeSource)
+			saved := pickerFn
+			t.Cleanup(func() { pickerFn = saved })
+			pickerFn = func(title string, _ []pickItem) ([]string, error) {
+				if strings.HasPrefix(title, "profiles") {
+					return []string{"common"}, nil
+				}
+				return nil, nil
+			}
+			args := []string{"init", "--checkout", root, "--new", "newbox"}
+			if field == "hardware" {
+				src.Files[filepath.Join(facts.DMIDir, "product_name")] = []byte("invalid\xffidentity")
+				args = append(args, "--no-dotfiles")
+			} else {
+				args = append(args, "--dotfiles", "git@example.invalid:owner/invalid\xffrepo")
+			}
+			code, out, errOut := run(t, args...)
+			if code != ExitFailure || !strings.Contains(out+errOut, "invalid UTF-8") || len(src.calls) != 0 {
+				t.Fatalf("invalid text reached installation: %d %s%s; calls=%v", code, out, errOut, src.calls)
+			}
+			path, err := selector.DefaultPath()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, path := range []string{path, manifestPath(root, "newbox")} {
+				if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("invalid text wrote selection: %s: %v", path, err)
+				}
+			}
+		})
 	}
 }

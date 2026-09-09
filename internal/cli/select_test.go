@@ -77,13 +77,9 @@ func TestSelectionStopsWhenReviewCannotBeWritten(t *testing.T) {
 
 func TestSelectionReportsUnchangedOutputFailure(t *testing.T) {
 	root, src := installerFixture(t)
-	c, err := loadCheckout(root)
-	if err != nil {
-		t.Fatal(err)
-	}
 	path := manifestPath(root, "vm")
-	before := append(renderManifest(nil, c.Machines["vm"]), '\n')
-	if err := os.WriteFile(path, before, 0644); err != nil {
+	before, err := os.ReadFile(path)
+	if err != nil {
 		t.Fatal(err)
 	}
 	writeErr := errors.New("result output unavailable")
@@ -96,8 +92,25 @@ func TestSelectionReportsUnchangedOutputFailure(t *testing.T) {
 		t.Fatalf("unchanged output failure not reported: %v", err)
 	}
 	after, err := os.ReadFile(path)
-	if err != nil || string(after) != string(before) || len(src.calls) != 0 {
-		t.Fatalf("unchanged selection mutated: manifest=%q, error=%v, calls=%v", after, err, src.calls)
+	if err != nil || string(after) != string(before) || len(src.calls) != 0 || len(src.reads) != 0 {
+		t.Fatalf("unchanged selection did work: manifest=%q, error=%v, calls=%v, reads=%v", after, err, src.calls, src.reads)
+	}
+}
+
+func TestSelectionNoOpPreservesOriginalManifest(t *testing.T) {
+	root, src := installerFixture(t)
+	path := manifestPath(root, "vm")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut := run(t, "profiles", "add", "common", "--checkout", root, "--machine", "vm", "--yes")
+	if code != ExitOK || !strings.Contains(out, "already says that") {
+		t.Fatalf("unchanged selection failed: %d %s%s", code, out, errOut)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || string(after) != string(before) || len(src.calls) != 0 || len(src.reads) != 0 {
+		t.Fatalf("unchanged selection did work: manifest=%q, error=%v, calls=%v, reads=%v", after, err, src.calls, src.reads)
 	}
 }
 
@@ -195,8 +208,12 @@ func TestRenderManifestIsCanonicalAndKeepsComments(t *testing.T) {
 	existing := []byte("# Laptop.\n# Second line.\nschema = 1\nid = \"laptop\"\nprofiles = [\"common\"]\n")
 	m := &definitions.Machine{Schema: 1, ID: "laptop", Profiles: []string{"common", "development"}, Components: []string{"amd-graphics"},
 		Packages: []string{"gimp"}, Dotfiles: &definitions.Dotfiles{Repo: "https://example.invalid/dotfiles.git"}}
-	out := string(renderManifest(existing, m))
-	want := "# Laptop.\n# Second line.\nschema = 1\nid = \"laptop\"\n\nprofiles = [\n  \"common\",\n  \"development\",\n]\n\ncomponents = [\n  \"amd-graphics\",\n]\n\npackages = [\n  \"gimp\",\n]\n\npackage_exclusions = []\n\n[dotfiles]\nrepo = \"https://example.invalid/dotfiles.git\""
+	data, err := renderManifest(existing, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(data)
+	want := "# Laptop.\n# Second line.\nschema = 1\nid = 'laptop'\nprofiles = [\n  'common',\n  'development'\n]\ncomponents = [\n  'amd-graphics'\n]\npackages = [\n  'gimp'\n]\npackage_exclusions = []\n\n[dotfiles]\nrepo = 'https://example.invalid/dotfiles.git'"
 	if out != want {
 		t.Fatalf("rendered:\n%s\nwant:\n%s", out, want)
 	}
@@ -214,8 +231,59 @@ func TestRenderManifestIsCanonicalAndKeepsComments(t *testing.T) {
 		t.Fatalf("decoded manifest = %+v, want %+v", back, *m)
 	}
 	diff := unifiedDiff("machines/laptop.toml", existing, []byte(out+"\n"))
-	if !strings.Contains(diff, "+  \"development\",") || !strings.Contains(diff, "-profiles = [\"common\"]") {
+	if !strings.Contains(diff, "+  'development'") || !strings.Contains(diff, "-profiles = [\"common\"]") {
 		t.Fatalf("diff:\n%s", diff)
+	}
+}
+
+func TestSelectionPreservesManifestStringValues(t *testing.T) {
+	for _, field := range []string{"hardware", "dotfiles"} {
+		t.Run(field, func(t *testing.T) {
+			root, _ := installerFixture(t)
+			for path, data := range map[string]string{
+				"profiles/common.toml": "schema=1\nid='common'\npackages=[]\n",
+				"components/demo.toml": "schema=1\nid='demo'\n",
+			} {
+				if err := os.WriteFile(filepath.Join(root, path), []byte(data), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			m := &definitions.Machine{Schema: 1, ID: "vm", Profiles: []string{"common"}}
+			const value = "fixture\a\v\x7fidentity"
+			if field == "hardware" {
+				m.Hardware = value
+			} else {
+				m.Dotfiles = &definitions.Dotfiles{Repo: "git@example.invalid:owner/" + value}
+			}
+			data, err := toml.Marshal(m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			const comment = "# Retained machine description.\n"
+			path := manifestPath(root, "vm")
+			if err := os.WriteFile(path, append([]byte(comment), data...), 0644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := loadCheckout(root); err != nil {
+				t.Fatalf("input manifest is invalid: %v", err)
+			}
+			code, out, errOut := run(t, "components", "add", "demo", "--checkout", root, "--machine", "vm", "--yes")
+			if code != ExitOK {
+				t.Fatalf("selection failed: %d %s%s", code, out, errOut)
+			}
+			checkout, err := loadCheckout(root)
+			if err != nil {
+				t.Fatalf("selection wrote an invalid manifest: %v", err)
+			}
+			got := checkout.Machines["vm"]
+			if got.Hardware != m.Hardware || field == "dotfiles" && (got.Dotfiles == nil || *got.Dotfiles != *m.Dotfiles) || !slices.Equal(got.Components, []string{"demo"}) {
+				t.Fatalf("selection changed unrelated values: %+v", got)
+			}
+			data, err = os.ReadFile(path)
+			if err != nil || !strings.HasPrefix(string(data), comment) {
+				t.Fatalf("leading comment lost: %q, %v", data, err)
+			}
+		})
 	}
 }
 
@@ -270,7 +338,7 @@ func TestProfilesAddShowsDiffAndPlanThenWrites(t *testing.T) {
 	if code != ExitFailure || !strings.Contains(errOut, "not applied") {
 		t.Fatalf("declined: %d %q\n%s", code, errOut, out)
 	}
-	for _, want := range []string{"components add: add components docker", "+  \"docker\",", "plan for laptop"} {
+	for _, want := range []string{"components add: add components docker", "+  'docker'", "plan for laptop"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output lacks %q:\n%s", want, out)
 		}
@@ -379,7 +447,7 @@ func TestPackagesInstallNeedsAQueryAndUsesTheCache(t *testing.T) {
 	if len(offered) != 2 || offered[0].ID != "ghostscript" || offered[1].ID != "terra:ghostty" {
 		t.Fatalf("offered = %+v", offered)
 	}
-	if !strings.Contains(out, "+  \"terra:ghostty\",") {
+	if !strings.Contains(out, "+  'terra:ghostty'") {
 		t.Fatalf("diff lacks the new reference:\n%s", out)
 	}
 }
@@ -406,7 +474,7 @@ func TestSelectionEditDigestSurvivesTheManifestWrite(t *testing.T) {
 		t.Fatalf("edit flow: %d %q\n%s", code, errOut, out)
 	}
 	data, _ := os.ReadFile(manifestPath(root, "laptop"))
-	if !strings.Contains(string(data), "\"docker\",") {
+	if !strings.Contains(string(data), "'docker'") {
 		t.Fatal("manifest not written")
 	}
 	lock, _ := os.ReadFile(filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), "nimbus", "operation.lock"))

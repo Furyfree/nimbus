@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/Furyfree/nimbus/internal/apply"
 
@@ -219,8 +220,17 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 		if _, err := os.Stat(path); err == nil {
 			return fmt.Errorf("machine %s already exists at %s; pick it with --machine or choose another ID", m.ID, path)
 		}
-		header := fmt.Sprintf("# %s: %s.\n", m.ID, describeHardware(hw.Value))
-		newManifest = renderManifest([]byte(header), m)
+		description := strings.Map(func(r rune) rune {
+			if unicode.IsControl(r) || unicode.IsSpace(r) {
+				return ' '
+			}
+			return r
+		}, describeHardware(hw.Value))
+		header := fmt.Sprintf("# %s: %s.\n", m.ID, description)
+		newManifest, err = renderManifest([]byte(header), m)
+		if err != nil {
+			return err
+		}
 		newManifestPath = path
 		c.Machines[m.ID] = m
 		c.Entries = append(c.Entries, definitions.Entry{Path: "machines/" + m.ID + ".toml", Mode: 0o100644, Content: append(bytes.Clone(newManifest), '\n')})

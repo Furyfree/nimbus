@@ -300,12 +300,16 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 	edited.Packages = slices.Clone(original.Packages)
 	edited.PackageExclusions = slices.Clone(original.PackageExclusions)
 	edit.edit(&edited)
-	after := renderManifest(before, &edited)
-	if string(after) == strings.TrimRight(string(before), "\n") {
+	if slices.Equal(edited.Profiles, original.Profiles) && slices.Equal(edited.Components, original.Components) &&
+		slices.Equal(edited.Packages, original.Packages) && slices.Equal(edited.PackageExclusions, original.PackageExclusions) {
 		if opts.json {
 			return writeJSON(out, map[string]string{"manifest": "unchanged"}, nil)
 		}
 		_, err := fmt.Fprintf(out, "%s: the manifest already says that\n", edit.cmdName)
+		return err
+	}
+	after, err := renderManifest(before, &edited)
+	if err != nil {
 		return err
 	}
 

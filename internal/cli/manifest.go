@@ -6,6 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
+
+	"github.com/pelletier/go-toml/v2"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
 )
@@ -13,7 +16,13 @@ import (
 // renderManifest writes a machine manifest in the canonical layout. Leading
 // comment lines of the existing file are kept; everything else is derived
 // from the manifest so the file always says exactly what it means.
-func renderManifest(existing []byte, m *definitions.Machine) []byte {
+func renderManifest(existing []byte, m *definitions.Machine) ([]byte, error) {
+	if !utf8.ValidString(m.Hardware) {
+		return nil, fmt.Errorf("machine hardware contains invalid UTF-8")
+	}
+	if m.Dotfiles != nil && !utf8.ValidString(m.Dotfiles.Repo) {
+		return nil, fmt.Errorf("machine dotfiles.repo contains invalid UTF-8")
+	}
 	var b bytes.Buffer
 	for line := range strings.SplitSeq(string(existing), "\n") {
 		if strings.HasPrefix(line, "#") {
@@ -22,30 +31,10 @@ func renderManifest(existing []byte, m *definitions.Machine) []byte {
 		}
 		break
 	}
-	fmt.Fprintf(&b, "schema = %d\nid = %q\n", m.Schema, m.ID)
-	if m.Hardware != "" {
-		fmt.Fprintf(&b, "hardware = %q\n", m.Hardware)
+	if err := toml.NewEncoder(&b).SetArraysMultiline(true).SetIndentSymbol("  ").Encode(m); err != nil {
+		return nil, fmt.Errorf("encode machine manifest: %w", err)
 	}
-	b.WriteString("\n")
-	list := func(name string, items []string) {
-		if len(items) == 0 {
-			fmt.Fprintf(&b, "%s = []\n\n", name)
-			return
-		}
-		fmt.Fprintf(&b, "%s = [\n", name)
-		for _, it := range items {
-			fmt.Fprintf(&b, "  %q,\n", it)
-		}
-		b.WriteString("]\n\n")
-	}
-	list("profiles", m.Profiles)
-	list("components", m.Components)
-	list("packages", m.Packages)
-	list("package_exclusions", m.PackageExclusions)
-	if m.Dotfiles != nil {
-		fmt.Fprintf(&b, "[dotfiles]\nrepo = %q\n", m.Dotfiles.Repo)
-	}
-	return bytes.TrimRight(b.Bytes(), "\n")
+	return bytes.TrimRight(b.Bytes(), "\n"), nil
 }
 
 // manifestPath is the tracked manifest file of a machine.

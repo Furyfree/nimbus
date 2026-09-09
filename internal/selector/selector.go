@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -104,8 +105,15 @@ func Write(path string, s *Selector) error {
 	if s.Schema != CurrentSchema || s.Checkout == "" || s.Machine == "" || s.Origin == "" {
 		return errors.New("selector: schema, checkout, machine, and origin are required")
 	}
+	if !utf8.ValidString(s.Checkout) || !utf8.ValidString(s.Machine) || !utf8.ValidString(s.Origin) {
+		return errors.New("selector: checkout, machine, and origin must be valid UTF-8")
+	}
 	if normalized, err := NormalizeOrigin(s.Origin); err != nil || normalized != s.Origin {
 		return fmt.Errorf("selector: origin %q is not a normalized identity", s.Origin)
+	}
+	content, err := toml.Marshal(s)
+	if err != nil {
+		return fmt.Errorf("encode selector: %w", err)
 	}
 	if info, err := os.Lstat(path); err == nil && info.Mode()&fs.ModeSymlink != 0 {
 		return fmt.Errorf("selector %s must not be a symlink", path)
@@ -113,14 +121,13 @@ func Write(path string, s *Selector) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	content := fmt.Sprintf("schema = %d\ncheckout = %q\nmachine = %q\norigin = %q\n", s.Schema, s.Checkout, s.Machine, s.Origin)
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.toml")
 	if err != nil {
 		return err
 	}
 	defer os.Remove(tmp.Name())
 	defer tmp.Close()
-	if _, err := tmp.WriteString(content); err != nil {
+	if _, err := tmp.Write(content); err != nil {
 		return err
 	}
 	if err := tmp.Chmod(0o644); err != nil {

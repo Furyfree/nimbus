@@ -65,6 +65,76 @@ func TestLoadSelector(t *testing.T) {
 	}
 }
 
+func TestWriteSelectorRoundTripsCheckoutPaths(t *testing.T) {
+	for _, tc := range []struct{ name, directory string }{
+		{"ordinary", "checkout"},
+		{"unicode", "checkout-\u00e6\u65e5"},
+		{"quotes", "checkout-\"quoted'"},
+		{"backslash", `checkout\path`},
+		{"whitespace", "checkout\t\n\r"},
+		{"bell", "checkout\a"},
+		{"vertical tab", "checkout\v"},
+		{"delete", "checkout\x7f"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			checkout := filepath.Join(t.TempDir(), tc.directory)
+			if err := os.Mkdir(checkout, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			want := &Selector{Schema: CurrentSchema, Checkout: checkout, Machine: "desktop", Origin: "github.com/Furyfree/nimbus"}
+			path := filepath.Join(t.TempDir(), "nimbus", "config.toml")
+			if err := Write(path, want); err != nil {
+				t.Fatal(err)
+			}
+			got, err := Load(path)
+			if err != nil {
+				t.Fatalf("load written selector: %v", err)
+			}
+			if *got != *want {
+				t.Fatalf("selector = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
+func TestWriteRejectsInvalidUTF8BeforeMutation(t *testing.T) {
+	for _, field := range []string{"checkout", "machine", "origin"} {
+		t.Run(field, func(t *testing.T) {
+			valid := Selector{Schema: CurrentSchema, Checkout: t.TempDir(), Machine: "desktop", Origin: "github.com/Furyfree/nimbus"}
+			invalid := valid
+			switch field {
+			case "checkout":
+				invalid.Checkout += "\xff"
+			case "machine":
+				invalid.Machine += "\xff"
+			case "origin":
+				invalid.Origin += "\xff"
+			}
+			path := filepath.Join(t.TempDir(), "nimbus", "config.toml")
+			if err := Write(path, &invalid); err == nil || !strings.Contains(err.Error(), "valid UTF-8") {
+				t.Fatalf("invalid %s accepted: %v", field, err)
+			}
+			if _, err := os.Stat(filepath.Dir(path)); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("invalid selector created its directory: %v", err)
+			}
+			if err := Write(path, &valid); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := Write(path, &invalid); err == nil || !strings.Contains(err.Error(), "valid UTF-8") {
+				t.Fatalf("invalid %s accepted for replacement: %v", field, err)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil || string(after) != string(before) {
+				t.Fatalf("existing selector changed: %q, %v", after, err)
+			}
+		})
+	}
+}
+
 func TestWriteRemovesTemporaryFileOnRenameFailure(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
