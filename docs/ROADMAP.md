@@ -455,7 +455,7 @@ nimbus files accept /etc/PATH
 ~~~
 
 The first milestone is a reboot into Noctalia greeter, a working normal
-desktop, and an independent recovery session. Workstation defaults follow
+desktop, and a tested TTY repair route. Workstation defaults follow
 that milestone. Installing the greeter package alone does not meet it.
 Retain Phase 5's installer and ownership architecture; these resources belong
 in the existing inspect, plan, apply, verify, and remove lifecycle.
@@ -472,18 +472,19 @@ in the existing inspect, plan, apply, verify, and remove lifecycle.
    state separately, preserve pre-existing memberships, and report logout or
    reboot needs. Unknown ownership blocks removal; failed verification writes
    no successful receipt. Read-only commands never start services or use sudo.
-3. Provide and test the system-owned recovery session and a documented TTY
-   restoration route before activating the normal graphical login. Choose a
-   native package or narrow typed integration for files under /usr; generic
-   system-file declarations remain limited to /etc.
+3. Prove and document TTY login and desktop repair without a working greeter
+   or user compositor configuration. The shipped graphical recovery session
+   remains during this transition; retire it only after the TTY drill passes,
+   through verified ownership-aware removal.
 4. Declare greetd/Noctalia activation, session discovery, required memberships,
    and portal selection in the desktop component. Include any boot-target or
    display-manager changes in the plan and verification. Chezmoi continues to
    own normal Hyprland/Noctalia user configuration. Do not silently displace a
    foreign display manager or interrupt an active graphical session.
-5. Extend doctor for these resources and prove login, logout, portals, repeat
-   sync, failure recovery, and removal on the graphical VM. Stop at this first
-   milestone to record evidence before adding workstation tuning.
+5. Extend doctor for these resources and prove login, repeat sync, failure
+   recovery, and removal on the graphical VM. Portal interaction and UWSM
+   logout/relogin cleanup are deferred to real hardware as described below.
+   Record evidence before adding workstation tuning.
 6. Deliver remaining service/group/file ownership and retirement behavior,
    fixed-argv trigger deduplication, and `files accept`. Then evaluate the
    workstation-default candidates below through the same resource lifecycle.
@@ -514,14 +515,36 @@ must prove toolkit selection, Brave Origin adoption, and dark/light switching
 for the selected applications before the appearance follow-up is complete.
 
 Fedora's portal service requires an active user `graphical-session.target`.
-The owner accepted the tested plain Hyprland session for this release and
-explicitly deferred UWSM adoption on 2026-09-09. Research native Hyprland session
-integration and UWSM before choosing a lifecycle manager or adding a
-session-specific doctor check. The tested VM's plain session left its graphical
-target and portal inactive; retain this limitation without weakening Fedora's
-portal dependencies. The final candidate package/configuration apply and repeat
-no-upgrade plan passed. Recovery and portal interaction drills remain recorded
-follow-ups rather than completed tests.
+The plain Hyprland 0.56.2 session leaves that target inactive. After initially
+deferring UWSM, the owner selected it as the interim session on 2026-09-09.
+The VM login activated the graphical target and all three portal services,
+with the keyring unlocked and no failed user units. Noctalia Greeter remembers
+the owner's selection, so Nimbus does not need to force a default. Aligning
+application startup, logout, and doctor remains follow-up work.
+
+At the owner's request, defer actual portal file picking, screen sharing, and
+UWSM logout/relogin cleanup tests until real-hardware testing. Keep them open;
+successful VM service activation does not complete those gates. Check the
+Librepods Bluetooth and application-registration warnings there too. Preserve
+Fedora's portal dependencies. TTY repair and destructive ownership drills remain
+separate disposable-VM gates, using the route below.
+
+### TTY desktop recovery
+
+The owner prefers `Ctrl+Alt+F3` and a console login for repairing broken desktop
+configuration. Adopt this as the desktop recovery route instead of requiring a
+second Hyprland session. In the disposable VM, prove console login with broken
+or absent compositor configuration and an unavailable greeter, repair the
+configuration, and return to normal login. Include a tested way to obtain a
+clean shell if user shell startup files are broken. Document the working route
+and verify console access again after component removal.
+
+The installed graphical recovery session remains until this drill passes.
+Then retire its entry and configuration through the existing ownership and
+receipt lifecycle; retain foreign or modified files according to that contract.
+This plan does not remove files from the current installation. A TTY requires
+a booted, responsive system; boot failure and snapshot restoration remain
+separate recovery work in Phase 7.
 
 ### Installer prompt polish
 
@@ -614,13 +637,14 @@ target metadata, writes a receipt, or performs Git operations. The user then
 runs validate, plan, and apply so the matching target is verified and adopted
 under the new definition identity.
 
-The desktop component installs a separate system-owned Hyprland recovery
+The published desktop component installs a system-owned Hyprland recovery
 session under /usr. It never writes a seed configuration into the user's home.
 Reuse Ghostty with user configuration disabled instead of installing Foot.
 Explicitly remove Foot, Kitty, and nwg-panel; verify the recovery terminal
 before removing Foot on an existing installation.
 Those files use a native package or a separately specified typed integration;
 they do not widen the generic system-file provider.
+The TTY decision above supersedes requiring this extra session long term.
 
 Before implementation, resolve the package-provided greeter/session launch
 contract, recovery-session packaging, adoption of existing units and group
@@ -631,8 +655,8 @@ TPM unlock, UKIs, and owner Secure Boot keys are outside this phase.
 
 ### Risks and recovery
 
-Service, greeter, portal, and compositor changes can prevent login. The recovery
-session and removal path must be proven before the normal session is managed.
+Service, greeter, portal, and compositor changes can prevent login. The TTY
+repair and removal paths must be proven before retiring graphical recovery.
 Report .rpmnew and .rpmsave files without modifying them.
 Record the prior boot target, unit state, and owned file contents needed for
 manual restoration; exercise that route from a console after a failed greeter
@@ -647,16 +671,18 @@ source replacement leaves both checkout and system unchanged.
 ### Validation and exit criteria
 
 Use focused provider fixtures and a clean Fedora graphical VM. Verify login,
-portal behavior, system-file restoration, component removal, and recovery
-session independence from Chezmoi. Test accepted content drift, cancellation,
-changed-input refusal, atomic source replacement, subsequent adoption receipt,
-and rejection of foreign, unknown, unselected, unreadable, symlinked,
-non-regular, multiple, and non-`/etc` targets. Prove that accept uses no sudo,
-does not modify the live target or metadata, and leaves Git untouched.
+portal service activation, system-file restoration, component removal, and
+TTY repair independent of working desktop configuration. Reserve portal
+interactions and UWSM logout/relogin cleanup for real hardware. Test content drift,
+cancellation, changed-input refusal, atomic source replacement, subsequent
+adoption receipt, and rejection of foreign, unknown, unselected, unreadable,
+symlinked, non-regular, multiple, and non-`/etc` targets. Prove that accept uses
+no sudo, does not modify the live target or metadata, and leaves Git untouched.
 
-The first milestone must prove reboot to greeter, normal login, logout and
-relogin, portal file picking and screen sharing, recovery with absent or broken
-user configuration, and a second sync with no pending changes. Exercise failed
+The first milestone must prove reboot to greeter, normal login, TTY repair with
+absent or broken user configuration, and a second sync with no pending changes.
+Logout/relogin cleanup, portal file picking, and screen sharing remain required
+evidence, deferred to real hardware rather than waived. Exercise failed
 activation and removal without losing console access. Run the complete
 `just check` gate and the native checks for each provider. VM success does not
 prove laptop suspend or hardware-specific defaults. Close the full phase only
@@ -724,6 +750,20 @@ proven ownership. Home tools remain outside Nimbus recovery. Stop on unknown
 ownership, unverified artifacts, or unexpected mutations. This milestone does
 not authorize live installation, COPR publication, or claim the Snapper restore
 drill below has passed.
+
+### GRUB customization follow-up
+
+Customize the GRUB boot menu after the boot recovery groundwork. Choose the
+appearance, menu visibility, and timeout with the owner before implementation;
+no theme or values are selected yet. Inspect Fedora 44's native configuration
+and generation workflow, then manage only the required owned inputs through
+Nimbus's preview, verification, and removal lifecycle.
+
+Preserve Fedora kernel entries, access to an older kernel, Secure Boot, and the
+existing boot layout. Test normal boot, older-kernel selection, and restoration
+of the previous menu configuration in the disposable VM before hardware use.
+Keep GRUB menu customization separate from Plymouth, firmware changes, and
+snapshot rollback integration.
 
 ### Context and decisions
 

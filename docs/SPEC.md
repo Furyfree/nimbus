@@ -1238,12 +1238,19 @@ login passwords, or disables encryption. Passwordless login requires separate
 unlocking support. Chezmoi owns the normal-session appearance preferences and
 application theme hooks; Noctalia owns generated theme outputs.
 
-Nimbus installs a separate minimal system-owned recovery session under /usr.
+Desktop configuration recovery uses a tested TTY login and repair route,
+normally reached with `Ctrl+Alt+F3`. It must work without a functioning greeter
+or user compositor configuration and include a way to recover from broken
+shell startup files. A TTY does not replace boot-failure or snapshot recovery.
+
+Nimbus currently installs a minimal system-owned recovery session under /usr.
 It uses an explicit system configuration, opens a terminal, provides minimal
 recovery bindings, and does not depend on user dotfiles. It works before and
 after Chezmoi apply and is removed with its owning component.
 It reuses Ghostty with user configuration and shell integration disabled;
 the desktop component removes Foot, Kitty, and nwg-panel.
+After proving the TTY route, retire this extra session through the normal
+ownership-aware removal lifecycle. Until then, preserve the shipped fallback.
 
 The typed `[recovery]` integration fixes its two paths: the compositor
 configuration at `/usr/local/lib/nimbus/recovery/hyprland.lua` and its session
@@ -1270,10 +1277,18 @@ container defaults, and justified gaming or hardware settings follow this
 rule. Candidate settings do not imply universal overrides or approved numeric
 values. Doctor reports effective state and owned drift without changing it.
 
-The `hyprland-noctalia` desktop currently uses the normal packaged Hyprland
-session. UWSM adoption and session-specific doctor checks are deferred pending
-research and native validation. Preserve the independent recovery session and
-Fedora's portal dependencies; do not claim portal readiness from login alone.
+The owner selects the packaged UWSM-managed Hyprland session as the interim
+normal session. Noctalia Greeter remembers the owner's session selection;
+Nimbus does not need to force a default. Application startup/logout integration
+and session-specific doctor checks remain follow-up work. Portal interactions
+and UWSM logout/relogin cleanup require real-hardware validation; VM activation
+is insufficient. Preserve the tested recovery route and Fedora's portal
+dependencies; do not claim portal readiness from login alone.
+
+GRUB menu customization is planned after boot recovery groundwork. Appearance
+and menu behavior remain to be selected. Use Fedora's native configuration
+workflow with visible, reversible changes; preserve kernel entries, older-kernel
+access, Secure Boot, and the existing boot layout.
 
 ## Manual tasks and runtime commands
 
@@ -1796,7 +1811,7 @@ Nimbus is complete when a supported clean Fedora installation can:
 - report and repair owned drift without claiming unrelated state
 - remove owned resources safely while preserving unmanaged data
 - initialize the selected Chezmoi repository without taking over its lifecycle
-- boot both the normal user session and the system-owned recovery session
+- boot the normal user session and repair desktop failures through a tested TTY
 - recover from each supported disruptive operation through a tested path
 - expose equivalent stable human and structured command behavior
 

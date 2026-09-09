@@ -10,6 +10,78 @@ Hyprland. The signed COPR build and its VM installation trial passed; the
 remaining recovery/portal drills are separate, uncompleted gates.
 Phase 5 is complete; its prompt improvements are included below.
 
+### Current session decision and hardware deferral, 2026-09-09
+
+Plan: [Desktop session follow-up](ROADMAP.md#login-keyring-and-desktop-appearance).
+
+The owner now selects UWSM as the interim session, superseding the earlier
+deferral below. Remaining portal interactions and UWSM logout/relogin cleanup
+are deferred to real hardware at the owner's request; do not run those drills
+on the VM or mark them passed from service activation.
+
+- [x] Verify the published 0.2.3 installation completed system setup and
+  dotfiles/tools, including all 28 Mise tools and three Flatpaks. The subsequent
+  read-only plan is complete with no pending changes or updates.
+- [x] Verify reboot and login, then the owner's selection of
+  `Hyprland (uwsm-managed)`: the UWSM session, graphical session target, main
+  portal, Hyprland portal, and GTK portal are active. PipeWire is connected,
+  screen-capture initialization succeeds, the keyring is unlocked, and no user
+  units are failed. This is startup evidence, not a screen-sharing test.
+- [x] Retain Noctalia Greeter's remembered session selection, as confirmed by
+  the owner. Nimbus does not need to force UWSM as the default.
+- [x] Confirm the owner can log into Nimbus recovery: Hyprland uses the
+  system-owned recovery Lua configuration and opens Ghostty with clean Bash.
+  This proves basic recovery login, not the broken-user-configuration drill.
+- [x] Prove repeat-sync convergence with published 0.2.3. The owner's actual
+  sync reports 162 managed items unchanged and successful DNF/Flatpak upgrades
+  with nothing to update. Subsequent status and `sync --plan --no-upgrade`
+  confirm no pending or blocked changes.
+- [x] Recheck the normal UWSM session after recovery: the graphical target,
+  all three portals, PipeWire, and WirePlumber are active, the login keyring
+  is unlocked, and no user units have failed. Doctor passes 32 of 33 checks;
+  disabled VM Secure Boot is the only failure.
+- [x] Run `go test -count=1 ./internal/state ./internal/apply ./internal/cli`
+  with Go 1.26.7. Temporary-state fixtures pass failure/verification refusal,
+  receipt preservation, owned removal, retry convergence, file acceptance,
+  and schema 1/2 migration. The older-reader check models its schema boundary;
+  it does not execute an older released binary against migrated VM state.
+- [x] Pass `just check` with Go 1.26.7 after reconciling these results:
+  formatting, vet, all Go tests, diff checks, markdownlint, and shellcheck.
+- [x] Exercise installed 0.2.3 `files accept` without root against a temporary
+  VM checkout. Preview preserves the source; accepted capture restores the
+  live Docker configuration into that source, preserves mode, and repeats
+  without rewriting it. Definitions validate afterwards. The live `/etc` file
+  and installed checkout remain unchanged; the temporary checkout is removed.
+- [ ] On real hardware, test portal file picking and actual screen sharing.
+- [ ] On real hardware, verify UWSM logout/relogin cleanup and subsequent
+  session/portal activation.
+- [ ] On real hardware, investigate Librepods Bluetooth-adapter and portal
+  application-registration warnings observed on the VM.
+- [ ] Align application startup/logout and doctor with the interim UWSM
+  choice. Remembering the session does not complete this integration work.
+- [ ] If the graphical fallback is retained, diagnose its `hyprland-guiutils`
+  warning. The installed `0.2.2-2.fc44` RPM verifies cleanly and the normal
+  session finds
+  `/usr/bin/hyprland-dialog`. Check recovery's executable search path before
+  attributing the banner to a missing package.
+
+TTY repair, compositor-failure cleanup, and destructive ownership drills remain
+separate open VM gates. Secure Boot is disabled on
+this VM; mcelog rejects its exposed AMD processor.
+
+### TTY recovery decision, 2026-09-09
+
+Plan: [TTY desktop recovery](ROADMAP.md#tty-desktop-recovery).
+
+- [x] Prefer `Ctrl+Alt+F3` and console repair over a second Hyprland session.
+  The existing recovery session stays installed until its replacement is tested.
+- [ ] Prove TTY login, repair, and return to normal login with broken or absent
+  compositor configuration and an unavailable greeter. Include broken shell
+  startup files and document how to obtain a clean repair shell.
+- [ ] After the drill passes, retire the extra recovery entry/configuration
+  through ownership-aware removal and verify receipts, retry, and TTY access.
+  No runtime removal is part of this roadmap change.
+
 ### First milestone: login and recovery
 
 - [x] Inspect the VM's boot target, greetd unit/configuration, greeter launch
@@ -21,9 +93,8 @@ Phase 5 is complete; its prompt improvements are included below.
 - [x] Extend strict definitions, facts, plans, apply, verification, and receipts
   for the required system units, memberships, files, and fixed-argv triggers.
   Preserve existing memberships and reject unknown or foreign removal.
-- [ ] Test a system-owned recovery session independent of Chezmoi and a manual
-  TTY restoration route. Normal graphical login has already been enabled;
-  independent recovery remains a release follow-up risk.
+- [ ] Complete the TTY restoration drill above. Normal graphical login and
+  the shipped recovery session boot successfully; console repair is unproven.
 - [x] Declare greetd/Noctalia activation, session discovery, portal selection,
   and required memberships through the normal resource lifecycle. Show any
   boot-target or display-manager change; preserve foreign configuration.
@@ -37,11 +108,14 @@ Phase 5 is complete; its prompt improvements are included below.
   State schema 3 blocks older writers; receipt and baseline schemas stay 2.
   Go 1.26.7 regressions also cover commented Git includes, native service
   enablement, and installed Flatpaks without version metadata.
-- [ ] Pass reboot to greeter, normal login, logout/relogin, file-picker and
-  screen-sharing portals, and recovery with absent/broken user configuration.
-- [ ] Prove second-sync convergence, failed-activation recovery, and component
-  removal without losing console access. Run focused provider tests and
-  `just check`; record the actual graphical VM evidence before proceeding.
+- [x] Pass reboot to greeter and normal login with the published 0.2.3 engine.
+- [ ] Pass logout/relogin cleanup and file-picker/screen-sharing interactions
+  on real hardware, as deferred above.
+- [ ] Verify TTY repair with absent/broken user configuration on the VM.
+- [x] Prove second-sync convergence with published 0.2.3, as recorded above.
+- [ ] Prove failed-activation recovery and component removal without losing
+  console access. Automated failure/removal tests pass; native destructive
+  VM drills remain open.
 
 ### PR 18 follow-up
 
@@ -55,9 +129,10 @@ Plan: [Modern Go PR validation](ROADMAP.md#modern-go-pr-validation).
   and retry; verification failures still reject successful receipts.
 - [x] Pass `just check` with Go 1.26.7 and inspect the final fix diff. Formatting,
   vet, all Go tests, diff checks, markdownlint, and shellcheck passed.
-- [ ] Confirm the disposable VM and restore snapshot, then stage and identify
-  the candidate. Record read-only validation, doctor, and first-plan results.
-- [ ] Apply the reviewed first plan and prove second-sync convergence.
+- [x] Validate the published successor 0.2.3 on the disposable VM and record
+  doctor, status, and plan results above; unpublished staging is superseded.
+- [x] Complete installation and second-sync convergence with published 0.2.3.
+- [ ] Confirm a disposable VM restore snapshot before destructive drills.
 - [ ] Prove managed-file/component removal, activation, receipt retirement,
   and retry without losing console access; restore the snapshot.
 - [ ] Test legacy schema 1 and 2 baselines separately, including the schema 3
@@ -65,9 +140,9 @@ Plan: [Modern Go PR validation](ROADMAP.md#modern-go-pr-validation).
 - [x] Obtain owner authorization for commits, push, marking PR 18 ready,
   merging it after final checks, and closing superseded Voxtype PR 17.
 
-Native apply and lifecycle validation remain incomplete. The read-only VM
-comparison below verifies the package-resolution fix; existing Phase 6 desktop,
-portal, and recovery gaps remain open.
+Native installation and repeat sync pass with 0.2.3. Destructive lifecycle and
+older-binary migration drills remain incomplete; the desktop, portal, and
+recovery gaps above remain open.
 
 ### Version 0.2.2 fresh-install blocker, 2026-09-09
 
@@ -89,8 +164,8 @@ not complete.
   same installed checkout and cached VM metadata, released 0.2.2 exits 1 with
   an incomplete plan; the candidate exits 0 with a complete plan and all 118
   package requests resolved, including `gcc-c++.x86_64`.
-- [ ] Retry installation with the corrected engine, then verify convergence
-  and complete the remaining desktop and recovery drills.
+- [x] Retry installation with published 0.2.3 and verify repeat convergence.
+  Remaining desktop and recovery drills are tracked above.
 
 Candidate base: `406f47a1e90a` plus the local package-resolution fix.
 Binary SHA-256:
@@ -217,8 +292,9 @@ password protection to hide the prompt.
   without reading or publishing its contents.
 - [ ] Verify keyring dialog colors after the Noctalia GTK integration applies.
 - [ ] Test file-picker and screen-sharing portals and actual audio playback.
-- [ ] Complete recovery-session, failed-activation/removal, file capture, and
-  second mutating-sync drills retained above.
+- [x] Complete native file capture in a temporary checkout and a second
+  mutating sync with published 0.2.3, as recorded above.
+- [ ] Complete TTY repair and failed-activation/removal drills.
 - [x] Test the signed 0.2.0 COPR engine on the disposable VM; see the
   published-install follow-up below.
 
@@ -339,6 +415,17 @@ Runtime implementation is deferred; Phase 6 VM and recovery gates remain open.
 - [ ] Pass focused lifecycle tests and every changed repository's local gate,
   then an approved disposable Fedora VM install/update/removal/retry trial.
   Record recovery limits; do not close the separate Snapper restore gate.
+
+### GRUB customization follow-up
+
+Plan: [GRUB customization](ROADMAP.md#grub-customization-follow-up).
+
+- [ ] After boot recovery groundwork, choose GRUB appearance, menu visibility,
+  and timeout; inspect Fedora 44's supported configuration workflow.
+- [ ] Implement owned, previewed, reversible configuration without changing
+  the boot layout, Secure Boot, or access to Fedora's current and older kernels.
+- [ ] Test normal boot, older-kernel selection, and restoration of the previous
+  menu configuration in the disposable VM before hardware use.
 
 ## Phase 5 evidence
 
@@ -1044,8 +1131,8 @@ skips
 
 ## Completion rule
 
-This work stops before commits, pushes, or publication. VM testing is now
-authorized; its remaining gates are recorded above. Complete
+This work stops before commits, pushes, or publication. Remaining VM gates and
+the owner's real-hardware deferrals are recorded above. Complete
 the first Phase 6 milestone only with the graphical login and recovery evidence
 listed above; package installation alone is insufficient. Close the full phase
 after the remaining resource ownership, `files accept`, selected-default, and
