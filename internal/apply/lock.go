@@ -28,7 +28,6 @@ type LockInfo struct {
 // Lock is the held operation lock.
 type Lock struct {
 	file *os.File
-	path string
 }
 
 // LockPath returns $XDG_RUNTIME_DIR/nimbus/operation.lock. A missing or
@@ -104,7 +103,7 @@ func Acquire(path string, info LockInfo) (*Lock, error) {
 		f.Close()
 		return nil, err
 	}
-	return &Lock{file: f, path: path}, nil
+	return &Lock{file: f}, nil
 }
 
 // Release drops the lock. The file stays; its content is diagnostic only.

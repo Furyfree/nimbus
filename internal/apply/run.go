@@ -85,7 +85,7 @@ func Run(p *plan.Plan, opts Options) *Result {
 		r.Error = "the plan is incomplete; resolve its blocked operations first"
 		return r
 	}
-	ex := &executor{p: p, opts: opts, seen: map[string]facts.Package{}}
+	ex := &executor{p: p, opts: opts}
 	if ex.opts.Now == nil {
 		ex.opts.Now = time.Now
 	}

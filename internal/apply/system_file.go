@@ -115,9 +115,7 @@ func ApplySystemFile(root string, change plan.FileChange) error {
 		return fmt.Errorf("invalid file mode")
 	}
 	var nonce [12]byte
-	if _, err := rand.Read(nonce[:]); err != nil {
-		return err
-	}
+	rand.Read(nonce[:])
 	temp := ".nimbus-" + hex.EncodeToString(nonce[:])
 	tf, err := unix.Openat(fd, temp, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
 	if err != nil {

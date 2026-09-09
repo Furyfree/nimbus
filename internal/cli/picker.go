@@ -48,7 +48,6 @@ type pickerModel struct {
 	cursor   int
 	filter   string
 	aborted  bool
-	done     bool
 }
 
 func (m pickerModel) Init() tea.Cmd { return nil }
@@ -74,7 +73,6 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.aborted = true
 		return m, tea.Quit
 	case "enter":
-		m.done = true
 		return m, tea.Quit
 	case "up", "ctrl+p":
 		m.cursor = max(0, m.cursor-1)

@@ -177,7 +177,7 @@ func Build(in Inputs) (*Plan, error) {
 	p.Operations = append(p.Operations, b.ownedRemovals()...)
 	p.Operations = append(p.Operations, b.sourceRetirements(p.Operations)...)
 	p.Prune = b.prune()
-	if in.Prune && (in.Applied == nil || in.Applied.Baseline == nil) {
+	if in.Prune && in.Applied.Baseline == nil {
 		p.PruneUnavailable = "prune needs the baseline the first sync records; run sync once first"
 	}
 	if in.Prune && len(p.Prune) > 0 {

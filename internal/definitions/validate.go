@@ -202,8 +202,7 @@ func (c *Checkout) FlatpakRepository() string {
 	return ""
 }
 
-func (c *Checkout) validateRefs(where string, raws []string, errs *ErrorList) []Ref {
-	refs := make([]Ref, 0, len(raws))
+func (c *Checkout) validateRefs(where string, raws []string, errs *ErrorList) {
 	seen := map[string]bool{}
 	prefixByName := map[string]string{}
 	for _, raw := range raws {
@@ -234,9 +233,7 @@ func (c *Checkout) validateRefs(where string, raws []string, errs *ErrorList) []
 			errs.Add(where, "%q is also listed as %s:%s; one package has one source", raw, prev, ref.Name)
 		}
 		prefixByName[ref.Name] = ref.Prefix
-		refs = append(refs, ref)
 	}
-	return refs
 }
 
 // cleanRelativePath accepts a relative, already-clean path with no ".."

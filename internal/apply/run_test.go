@@ -25,7 +25,6 @@ type scripted struct {
 	installed []string // package names the fake host has
 	remotes   []string
 	apps      []string
-	repoIDs   []string
 	log       []string
 	fail      map[string]string // command prefix -> error
 	installs  []string          // what dnf5 install adds
@@ -141,7 +140,6 @@ func (s *scripted) privileged(argv []string) ([]byte, error) {
 		}
 		s.installed = kept
 	case argv[0] == "dnf5" && argv[1] == "config-manager" && argv[2] == "addrepo":
-		s.repoIDs = append(s.repoIDs, strings.TrimPrefix(argv[3], "--id="))
 		var file bytes.Buffer
 		file.WriteString("[nimbus-terra]\nenabled=1\n")
 		for _, a := range argv[4:] {

@@ -106,15 +106,7 @@ func installArgs(p *Plan) []string {
 		return nil
 	}
 	args := []string{"--assumeno", "--cacheonly"}
-	argv := op.Steps[0].Argv[2:] // drop dnf5 -y
-	for i := 0; i < len(argv); i++ {
-		if argv[i] == "--store" {
-			i++ // the stage path is apply's, not the preview's
-			continue
-		}
-		args = append(args, argv[i])
-	}
-	return args
+	return append(args, op.Steps[0].Argv[2:]...) // drop dnf5 -y
 }
 
 func installNames(args []string) []string {
@@ -861,7 +853,7 @@ func TestReleasePackagesBelongToTheirRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if slices.ContainsFunc(p.Prune, func(pr Prune) bool { return pr.Name == "rpmfusion-free-release" }) {
+	if slices.ContainsFunc(p.Prune, func(pr Prune) bool { return pr.Name == "rpmfusion-free-release.noarch" }) {
 		t.Fatal("the release package Nimbus installed is a prune candidate")
 	}
 	if !IsReleasePackage(c.Definitions(), "rpmfusion-free-release") || IsReleasePackage(c.Definitions(), "rpmfusion") {

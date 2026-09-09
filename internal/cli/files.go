@@ -299,9 +299,7 @@ func replaceAcceptedSource(in *acceptInput) error {
 		return errors.New("source changed before replacement")
 	}
 	var nonce [16]byte
-	if _, err = rand.Read(nonce[:]); err != nil {
-		return err
-	}
+	rand.Read(nonce[:])
 	tmp := ".nimbus-accept-" + hex.EncodeToString(nonce[:])
 	fd, err := syscall.Openat(int(parent.Fd()), tmp, syscall.O_WRONLY|syscall.O_CREAT|syscall.O_EXCL|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0600)
 	if err != nil {
