@@ -29,8 +29,9 @@ preference is fixed and the same for every package:
 3. Flathub, which a GUI application without host integration may use.
 4. Terra, RPM Fusion, or a community COPR, when nothing above offers the
    package.
-5. A COPR the owner builds, when nothing offers the package at all: GitHub
-   Desktop, WoWUp, and the Nimbus engine itself.
+5. A COPR the owner builds, when nothing offers the package at all, such as
+   WoWUp and the Nimbus engine itself. Voxtype is an explicit planned exception:
+   the owner chooses their own maintained COPR over a community COPR.
 
 Container images pinned by digest are the one remaining case; the Windows
 guest is the only one. Workstation package repositories, including the owner's
@@ -45,6 +46,12 @@ updates. `--nogpgcheck` never appears in a plan.
 
 Rules:
 
+- Phase 7 will add the official GitHub Copilot app RPM from `github/app`;
+  prefer the maker's artifact over a community desktop fork or repackaging.
+  Its verification and update lifecycle must be defined before implementation;
+  a mutable release URL or an untrusted checksum is not sufficient approval.
+  ChatGPT stays on the official repository. Voxtype's own COPR requires the
+  same pinned signing-key and ownership checks as every accepted repository.
 - The earlier source wins where two carry the same name. Fedora provides
   Chezmoi, Noctalia, Just, Tailscale, and Nix; RPM Fusion provides Steam. A
   later repository is declared with a higher numeric DNF `priority`, which
@@ -260,18 +267,18 @@ key/repository files and PATH-shadowed engines. It never uses `--nogpgcheck`.
 
 - System-layer updates from every source go through `nimbus sync` or
   direct DNF and Flatpak; nothing in the system layer updates unattended.
-- `nimbus sync` is the primary entry point: its last step runs `dnf5 upgrade`
-  and `flatpak update`, surrounded by its recovery point once Phase 7 adds
-  it. It then offers a Topgrade phase for the user-scope
-  managers. Topgrade reads the user's own Chezmoi-owned configuration, and
-  Nimbus passes `--only` with the declared allowlist of user-scope steps plus
-  `--no-self-update`, so a step Topgrade adds later is never enabled by
-  accident and the phase cannot reach the system plan or source checkouts.
-  Direct `topgrade` runs are the user's own, like direct DNF.
-- Topgrade dry-run shows commands, not the downstream package versions selected
-  by each manager. The plan therefore labels the user phase as command-level
-  review, never as an exact or recoverable transaction. The root and Flatpak
-  snapshots do not cover home-directory tools.
+- Phase 7 makes Topgrade the overall entry point, with a Chezmoi-owned explicit
+  allowlist. On managed hosts it invokes Nimbus first for system updates and
+  disables duplicate system and system-Flatpak steps. Nimbus never calls
+  Topgrade. New steps and Topgrade self-update remain disabled. Standalone
+  hosts use appropriate native managers without requiring Nimbus.
+- Nimbus retains system preview, approval, verification, and planned recovery.
+  A failed or cancelled Nimbus phase stops the run. Independent user-manager
+  failures may continue other user steps but retain an unsuccessful final
+  status. User steps do not escalate privileges.
+- Topgrade dry-run shows commands, not resolved downstream versions. User
+  updates are command-level review, never exact or recoverable Nimbus
+  transactions. Planned root and Flatpak snapshots do not cover home tools.
 - User-scope tools may update themselves on the maker's schedule. Mise's
   accepted global setting is `auto_update = true`; it replaces only the
   user-owned Mise binary. Chezmoi overrides it to false during apply, keeping

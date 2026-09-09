@@ -667,9 +667,63 @@ prompt gates pass.
 
 ### Outcome
 
-Deliver the recovery and coordination around the upgrade step `nimbus sync`
-already runs: enforce native constraints, coordinate the desktop-session
+Deliver official application updates through one Topgrade entry point, then
+the recovery and coordination around the system upgrade step `nimbus sync`
+already runs. Enforce native constraints, coordinate the desktop-session
 group, and create tested recovery points for disruptive transactions.
+
+### First milestone: application delivery and unified updates
+
+This is the next implementation milestone, deferred from rewrite PR 18 and
+superseding the manual Voxtype installation proposal in PR 17. It changes no
+runtime behavior until implemented. Keep the Phase 6 VM gates open and
+reconcile the existing Phase 7 branch with this plan before reusing its work.
+
+Implement in dependency order:
+
+1. Keep ChatGPT Desktop on the existing official OpenAI DNF repository. Use
+   the official GitHub Copilot app RPM from `github/app`, not the community
+   GitHub Desktop fork or a repackaged COPR. Define the narrow official-RPM
+   lifecycle before adding it: stable-release discovery during mutating sync
+   preparation, authenticated artifact verification, native RPM identity,
+   version preview, and approval bound to the exact downloaded bytes. Pure
+   validation, status, and `sync --plan` remain offline. A fixed download URL
+   alone does not provide updates; signature or digest trust must be resolved
+   without disabling verification.
+2. Add a Voxtype recipe in `~/git/copr` from verified upstream releases for
+   Fedora 44 x86_64. Define version bumps, builds, and signed publication;
+   COPR does not automatically follow upstream releases. Keep publication
+   manual until a separate automation change is approved. After verifying
+   the repository key and build, select it through Nimbus's existing
+   repository lifecycle. Reuse existing audio/clipboard dependencies and
+   add the required Wayland typing helper. Dotfiles owns user configuration,
+   keybindings, and daemon setup; verify the actual unit/backend before
+   prescribing a service or input-group change.
+3. In `~/git/dotfiles`, make Topgrade the update entry point. On Nimbus-managed
+   hosts, run the Nimbus system phase first, then Mise, Sheldon, GitHub CLI
+   extensions, tldr, and explicitly selected native app/plugin managers.
+   Disable duplicate native system and system-Flatpak steps. Nimbus never
+   invokes Topgrade. Chezmoi owns the conditional configuration; standalone
+   hosts retain appropriate native managers without requiring Nimbus.
+4. Prove ordering and failure handling with the installed Topgrade version.
+   A failed Nimbus phase stops the run; independent user-tool failures allow
+   other user steps to finish but retain a failing final status. Keep an
+   explicit step allowlist and disable Topgrade self-update. Do not assume
+   custom-command order or failure behavior without an executable test.
+
+Exit this milestone with focused lifecycle and orchestration tests, each
+repository's complete local gate, and an approved disposable Fedora VM trial.
+Verify install, version change, retry, removal, source identity, changed-input
+refusal, corrupt downloads, and no implicit downgrade. Prove one system update
+per run, cancellation, no recursion, managed/standalone selection, and failure
+propagation. Resolve any unsupported Topgrade ordering before shipping.
+
+Use a restorable VM snapshot for trials. Removing the optional integration
+restores direct native commands; retiring packages/repositories still requires
+proven ownership. Home tools remain outside Nimbus recovery. Stop on unknown
+ownership, unverified artifacts, or unexpected mutations. This milestone does
+not authorize live installation, COPR publication, or claim the Snapper restore
+drill below has passed.
 
 ### Context and decisions
 
@@ -704,13 +758,10 @@ before freezing the implementation, and record the results in TASKS.md:
 
 The upgrade step runs inside `nimbus sync`, after the definition changes of
 the same run, so drift and updates are one decision; `--no-upgrade` leaves it
-out. After system verification sync offers a Topgrade phase that
-reads the user's Chezmoi-owned configuration and runs only the declared
-allowlist through `--only` plus `--no-self-update`, so system, Flatpak,
-firmware, Nix, Chezmoi, and Git repository steps never run from it. The plan
-labels this as command-level review
-because Topgrade dry-run does not resolve downstream versions, and reports
-that the home subvolume is outside the recovery point.
+out. Topgrade calls this system phase before its allowed user managers;
+Nimbus never calls Topgrade. The system post snapshot closes after verified
+system updates, before user tools run. User-manager previews show commands,
+not resolved downstream versions, and home remains outside recovery.
 Q-008 permanently delegates Fedora release upgrades to the native DNF5
 system-upgrade workflow. Nimbus has no target-release option or release-upgrade
 transaction. Doctor reports installed-release compatibility, mutations refuse
@@ -737,10 +788,10 @@ manual restoration in disposable VMs. Cover topology mismatch, nested
 subvolume exclusion, conditional Flatpak and boot capture, partial recovery
 creation and cleanup, protected failed operations, retention cleanup, delayed
 Btrfs deletion, the 20 GiB refusal, checksums, and preservation of home and
-guest data. Exercise the Topgrade `--only` allowlist, command preview,
-refusal of sudo and system managers, partial user-step failure, and the
-explicit lack of home rollback. Prove that the upgrade step remains
-within the installed release, exposes no target-release path, and never invokes
+guest data. Retest Topgrade ordering and failure propagation around recovery
+creation, including its user-step allowlist and the lack of home rollback.
+Prove that the upgrade step remains within the installed release, exposes no
+target-release path, and never invokes
 DNF5 system-upgrade. Verify that unsupported releases preserve version,
 validation, and doctor diagnostics while blocking mutation, and that supported
 post-upgrade inspection exposes Nimbus-owned drift.

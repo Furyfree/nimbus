@@ -286,6 +286,30 @@ prepared desktop entries call `nimbus launch webapp`, which the installed
 0.2.0 engine and current source do not implement. They cannot be enabled until
 the Phase 8 launcher is available; this is not a Noctalia discovery problem.
 
+## Next phase: 7. Application delivery and unified updates
+
+Plan: [First milestone](ROADMAP.md#first-milestone-application-delivery-and-unified-updates).
+Runtime implementation is deferred; Phase 6 VM and recovery gates remain open.
+
+- [ ] Reconcile the existing Phase 7 branch with the accepted direction.
+- [ ] Define and implement the official GitHub Copilot RPM lifecycle: trusted
+  artifact verification, release discovery, approval, native identity,
+  receipts, retry, removal, and downgrade refusal. Keep read-only paths offline.
+- [ ] Retain ChatGPT's official OpenAI repository and verify update ownership.
+- [ ] Add Voxtype source/version/build handling in the COPR repository; verify
+  a signed Fedora 44 x86_64 build and pin the accepted repository key before
+  selecting it in Nimbus. Publication remains a separate authorized action.
+- [ ] Resolve Voxtype dependencies, user configuration, typing backend, and
+  actual daemon unit with the dotfiles handoff.
+- [ ] Make Chezmoi-owned Topgrade configuration invoke Nimbus first on managed
+  hosts, then the explicit native user-manager allowlist. Cover standalone
+  hosts, disable duplicate system steps, and prevent recursion.
+- [ ] Test cancellation, Nimbus fail-stop, user-step continuation with final
+  failure status, and no privileged user updates against native Topgrade.
+- [ ] Pass focused lifecycle tests and every changed repository's local gate,
+  then an approved disposable Fedora VM install/update/removal/retry trial.
+  Record recovery limits; do not close the separate Snapper restore gate.
+
 ## Phase 5 evidence
 
 Plan: [Bootstrap, initialization, and Chezmoi
@@ -917,11 +941,10 @@ skips
 - D-012 keeps hardware out of profiles and static resolution. A later
   `nimbus init` inspection proposes explicit components from DMI and PCI facts;
   the Phase 1 desktop and laptop fixtures select those components directly.
-- D-013, as amended by D-018, keeps exact system updates in Nimbus and runs
-  Topgrade with the user's Chezmoi-owned configuration and a command-line
-  `--only` allowlist. Topgrade dry-run shows command invocations rather than
-  resolved downstream versions, and the recovery topology excludes those
-  home-directory mutations.
+- D-018's 2026-09-09 amendment makes Topgrade the planned update entry point,
+  calling Nimbus for system updates before its allowed native user managers.
+  Chezmoi owns the conditional configuration. Dry-run shows commands rather
+  than resolved downstream versions; recovery excludes home mutations.
 - Current upstream installation evidence accepts Mise's recommended user-scope
   installer and self-update setting. Tailscale comes from Fedora 44, which
   carries it. Nix remains Fedora-owned because the upstream multi-user

@@ -1437,33 +1437,43 @@ managed packages, repository state, enforceable constraints, coordinated update
 groups, recovery requirements, and post-update verification. Nimbus does not
 silently update itself, its checkout, dotfiles, or system packages.
 
-`nimbus sync` is the primary entry point for normal workstation updates as
-well: its last step upgrades the system with `dnf5 upgrade` and `flatpak
-update`, after the definition changes of the same run, so drift and updates
-are one decision. `--no-upgrade` leaves that step out. Recovery points and
+`nimbus sync` owns normal system updates: its last step upgrades the system
+with `dnf5 upgrade` and `flatpak update`, after the definition changes of the
+same run, so drift and updates are one decision. `--no-upgrade` leaves that
+step out. Recovery points and
 reboot or logout requirements join the plan when Phase 7 delivers them. The
 upgrade operates only within the currently installed Fedora release and has
 no target-release flag.
 
-After the verified system phase, the command offers a separate Topgrade phase
-for the user-scope update managers. Topgrade reads the user's own
-Chezmoi-owned configuration; Nimbus installs the Topgrade package and passes
-`--only` with the declared allowlist of user-scope steps plus
-`--no-self-update`, so system, Flatpak, firmware, Nix, Chezmoi, and
-Git-repository steps, and any step Topgrade adds later, never run from this
-phase. The reviewed plan identifies every allowed Topgrade step and its
-command, and Topgrade runs as the normal user without sudo. The phase is
-command-level review: Topgrade dry-run does not resolve the exact downstream
-versions selected by Mise, Cargo, npm, uv, and similar managers, so Nimbus
-does not describe those mutations as exact, managed, or recoverable
-transactions.
+Phase 7 makes Topgrade the overall update entry point. On managed hosts its
+Chezmoi-owned configuration calls Nimbus for the system phase first, then
+explicitly allowed user managers: Mise, Sheldon, GitHub CLI extensions, tldr,
+and selected native app/plugin updaters. Nimbus never invokes Topgrade.
+Topgrade's direct system and system-Flatpak steps are disabled on these hosts;
+standalone configuration does not require Nimbus. New steps are not enabled
+implicitly, and Topgrade self-update remains disabled. Nimbus retains its
+preview, approval, verification, and recovery boundaries.
 
-The recovery point's pre snapshot is created before the system mutation and
-its post snapshot as soon as the system phase is verified, before the
-Topgrade phase starts. It covers the root and system Flatpak subvolumes
-only. User tools below the home subvolume are
-outside that recovery boundary; a failed Topgrade step is repaired through its
-own manager or by reconstructing the declared user environment.
+A failed or cancelled Nimbus phase stops the run before user updates.
+Independent user-tool failures may allow remaining user steps to complete,
+but the final status must remain unsuccessful. The implementation must prove
+Topgrade's actual ordering and exit behavior. User steps run without privilege
+escalation. Their dry-run output identifies commands rather than exact
+resolved versions, so they are not exact Nimbus-managed transactions.
+
+The planned recovery point's pre snapshot precedes system mutation and its
+post snapshot follows system verification, before user updates. It covers
+root and system Flatpak subvolumes only. User tools below home remain outside
+that boundary; repair them through their manager or declared environment.
+Recovery creation stays disabled until its native restore drill succeeds.
+
+The same phase adds the official GitHub Copilot app RPM lifecycle and Voxtype
+from the owner's COPR; ChatGPT retains the official OpenAI repository.
+Official-RPM discovery and download belong to mutating sync preparation, never
+read-only planning. Approval binds the displayed version and verified artifact
+to the bytes installed through DNF. Source trust, native identity, receipts,
+retry, removal, and downgrade refusal must be defined and tested before this
+provider ships. These are planned capabilities, not existing providers.
 
 Fedora release upgrades are permanently owned by Fedora's native DNF5
 system-upgrade workflow and the user. Nimbus never invokes or wraps that
