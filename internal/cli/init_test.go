@@ -27,6 +27,59 @@ func (s handoffOutputSource) Stream(out, errOut io.Writer, name string, args ...
 	return err
 }
 
+func TestInitReportsResultWriteFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name, output string
+		newMachine   bool
+	}{
+		{"selector", "selected vm; selector written to", false},
+		{"manifest", "; the Git change is yours to commit", true},
+		{"footer", "Installation time:", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, src := installerFixture(t)
+			if err := os.WriteFile(filepath.Join(root, "profiles/common.toml"), []byte("schema=1\nid=\"common\"\npackages=[]\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			args := []string{"init", "--checkout", root, "--machine", "vm"}
+			if tc.newMachine {
+				saved := pickerFn
+				t.Cleanup(func() { pickerFn = saved })
+				pickerFn = func(title string, _ []pickItem) ([]string, error) {
+					if strings.HasPrefix(title, "profiles") {
+						return []string{"common"}, nil
+					}
+					return nil, nil
+				}
+				args = []string{"init", "--checkout", root, "--new", "newbox", "--no-dotfiles"}
+			}
+			cmd := New()
+			cmd.SetArgs(args)
+			cmd.SetOut(resultErrorWriter{match: tc.output, err: syscall.ENOSPC})
+			cmd.SetErr(io.Discard)
+			if err := cmd.Execute(); !errors.Is(err, syscall.ENOSPC) || errors.Is(err, reported{}) {
+				t.Fatalf("result output error = %v", err)
+			}
+			if tc.name != "footer" && len(src.calls) != 0 {
+				t.Fatalf("mutated after a failed selection report: %v", src.calls)
+			}
+			if tc.newMachine {
+				if _, err := os.Stat(manifestPath(root, "newbox")); err != nil {
+					t.Fatalf("already written manifest lost: %v", err)
+				}
+			} else {
+				path, err := selector.DefaultPath()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := selector.Load(path); err != nil {
+					t.Fatalf("already written selector lost: %v", err)
+				}
+			}
+		})
+	}
+}
+
 func TestInitPromptPreservesEnteredAnswersAndReportsReadErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name string

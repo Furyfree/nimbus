@@ -275,8 +275,12 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 				return err
 			}
 		} else {
-			out.Write(renderPlan(p, sf.prune, !sf.noUpgrade))
-			fmt.Fprintln(out, "\nfrom the local metadata cache; sync refreshes it before it runs")
+			if _, err := out.Write(renderPlan(p, sf.prune, !sf.noUpgrade)); err != nil {
+				return fmt.Errorf("show plan: %w", err)
+			}
+			if _, err := fmt.Fprintln(out, "\nfrom the local metadata cache; sync refreshes it before it runs"); err != nil {
+				return err
+			}
 		}
 		if !p.Complete {
 			return reported{}
@@ -291,7 +295,9 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	}
 	if !p.Complete {
 		if !opts.json {
-			out.Write(renderPlan(p, sf.prune, !sf.noUpgrade))
+			if _, err := out.Write(renderPlan(p, sf.prune, !sf.noUpgrade)); err != nil {
+				return fmt.Errorf("show plan: %w", err)
+			}
 		}
 		return errors.New("the plan has problems; see above")
 	}
@@ -299,8 +305,8 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 		if opts.json {
 			return nil
 		}
-		fmt.Fprintln(out, "nothing to do; the system matches the definitions")
-		return nil
+		_, err := fmt.Fprintln(out, "nothing to do; the system matches the definitions")
+		return err
 	}
 	// Everything left waits for something outside this run, such as the
 	// Chezmoi handoff: say so and touch nothing, sudo included.
@@ -311,8 +317,12 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			}
 			return nil
 		}
-		out.Write(renderPlan(p, sf.prune, false))
-		fmt.Fprintln(out, "\n"+waitingLine(p))
+		if _, err := out.Write(renderPlan(p, sf.prune, false)); err != nil {
+			return fmt.Errorf("show plan: %w", err)
+		}
+		if _, err := fmt.Fprintln(out, "\n"+waitingLine(p)); err != nil {
+			return err
+		}
 		if !sf.deferUser {
 			return errors.New(waitingLine(p))
 		}
@@ -410,7 +420,9 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			}
 			currentPlan = p
 			if !p.Complete {
-				execOut.Write(renderPlan(p, sf.prune, false))
+				if _, err := execOut.Write(renderPlan(p, sf.prune, false)); err != nil {
+					return fmt.Errorf("show updated plan: %w", err)
+				}
 				return errors.New("the plan has problems; see above")
 			}
 			if err := showReplanned(execOut, p, sf.prune, &result); err != nil {
@@ -446,7 +458,9 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			}
 			currentPlan = p
 			if !p.Complete {
-				execOut.Write(renderPlan(p, sf.prune, false))
+				if _, err := execOut.Write(renderPlan(p, sf.prune, false)); err != nil {
+					return fmt.Errorf("show updated plan: %w", err)
+				}
 				return errors.New("the plan has problems; see above")
 			}
 		}

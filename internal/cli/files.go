@@ -103,13 +103,13 @@ func newFiles(opts *options) *cobra.Command {
 				return writeJSON(out, before.result, nil)
 			}
 			if before.result.Changed {
-				fmt.Fprintln(out, "Source updated. Run validate, then sync --plan and sync to verify the new definition.")
+				_, err = fmt.Fprintln(out, "Source updated. Run validate, then sync --plan and sync to verify the new definition.")
 			} else if preview {
-				fmt.Fprintln(out, "Preview only; source unchanged.")
+				_, err = fmt.Fprintln(out, "Preview only; source unchanged.")
 			} else {
-				fmt.Fprintln(out, "Source already matches the live file.")
+				_, err = fmt.Fprintln(out, "Source already matches the live file.")
 			}
-			return nil
+			return err
 		},
 	}
 	addMachineFlags(&flags, cmd.Flags())

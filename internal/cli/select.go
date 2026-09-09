@@ -309,8 +309,8 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 		if opts.json {
 			return writeJSON(out, map[string]string{"manifest": "unchanged"}, nil)
 		}
-		fmt.Fprintf(out, "%s: the manifest already says that\n", edit.cmdName)
-		return nil
+		_, err := fmt.Fprintf(out, "%s: the manifest already says that\n", edit.cmdName)
+		return err
 	}
 
 	// Validate and plan the edited manifest in memory before touching it.
@@ -409,13 +409,18 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 		lock.Release()
 		return err
 	}
-	fmt.Fprintf(review, "wrote %s; the Git change is yours to commit\n", path)
+	if _, err := fmt.Fprintf(review, "wrote %s; the Git change is yours to commit\n", path); err != nil {
+		return err
+	}
 	if strings.HasPrefix(edit.cmdName, "profiles ") && edited.Dotfiles != nil {
 		selection := facts.Inspect(src, "").Chezmoi
 		if selection.Known() && selection.Value.Initialized {
-			fmt.Fprintf(review, "Chezmoi keeps its own copy of the profiles; refresh it with:\n  %s\n", doctor.ChezmoiRefresh(edited.ID, r.Profiles, selection.Value.OnePasswordSSH))
+			_, err = fmt.Fprintf(review, "Chezmoi keeps its own copy of the profiles; refresh it with:\n  %s\n", doctor.ChezmoiRefresh(edited.ID, r.Profiles, selection.Value.OnePasswordSSH))
 		} else {
-			fmt.Fprintln(review, "Chezmoi selection is unavailable; run nimbus doctor after initializing Chezmoi to obtain the refresh command.")
+			_, err = fmt.Fprintln(review, "Chezmoi selection is unavailable; run nimbus doctor after initializing Chezmoi to obtain the refresh command.")
+		}
+		if err != nil {
+			return err
 		}
 	}
 	if nothingToRun(p) {

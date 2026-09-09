@@ -154,7 +154,13 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 		opts.installLog = previousLog
 		cmd.SetOut(oldOut)
 		cmd.SetErr(oldErr)
-		fmt.Fprintf(oldOut, "Installation time: %s; logs: %s\n", time.Since(log.started).Round(time.Second), log.dir)
+		if _, err := fmt.Fprintf(oldOut, "Installation time: %s; logs: %s\n", time.Since(log.started).Round(time.Second), log.dir); err != nil {
+			if errors.Is(retErr, reported{}) {
+				retErr = err
+			} else {
+				retErr = errors.Join(retErr, err)
+			}
+		}
 		if err := log.finish(retErr); err != nil {
 			fmt.Fprintf(oldErr, "installation logging failed: %v\n", err)
 			retErr = errors.Join(retErr, err)
@@ -285,12 +291,16 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 		if err := writeManifest(newManifestPath, newManifest); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "wrote %s; the Git change is yours to commit\n", newManifestPath)
+		if _, err := fmt.Fprintf(out, "wrote %s; the Git change is yours to commit\n", newManifestPath); err != nil {
+			return fmt.Errorf("report written manifest %s: %w", newManifestPath, err)
+		}
 	}
 	if err := selector.Write(selectorPath, &selector.Selector{Schema: selector.CurrentSchema, Checkout: root, Machine: machine, Origin: origin}); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "selected %s; selector written to %s\n\n", machine, selectorPath)
+	if _, err := fmt.Fprintf(out, "selected %s; selector written to %s\n\n", machine, selectorPath); err != nil {
+		return fmt.Errorf("report written selector %s: %w", selectorPath, err)
+	}
 
 	steps[0].Status = "succeeded"
 	log.event("selection machine=%s profiles=%s definitions=%s", machine, strings.Join(r.Profiles, ","), c.Digest())

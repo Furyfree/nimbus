@@ -26,6 +26,66 @@ type streamErrorSource struct {
 	err error
 }
 
+type resultErrorWriter struct {
+	match string
+	err   error
+	out   io.Writer
+}
+
+func (w resultErrorWriter) Write(p []byte) (int, error) {
+	if strings.Contains(string(p), w.match) {
+		return 0, w.err
+	}
+	if w.out != nil {
+		return w.out.Write(p)
+	}
+	return len(p), nil
+}
+
+func TestSyncReportsFailedReadOnlyResults(t *testing.T) {
+	for _, tc := range []struct {
+		name, output string
+		flags        syncFlags
+	}{
+		{"plan", "plan for vm", syncFlags{plan: true}},
+		{"cache note", "from the local metadata cache", syncFlags{plan: true}},
+		{"unchanged", "nothing to do;", syncFlags{noUpgrade: true}},
+		{"waiting plan", "plan for vm", syncFlags{noUpgrade: true}},
+		{"waiting reason", "operations wait for", syncFlags{noUpgrade: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, src := installerFixture(t)
+			if !strings.HasPrefix(tc.name, "waiting ") {
+				if err := os.WriteFile(filepath.Join(root, "profiles/common.toml"), []byte("schema=1\nid=\"common\"\npackages=[]\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if err := os.WriteFile(filepath.Join(root, "profiles/common.toml"), []byte("schema=1\nid=\"common\"\ncomponents=[\"runtime\"]\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(root, "components/runtime.toml"), []byte("schema=1\nid=\"runtime\"\n[installer]\nurl=\"https://example.invalid/install.sh\"\nbinary=\".local/bin/runtime\"\nconfig=\".config/runtime.toml\"\ninstall=[\"<home>/.local/bin/runtime\",\"install\"]\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				src.Dirs[filepath.Join(os.Getenv("HOME"), ".local/bin")] = []string{"runtime"}
+			}
+			var report bytes.Buffer
+			cmd := New()
+			cmd.SetOut(resultErrorWriter{match: tc.output, err: syscall.ENOSPC, out: &report})
+			cmd.SetErr(io.Discard)
+			err := runSync(cmd, &options{}, machineFlags{checkout: root, machine: "vm"}, tc.flags)
+			if err == nil || tc.flags.plan && !errors.Is(err, syscall.ENOSPC) || !tc.flags.plan && !strings.Contains(report.String(), syscall.ENOSPC.Error()) {
+				t.Fatalf("result output failure not reported: %v\n%s", err, &report)
+			}
+			if len(src.calls) != 0 {
+				t.Fatalf("read-only result ran native mutations: %v", src.calls)
+			}
+			if _, err := os.Stat(stateRoot); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("read-only result wrote state: %v", err)
+			}
+		})
+	}
+}
+
 func (s streamErrorSource) Stream(io.Writer, io.Writer, string, ...string) error {
 	return s.err
 }

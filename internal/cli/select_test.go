@@ -75,6 +75,95 @@ func TestSelectionStopsWhenReviewCannotBeWritten(t *testing.T) {
 	}
 }
 
+func TestSelectionReportsUnchangedOutputFailure(t *testing.T) {
+	root, src := installerFixture(t)
+	c, err := loadCheckout(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := manifestPath(root, "vm")
+	before := append(renderManifest(nil, c.Machines["vm"]), '\n')
+	if err := os.WriteFile(path, before, 0644); err != nil {
+		t.Fatal(err)
+	}
+	writeErr := errors.New("result output unavailable")
+	cmd := newProfiles(&options{})
+	cmd.SilenceErrors, cmd.SilenceUsage = true, true
+	cmd.SetArgs([]string{"add", "common", "--checkout", root, "--machine", "vm"})
+	cmd.SetOut(&previewErrorWriter{err: writeErr})
+	cmd.SetErr(io.Discard)
+	if err := cmd.Execute(); !errors.Is(err, writeErr) {
+		t.Fatalf("unchanged output failure not reported: %v", err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || string(after) != string(before) || len(src.calls) != 0 {
+		t.Fatalf("unchanged selection mutated: manifest=%q, error=%v, calls=%v", after, err, src.calls)
+	}
+}
+
+func TestSelectionReportsWrittenManifestAndRefreshOutputFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name, group, id string
+		after           int
+		initialized     bool
+	}{
+		{name: "manifest", group: "components", id: "demo", after: 2},
+		{name: "profile refresh", group: "profiles", id: "extra", after: 3, initialized: true},
+		{name: "unavailable selection", group: "profiles", id: "extra", after: 3},
+	} {
+		for _, asJSON := range []bool{false, true} {
+			t.Run(tc.name+"/"+map[bool]string{false: "text", true: "json"}[asJSON], func(t *testing.T) {
+				root, src := installerFixture(t)
+				for path, data := range map[string]string{
+					"profiles/common.toml": "schema = 1\nid = \"common\"\npackages = []\n",
+					"profiles/extra.toml":  "schema = 1\nid = \"extra\"\n",
+					"components/demo.toml": "schema = 1\nid = \"demo\"\n",
+				} {
+					if err := os.WriteFile(filepath.Join(root, path), []byte(data), 0644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if code, out, errOut := run(t, "sync", "--checkout", root, "--machine", "vm", "--no-upgrade", "--yes"); code != ExitOK {
+					t.Fatalf("prepare already-managed fixture: %d %s%s", code, out, errOut)
+				}
+				if tc.initialized {
+					src.Dirs[filepath.Join(os.Getenv("HOME"), ".local/share/chezmoi")] = []string{".git"}
+				}
+				writeErr := errors.New("result output unavailable")
+				writer := &previewErrorWriter{after: tc.after, err: writeErr}
+				opts := &options{json: asJSON}
+				cmd := newComponents(opts)
+				if tc.group == "profiles" {
+					cmd = newProfiles(opts)
+				}
+				cmd.SilenceErrors, cmd.SilenceUsage = true, true
+				cmd.SetArgs([]string{"add", tc.id, "--checkout", root, "--machine", "vm", "--yes"})
+				cmd.SetOut(writer)
+				cmd.SetErr(io.Discard)
+				if asJSON {
+					cmd.SetOut(io.Discard)
+					cmd.SetErr(writer)
+				}
+				if err := cmd.Execute(); !errors.Is(err, writeErr) {
+					t.Fatalf("selection result output failure not reported: %v", err)
+				}
+				selected, err := loadSelected(machineFlags{checkout: root, machine: "vm"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				m := selected.Checkout.Machines["vm"]
+				if !slices.Contains(m.Components, tc.id) && !slices.Contains(m.Profiles, tc.id) {
+					t.Fatal("report failure discarded the approved manifest edit")
+				}
+				p, err := buildPlan(selected, src)
+				if err != nil || !nothingToRun(p) || len(src.calls) != 0 {
+					t.Fatalf("expected a manifest-only change: plan=%+v, error=%v, calls=%v", p, err, src.calls)
+				}
+			})
+		}
+	}
+}
+
 func TestWriteManifestCleansTemporaryFileOnRenameFailure(t *testing.T) {
 	dir := t.TempDir()
 	destination := filepath.Join(dir, "machine.toml")

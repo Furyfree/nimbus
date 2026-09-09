@@ -55,6 +55,40 @@ func TestFilesAcceptStopsWhenPreviewCannotBeWritten(t *testing.T) {
 	}
 }
 
+func TestFilesAcceptReportsClosingOutputFailure(t *testing.T) {
+	for _, mode := range []string{"capture", "preview", "unchanged"} {
+		t.Run(mode, func(t *testing.T) {
+			checkout, source, live := acceptanceFixture(t)
+			if mode == "unchanged" {
+				if err := os.WriteFile(live, []byte("old\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			args := []string{"accept", "/etc/nimbus-test.conf", "--checkout", checkout, "--machine", "test", "--yes"}
+			if mode == "preview" {
+				args = append(args, "--plan")
+			}
+			writeErr := errors.New("result output unavailable")
+			cmd := newFiles(&options{})
+			cmd.SilenceErrors, cmd.SilenceUsage = true, true
+			cmd.SetArgs(args)
+			cmd.SetOut(&previewErrorWriter{after: 1, err: writeErr})
+			cmd.SetErr(io.Discard)
+			if err := cmd.Execute(); !errors.Is(err, writeErr) {
+				t.Fatalf("closing output failure not reported: %v", err)
+			}
+			want := "old\n"
+			if mode == "capture" {
+				want = "new\n"
+			}
+			data, err := os.ReadFile(source)
+			if err != nil || string(data) != want {
+				t.Fatalf("source = %q, %v; want %q", data, err, want)
+			}
+		})
+	}
+}
+
 func acceptanceFixture(t *testing.T) (string, string, string) {
 	t.Helper()
 	applyEnv(t)
