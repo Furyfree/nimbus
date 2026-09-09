@@ -82,7 +82,7 @@ func packageViews(s *selected, f *facts.Facts, applied *state.Applied) []package
 			}
 		}
 		if p.Prefix == definitions.PrefixFlatpak || p.Prefix == definitions.PrefixCargo {
-			if _, ok := applied.Receipts[id]; ok && v.Installed != "" {
+			if _, ok := applied.Receipts[id]; ok && v.State == "adopt" {
 				v.State = "managed"
 			}
 		}
@@ -131,9 +131,9 @@ func renderPackageViews(views []packageView) []byte {
 		line := fmt.Sprintf("%-10s %s", v.State, v.Canonical)
 		if v.Installed != "" {
 			line += " " + v.Installed
-			if v.Repository != "" {
-				line += " (" + v.Repository + ")"
-			}
+		}
+		if v.Repository != "" {
+			line += " (" + v.Repository + ")"
 		}
 		if len(v.Paths) > 0 {
 			line += "  <- " + strings.Join(v.Paths, ", ")
@@ -219,7 +219,7 @@ func newUnmanaged(opts *options) *cobra.Command {
 func newPackagesInstalled(opts *options) *cobra.Command {
 	list := newListCommand(opts, "installed [QUERY]", "Browse explicitly installed packages with their desired and managed state",
 		func(query string, _ bool, v packageView) bool {
-			return v.Installed != "" && v.State != "dependency" && strings.Contains(v.Name, query)
+			return v.State != "desired" && v.State != "dependency" && strings.Contains(v.Name, query)
 		}, 1, "")
 	packages := &cobra.Command{Use: "packages", Short: "Package views over the selected machine", Args: noArgs, RunE: func(cmd *cobra.Command, args []string) error { return cmd.Help() }}
 	packages.AddCommand(list)

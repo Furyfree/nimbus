@@ -87,6 +87,57 @@ func TestDesiredFlatpakIsAdoptableFromAnyRemote(t *testing.T) {
 	}
 }
 
+func TestInstalledFlatpaksDoNotRequireVersionMetadata(t *testing.T) {
+	for _, tc := range []struct {
+		name, app, want string
+		present, owned  bool
+	}{
+		{"desired adoption", "com.spotify.Client", "adopt", true, false},
+		{"desired managed", "com.spotify.Client", "managed", true, true},
+		{"unselected unmanaged", "org.example.App", "unmanaged", true, false},
+		{"unselected managed", "org.example.App", "managed", true, true},
+		{"desired absent", "com.spotify.Client", "", false, false},
+		{"owned absent", "com.spotify.Client", "", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := repoRoot(t)
+			src := fixtureSource(t, root)
+			if tc.present {
+				src.Commands[facts.Key("flatpak", "list", "--system", "--app", "--columns=application,version,origin")] = []byte(tc.app + "\t\tflathub\n")
+			}
+			withSource(t, src)
+			if tc.owned {
+				stage := &state.Stage{Schema: state.Schema, PlanDigest: "sha256:p", Receipts: []state.Receipt{{
+					Schema: state.ReceiptSchema, Resource: "flatpak:" + tc.app, Provider: "flatpak",
+					Operation: "adopt", PlanDigest: "sha256:p", Verified: true,
+				}}}
+				if err := state.Record(stateRoot, stage.PlanDigest, stage); err != nil {
+					t.Fatal(err)
+				}
+			}
+			args := []string{"packages", "installed", tc.app, "--checkout", root, "--machine", "desktop"}
+			code, out, errOut := run(t, append(args, "--json")...)
+			var env struct{ Data []packageView }
+			if err := json.Unmarshal([]byte(out), &env); err != nil || code != ExitOK {
+				t.Fatalf("installed JSON: code=%d, error=%v\n%s%s", code, err, out, errOut)
+			}
+			if !tc.present {
+				if len(env.Data) != 0 {
+					t.Fatalf("absent Flatpak listed as installed: %+v", env.Data)
+				}
+				return
+			}
+			if len(env.Data) != 1 || env.Data[0].Canonical != "flatpak:"+tc.app || env.Data[0].State != tc.want || env.Data[0].Installed != "" || env.Data[0].Repository != "flathub" {
+				t.Fatalf("installed Flatpak lost presence or ownership: %+v", env.Data)
+			}
+			code, out, errOut = run(t, args...)
+			if code != ExitOK || !strings.Contains(out, tc.want) || !strings.Contains(out, "flatpak:"+tc.app+" (flathub)") {
+				t.Fatalf("installed human output: code=%d\n%s%s", code, out, errOut)
+			}
+		})
+	}
+}
+
 func TestRPMViewsResolveReceiptOwnershipByNativeIdentity(t *testing.T) {
 	multilib := []facts.Package{
 		{Name: "demo", Arch: "i686", Version: "1", Reason: "user"},
