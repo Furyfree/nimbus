@@ -118,9 +118,10 @@ func runDoctor(cmd *cobra.Command, opts *options, override, machine string) erro
 		}
 		for _, check := range checks {
 			report.Checks = append(report.Checks, check)
-			if check.Status == doctor.Fail {
+			switch check.Status {
+			case doctor.Fail:
 				report.Failed++
-			} else if check.Status == doctor.Unknown {
+			case doctor.Unknown:
 				report.Unknown++
 			}
 		}

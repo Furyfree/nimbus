@@ -845,3 +845,78 @@ func TestRemovalWithoutNamedPackagesIsRefusedBeforeNativeExecution(t *testing.T)
 		t.Fatalf("empty removal executed: %+v", result)
 	}
 }
+
+type failingProgressWriter struct {
+	prefix string
+	err    error
+}
+
+func (w failingProgressWriter) Write(p []byte) (int, error) {
+	if strings.HasPrefix(string(p), w.prefix) {
+		return 0, w.err
+	}
+	return len(p), nil
+}
+
+func TestProgressFailureStopsBeforeNativeExecution(t *testing.T) {
+	for _, kind := range []string{"operation", "privileged command", "user command", "installer digest"} {
+		t.Run(kind, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			src := newScripted()
+			opts := options(t, src, t.TempDir())
+			opts.FirstApply = false
+			cause := errors.New("output unavailable")
+			prefix := "-> "
+			op := plan.Operation{ID: "packages:install", Kind: plan.KindPackage, Action: plan.ActionInstall, Items: []string{"dnf:ripgrep"},
+				Transaction: &plan.Transaction{Packages: []plan.TxPackage{{Name: "ripgrep", Arch: "x86_64", EVR: "1-1.fc44", Repository: "fedora", Section: "installing"}}},
+				Steps:       []plan.Step{{Argv: []string{"dnf5", "-y", "install", "ripgrep"}}}}
+			switch kind {
+			case "privileged command":
+				prefix = "   $ sudo "
+			case "user command":
+				prefix = "   $ env "
+				op = plan.Operation{ID: "user:tools", Kind: plan.KindUser, Action: plan.ActionInstall, Steps: []plan.Step{{Argv: []string{"env", "tool", "install"}}}}
+			case "installer digest":
+				prefix = "   downloaded "
+				op = plan.Operation{ID: "user:mise", Kind: plan.KindUser, Action: plan.ActionInstall, Steps: []plan.Step{{Description: "download https://mise.run to the stage directory and show its sha256"}, {Argv: []string{"sh", plan.InstallerScript}}}}
+				opts.Fetch = func(string) ([]byte, error) { return []byte("#!/bin/sh\n"), nil }
+			}
+			opts.Out = failingProgressWriter{prefix: prefix, err: cause}
+			recorded := false
+			opts.Record = func(string, *state.Stage) error { recorded = true; return nil }
+			result := Run(&plan.Plan{Complete: true, Operations: []plan.Operation{op}}, opts)
+			if !strings.Contains(result.Error, cause.Error()) || result.Failed != op.ID || len(result.Failures) != 1 || len(result.Executed) != 0 || recorded {
+				t.Fatalf("output failure lost or recorded: %+v recorded=%t", result, recorded)
+			}
+			if src.ran("sudo ") || src.ran("env ") || src.ran("sh ") {
+				t.Fatalf("native execution after output failure: %v", src.log)
+			}
+		})
+	}
+}
+
+func TestDiagnosticWriteFailurePreservesPrimaryOperationError(t *testing.T) {
+	for _, kind := range []string{"execution", "record"} {
+		t.Run(kind, func(t *testing.T) {
+			src := newScripted()
+			opts := options(t, src, t.TempDir())
+			opts.FirstApply = false
+			prefix := "   failed: "
+			const primary = "primary operation failure"
+			if kind == "execution" {
+				src.fail["sudo dnf5"] = primary
+			} else {
+				prefix = "   operation applied and verified"
+				opts.Record = func(string, *state.Stage) error { return errors.New(primary) }
+			}
+			opts.Out = failingProgressWriter{prefix: prefix, err: errors.New("secondary output failure")}
+			op := plan.Operation{ID: "packages:install", Kind: plan.KindPackage, Action: plan.ActionInstall, Items: []string{"dnf:ripgrep"},
+				Transaction: &plan.Transaction{Packages: []plan.TxPackage{{Name: "ripgrep", Arch: "x86_64", EVR: "1-1.fc44", Repository: "fedora", Section: "installing"}}},
+				Steps:       []plan.Step{{Argv: []string{"dnf5", "-y", "install", "ripgrep"}}}}
+			result := Run(&plan.Plan{Complete: true, Operations: []plan.Operation{op}}, opts)
+			if !strings.Contains(result.Error, primary) || len(result.Failures) != 1 || !strings.Contains(result.Failures[0].Error, primary) || len(result.Executed) != 0 {
+				t.Fatalf("primary failure lost: %+v", result)
+			}
+		})
+	}
+}

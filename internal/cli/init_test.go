@@ -27,6 +27,70 @@ func (s handoffOutputSource) Stream(out, errOut io.Writer, name string, args ...
 	return err
 }
 
+func TestInitStopsBeforeSelectionWhenStartupOutputFails(t *testing.T) {
+	for _, tc := range []struct {
+		name, output string
+		reuse        bool
+	}{
+		{"log path", "Installation logs:", false},
+		{"hardware", "hardware:", false},
+		{"selector reuse", "the selector already names", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, src := installerFixture(t)
+			withHardware(src.FakeSource)
+			path, err := selector.DefaultPath()
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := []string{"init", "--checkout", root, "--machine", "vm"}
+			var before []byte
+			if tc.reuse {
+				if err := selector.Write(path, &selector.Selector{Schema: selector.CurrentSchema, Checkout: root, Machine: "vm", Origin: "github.com/Furyfree/nimbus"}); err != nil {
+					t.Fatal(err)
+				}
+				before, err = os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				args = []string{"init", "--checkout", root}
+			}
+			cmd := New()
+			cmd.SetArgs(args)
+			cmd.SetOut(resultErrorWriter{match: tc.output, err: syscall.ENOSPC})
+			cmd.SetErr(io.Discard)
+			if err := cmd.Execute(); !errors.Is(err, syscall.ENOSPC) {
+				t.Errorf("startup output failure lost: %v", err)
+			}
+			if len(src.calls) != 0 {
+				t.Errorf("native mutation after failed startup output: %v", src.calls)
+			}
+			after, err := os.ReadFile(path)
+			if tc.reuse {
+				if err != nil || string(after) != string(before) {
+					t.Errorf("existing selector changed: %q, %v", after, err)
+				}
+			} else if !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("selector written after failed startup output: %q, %v", after, err)
+			}
+			if _, err := os.Stat(filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), "nimbus", "operation.lock")); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("failed startup output reached mutation lock: %v", err)
+			}
+			runs, err := filepath.Glob(filepath.Join(os.Getenv("XDG_STATE_HOME"), "nimbus", "install", "run-*"))
+			if err != nil || len(runs) != 1 {
+				t.Fatalf("installation log missing: %v, %v", runs, err)
+			}
+			finished, err := os.ReadFile(filepath.Join(runs[0], ".finished"))
+			if err != nil || strings.TrimSpace(string(finished)) != "failed" {
+				t.Errorf("failed initialization log was not finished: %q, %v", finished, err)
+			}
+			if _, err := os.Stat(filepath.Join(runs[0], ".active")); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("failed initialization log remains active: %v", err)
+			}
+		})
+	}
+}
+
 func TestInitReportsResultWriteFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name, output string

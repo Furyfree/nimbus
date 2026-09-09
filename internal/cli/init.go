@@ -37,7 +37,7 @@ var (
 			return "", err
 		}
 		line, err := bufio.NewReader(in).ReadString('\n')
-		if err != nil && !(errors.Is(err, io.EOF) && strings.TrimSpace(line) != "") {
+		if err != nil && (!errors.Is(err, io.EOF) || strings.TrimSpace(line) == "") {
 			return "", err
 		}
 		return cmp.Or(strings.TrimSpace(line), def), nil
@@ -134,18 +134,19 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	if err != nil {
 		return fmt.Errorf("start installation log: %w", err)
 	}
-	fmt.Fprintf(out, "Installation logs: %s\n", log.dir)
+	if _, err := fmt.Fprintf(out, "Installation logs: %s\n", log.dir); err != nil {
+		return errors.Join(err, log.finish(err))
+	}
+	oldEnv, hadEnv := os.LookupEnv("NIMBUS_INSTALL_LOG_DIR")
+	if err := os.Setenv("NIMBUS_INSTALL_LOG_DIR", log.dir); err != nil {
+		return errors.Join(err, log.finish(err))
+	}
 	previousLog := opts.installLog
 	opts.installLog = log
 	oldOut, oldErr := cmd.OutOrStdout(), cmd.ErrOrStderr()
 	cmd.SetOut(installWriter{oldOut, log})
 	cmd.SetErr(installWriter{oldErr, log})
 	out = cmd.OutOrStdout()
-	oldEnv, hadEnv := os.LookupEnv("NIMBUS_INSTALL_LOG_DIR")
-	if err := os.Setenv("NIMBUS_INSTALL_LOG_DIR", log.dir); err != nil {
-		log.finish(err)
-		return err
-	}
 	defer func() {
 		if hadEnv {
 			_ = os.Setenv("NIMBUS_INSTALL_LOG_DIR", oldEnv)
@@ -163,7 +164,7 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 			}
 		}
 		if err := log.finish(retErr); err != nil {
-			fmt.Fprintf(oldErr, "installation logging failed: %v\n", err)
+			_, _ = fmt.Fprintf(oldErr, "installation logging failed: %v\n", err)
 			retErr = errors.Join(retErr, err)
 		}
 	}()
@@ -192,7 +193,9 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	originalDigest := c.Digest()
 	hw := facts.Inspect(src, root).Hardware
 	if hw.Known() {
-		fmt.Fprintf(out, "hardware: %s\n", describeHardware(hw.Value))
+		if _, err := fmt.Fprintf(out, "hardware: %s\n", describeHardware(hw.Value)); err != nil {
+			return err
+		}
 	}
 
 	// The machine: a tracked manifest, or a new one from the dialog.
@@ -205,7 +208,7 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 		return selectorErr
 	}
 	if existingSelector != nil && (existingSelector.Checkout != root || existingSelector.Origin != origin) {
-		fmt.Fprintf(out, "Selector trust change:\n  previous: %s (%s)\n  requested: %s (%s)\n", existingSelector.Checkout, existingSelector.Origin, root, origin)
+		_, _ = fmt.Fprintf(out, "Selector trust change:\n  previous: %s (%s)\n  requested: %s (%s)\n", existingSelector.Checkout, existingSelector.Origin, root, origin)
 		return fmt.Errorf("selector trust change refused; %s is unchanged; use the existing trusted checkout, or inspect and explicitly update the selector's checkout and origin before retrying", selectorPath)
 	}
 	machine := f.machine
@@ -243,7 +246,9 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	if machine == "" {
 		if existingSelector != nil && existingSelector.Checkout == root {
 			machine = existingSelector.Machine
-			fmt.Fprintf(out, "the selector already names %s for this checkout\n", machine)
+			if _, err := fmt.Fprintf(out, "the selector already names %s for this checkout\n", machine); err != nil {
+				return err
+			}
 		}
 	}
 	if machine == "" {
@@ -274,7 +279,7 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	if err != nil {
 		return err
 	}
-	defer lock.Release()
+	defer func() { _ = lock.Release() }()
 	fresh, err := loadCheckout(root)
 	if err != nil {
 		return err
@@ -515,7 +520,7 @@ func chezmoiHandoff(src facts.Source, out io.Writer, machine string, profiles []
 	}
 	root := strings.TrimSpace(string(sourcePath))
 	if !filepath.IsAbs(root) {
-		return errors.New("Chezmoi returned no absolute source path")
+		return errors.New("chezmoi returned no absolute source path")
 	}
 	origin, err := src.Run("git", facts.GitArgs(root, "config", "--get", "remote.origin.url")...)
 	if err != nil {
@@ -537,7 +542,7 @@ func chezmoiHandoff(src facts.Source, out io.Writer, machine string, profiles []
 		return fmt.Errorf("read Chezmoi selection: %w", err)
 	}
 	if selection.Machine != machine || !selection.ManagedByNimbus || !slices.Equal(slices.Sorted(slices.Values(selection.Profiles)), slices.Sorted(slices.Values(profiles))) {
-		return fmt.Errorf("Chezmoi's stored selection differs; refresh it before retrying: %s", doctor.ChezmoiRefresh(machine, profiles, selection.OnePasswordSSH))
+		return fmt.Errorf("chezmoi's stored selection differs; refresh it before retrying: %s", doctor.ChezmoiRefresh(machine, profiles, selection.OnePasswordSSH))
 	}
 	if onePasswordSSH && !selection.OnePasswordSSH {
 		return fmt.Errorf("the existing Chezmoi configuration has 1Password SSH disabled; enable it explicitly with: %s", doctor.ChezmoiRefresh(machine, profiles, true))

@@ -354,7 +354,9 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 		return err
 	}
 	if _, err := src.Run("dnf5", "makecache"); err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "metadata not refreshed: %v; using cached metadata\n", err)
+		if _, writeErr := fmt.Fprintf(cmd.ErrOrStderr(), "metadata not refreshed: %v; using cached metadata\n", err); writeErr != nil {
+			return errors.Join(err, writeErr)
+		}
 	}
 	p, _, err := planWithState(trial, src, false)
 	if err != nil {
@@ -396,7 +398,7 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 	if err != nil {
 		return err
 	}
-	defer lock.Release()
+	defer func() { _ = lock.Release() }()
 	fresh, err := loadSelected(flags)
 	if err != nil {
 		return err
@@ -416,11 +418,9 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 	}
 	current, err := os.ReadFile(path)
 	if err != nil || string(current) != string(before) {
-		lock.Release()
 		return errors.New("the manifest changed while the plan was being reviewed; run the command again")
 	}
 	if err := writeManifest(path, after); err != nil {
-		lock.Release()
 		return err
 	}
 	if _, err := fmt.Fprintf(review, "wrote %s; the Git change is yours to commit\n", path); err != nil {
@@ -438,7 +438,6 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 		}
 	}
 	if nothingToRun(p) {
-		lock.Release()
 		if opts.json {
 			return writeJSON(out, syncResult{Digest: p.Digest, Executed: []string{}, Differences: []string{}}, nil)
 		}

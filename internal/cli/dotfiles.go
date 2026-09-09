@@ -37,7 +37,7 @@ func newDotfiles(opts *options) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				defer lock.Release()
+				defer func() { _ = lock.Release() }()
 			}
 			out := cmd.OutOrStdout()
 			if opts.json {

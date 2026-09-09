@@ -97,12 +97,12 @@ func openInstallLog() (*installLog, error) {
 	}
 	i, err := f.Stat()
 	if err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, err
 	}
 	st, ok := i.Sys().(*syscall.Stat_t)
 	if !ok || st.Uid != uint32(os.Getuid()) || st.Nlink != 1 || !i.Mode().IsRegular() || i.Mode().Perm() != 0600 {
-		f.Close()
+		_ = f.Close()
 		return nil, errors.New("unsafe opened installation log file")
 	}
 	l := &installLog{file: f, dir: dir, owned: owned, started: time.Now()}
@@ -167,7 +167,8 @@ func (l *installLog) Write(p []byte) (int, error) {
 }
 
 func (l *installLog) event(format string, args ...any) {
-	fmt.Fprintf(l, "[%s] %s\n", time.Now().UTC().Format(time.RFC3339Nano), fmt.Sprintf(format, args...))
+	// Write retains the first error for commandError and finish to report.
+	_, _ = fmt.Fprintf(l, "[%s] %s\n", time.Now().UTC().Format(time.RFC3339Nano), fmt.Sprintf(format, args...))
 }
 
 func (l *installLog) finish(runErr error) error {
@@ -330,7 +331,7 @@ func (s installSource) Run(name string, args ...string) ([]byte, error) {
 	} else {
 		output, err = s.Source.Run(name, args...)
 		if publicInstallCommand(name, args) {
-			s.log.Write(output)
+			_, _ = s.log.Write(output)
 		}
 	}
 	s.log.commandEnd(label, start, err)
@@ -394,10 +395,15 @@ func (e privateInstallError) Error() string {
 func (e privateInstallError) Unwrap() error { return e.cause }
 func (s installSource) commandError(name string, args []string, err error, showDiagnostic bool) error {
 	if err != nil && !publicInstallCommand(name, args) {
+		shown := false
 		if s.terminal != nil && showDiagnostic {
-			fmt.Fprintln(s.terminal, err)
+			if _, writeErr := fmt.Fprintln(s.terminal, err); writeErr != nil {
+				err = errors.Join(err, writeErr)
+			} else {
+				shown = true
+			}
 		}
-		err = privateInstallError{filepath.Base(name), err, showDiagnostic}
+		err = privateInstallError{filepath.Base(name), err, shown}
 	}
 	s.log.mu.Lock()
 	logErr := s.log.err

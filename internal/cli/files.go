@@ -86,7 +86,7 @@ func newFiles(opts *options) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				defer lock.Release()
+				defer func() { _ = lock.Release() }()
 				fresh, err := prepareAcceptance(flags, args[0])
 				if err != nil {
 					return err
@@ -230,7 +230,7 @@ func acceptanceCheckoutIdentity(root string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("checkout identity %s: %w", name, err)
 		}
-		fmt.Fprintf(h, "%s\x00%d\x00", name, len(data))
+		_, _ = fmt.Fprintf(h, "%s\x00%d\x00", name, len(data))
 		h.Write(data)
 		if name == ".git/HEAD" {
 			head = strings.TrimSpace(string(data))
@@ -262,7 +262,7 @@ func acceptParent(root, rel string) (*os.File, string, error) {
 	parts := strings.Split(rel, string(filepath.Separator))
 	for _, part := range parts[:len(parts)-1] {
 		next, e := syscall.Openat(fd, part, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
-		syscall.Close(fd)
+		_ = syscall.Close(fd)
 		if e != nil {
 			return nil, "", e
 		}
@@ -277,7 +277,7 @@ func readAcceptAt(parent *os.File, name string) ([]byte, os.FileInfo, error) {
 		return nil, nil, err
 	}
 	f := os.NewFile(uintptr(fd), name)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil {
 		return nil, nil, err
@@ -302,7 +302,7 @@ func readAcceptFile(root, rel string) ([]byte, os.FileInfo, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	defer parent.Close()
+	defer func() { _ = parent.Close() }()
 	return readAcceptAt(parent, name)
 }
 
@@ -311,7 +311,7 @@ func replaceAcceptedSource(in *acceptInput) error {
 	if err != nil {
 		return err
 	}
-	defer parent.Close()
+	defer func() { _ = parent.Close() }()
 	data, info, err := readAcceptAt(parent, name)
 	if err != nil {
 		return err
@@ -327,7 +327,7 @@ func replaceAcceptedSource(in *acceptInput) error {
 		return err
 	}
 	f := os.NewFile(uintptr(fd), tmp)
-	defer syscall.Unlinkat(int(parent.Fd()), tmp)
+	defer func() { _ = syscall.Unlinkat(int(parent.Fd()), tmp) }()
 	if _, err = f.Write(in.target); err == nil {
 		err = f.Chmod(info.Mode().Perm())
 	}

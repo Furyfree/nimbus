@@ -50,8 +50,8 @@ func writeManifest(path string, content []byte) error {
 		return err
 	}
 	name := tmp.Name()
-	defer os.Remove(name)
-	defer tmp.Close()
+	defer func() { _ = os.Remove(name) }()
+	defer func() { _ = tmp.Close() }()
 	if _, err := tmp.Write(append(content, '\n')); err != nil {
 		return err
 	}

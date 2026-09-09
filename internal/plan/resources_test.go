@@ -370,18 +370,20 @@ func TestRetirementPlansShowSessionRequirementsOnlyForChanges(t *testing.T) {
 					receipt.Resource, receipt.Previous, receipt.Intended = "group:docker:owner", "false", "true"
 					src.Commands[facts.Key("id", "-nG", "--", "owner")] = []byte("owner docker")
 					src.Commands[facts.Key("id", "-gn", "--", "owner")] = []byte("owner")
-					if outcome == "unchanged" {
+					switch outcome {
+					case "unchanged":
 						receipt.Previous = "true"
-					} else if outcome == "blocked" {
+					case "blocked":
 						src.Commands[facts.Key("id", "-gn", "--", "owner")] = []byte("docker")
 					}
 					note = "logout and login"
 				} else {
 					receipt.Resource, receipt.Previous, receipt.Intended = "default-target", "graphical.target", "multi-user.target"
 					src.Commands[facts.Key("systemctl", "get-default")] = []byte("multi-user.target\n")
-					if outcome == "unchanged" {
+					switch outcome {
+					case "unchanged":
 						receipt.Previous = "multi-user.target"
-					} else if outcome == "blocked" {
+					case "blocked":
 						receipt.Intended = "graphical.target"
 					}
 					note = "next boot"

@@ -302,7 +302,10 @@ func editableCheckout(t *testing.T) string {
 			if err != nil {
 				return err
 			}
-			rel, _ := filepath.Rel(src, p)
+			rel, err := filepath.Rel(src, p)
+			if err != nil {
+				return err
+			}
 			if d.IsDir() {
 				return os.MkdirAll(filepath.Join(dst, rel), 0o755)
 			}
@@ -315,11 +318,23 @@ func editableCheckout(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
-	data, _ := os.ReadFile(filepath.Join(src, "nimbus.toml"))
-	os.WriteFile(filepath.Join(dst, "nimbus.toml"), data, 0o644)
-	os.MkdirAll(filepath.Join(dst, ".git"), 0o755)
-	os.WriteFile(filepath.Join(dst, ".git", "config"), []byte("[remote \"origin\"]\n\turl = https://github.com/Furyfree/nimbus.git\n"), 0o644)
-	real, _ := filepath.EvalSymlinks(dst)
+	data, err := os.ReadFile(filepath.Join(src, "nimbus.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dst, "nimbus.toml"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dst, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dst, ".git", "config"), []byte("[remote \"origin\"]\n\turl = https://github.com/Furyfree/nimbus.git\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	real, err := filepath.EvalSymlinks(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return real
 }
 

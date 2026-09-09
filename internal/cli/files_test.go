@@ -123,15 +123,25 @@ func acceptanceFixture(t *testing.T) (string, string, string) {
 			t.Fatal(err)
 		}
 	}
-	os.MkdirAll(filepath.Join(checkout, "profiles"), 0755)
 	source := filepath.Join(checkout, "system/root/etc/nimbus-test.conf")
-	os.Chmod(source, 0755)
+	if err := os.Chmod(source, 0755); err != nil {
+		t.Fatal(err)
+	}
 	live := filepath.Join(filesSystemRoot, "etc/nimbus-test.conf")
-	os.MkdirAll(filepath.Dir(live), 0755)
-	os.WriteFile(live, []byte("new\n"), 0644)
+	if err := os.MkdirAll(filepath.Dir(live), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(live, []byte("new\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	receipt := state.Receipt{Schema: state.ReceiptSchema, Resource: "file:/etc/nimbus-test.conf", Provider: "system-file", Verified: true, Machine: "test", PlanDigest: "sha256:test", Operation: "install"}
-	data, _ := json.Marshal(receipt)
-	os.MkdirAll(filepath.Join(stateRoot, state.ReceiptsDir), 0755)
+	data, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(stateRoot, state.ReceiptsDir), 0755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(stateRoot, state.SchemaFile), fmt.Appendln(nil, state.Schema), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -143,14 +153,26 @@ func acceptanceFixture(t *testing.T) (string, string, string) {
 
 func TestFilesAcceptCapturesOnlySourceAndPreservesMode(t *testing.T) {
 	checkout, source, live := acceptanceFixture(t)
-	before, _ := os.Stat(live)
+	before, err := os.Stat(live)
+	if err != nil {
+		t.Fatal(err)
+	}
 	code, out, errOut := run(t, "files", "accept", "/etc/nimbus-test.conf", "--checkout", checkout, "--machine", "test", "--yes")
 	if code != ExitOK {
 		t.Fatalf("%d %s %s", code, out, errOut)
 	}
-	data, _ := os.ReadFile(source)
-	info, _ := os.Stat(source)
-	after, _ := os.Stat(live)
+	data, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(live)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if string(data) != "new\n" || info.Mode().Perm() != 0755 || !os.SameFile(before, after) || !before.ModTime().Equal(after.ModTime()) {
 		t.Fatal("capture changed metadata/target or lost content")
 	}
@@ -252,13 +274,21 @@ func TestFilesAcceptPreviewCancellationAndChangedInput(t *testing.T) {
 				case "cancel":
 					return false
 				case "target":
-					os.WriteFile(live, []byte("changed\n"), 0644)
+					if err := os.WriteFile(live, []byte("changed\n"), 0644); err != nil {
+						t.Fatal(err)
+					}
 				case "source":
-					os.WriteFile(source, []byte("changed source\n"), 0755)
+					if err := os.WriteFile(source, []byte("changed source\n"), 0755); err != nil {
+						t.Fatal(err)
+					}
 				case "receipt":
-					os.Remove(filepath.Join(stateRoot, state.ReceiptsDir, state.FileName("file:/etc/nimbus-test.conf")))
+					if err := os.Remove(filepath.Join(stateRoot, state.ReceiptsDir, state.FileName("file:/etc/nimbus-test.conf"))); err != nil {
+						t.Fatal(err)
+					}
 				case "head":
-					os.WriteFile(filepath.Join(checkout, ".git/HEAD"), []byte("other\n"), 0644)
+					if err := os.WriteFile(filepath.Join(checkout, ".git/HEAD"), []byte("other\n"), 0644); err != nil {
+						t.Fatal(err)
+					}
 				}
 				return true
 			}
@@ -270,7 +300,10 @@ func TestFilesAcceptPreviewCancellationAndChangedInput(t *testing.T) {
 			if scenario == "preview" && code != ExitOK || scenario != "preview" && code != ExitFailure {
 				t.Fatalf("%d %s %s", code, out, errOut)
 			}
-			data, _ := os.ReadFile(source)
+			data, err := os.ReadFile(source)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if string(data) == "new\n" {
 				t.Fatal("captured despite cancellation/input change")
 			}
@@ -348,32 +381,60 @@ func TestFilesAcceptRefusesUnsafeTargetsAndOwnership(t *testing.T) {
 			case "unselected":
 				target = "/etc/other"
 			case "symlink":
-				os.Remove(live)
-				os.Symlink("/etc/passwd", live)
+				if err := os.Remove(live); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink("/etc/passwd", live); err != nil {
+					t.Fatal(err)
+				}
 			case "ancestor":
-				os.Rename(filepath.Dir(live), filepath.Join(filesSystemRoot, "real-etc"))
-				os.Symlink("real-etc", filepath.Dir(live))
+				if err := os.Rename(filepath.Dir(live), filepath.Join(filesSystemRoot, "real-etc")); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink("real-etc", filepath.Dir(live)); err != nil {
+					t.Fatal(err)
+				}
 			case "hardlink":
-				os.Link(live, live+".link")
+				if err := os.Link(live, live+".link"); err != nil {
+					t.Fatal(err)
+				}
 			case "directory":
-				os.Remove(live)
-				os.Mkdir(live, 0755)
+				if err := os.Remove(live); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(live, 0755); err != nil {
+					t.Fatal(err)
+				}
 			case "unverified", "foreign":
 				path := filepath.Join(stateRoot, state.ReceiptsDir, state.FileName("file:"+target))
-				data, _ := os.ReadFile(path)
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
 				var r state.Receipt
-				json.Unmarshal(data, &r)
+				if err := json.Unmarshal(data, &r); err != nil {
+					t.Fatal(err)
+				}
 				if scenario == "unverified" {
 					r.Verified = false
 				} else {
 					r.Machine = "other"
 				}
-				data, _ = json.Marshal(r)
-				os.WriteFile(path, data, 0644)
+				data, err = json.Marshal(r)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, data, 0644); err != nil {
+					t.Fatal(err)
+				}
 			case "metadata":
-				os.Chmod(live, 0600)
+				if err := os.Chmod(live, 0600); err != nil {
+					t.Fatal(err)
+				}
 			case "binary":
-				os.WriteFile(live, []byte{0}, 0644)
+				if err := os.WriteFile(live, []byte{0}, 0644); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if code, out, errOut := run(t, "files", "accept", target, "--checkout", checkout, "--machine", "test", "--yes"); code != ExitFailure {
 				t.Fatalf("%d %s %s", code, out, errOut)
@@ -391,7 +452,10 @@ func TestFilesAcceptJSONRequiresExplicitMode(t *testing.T) {
 	if code, out, errOut := run(t, append(args, "--plan")...); code != ExitOK || !strings.Contains(out, `"changed": false`) {
 		t.Fatalf("%d %s %s", code, out, errOut)
 	}
-	data, _ := os.ReadFile(source)
+	data, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if string(data) != "old\n" {
 		t.Fatal("JSON preview mutated source")
 	}

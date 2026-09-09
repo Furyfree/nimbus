@@ -461,6 +461,7 @@ type fileCommandSource struct {
 	mutated        bool
 	restoreFailure bool
 	inspectFailure bool
+	cleanupFailure bool
 }
 
 func (s *fileCommandSource) Run(name string, args ...string) ([]byte, error) {
@@ -490,6 +491,18 @@ func (s *fileCommandSource) Stream(_, _ io.Writer, name string, args ...string) 
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return err
 	}
+	if s.cleanupFailure {
+		staged := args[len(args)-1]
+		if err := os.Remove(staged); err != nil {
+			return err
+		}
+		if err := os.Mkdir(staged, 0700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(staged, "leftover"), nil, 0600); err != nil {
+			return err
+		}
+	}
 	s.mutated = true
 	s.after = payload.Change.After
 	if s.after.Exists {
@@ -509,11 +522,12 @@ func fileCommands() *fileCommandSource {
 	}}}
 }
 func TestPostWriteFailureReportsAppliedUnrecordedFile(t *testing.T) {
-	for _, kind := range []string{"restorecon", "reinspection"} {
+	for _, kind := range []string{"restorecon", "reinspection", "payload cleanup"} {
 		t.Run(kind, func(t *testing.T) {
 			src := fileCommands()
 			src.restoreFailure = kind == "restorecon"
 			src.inspectFailure = kind == "reinspection"
+			src.cleanupFailure = kind == "payload cleanup"
 			ex := resourceExecutor(src)
 			ex.opts.Stage = t.TempDir()
 			op := plan.Operation{ID: "file:/etc/nimbus.conf", Kind: plan.KindFile, Action: plan.ActionInstall, File: &plan.FileChange{Target: "/etc/nimbus.conf", After: facts.SystemFile{Exists: true, Content: []byte("new"), Owner: "root", Group: "root", Mode: "0644"}}}

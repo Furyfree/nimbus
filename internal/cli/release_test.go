@@ -119,7 +119,7 @@ esac
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer gz.Close()
+			defer func() { _ = gz.Close() }() // Decoder cleanup; reads report decompression errors.
 			archive := tar.NewReader(gz)
 			files := map[string]string{}
 			for {

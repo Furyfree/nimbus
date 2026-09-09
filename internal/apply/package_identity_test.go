@@ -180,15 +180,19 @@ func TestAbsentRetirementRechecksInventoryAfterEarlierOperations(t *testing.T) {
 					}
 					if len(stage.Receipts) != 0 {
 						if kind == plan.KindPackage {
-							if transition == "present" {
+							switch transition {
+							case "present":
 								src.installed = append(src.installed, "actual-tool")
-							} else if transition == "unknown" {
+							case "unknown":
 								src.fail["dnf5"] = "package inventory unavailable"
 							}
-						} else if transition == "present" {
-							src.apps = []string{"org.example.Gone"}
-						} else if transition == "unknown" {
-							src.fail["flatpak list"] = "app inventory unavailable"
+						} else {
+							switch transition {
+							case "present":
+								src.apps = []string{"org.example.Gone"}
+							case "unknown":
+								src.fail["flatpak list"] = "app inventory unavailable"
+							}
 						}
 					}
 					return nil

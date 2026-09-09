@@ -75,19 +75,19 @@ func Acquire(path string, info LockInfo) (*Lock, error) {
 	}
 	fileInfo, err := f.Stat()
 	if err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, err
 	}
 	stat, ok := fileInfo.Sys().(*syscall.Stat_t)
 	if !fileInfo.Mode().IsRegular() || !ok || int(stat.Uid) != os.Getuid() || stat.Nlink != 1 {
-		f.Close()
+		_ = f.Close()
 		return nil, errors.New("lock must be a regular file owned by this user with one link")
 	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		var other LockInfo
 		data, _ := os.ReadFile(path)
 		_ = json.Unmarshal(data, &other)
-		f.Close()
+		_ = f.Close()
 		if other.PID != 0 {
 			return nil, fmt.Errorf("another Nimbus operation is running: %s (%s, pid %d, started %s)", other.Command, other.Operation, other.PID, other.Started.Format(time.RFC3339))
 		}
@@ -95,24 +95,25 @@ func Acquire(path string, info LockInfo) (*Lock, error) {
 	}
 	// Stale content is replaced only now, after the lock is held.
 	if err := f.Truncate(0); err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, err
 	}
 	data, _ := json.Marshal(info)
 	if _, err := f.WriteAt(append(data, '\n'), 0); err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, err
 	}
 	return &Lock{file: f}, nil
 }
 
 // Release drops the lock. The file stays; its content is diagnostic only.
+// It closes the descriptor even if unlocking fails.
 func (l *Lock) Release() error {
 	if l == nil || l.file == nil {
 		return nil
 	}
-	err := syscall.Flock(int(l.file.Fd()), syscall.LOCK_UN)
-	l.file.Close()
+	unlockErr := syscall.Flock(int(l.file.Fd()), syscall.LOCK_UN)
+	closeErr := l.file.Close()
 	l.file = nil
-	return err
+	return errors.Join(unlockErr, closeErr)
 }

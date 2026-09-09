@@ -57,7 +57,7 @@ func Load(path string) (*Selector, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read selector: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	opened, err := f.Stat()
 	if err != nil {
 		return nil, fmt.Errorf("read selector: %w", err)
@@ -125,8 +125,10 @@ func Write(path string, s *Selector) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name())
-	defer tmp.Close()
+	defer func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+	}()
 	if _, err := tmp.Write(content); err != nil {
 		return err
 	}
@@ -267,7 +269,7 @@ func ParseOriginURL(data []byte) (string, error) {
 		}
 		value, err := parseGitValue(rawValue)
 		if err != nil {
-			return "", fmt.Errorf("Git configuration line %d: %w", lineNumber, err)
+			return "", fmt.Errorf("parse Git configuration line %d: %w", lineNumber, err)
 		}
 		if section != "remote" || subsection != "origin" || !strings.EqualFold(strings.TrimSpace(key), "url") {
 			continue

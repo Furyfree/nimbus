@@ -63,15 +63,27 @@ func TestSystemFileRejectsSymlinksHardlinksAndForeignParents(t *testing.T) {
 			c := plan.FileChange{Target: "/etc/managed/file", After: localFile(t, "new")}
 			switch kind {
 			case "parent-symlink":
-				os.Remove(filepath.Join(root, "etc/managed"))
-				os.Symlink(t.TempDir(), filepath.Join(root, "etc/managed"))
+				if err := os.Remove(filepath.Join(root, "etc/managed")); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(t.TempDir(), filepath.Join(root, "etc/managed")); err != nil {
+					t.Fatal(err)
+				}
 			case "target-symlink":
-				os.Symlink(filepath.Join(t.TempDir(), "victim"), target)
+				if err := os.Symlink(filepath.Join(t.TempDir(), "victim"), target); err != nil {
+					t.Fatal(err)
+				}
 			case "hardlink":
-				os.WriteFile(target, []byte("old"), 0644)
-				os.Link(target, target+"-alias")
+				if err := os.WriteFile(target, []byte("old"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Link(target, target+"-alias"); err != nil {
+					t.Fatal(err)
+				}
 			case "writable-parent":
-				os.Chmod(filepath.Dir(target), 0777)
+				if err := os.Chmod(filepath.Dir(target), 0777); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if err := ApplySystemFile(root, c); err == nil {
 				t.Fatal("unsafe path accepted")

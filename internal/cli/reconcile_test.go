@@ -81,9 +81,10 @@ func TestReconcileVendorRepositoriesAfterPackageTransaction(t *testing.T) {
 			}
 			var out bytes.Buffer
 			var review io.Writer = &out
-			if mode == "preview header failure" {
+			switch mode {
+			case "preview header failure":
 				review = &previewErrorWriter{err: syscall.ENOSPC}
-			} else if mode == "preview plan failure" {
+			case "preview plan failure":
 				review = &previewErrorWriter{after: 1, err: syscall.ENOSPC}
 			}
 			options := func(p *plan.Plan) apply.Options {

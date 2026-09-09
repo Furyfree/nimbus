@@ -33,7 +33,7 @@ var (
 			if err != nil {
 				return nil, err
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != http.StatusOK {
 				return nil, fmt.Errorf("%s: HTTP %s", url, resp.Status)
 			}
@@ -54,7 +54,7 @@ var (
 			if err := os.WriteFile(path, data, 0o644); err != nil {
 				return err
 			}
-			defer os.Remove(path)
+			defer func() { _ = os.Remove(path) }()
 			_, err = src.Run("sudo", exe, "internal", "record", "--plan", digest, "--stage", path)
 			return err
 		}
@@ -64,7 +64,9 @@ var (
 	// long transaction does not ask again. Tests replace it.
 	sudoKeepalive = func(src facts.Source, out, errOut io.Writer) (func(), error) {
 		if _, err := src.Run("sudo", "-n", "-v"); err != nil {
-			fmt.Fprintln(out, "sudo is needed for the privileged commands; the password is asked once")
+			if _, err := fmt.Fprintln(out, "sudo is needed for the privileged commands; the password is asked once"); err != nil {
+				return nil, err
+			}
 			if err := src.Stream(out, errOut, "sudo", "-v"); err != nil {
 				return nil, err
 			}
@@ -92,7 +94,7 @@ var (
 		}
 		reader := bufio.NewReader(in)
 		line, err := reader.ReadString('\n')
-		if err != nil && !(errors.Is(err, io.EOF) && strings.TrimSpace(line) != "") {
+		if err != nil && (!errors.Is(err, io.EOF) || strings.TrimSpace(line) == "") {
 			return false
 		}
 		answer := strings.TrimSpace(strings.ToLower(line))
@@ -200,7 +202,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 				reportErr = writeJSON(out, result, nil)
 			} else {
 				var summary bytes.Buffer
-				renderRunSummary(&summary, "sync", result.Steps)
+				_ = renderRunSummary(&summary, "sync", result.Steps)
 				if result.Reboot {
 					fmt.Fprintln(&summary, "Reboot required to use the configured boot target or greeter.")
 				}
@@ -256,11 +258,13 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	// reads the cache as it is and touches nothing.
 	if !sf.plan && sf.approvedDigest == "" && !sf.userOnly {
 		if _, err := src.Run("dnf5", "makecache"); err != nil {
-			fmt.Fprintf(errOut, "metadata not refreshed: %v\n", err)
+			if _, writeErr := fmt.Fprintf(errOut, "metadata not refreshed: %v\n", err); writeErr != nil {
+				return errors.Join(err, writeErr)
+			}
 			result.Steps = append(result.Steps, runStep{Name: "metadata refresh", Status: "warning", Detail: err.Error() + "; using cached metadata"})
 		}
 	}
-	p, applied, err := planWithState(s, src, sf.prune)
+	p, _, err := planWithState(s, src, sf.prune)
 	if err != nil {
 		return err
 	}
@@ -351,7 +355,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 		}
 	}
 	if held == nil {
-		defer lock.Release()
+		defer func() { _ = lock.Release() }()
 	}
 	// Another Nimbus run may have finished while the question was open;
 	// the plan answered must still be the plan that runs.
@@ -362,7 +366,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	if freshSelection.Root != s.Root || freshSelection.Resolved.Machine != s.Resolved.Machine {
 		return errors.New("the selection changed while the question was open; run sync again")
 	}
-	fresh, freshApplied, err := planWithState(freshSelection, src, sf.prune)
+	fresh, applied, err := planWithState(freshSelection, src, sf.prune)
 	if err != nil {
 		return err
 	}
@@ -375,7 +379,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	if err := facts.CheckPlatform(src, freshSelection.Checkout.Definitions().Compatibility.Fedora); err != nil {
 		return err
 	}
-	p, applied, currentPlan = fresh, freshApplied, fresh
+	p, currentPlan = fresh, fresh
 	approvedCheckout := p.Checkout
 	s = freshSelection
 	stage := filepath.Join(filepath.Dir(lockPath), "stage")
@@ -500,7 +504,9 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	}
 	if !sf.noUpgrade {
 		phase = "upgrade"
-		fmt.Fprintln(execOut, "-> upgrade the system")
+		if _, err := fmt.Fprintln(execOut, "-> upgrade the system"); err != nil {
+			return err
+		}
 		r := apply.Upgrade(options(p), s.Checkout.Definitions())
 		result.Executed = append(result.Executed, r.Executed...)
 		result.Differences = append(result.Differences, r.Differences...)

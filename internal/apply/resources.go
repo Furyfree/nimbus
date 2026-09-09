@@ -2,6 +2,7 @@ package apply
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -205,9 +206,14 @@ func (ex *executor) systemFile(op plan.Operation) (receipts []state.Receipt, rem
 			return nil, nil, err
 		}
 		staged := f.Name()
-		defer os.Remove(staged)
+		defer func() {
+			if err := os.Remove(staged); err != nil && !errors.Is(err, os.ErrNotExist) {
+				resultErr = errors.Join(resultErr, fmt.Errorf("remove staged file payload: %w", err))
+				receipts, remove = nil, nil
+			}
+		}()
 		if _, err = f.Write(payload); err != nil {
-			f.Close()
+			_ = f.Close()
 			return nil, nil, err
 		}
 		if err = f.Close(); err != nil {

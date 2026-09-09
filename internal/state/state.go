@@ -281,7 +281,7 @@ func Record(root, planDigest string, st *Stage) error {
 	if err != nil {
 		return err
 	}
-	defer journal.Close()
+	defer func() { _ = journal.Close() }()
 	enc := json.NewEncoder(journal)
 	for _, r := range st.Receipts {
 		data, err := json.MarshalIndent(r, "", "  ")
@@ -320,8 +320,10 @@ func writeAtomic(path string, data []byte, mode fs.FileMode) error {
 		return err
 	}
 	name := tmp.Name()
-	defer os.Remove(name)
-	defer tmp.Close()
+	defer func() {
+		_ = tmp.Close()
+		_ = os.Remove(name)
+	}()
 	if _, err := tmp.Write(data); err != nil {
 		return err
 	}

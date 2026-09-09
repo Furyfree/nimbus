@@ -195,7 +195,7 @@ func CheckSourceRetirement(op Operation, f *facts.Facts, src facts.Source) error
 		return fmt.Errorf("source ownership identity is missing")
 	}
 	if op.Kind == KindFlatpakRemote && !f.Flatpak.Known() {
-		return fmt.Errorf("Flatpak state is unknown: %s", f.Flatpak.Error)
+		return fmt.Errorf("flatpak state is unknown: %s", f.Flatpak.Error)
 	}
 	if op.Kind == KindRepository && (!f.Repositories.Known() || !f.Packages.Known()) {
 		return fmt.Errorf("repository or installed package state is unknown")

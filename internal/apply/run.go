@@ -103,7 +103,11 @@ func Run(p *plan.Plan, opts Options) *Result {
 		if op.Action == plan.ActionKeep {
 			continue
 		}
-		fmt.Fprintf(ex.opts.Out, "-> %s\n", op.Summary)
+		if _, err := fmt.Fprintf(ex.opts.Out, "-> %s\n", op.Summary); err != nil {
+			r.Failed, r.Error = op.ID, "write operation progress: "+err.Error()
+			r.Failures = append(r.Failures, Failure{ID: op.ID, Error: r.Error})
+			return r
+		}
 		receipts, remove, err := ex.execute(op)
 		r.Differences = append(r.Differences, ex.differences...)
 		ex.differences = nil
@@ -112,7 +116,7 @@ func Run(p *plan.Plan, opts Options) *Result {
 			if r.Error == "" {
 				r.Failed, r.Error = op.ID, err.Error()
 			}
-			fmt.Fprintf(ex.opts.Out, "   failed: %v\n", err)
+			_, _ = fmt.Fprintf(ex.opts.Out, "   failed: %v\n", err)
 			if op.Kind == plan.KindUser {
 				continue
 			}
@@ -139,7 +143,7 @@ func Run(p *plan.Plan, opts Options) *Result {
 			if err := ex.opts.Record(p.Digest, st); err != nil {
 				r.Failed = op.ID
 				r.Error = "operation applied and verified, but its receipt was not recorded: " + err.Error()
-				fmt.Fprintf(ex.opts.Out, "   %s; inspect the live resource and restore its reviewed previous state before retrying.\n", r.Error)
+				_, _ = fmt.Fprintf(ex.opts.Out, "   %s; inspect the live resource and restore its reviewed previous state before retrying.\n", r.Error)
 				r.Failures = append(r.Failures, Failure{ID: op.ID, Error: r.Error})
 				return r
 			}
@@ -154,7 +158,7 @@ func Run(p *plan.Plan, opts Options) *Result {
 			for _, id := range deferredFileRemovals {
 				r.Failures = append(r.Failures, Failure{ID: id, Error: r.Error})
 			}
-			fmt.Fprintf(ex.opts.Out, "   %s\n", r.Error)
+			_, _ = fmt.Fprintf(ex.opts.Out, "   %s\n", r.Error)
 		}
 	}
 	return r
@@ -204,7 +208,9 @@ func (ex *executor) installed() ([]facts.Package, error) {
 // sudo runs one privileged native command with its output on the terminal,
 // so DNF's and Flatpak's own progress stays visible.
 func (ex *executor) sudo(argv ...string) error {
-	fmt.Fprintf(ex.opts.Out, "   $ sudo %s\n", strings.Join(argv, " "))
+	if _, err := fmt.Fprintf(ex.opts.Out, "   $ sudo %s\n", strings.Join(argv, " ")); err != nil {
+		return fmt.Errorf("write command progress: %w", err)
+	}
 	errOut := cmp.Or(ex.opts.ErrOut, ex.opts.Out)
 	return ex.opts.Source.Stream(ex.opts.Out, errOut, "sudo", argv...)
 }
@@ -308,7 +314,7 @@ func (ex *executor) verifiedKey(name string, data []byte, want string) (string, 
 		return "", err
 	}
 	if got != definitions.NormalizeFingerprint(want) {
-		os.Remove(path)
+		_ = os.Remove(path)
 		return "", fmt.Errorf("key fingerprint %s does not match the declared %s", got, definitions.NormalizeFingerprint(want))
 	}
 	return path, nil
@@ -904,7 +910,9 @@ func (ex *executor) userTool(op plan.Operation) error {
 				argv[i] = home + rest
 			}
 		}
-		fmt.Fprintf(ex.opts.Out, "   $ %s\n", strings.Join(argv, " "))
+		if _, err := fmt.Fprintf(ex.opts.Out, "   $ %s\n", strings.Join(argv, " ")); err != nil {
+			return fmt.Errorf("write command progress: %w", err)
+		}
 		errOut := cmp.Or(ex.opts.ErrOut, ex.opts.Out)
 		if err := ex.opts.Source.Stream(ex.opts.Out, errOut, argv[0], argv[1:]...); err != nil {
 			return err
@@ -936,7 +944,9 @@ func (ex *executor) fetchInstaller(op plan.Operation) (string, error) {
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return "", err
 	}
-	fmt.Fprintf(ex.opts.Out, "   downloaded %s, sha256 %x\n", url, sha256.Sum256(data))
+	if _, err := fmt.Fprintf(ex.opts.Out, "   downloaded %s, sha256 %x\n", url, sha256.Sum256(data)); err != nil {
+		return "", fmt.Errorf("show installer digest: %w", err)
+	}
 	return path, nil
 }
 

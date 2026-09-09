@@ -17,7 +17,7 @@ func readKeysFromArchive(archive []byte) (map[string][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 	keys := map[string][]byte{}
 	tr := tar.NewReader(gz)
 	for {

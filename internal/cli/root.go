@@ -122,7 +122,7 @@ func Execute(args []string, stdout, stderr io.Writer) int {
 		return ExitOK
 	}
 	if _, ok := errors.AsType[usageError](err); ok {
-		fmt.Fprintln(stderr, "error:", err)
+		_, _ = fmt.Fprintln(stderr, "error:", err)
 		return ExitUsage
 	}
 	if errors.Is(err, reported{}) {
@@ -133,6 +133,6 @@ func Execute(args []string, stdout, stderr io.Writer) int {
 			return ExitFailure
 		}
 	}
-	fmt.Fprintln(stderr, "error:", err)
+	_, _ = fmt.Fprintln(stderr, "error:", err)
 	return ExitFailure
 }

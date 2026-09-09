@@ -109,12 +109,14 @@ func (s *installerSource) Stream(out, errOut io.Writer, name string, args ...str
 	}
 	lock, err := apply.Acquire(path, apply.LockInfo{})
 	if err == nil {
-		lock.Release()
+		_ = lock.Release() // Cleanup cannot change the failed lock assertion.
 		s.t.Fatal("installer released its lock between stages")
 	}
 	home := os.Getenv("HOME")
 	if key == "chezmoi apply" && s.failApply {
-		fmt.Fprintln(out, "FAKE-RENDERED-SECRET")
+		if _, err := fmt.Fprintln(out, "FAKE-RENDERED-SECRET"); err != nil {
+			return err
+		}
 		return errors.New("required secret unavailable")
 	}
 	if name == filepath.Join(home, ".cargo/bin/cargo") {
@@ -212,17 +214,27 @@ func TestInitAppliesDotfilesBeforeCargoAndRetriesAFailure(t *testing.T) {
 
 func TestInitCannotWriteWhileAnotherOperationHoldsTheLock(t *testing.T) {
 	root, _ := installerFixture(t)
-	path, _ := apply.LockPath()
+	path, err := apply.LockPath()
+	if err != nil {
+		t.Fatal(err)
+	}
 	lock, err := apply.Acquire(path, apply.LockInfo{Command: "other", PID: os.Getpid()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lock.Release()
+	t.Cleanup(func() {
+		if err := lock.Release(); err != nil {
+			t.Error(err)
+		}
+	})
 	code, _, _ := run(t, "init", "--checkout", root, "--machine", "vm", "-y")
 	if code != ExitFailure {
 		t.Fatal("concurrent init succeeded")
 	}
-	path, _ = selector.DefaultPath()
+	path, err = selector.DefaultPath()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("selector written: %v", err)
 	}

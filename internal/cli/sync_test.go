@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -40,6 +41,45 @@ func (w resultErrorWriter) Write(p []byte) (int, error) {
 		return w.out.Write(p)
 	}
 	return len(p), nil
+}
+
+func TestSyncStopsWhenUpgradeAnnouncementFails(t *testing.T) {
+	for _, asJSON := range []bool{false, true} {
+		t.Run(map[bool]string{false: "text", true: "json"}[asJSON], func(t *testing.T) {
+			root, src := installerFixture(t)
+			if err := os.WriteFile(filepath.Join(root, "profiles/common.toml"), []byte("schema=1\nid='common'\npackages=[]\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			var report bytes.Buffer
+			failedOutput := resultErrorWriter{match: "-> upgrade the system", err: syscall.ENOSPC, out: &report}
+			cmd := newSync(&options{json: asJSON})
+			cmd.SilenceErrors, cmd.SilenceUsage = true, true
+			cmd.SetArgs([]string{"--checkout", root, "--machine", "vm", "--yes"})
+			cmd.SetOut(failedOutput)
+			cmd.SetErr(io.Discard)
+			if asJSON {
+				cmd.SetOut(&report)
+				cmd.SetErr(resultErrorWriter{match: "-> upgrade the system", err: syscall.ENOSPC})
+			}
+			if err := cmd.Execute(); err == nil {
+				t.Error("upgrade announcement failure was ignored")
+			}
+			if len(src.calls) != 0 {
+				t.Errorf("native mutation after failed upgrade announcement: %v", src.calls)
+			}
+			if asJSON {
+				var env struct{ Data syncResult }
+				if err := json.Unmarshal(report.Bytes(), &env); err != nil {
+					t.Fatal(err)
+				}
+				if env.Data.Upgraded || env.Data.Failed != "upgrade" || !strings.Contains(env.Data.Error, syscall.ENOSPC.Error()) {
+					t.Errorf("incorrect upgrade result: %+v", env.Data)
+				}
+			} else if !strings.Contains(report.String(), "failed     upgrade") || !strings.Contains(report.String(), syscall.ENOSPC.Error()) {
+				t.Errorf("upgrade output failure missing from closing report: %s", &report)
+			}
+		})
+	}
 }
 
 func TestSyncReportsFailedReadOnlyResults(t *testing.T) {
@@ -219,7 +259,7 @@ func TestSyncPreservesFailureWhenReportCannotBeWritten(t *testing.T) {
 			cmd := newSync(&options{json: mode == "json"})
 			cmd.SilenceErrors, cmd.SilenceUsage = true, true
 			cmd.SetArgs([]string{"--checkout", root, "--machine", "vm", "--yes"})
-			cmd.SetOut(&previewErrorWriter{after: 1, err: syscall.ENOSPC})
+			cmd.SetOut(resultErrorWriter{match: "\nsync summary:\n", err: syscall.ENOSPC})
 			cmd.SetErr(io.Discard)
 			if mode == "json" {
 				cmd.SetOut(&previewErrorWriter{err: syscall.ENOSPC})
