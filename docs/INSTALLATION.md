@@ -141,10 +141,9 @@ retains its confirmation. Fresh Chezmoi setup leaves optional 1Password SSH
 integration disabled without asking; add `--onepassword-ssh` after the machine
 ID to opt in explicitly.
 
-After reboot, use the greeter's default `Hyprland (uwsm-managed)` entry. The
-native UWSM session activates the user graphical target required by desktop
-portals. `Hyprland (Nimbus recovery)` remains available independently. Plain
-`Hyprland` bypasses this session lifecycle and is not the managed desktop.
+After reboot, use the normal `Hyprland` session. `Hyprland (Nimbus recovery)`
+remains available independently. UWSM adoption is deferred for further research;
+portal activation in the plain session remains a documented follow-up.
 
 The closing report includes setup instructions, stage results, elapsed time,
 and the log directory. Logs retain the latest 20 completed runs below

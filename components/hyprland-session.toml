@@ -7,7 +7,6 @@ requires = []
 conflicts = []
 packages = [
   "hyprland-copr:hyprland",
-  "hyprland-copr:hyprland-uwsm",
   "hyprland-copr:hyprland-guiutils",
   "hyprland-copr:xdg-desktop-portal-hyprland",
   "noctalia",

@@ -510,21 +510,14 @@ must prove toolkit selection, Brave Origin adoption, and dark/light switching
 for the selected applications before the appearance follow-up is complete.
 
 Fedora's portal service requires an active user `graphical-session.target`.
-Select the native `Hyprland (uwsm-managed)` session in Noctalia Greeter and
-explicitly declare the Hyprland COPR's `hyprland-uwsm` package. Its UWSM
-service starts and stops the graphical target with the compositor, including
-failure cleanup. Preserve the independent Nimbus recovery session and Fedora's
-portal dependencies. Doctor reports the managed compositor and target state;
-logout/relogin, crash cleanup, and portal activation still need the VM drill.
-The final candidate package/configuration apply and repeat no-upgrade plan
-passed on 2026-09-09. The owner used plain Hyprland afterward, so this evidence
-does not close the UWSM and portal gates. UWSM is the current Nimbus choice,
-not an upstream requirement for every Hyprland installation.
-Use the upstream [Noctalia session-name rules][greeter-session] and
-[UWSM lifecycle][uwsm-lifecycle] rather than a custom session manager.
-
-[greeter-session]: https://docs.noctalia.dev/greeter/configuration/#default-session
-[uwsm-lifecycle]: https://github.com/Vladimir-csp/uwsm#how-to-stop
+The owner accepted the tested plain Hyprland session for this release and
+explicitly deferred UWSM adoption on 2026-09-09. Research native Hyprland session
+integration and UWSM before choosing a lifecycle manager or adding a
+session-specific doctor check. The tested VM's plain session left its graphical
+target and portal inactive; retain this limitation without weakening Fedora's
+portal dependencies. The final candidate package/configuration apply and repeat
+no-upgrade plan passed. Recovery and portal interaction drills remain recorded
+follow-ups rather than completed tests.
 
 ### Installer prompt polish
 

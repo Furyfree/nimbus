@@ -49,28 +49,3 @@ func TestResourceDoctorDistinguishesFileDriftAndOwnership(t *testing.T) {
 		t.Fatalf("%+v", checks)
 	}
 }
-
-func TestGraphicalSessionRequiresNativeSessionAndTarget(t *testing.T) {
-	key := facts.Key("systemctl", "--user", "show", "--property=ActiveState", "--value", "--", "wayland-wm@hyprland.desktop.service", "graphical-session.target")
-	for _, tc := range []struct{ name, output, status string }{
-		{"ready", "active\n\nactive\n", Pass},
-		{"missing target", "active\n\ninactive\n", Fail},
-		{"before login", "inactive\n\ninactive\n", Unknown},
-		{"other desktop", "inactive\n\nactive\n", Unknown},
-		{"incomplete", "active\n", Unknown},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			src := &facts.FakeSource{Commands: map[string][]byte{key: []byte(tc.output)}}
-			checks := SystemResources(src, &defs.Resolved{Profiles: []string{"hyprland-noctalia"}}, nil, "test")
-			if len(checks) != 1 || checks[0].ID != "graphical-session" || checks[0].Status != tc.status {
-				t.Fatalf("checks = %+v", checks)
-			}
-		})
-	}
-	if c := graphicalSession(&facts.FakeSource{}); c.Status != Unknown || !strings.Contains(c.Observation, "cannot inspect") {
-		t.Fatalf("unreadable session: %+v", c)
-	}
-	if checks := SystemResources(&facts.FakeSource{}, &defs.Resolved{}, nil, "test"); len(checks) != 0 {
-		t.Fatalf("unselected desktop was inspected: %+v", checks)
-	}
-}

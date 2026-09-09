@@ -1261,14 +1261,10 @@ container defaults, and justified gaming or hardware settings follow this
 rule. Candidate settings do not imply universal overrides or approved numeric
 values. Doctor reports effective state and owned drift without changing it.
 
-The `hyprland-noctalia` desktop uses the packaged Hyprland UWSM session as the
-Noctalia Greeter default. UWSM owns the compositor's user-service lifecycle and
-its binding to `graphical-session.target`, including cleanup after exit or
-failure. Nimbus declares the native session package and greeter selection;
-it never weakens portal unit dependencies or adds a competing session target.
-The system-owned recovery session stays independent. Doctor inspects the
-managed compositor and graphical target read-only; no managed login is unknown,
-and an active managed compositor without its target is a failed check.
+The `hyprland-noctalia` desktop currently uses the normal packaged Hyprland
+session. UWSM adoption and session-specific doctor checks are deferred pending
+research and native validation. Preserve the independent recovery session and
+Fedora's portal dependencies; do not claim portal readiness from login alone.
 
 ## Manual tasks and runtime commands
 

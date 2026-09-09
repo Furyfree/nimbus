@@ -211,15 +211,12 @@ installed; verify executable discovery rather than adding a duplicate entry.
 - [x] Record successful kernel, greetd, and password-login keyring activation.
 - [ ] Verify Chezmoi's toolkit settings and all selected application theme
   consumers on a fresh login, including Brave Origin and dark/light changes.
-- [x] Declare `hyprland-copr:hyprland-uwsm` and default Noctalia Greeter to the
-  exact native session name `Hyprland (uwsm-managed)`. The VM already has the
-  native subpackage, but its selected plain Hyprland session left
-  `graphical-session.target` inactive and blocked portal activation.
-- [x] Extend doctor to inspect the UWSM compositor service and graphical target
-  without activating either. No managed session is unknown; an active
-  compositor with an inactive target fails readiness.
-- [ ] Test a fresh UWSM login, portal activation, orderly logout/relogin, and
-  compositor-failure cleanup. Confirm the recovery entry remains selectable.
+- [ ] Research native Hyprland session integration and UWSM before adopting
+  either lifecycle policy. The owner deferred UWSM on 2026-09-09; its proposed
+  package selection, greeter default and doctor requirement were removed.
+- [ ] Test portal activation, orderly logout/relogin, compositor-failure cleanup
+  and the independent recovery session. Plain Hyprland remains the release
+  session; its inactive graphical target is a known limitation.
 - [ ] Verify the Hyprland dependency warning is absent after session startup.
 - [ ] Complete the promptless-init VM drill described above before publication.
 - [x] Replace the recovery session's Foot dependency with Ghostty, bypassing
@@ -243,13 +240,13 @@ result works. Selected Chezmoi desktop files had no drift. A subsequent
 The owner selected plain Hyprland after login, so the graphical session target
 and desktop portal remain inactive. UWSM login, portal interactions, recovery
 login, failure/removal drills, and the clean-init prompt drill remain pending.
-UWSM is Nimbus's current integration choice, not a universal Hyprland default.
+The owner subsequently deferred UWSM; the release retains plain Hyprland.
 Do not mark these checks passed from the successful package/configuration apply.
 The candidate binary SHA-256 is
 `1faf2992f120df6e23f0520df22b82c6f305fc32ebcd69e110da953e823016cd`.
 Candidate metadata and the apply log are retained privately outside the VM.
-The follow-up is being prepared for review; no new release or COPR build is
-authorized.
+The owner authorized merging the reviewed follow-up and publishing 0.2.1
+through COPR, with the deferred session research and remaining tests recorded.
 
 Google Maps and FotMob are still intentionally excluded by Chezmoi. Their
 prepared desktop entries call `nimbus launch webapp`, which the installed
