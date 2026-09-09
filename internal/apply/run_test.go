@@ -303,6 +303,70 @@ func TestMergedInstallPreservesEachPackagesProvenance(t *testing.T) {
 	}
 }
 
+func TestFlatpakAdoptionVerifiesAndRecordsObservedState(t *testing.T) {
+	for _, tc := range []struct {
+		name, version, origin, failure string
+		missing                        bool
+	}{
+		{name: "other remote", version: "2.0", origin: "fedora"},
+		{name: "no version", origin: "flathub"},
+		{name: "disappeared after plan", version: "2.0", origin: "fedora", missing: true},
+		{name: "unknown after plan", version: "2.0", origin: "fedora", failure: "inventory unavailable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const id = "org.example.App"
+			const key = "AE09157A4DE88B497EA1D5D300CDAB43DE226D6F"
+			root := definitions.Root{Repositories: map[string]definitions.Repository{"flathub": {Kind: "flatpak", URL: "https://dl.flathub.org/repo/flathub.flatpakrepo", Key: key}}}
+			list := facts.Key("flatpak", "list", "--system", "--app", "--columns=application,version,origin")
+			src := &facts.FakeSource{
+				Dirs:  map[string][]string{facts.RepoDir: {}},
+				Files: map[string][]byte{filepath.Join(facts.FlatpakRepoPath, "config"): []byte("[remote \"flathub\"]\ngpg-verify=true\n")},
+				Commands: map[string][]byte{
+					facts.Key("dnf5", facts.PackageQueryArgs...):                                                               nil,
+					facts.Key("dnf5", "--cacheonly", "check-upgrade"):                                                          nil,
+					facts.Key("flatpak", "remotes", "--system", "--columns=name,url"):                                          []byte("flathub\thttps://dl.flathub.org/repo/\n"),
+					facts.Key("gpg", facts.KeyInspectArgs(filepath.Join(facts.FlatpakRepoPath, "flathub.trustedkeys.gpg"))...): []byte("pub:::::::::\nfpr:::::::::" + key + ":\n"),
+					list: []byte(id + "\t1.0\tflathub\n"),
+				},
+			}
+			desired := &definitions.Resolved{Machine: "vm", Repositories: []string{"flathub"}, Packages: []definitions.ResolvedPackage{{Canonical: "flatpak:" + id, Prefix: definitions.PrefixFlatpak, Name: id}}}
+			p, err := plan.Build(plan.Inputs{Resolved: desired, Root: root, Facts: facts.Inspect(src, ""), Source: src})
+			if err != nil || !p.Complete || len(p.Operations) != 1 || p.Operations[0].Action != plan.ActionAdopt {
+				t.Fatalf("adoption plan: %+v %v", p, err)
+			}
+			src.Commands[list] = fmt.Appendf(nil, "%s\t%s\t%s\n", id, tc.version, tc.origin)
+			if tc.missing {
+				src.Commands[list] = nil
+			}
+			if tc.failure != "" {
+				src.Failures = map[string]string{list: tc.failure}
+			}
+			var recorded []state.Receipt
+			result := Run(p, Options{Source: src, Record: func(_ string, stage *state.Stage) error {
+				recorded = append(recorded, stage.Receipts...)
+				return nil
+			}})
+			if tc.missing || tc.failure != "" {
+				want := tc.failure
+				if tc.missing {
+					want = "not installed"
+				}
+				if result.Error == "" || !strings.Contains(result.Error, want) || len(recorded) != 0 || len(result.Executed) != 0 {
+					t.Fatalf("unverified adoption: %+v receipts=%+v", result, recorded)
+				}
+				return
+			}
+			if result.Error != "" || len(recorded) != 1 || len(result.Executed) != 1 {
+				t.Fatalf("adoption failed: %+v receipts=%+v", result, recorded)
+			}
+			want := "installed " + tc.version + " from " + tc.origin
+			if r := recorded[0]; r.Previous != want || r.Intended != want || !r.Verified || r.Operation != plan.ActionAdopt {
+				t.Fatalf("adopted observation lost: %+v", r)
+			}
+		})
+	}
+}
+
 func TestDifferencesFromThePreviewAreReportedNotRefused(t *testing.T) {
 	src := newScripted()
 	// DNF resolved again at install time and brought a package the preview

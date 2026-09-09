@@ -225,10 +225,8 @@ func (ex *executor) execute(op plan.Operation) (receipts []state.Receipt, remove
 		return ex.repository(op)
 	case op.Kind == plan.KindFlatpakRemote:
 		return ex.flatpakRemote(op)
-	case op.Kind == plan.KindFlatpak && op.Action == plan.ActionAdopt:
-		return []state.Receipt{ex.receipt(op, "flatpak", "installed", "installed", "flatpak list shows the application")}, nil, nil
-	case op.Kind == plan.KindFlatpak && op.Action == plan.ActionInstall:
-		return ex.flatpakInstall(op)
+	case op.Kind == plan.KindFlatpak && (op.Action == plan.ActionInstall || op.Action == plan.ActionAdopt):
+		return ex.flatpakApp(op)
 	case op.Kind == plan.KindFlatpak && op.Action == plan.ActionRemove:
 		return ex.flatpakRemove(op)
 	case (op.Kind == plan.KindPackage || op.Kind == plan.KindFlatpak) && op.Action == plan.ActionRetire:
@@ -736,9 +734,11 @@ func (ex *executor) removeTransaction(op plan.Operation) ([]state.Receipt, []str
 	return nil, remove, nil
 }
 
-func (ex *executor) flatpakInstall(op plan.Operation) ([]state.Receipt, []string, error) {
-	if err := ex.sudo(op.Steps[0].Argv...); err != nil {
-		return nil, nil, err
+func (ex *executor) flatpakApp(op plan.Operation) ([]state.Receipt, []string, error) {
+	if op.Action == plan.ActionInstall {
+		if err := ex.sudo(op.Steps[0].Argv...); err != nil {
+			return nil, nil, err
+		}
 	}
 	id := strings.TrimPrefix(op.ID, "flatpak:")
 	f := facts.Inspect(ex.opts.Source, "")
@@ -750,7 +750,12 @@ func (ex *executor) flatpakInstall(op plan.Operation) ([]state.Receipt, []string
 		return nil, nil, fmt.Errorf("verification: %s is not installed after the operation", id)
 	}
 	app := f.Flatpak.Value.Apps[i]
-	return []state.Receipt{ex.receipt(op, "flatpak", "absent", "installed "+app.Version+" from "+app.Origin, "flatpak list shows the application")}, nil, nil
+	installed := "installed " + app.Version + " from " + app.Origin
+	previous := "absent"
+	if op.Action == plan.ActionAdopt {
+		previous = installed
+	}
+	return []state.Receipt{ex.receipt(op, "flatpak", previous, installed, "flatpak list shows the application")}, nil, nil
 }
 
 func (ex *executor) flatpakRemove(op plan.Operation) ([]state.Receipt, []string, error) {
