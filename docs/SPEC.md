@@ -664,6 +664,9 @@ data, not Nimbus state. A receipt records at least:
 
 A failed operation never produces a successful receipt. Accurate receipts for
 previously completed independent operations remain after partial failure.
+After successful resource verification, temporary payload cleanup failure
+appears in the closing differences report; it does not discard the receipt or
+prevent verified retirement.
 
 ## Inspection, status, plan, and apply
 

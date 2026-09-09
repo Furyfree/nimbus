@@ -43,6 +43,31 @@ Phase 5 is complete; its prompt improvements are included below.
   removal without losing console access. Run focused provider tests and
   `just check`; record the actual graphical VM evidence before proceeding.
 
+### PR 18 follow-up
+
+Plan: [Modern Go PR validation](ROADMAP.md#modern-go-pr-validation).
+
+- [x] Preserve verified file receipts and retirement when temporary payload
+  cleanup fails; surface the failure in the closing differences report.
+- [x] Normalize CRLF repository lines before parsing blank-line boundaries.
+  Both regressions failed before their fixes and pass with Go 1.26.7. The file
+  regression records real temporary state and checks install, retry, removal,
+  and retry; verification failures still reject successful receipts.
+- [x] Pass `just check` with Go 1.26.7 and inspect the final fix diff. Formatting,
+  vet, all Go tests, diff checks, markdownlint, and shellcheck passed.
+- [ ] Confirm the disposable VM and restore snapshot, then stage and identify
+  the candidate. Record read-only validation, doctor, and first-plan results.
+- [ ] Apply the reviewed first plan and prove second-sync convergence.
+- [ ] Prove managed-file/component removal, activation, receipt retirement,
+  and retry without losing console access; restore the snapshot.
+- [ ] Test legacy schema 1 and 2 baselines separately, including the schema 3
+  write boundary and older-engine refusal. Record recovery and all results.
+- [x] Obtain owner authorization for commits, push, marking PR 18 ready,
+  merging it after final checks, and closing superseded Voxtype PR 17.
+
+Native VM validation is planned, not completed. Existing Phase 6 desktop,
+portal, and recovery gaps remain open.
+
 ### Installer prompt polish carried from Phase 5
 
 - [x] Make the already-key-verified isolated DNF engine download noninteractive.

@@ -89,6 +89,7 @@ func parseRepoFile(file string, data []byte) ([]Repository, error) {
 	lineNumber := 0
 	for raw := range strings.SplitSeq(string(data), "\n") {
 		lineNumber++
+		raw = strings.TrimRight(raw, "\r")
 		if lineNumber == 1 {
 			raw = strings.TrimPrefix(raw, "\uFEFF")
 		}

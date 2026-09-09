@@ -546,6 +546,42 @@ The [candidate guide](../tools/vm/README.md) records commands and limitations.
 A separate beta COPR is reserved for later native RPM delivery drills, with
 its own reviewed key and explicit opt-in; stable publication stays manual.
 
+### Modern Go PR validation
+
+Finish PR 18 with the two reviewed corrections: retain verified file ownership
+and retirement when temporary payload cleanup fails, reporting that failure in
+the closing differences; normalize CRLF repository lines before interpreting
+blank lines and continuations. Prove both with focused regressions and the
+complete local gate. Keep further modernization outside this change.
+
+Native validation remains a follow-up on a disposable Fedora 44 x86_64 VM,
+using the candidate guide above:
+
+1. Confirm the target VM, working console access, and a restorable clean
+   snapshot before staging or applying. Record the candidate's commit, dirty
+   state, definition digest, binary checksum, and VM baseline with the results.
+2. Stage the matching binary and definitions with `just vm-stage`. Run candidate
+   validation, doctor, and `sync -n` with explicit checkout and machine inputs;
+   inspect every planned mutation before the first approved sync.
+3. Compare the first sync's closing report, native state, and verified receipts
+   with its plan. Run a second preview and sync; require convergence without
+   repeated mutations or lost ownership.
+4. Exercise removal of a small candidate-only component with a managed file
+   and activation trigger. Require previewed removal, verified receipt
+   retirement, a converged retry, and continued console access. Restore the
+   snapshot before testing another baseline.
+5. From separate snapshots with valid legacy schema 1 and 2 state, verify reads,
+   planning, and owned-resource handling. After a candidate write, check schema
+   3 and confirm an older engine refuses it without writes. Restore the whole
+   snapshot for rollback; never downgrade the marker by hand.
+
+Stop and preserve evidence on unexplained mutations, blocked ownership,
+verification failures, or loss of console access. Restore the VM snapshot
+before retrying. Exit with recorded commands and results for all four lifecycle
+checks: first sync, convergence, removal, and legacy compatibility. This does
+not close the outstanding graphical recovery and portal drills. Merging the
+rewrite does not establish native validation or authorize a release.
+
 ### Workstation defaults
 
 Inspect Fedora's shipped and effective defaults before declaring overrides.

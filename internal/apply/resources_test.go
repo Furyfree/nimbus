@@ -522,12 +522,12 @@ func fileCommands() *fileCommandSource {
 	}}}
 }
 func TestPostWriteFailureReportsAppliedUnrecordedFile(t *testing.T) {
-	for _, kind := range []string{"restorecon", "reinspection", "payload cleanup"} {
+	for _, kind := range []string{"restorecon", "reinspection", "restorecon and cleanup", "reinspection and cleanup"} {
 		t.Run(kind, func(t *testing.T) {
 			src := fileCommands()
-			src.restoreFailure = kind == "restorecon"
-			src.inspectFailure = kind == "reinspection"
-			src.cleanupFailure = kind == "payload cleanup"
+			src.restoreFailure = strings.HasPrefix(kind, "restorecon")
+			src.inspectFailure = strings.HasPrefix(kind, "reinspection")
+			src.cleanupFailure = strings.HasSuffix(kind, "and cleanup")
 			ex := resourceExecutor(src)
 			ex.opts.Stage = t.TempDir()
 			op := plan.Operation{ID: "file:/etc/nimbus.conf", Kind: plan.KindFile, Action: plan.ActionInstall, File: &plan.FileChange{Target: "/etc/nimbus.conf", After: facts.SystemFile{Exists: true, Content: []byte("new"), Owner: "root", Group: "root", Mode: "0644"}}}
@@ -535,9 +535,63 @@ func TestPostWriteFailureReportsAppliedUnrecordedFile(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "applied but not recorded") || !strings.Contains(err.Error(), "restore the reviewed previous state") || len(receipts) != 0 || !src.mutated {
 				t.Fatalf("postwrite result: %v %v", receipts, err)
 			}
+			if src.cleanupFailure && !strings.Contains(err.Error(), "remove staged file payload") {
+				t.Fatalf("cleanup failure missing: %v", err)
+			}
 		})
 	}
 }
+
+func TestPayloadCleanupFailurePreservesVerifiedFileLifecycle(t *testing.T) {
+	src := fileCommands()
+	src.cleanupFailure = true
+	root := t.TempDir()
+	resolved := &definitions.Resolved{Machine: "vm", Files: []definitions.ResolvedFile{{
+		Target: "/etc/nimbus.conf", Content: []byte("new"), Owner: "root", Group: "root", Mode: "0644",
+	}}}
+	in := plan.Inputs{Resolved: resolved, Facts: &facts.Facts{}, Source: src, Definitions: "definitions"}
+	build := func() *plan.Plan {
+		t.Helper()
+		var err error
+		in.Applied, err = state.Read(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p, err := plan.Build(in)
+		if err != nil || !p.Complete {
+			t.Fatalf("plan: %+v, %v", p, err)
+		}
+		return p
+	}
+	for _, action := range []string{plan.ActionInstall, plan.ActionRemove} {
+		if action == plan.ActionRemove {
+			resolved.Files = nil
+		}
+		p := build()
+		if len(p.Operations) != 1 || p.Operations[0].Action != action {
+			t.Fatalf("expected %s: %+v", action, p.Operations)
+		}
+		result := Run(p, Options{Source: src, Stage: t.TempDir(), Definitions: state.Definitions{Digest: in.Definitions},
+			Record: func(digest string, stage *state.Stage) error { return state.Record(root, digest, stage) },
+		})
+		if result.Error != "" || len(result.Failures) != 0 || !slices.Equal(result.Executed, []string{"file:/etc/nimbus.conf"}) {
+			t.Fatalf("%s result: %+v", action, result)
+		}
+		if len(result.Differences) != 1 || !strings.Contains(result.Differences[0], "remove staged file payload") {
+			t.Fatalf("%s cleanup failure missing from report: %+v", action, result)
+		}
+		retry := build()
+		if action == plan.ActionInstall {
+			receipt, ok := in.Applied.Receipts["file:/etc/nimbus.conf"]
+			if !ok || !receipt.Verified || len(retry.Operations) != 1 || retry.Operations[0].Action != plan.ActionKeep {
+				t.Fatalf("verified ownership or convergence lost: %+v, %+v", in.Applied, retry.Operations)
+			}
+		} else if len(in.Applied.Receipts) != 0 || len(retry.Operations) != 0 {
+			t.Fatalf("verified removal lost: %+v, %+v", in.Applied, retry.Operations)
+		}
+	}
+}
+
 func TestDeferredRetirementRecordFailureIdentifiesEveryFile(t *testing.T) {
 	for _, count := range []int{1, 2} {
 		t.Run(fmt.Sprint(count), func(t *testing.T) {

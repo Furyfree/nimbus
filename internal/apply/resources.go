@@ -208,8 +208,12 @@ func (ex *executor) systemFile(op plan.Operation) (receipts []state.Receipt, rem
 		staged := f.Name()
 		defer func() {
 			if err := os.Remove(staged); err != nil && !errors.Is(err, os.ErrNotExist) {
-				resultErr = errors.Join(resultErr, fmt.Errorf("remove staged file payload: %w", err))
-				receipts, remove = nil, nil
+				cleanupErr := fmt.Errorf("remove staged file payload: %w", err)
+				if resultErr != nil {
+					resultErr = errors.Join(resultErr, cleanupErr)
+				} else {
+					ex.differences = append(ex.differences, cleanupErr.Error())
+				}
 			}
 		}()
 		if _, err = f.Write(payload); err != nil {

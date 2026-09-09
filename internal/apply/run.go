@@ -70,9 +70,8 @@ type Result struct {
 	Pending  []string  `json:"pending"`
 	Failed   string    `json:"failed,omitempty"`
 	Error    string    `json:"error,omitempty"`
-	// Differences lists what a DNF transaction did beyond or instead of
-	// its preview: a package the preview did not name, one it named that
-	// did not happen, or another version than shown.
+	// Differences lists deviations from the preview, including unexpected
+	// package changes and temporary payload cleanup failures.
 	Differences []string `json:"differences,omitempty"`
 }
 
@@ -170,7 +169,7 @@ type executor struct {
 	seen         map[string]facts.Package // installed packages, kept current
 	before       []string                 // package names at the start, sorted
 	baselineDone bool
-	differences  []string // what the last transaction did beyond its preview
+	differences  []string // deviations from the last operation's preview
 }
 
 func (ex *executor) snapshotPackages() error {
