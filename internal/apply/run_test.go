@@ -524,6 +524,83 @@ func TestRepositoryRepairIsVerifiedAsDeclared(t *testing.T) {
 	}
 }
 
+type dnfDropInSource struct {
+	*facts.FakeSource
+	readErr error
+}
+
+func (s dnfDropInSource) ReadFile(path string) ([]byte, error) {
+	if s.readErr != nil {
+		return nil, fmt.Errorf("read %s: %w", path, s.readErr)
+	}
+	return s.FakeSource.ReadFile(path)
+}
+
+func TestDNFDropInAdoptionVerifiesCurrentContent(t *testing.T) {
+	root := definitions.Root{DNF: map[string]any{"fastestmirror": true}}
+	for _, tc := range []struct {
+		name    string
+		content *string
+		readErr error
+		valid   bool
+	}{
+		{name: "matching", content: new(plan.DNFDropIn(root)), valid: true},
+		{name: "changed", content: new("[main]\nfastestmirror=False\n")},
+		{name: "empty", content: new("")},
+		{name: "absent"},
+		{name: "unreadable", readErr: os.ErrPermission},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := dnfDropInSource{FakeSource: &facts.FakeSource{Files: map[string][]byte{}}, readErr: tc.readErr}
+			if tc.content != nil {
+				src.Files[facts.DNFDropInPath] = []byte(*tc.content)
+			}
+			ex := &executor{p: &plan.Plan{}, opts: Options{Source: src, Root: root, Now: time.Now}}
+			receipts, removed, err := ex.dnfConfig(plan.Operation{ID: "dnf:config", Kind: plan.KindDNFConfig, Action: plan.ActionAdopt})
+			if (err == nil) != tc.valid || (len(receipts) == 1) != tc.valid || len(removed) != 0 {
+				t.Fatalf("adoption: receipts=%v removed=%v err=%v; want valid=%t", receipts, removed, err, tc.valid)
+			}
+			if tc.readErr != nil && !errors.Is(err, tc.readErr) {
+				t.Fatalf("inspection cause lost: %v", err)
+			}
+		})
+	}
+}
+
+func TestDNFDropInRemovalRequiresVerifiedAbsence(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		content *string
+		readErr error
+		valid   bool
+	}{
+		{name: "absent", valid: true},
+		{name: "present", content: new("[main]\nfastestmirror=True\n")},
+		{name: "empty", content: new("")},
+		{name: "unreadable", readErr: os.ErrPermission},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			argv := []string{"rm", "-f", facts.DNFDropInPath}
+			src := dnfDropInSource{FakeSource: &facts.FakeSource{Commands: map[string][]byte{facts.Key("sudo", argv...): nil}, Files: map[string][]byte{}}, readErr: tc.readErr}
+			if tc.content != nil {
+				src.Files[facts.DNFDropInPath] = []byte(*tc.content)
+			}
+			ex := &executor{opts: Options{Source: src, Out: io.Discard}}
+			op := plan.Operation{ID: "dnf:config", Kind: plan.KindDNFConfig, Action: plan.ActionRemove, Steps: []plan.Step{{Argv: argv}}}
+			receipts, removed, err := ex.dnfConfig(op)
+			if (err == nil) != tc.valid || (len(removed) == 1) != tc.valid || len(receipts) != 0 {
+				t.Fatalf("removal: receipts=%v removed=%v err=%v; want valid=%t", receipts, removed, err, tc.valid)
+			}
+			if tc.valid && removed[0] != op.ID {
+				t.Fatalf("retired unrelated receipt: %v", removed)
+			}
+			if tc.readErr != nil && !errors.Is(err, tc.readErr) {
+				t.Fatalf("inspection cause lost: %v", err)
+			}
+		})
+	}
+}
+
 func TestDNFDropInIsWrittenThenReadBack(t *testing.T) {
 	src := newScripted()
 	src.privilegedNoop = true
@@ -536,7 +613,7 @@ func TestDNFDropInIsWrittenThenReadBack(t *testing.T) {
 	p := &plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:dnf", Operations: []plan.Operation{op}}
 	// The privileged install is a no-op in the fake, so the file never
 	// appears: verification must refuse the receipt.
-	if r := Run(p, opts); r.Error == "" || !strings.Contains(r.Error, "does not hold the rendered drop-in") {
+	if r := Run(p, opts); r.Error == "" || !strings.Contains(r.Error, facts.DNFDropInPath) || !strings.Contains(r.Error, os.ErrNotExist.Error()) {
 		t.Fatalf("unwritten drop-in verified: %+v", r)
 	}
 	staged, err := os.ReadFile(filepath.Join(opts.Stage, "dnf-drop-in.conf"))
@@ -725,8 +802,36 @@ func TestUserToolsRunAsTheUserAndAreVerifiedByPresence(t *testing.T) {
 	src2.installerLeavesNothing = true
 	opts2 := options(t, src2, t.TempDir())
 	opts2.Fetch = opts.Fetch
-	if r := Run(&plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:user2", Operations: p.Operations[:1]}, opts2); r.Error == "" || !strings.Contains(r.Error, "~/.local/bin/mise does not exist") {
+	if r := Run(&plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:user2", Operations: p.Operations[:1]}, opts2); r.Error == "" || !strings.Contains(r.Error, "~/.local/bin/mise") || !strings.Contains(r.Error, os.ErrNotExist.Error()) {
 		t.Fatalf("missing binary passed verification: %+v", r)
+	}
+}
+
+type unreadableUserDirectory struct{ facts.Source }
+
+func (s unreadableUserDirectory) ReadDir(path string) ([]string, error) {
+	return nil, fmt.Errorf("read %s: %w", path, os.ErrPermission)
+}
+
+func TestUserToolVerificationPreservesDirectoryReadError(t *testing.T) {
+	ex := &executor{opts: Options{Source: unreadableUserDirectory{Source: &facts.FakeSource{}}}}
+	op := plan.Operation{ID: "user:mise", Steps: []plan.Step{{Description: "verify ~/.local/bin/mise exists"}}}
+	if err := ex.verifyUserTool(op, t.TempDir()); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("directory inspection cause lost: %v", err)
+	}
+}
+
+func TestCargoVerificationReportsUnknownInventory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cargoDir := filepath.Join(home, ".cargo", "bin")
+	src := &facts.FakeSource{
+		Dirs:     map[string][]string{cargoDir: {"cargo"}},
+		Failures: map[string]string{facts.Key(filepath.Join(cargoDir, "cargo"), facts.CargoListArgs...): "inventory locked"},
+	}
+	ex := &executor{opts: Options{Source: src}}
+	if err := ex.verifyUserTool(plan.Operation{ID: "package:cargo:demo"}, home); err == nil || !strings.Contains(err.Error(), "inventory locked") {
+		t.Fatalf("Cargo inspection cause lost: %v", err)
 	}
 }
 

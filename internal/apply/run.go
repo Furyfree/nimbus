@@ -296,22 +296,32 @@ func (ex *executor) verifiedKey(name string, data []byte, want string) (string, 
 // the file afterwards by reading it back.
 func (ex *executor) dnfConfig(op plan.Operation) ([]state.Receipt, []string, error) {
 	want := plan.DNFDropIn(ex.opts.Root)
-	readBack := func() (string, error) {
+	verifyContent := func() error {
 		data, err := ex.opts.Source.ReadFile(facts.DNFDropInPath)
-		if errors.Is(err, os.ErrNotExist) {
-			return "", nil
+		if err != nil {
+			return fmt.Errorf("verification: %w", err)
 		}
-		return string(data), err
+		if string(data) != want {
+			return fmt.Errorf("verification: %s does not hold the rendered drop-in", facts.DNFDropInPath)
+		}
+		return nil
 	}
 	switch op.Action {
 	case plan.ActionAdopt:
+		if err := verifyContent(); err != nil {
+			return nil, nil, err
+		}
 		return []state.Receipt{ex.receipt(op, "dnf-config", "present as declared", "drop-in rendered from nimbus.toml [dnf]", "file content matches the rendered drop-in")}, nil, nil
 	case plan.ActionRemove:
 		if err := ex.sudo(op.Steps[0].Argv...); err != nil {
 			return nil, nil, err
 		}
-		if have, err := readBack(); err != nil || have != "" {
+		_, err := ex.opts.Source.ReadFile(facts.DNFDropInPath)
+		if err == nil {
 			return nil, nil, fmt.Errorf("verification: %s still exists after removal", facts.DNFDropInPath)
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, nil, fmt.Errorf("verification: %w", err)
 		}
 		return nil, []string{op.ID}, nil
 	}
@@ -340,12 +350,8 @@ func (ex *executor) dnfConfig(op plan.Operation) ([]state.Receipt, []string, err
 			return nil, nil, err
 		}
 	}
-	have, err := readBack()
-	if err != nil {
-		return nil, nil, fmt.Errorf("verification: %w", err)
-	}
-	if have != want {
-		return nil, nil, fmt.Errorf("verification: %s does not hold the rendered drop-in", facts.DNFDropInPath)
+	if err := verifyContent(); err != nil {
+		return nil, nil, err
 	}
 	return []state.Receipt{ex.receipt(op, "dnf-config", previous, "drop-in rendered from nimbus.toml [dnf]", "file content matches the rendered drop-in")}, nil, nil
 }
@@ -915,7 +921,10 @@ func (ex *executor) fetchInstaller(op plan.Operation) (string, error) {
 func (ex *executor) verifyUserTool(op plan.Operation, home string) error {
 	if crate, ok := strings.CutPrefix(op.ID, "package:cargo:"); ok {
 		f := facts.Inspect(ex.opts.Source, "")
-		if !f.User.Known() || !slices.Contains(f.User.Value.Crates, crate) {
+		if !f.User.Known() {
+			return fmt.Errorf("verification: user-scope tool state is unknown: %s", f.User.Error)
+		}
+		if !slices.Contains(f.User.Value.Crates, crate) {
 			return fmt.Errorf("verification: cargo install --list does not show %s", crate)
 		}
 	} else if strings.HasPrefix(op.ID, "user:") && !strings.HasSuffix(op.ID, ":install") {
@@ -923,7 +932,10 @@ func (ex *executor) verifyUserTool(op plan.Operation, home string) error {
 			if rel, ok := strings.CutPrefix(st.Description, "verify ~/"); ok {
 				rel = strings.TrimSuffix(rel, " exists")
 				names, err := ex.opts.Source.ReadDir(filepath.Join(home, filepath.Dir(rel)))
-				if err != nil || !slices.Contains(names, filepath.Base(rel)) {
+				if err != nil {
+					return fmt.Errorf("verification: inspect ~/%s after the installer ran: %w", rel, err)
+				}
+				if !slices.Contains(names, filepath.Base(rel)) {
 					return fmt.Errorf("verification: ~/%s does not exist after the installer ran", rel)
 				}
 			}

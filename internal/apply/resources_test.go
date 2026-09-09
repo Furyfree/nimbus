@@ -2,6 +2,7 @@ package apply
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -137,6 +138,16 @@ func TestGreeterDirectoryTriggerVerifiesTypeAndOwnership(t *testing.T) {
 				t.Fatalf("receipts=%v err=%v", receipts, err)
 			}
 		})
+	}
+}
+
+func TestDaemonReloadVerificationPreservesInspectionFailure(t *testing.T) {
+	src := &facts.FakeSource{Commands: map[string][]byte{facts.Key("sudo", "systemctl", "daemon-reload"): nil}}
+	ex := resourceExecutor(src)
+	ex.p.Operations = []plan.Operation{{Kind: plan.KindService, Resource: &plan.ResourceChange{Name: "demo.service"}}}
+	receipts, removed, err := ex.systemResource(plan.Operation{ID: "trigger:systemd-daemon-reload", Kind: plan.KindTrigger, Action: plan.ActionRepair})
+	if !errors.Is(err, facts.ErrNotRecorded) || len(receipts) != 0 || len(removed) != 0 {
+		t.Fatalf("reload verification cause lost: receipts=%v removed=%v err=%v", receipts, removed, err)
 	}
 }
 

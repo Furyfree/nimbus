@@ -59,7 +59,10 @@ func (ex *executor) systemResource(op plan.Operation) ([]state.Receipt, []string
 			for _, resource := range ex.p.Operations {
 				if resource.Kind == plan.KindService && resource.Resource != nil {
 					out, err := ex.opts.Source.Run("systemctl", "show", "--property=NeedDaemonReload", "--value", "--", resource.Resource.Name)
-					if err != nil || strings.TrimSpace(string(out)) != "no" {
+					if err != nil {
+						return nil, nil, fmt.Errorf("daemon reload verification failed for %s: %w", resource.Resource.Name, err)
+					}
+					if strings.TrimSpace(string(out)) != "no" {
 						return nil, nil, fmt.Errorf("daemon reload verification failed for %s", resource.Resource.Name)
 					}
 				}
