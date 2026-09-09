@@ -105,8 +105,8 @@ type Updates struct {
 // Plan is the complete result for one machine.
 type Plan struct {
 	Machine string `json:"machine"`
-	// Definitions is the definition digest the plan was built from, and
-	// Checkout the Git identity of the checkout; both bind the plan digest.
+	// Definitions is the definition digest used for planning. Checkout
+	// records Git identity, which approval rechecks separately.
 	Definitions string         `json:"definitions"`
 	Checkout    facts.Checkout `json:"checkout"`
 	Operations  []Operation    `json:"operations"`
@@ -827,8 +827,8 @@ func (b *builder) sourceNote(p definitions.ResolvedPackage, inst facts.Package) 
 	return fmt.Sprintf("%s is installed from %s, not from %s", p.Name, from, strings.Join(b.expectedRepos(p.Prefix), " or "))
 }
 
-// installTransaction previews one DNF transaction for every installable
-// package and refuses anything the definitions did not ask for.
+// installTransaction previews one DNF transaction for installable packages
+// and records effects beyond the requested selections as notes.
 func (b *builder) installTransaction(pkgs []definitions.ResolvedPackage) Operation {
 	names := make([]string, 0, len(pkgs))
 	byName := map[string]definitions.ResolvedPackage{}
@@ -1247,10 +1247,8 @@ func (b *builder) pruneTransaction(cands []Prune) Operation {
 	return op
 }
 
-// prune lists the third bucket: installed with the user reason, not
-// desired, not managed by a receipt, and not in the baseline of packages
-// that existed before Nimbus took over. Before the first apply there is no
-// baseline, so every such package is a candidate.
+// prune lists user-installed packages with no desired selection or receipt
+// that are outside the baseline. It waits for the first sync to record it.
 func (b *builder) prune() []Prune {
 	if b.in.Applied == nil || b.in.Applied.Baseline == nil {
 		// Without the baseline every pre-existing package would look
