@@ -234,7 +234,7 @@ func CheckoutOrigin(root string) (string, error) {
 // Include directives are rejected so the value is always what the file says.
 func ParseOriginURL(data []byte) (string, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
-	section := ""
+	section, subsection := "", ""
 	origin := ""
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -242,13 +242,17 @@ func ParseOriginURL(data []byte) (string, error) {
 			continue
 		}
 		if line[0] == '[' {
-			section = sectionKey(line)
-			if section == "include" || strings.HasPrefix(section, "includeif") {
+			var err error
+			section, subsection, err = parseSection(line)
+			if err != nil {
+				return "", err
+			}
+			if section == "include" || section == "includeif" {
 				return "", fmt.Errorf("include directives are not supported; set remote.origin.url directly")
 			}
 			continue
 		}
-		if section != `remote "origin"` {
+		if section != "remote" || subsection != "origin" {
 			continue
 		}
 		key, value, ok := strings.Cut(line, "=")
@@ -269,16 +273,27 @@ func ParseOriginURL(data []byte) (string, error) {
 	return origin, nil
 }
 
-// sectionKey normalizes a Git config section header. Section names are
-// case-insensitive; a quoted subsection such as a remote name is not.
-func sectionKey(header string) string {
-	inner := strings.TrimSuffix(strings.TrimPrefix(header, "["), "]")
-	name, sub, quoted := strings.Cut(inner, " ")
-	name = strings.ToLower(strings.TrimSpace(name))
-	if !quoted {
-		return name
+var sectionHeaderRe = regexp.MustCompile(`^\[([A-Za-z0-9.-]+)(?:[ \t]+"((?:[^"\\]|\\.)*)")?\][ \t]*(?:[#;].*)?$`)
+
+// parseSection keeps comments and brackets inside quoted subsections intact.
+// Section names are case-insensitive; subsection names are not.
+func parseSection(header string) (string, string, error) {
+	match := sectionHeaderRe.FindStringSubmatch(header)
+	if match == nil {
+		return "", "", fmt.Errorf("invalid Git configuration section %q", header)
 	}
-	return name + " " + strings.TrimSpace(sub)
+	if strings.Contains(match[1], ".") {
+		return "", "", fmt.Errorf("legacy dotted Git configuration section %q is not supported; use a quoted subsection", header)
+	}
+	var sub strings.Builder
+	for i := 0; i < len(match[2]); i++ {
+		// Git removes the backslash before any escaped subsection byte.
+		if match[2][i] == '\\' {
+			i++
+		}
+		sub.WriteByte(match[2][i])
+	}
+	return strings.ToLower(match[1]), sub.String(), nil
 }
 
 // Verify checks that the checkout's origin matches the selector.

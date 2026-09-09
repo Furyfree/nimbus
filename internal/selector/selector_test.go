@@ -3,6 +3,7 @@ package selector
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -195,5 +196,93 @@ func TestUnreadableCommondirFails(t *testing.T) {
 	sel := &Selector{Schema: 1, Checkout: wt, Machine: "m", Origin: "github.com/furyfree-org/nimbus"}
 	if err := Verify(sel, wt); err == nil || !strings.Contains(err.Error(), "commondir") {
 		t.Fatalf("directory commondir fell back to the worktree config: %v", err)
+	}
+}
+
+func TestOriginSectionSyntax(t *testing.T) {
+	for _, header := range []string{
+		`[remote "origin"] # origin comment`,
+		"[Remote\t\"origin\"] ; origin comment",
+		`[remote  "origin"]`,
+		`[remote "or\igin"]`,
+	} {
+		t.Run(header, func(t *testing.T) {
+			config := header + "\nurl=https://github.com/Furyfree/nimbus.git\n" +
+				`[remote "other] # ; \" \\"] # outside comment` + "\nurl=https://github.com/other/repo.git\n"
+			got, err := ParseOriginURL([]byte(config))
+			if err != nil || got != "https://github.com/Furyfree/nimbus.git" {
+				t.Fatalf("origin = %q, %v", got, err)
+			}
+		})
+	}
+}
+
+func TestOriginRejectsIncludesAndMalformedHeaders(t *testing.T) {
+	for _, header := range []string{
+		`[include] # comment`,
+		`[INCLUDE] ; comment`,
+		"[include\t]#comment",
+		"[includeIf\t\"gitdir:/tmp/path]with-bracket/\"] # comment",
+		`[include "subsection"]`,
+		`[includeIf.foo]`,
+		`[includeIf.gitdir:/tmp/]`,
+		`[include`,
+		`[include] unexpected`,
+		`[remote "unterminated]`,
+		`[remote "origin" ]`,
+		`[remote "origin"] unexpected`,
+	} {
+		t.Run(header, func(t *testing.T) {
+			config := originConfig + header + "\npath=other\n"
+			if origin, err := ParseOriginURL([]byte(config)); err == nil {
+				t.Fatalf("accepted %q as origin %q", header, origin)
+			}
+		})
+	}
+}
+
+func TestVerifyRejectsCommentedIncludeUsedByGit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable:", err)
+	}
+	for _, comment := range []string{"# comment", "; comment"} {
+		t.Run(comment, func(t *testing.T) {
+			root := gitCheckout(t, originConfig+"[include] "+comment+"\npath=included\n")
+			if err := os.WriteFile(filepath.Join(root, ".git", "included"), []byte("[remote \"origin\"]\nurl=https://github.com/other/repo.git\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			out, err := exec.CommandContext(t.Context(), "git", "config", "--includes", "--file", filepath.Join(root, ".git", "config"), "--get", "remote.origin.url").CombinedOutput()
+			if err != nil || strings.TrimSpace(string(out)) != "https://github.com/other/repo.git" {
+				t.Fatalf("native Git origin = %q, %v", out, err)
+			}
+			sel := &Selector{Origin: "github.com/furyfree-org/nimbus"}
+			if err := Verify(sel, root); err == nil || !strings.Contains(err.Error(), "include directives") {
+				t.Fatalf("included Git origin bypassed selector trust: %v", err)
+			}
+		})
+	}
+}
+
+func TestVerifyRejectsDottedOriginUsedByGit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable:", err)
+	}
+	for _, header := range []string{
+		`[remote.origin]`,
+		`[remote.Origin]`,
+		`[Remote.ORIGIN]`,
+		`[remote.origin] # comment`,
+	} {
+		t.Run(header, func(t *testing.T) {
+			root := gitCheckout(t, originConfig+header+"\nurl=https://github.com/other/repo.git\n")
+			out, err := exec.CommandContext(t.Context(), "git", "config", "--file", filepath.Join(root, ".git", "config"), "--get", "remote.origin.url").CombinedOutput()
+			if err != nil || strings.TrimSpace(string(out)) != "https://github.com/other/repo.git" {
+				t.Fatalf("native Git origin = %q, %v", out, err)
+			}
+			sel := &Selector{Origin: "github.com/furyfree-org/nimbus"}
+			if err := Verify(sel, root); err == nil {
+				t.Fatal("dotted Git origin bypassed selector trust")
+			}
+		})
 	}
 }
