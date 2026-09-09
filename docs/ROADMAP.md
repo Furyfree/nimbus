@@ -281,6 +281,8 @@ Exercise install, package-picker install and remove, profile and component
 add and remove including the resulting owned removals, profile exclusion,
 already-present adoption, verification failure, digest change, interrupted
 operation, owned removal, explicit pruning, and protected dependency cases.
+Check colliding legacy receipt names, rejected state encodings, and each
+package's provenance through a merged plan and recorded transaction.
 Exit when a small representative DNF component and the package shortcuts can
 complete and reverse safely in a disposable VM.
 

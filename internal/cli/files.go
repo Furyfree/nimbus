@@ -138,7 +138,18 @@ func prepareAcceptance(flags machineFlags, target string) (*acceptInput, error) 
 		return nil, errors.New("target is not a selected generic system file")
 	}
 	decl := &s.Resolved.Files[i]
-	receiptData, ri, err := readAcceptFile(stateRoot, filepath.Join(state.ReceiptsDir, state.FileName("file:"+target)))
+	applied, err := state.Read(stateRoot)
+	if err != nil {
+		return nil, fmt.Errorf("ownership state: %w", err)
+	}
+	if !applied.Present {
+		return nil, errors.New("no recorded Nimbus ownership state")
+	}
+	resource := "file:" + target
+	receiptData, ri, err := readAcceptFile(stateRoot, filepath.Join(state.ReceiptsDir, state.FileName(resource)))
+	if errors.Is(err, os.ErrNotExist) {
+		receiptData, ri, err = readAcceptFile(stateRoot, filepath.Join(state.ReceiptsDir, state.LegacyFileName(resource)))
+	}
 	if err != nil {
 		return nil, fmt.Errorf("ownership receipt: %w", err)
 	}

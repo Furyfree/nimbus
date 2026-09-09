@@ -155,6 +155,10 @@ replacement. DNF receipts also record the
 native name and architecture separately from the requested package reference;
 ambiguous legacy ownership blocks removal. Every DNF transaction, including
 removal and upgrade, compares the installed set before and after execution.
+New receipt filenames hash the complete resource ID to avoid collisions.
+Existing matching legacy files stay in place; replacement and removal check
+the embedded identity. State schema 3 prevents older writers from accepting
+this layout while receipt and baseline contents remain schema 2.
 The selection commands edit a
 manifest in memory, validate and plan it, show the diff and plan, ask once,
 and then write the file and sync without system updates.

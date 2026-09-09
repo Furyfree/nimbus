@@ -187,9 +187,8 @@ func samplePlan(t *testing.T) *plan.Plan {
 		{ID: "repository:terra", Kind: plan.KindRepository, Action: plan.ActionEnable, Risk: plan.RiskMedium, Summary: "enable terra"},
 		{ID: "flatpak-remote:flathub", Kind: plan.KindFlatpakRemote, Action: plan.ActionEnable, Summary: "add flathub"},
 		{ID: "package:dnf:bash", Kind: plan.KindPackage, Action: plan.ActionAdopt, Summary: "adopt bash", Paths: []string{"profile:common"}},
-		{ID: "packages:install", Kind: plan.KindPackage, Action: plan.ActionInstall, Summary: "install 1", Paths: []string{"profile:common"}, Items: []string{"dnf:ripgrep"}, Transaction: tx,
+		{ID: "packages:install", Kind: plan.KindPackage, Action: plan.ActionInstall, Summary: "install 1", Paths: []string{"profile:common"}, Items: []string{"dnf:ripgrep"}, ItemPaths: map[string][]string{"dnf:ripgrep": {"profile:common"}}, Transaction: tx,
 			Steps: []plan.Step{{Argv: []string{"dnf5", "-y", "install", "ripgrep"}, Privileged: true}}},
-		{ID: "package:dnf:ripgrep", Kind: plan.KindPackage, Action: plan.ActionInstall, Summary: "install ripgrep", Paths: []string{"profile:common"}, After: "packages:install"},
 		{ID: "flatpak:com.spotify.Client", Kind: plan.KindFlatpak, Action: plan.ActionInstall, Summary: "install spotify", Paths: []string{"profile:hyprland-noctalia"},
 			Steps: []plan.Step{{Argv: []string{"flatpak", "install", "--system", "--noninteractive", "flathub", "com.spotify.Client"}, Privileged: true}}},
 	}}
@@ -230,7 +229,7 @@ func TestRunExecutesVerifiesAndRecords(t *testing.T) {
 	if r.Error != "" || r.Failed != "" {
 		t.Fatalf("run failed: %+v\n%s", r, strings.Join(src.log, "\n"))
 	}
-	if strings.Join(r.Executed, ",") != "repository:terra,flatpak-remote:flathub,package:dnf:bash,packages:install,flatpak:com.spotify.Client" || strings.Join(r.Pending, ",") != "package:dnf:ripgrep" {
+	if strings.Join(r.Executed, ",") != "repository:terra,flatpak-remote:flathub,package:dnf:bash,packages:install,flatpak:com.spotify.Client" || len(r.Pending) != 0 {
 		t.Fatalf("executed %v pending %v", r.Executed, r.Pending)
 	}
 	for _, want := range []string{
@@ -257,6 +256,50 @@ func TestRunExecutesVerifiesAndRecords(t *testing.T) {
 	}
 	if a.Baseline == nil || !a.InBaseline("coreutils.x86_64") || a.InBaseline("ripgrep.x86_64") {
 		t.Fatalf("baseline = %+v", a.Baseline)
+	}
+}
+
+func TestMergedInstallPreservesEachPackagesProvenance(t *testing.T) {
+	desired := &definitions.Resolved{Machine: "desktop", Packages: []definitions.ResolvedPackage{
+		{Canonical: "dnf:fd-find", Prefix: "dnf", Name: "fd-find", Paths: []string{"profile:development"}},
+		{Canonical: "dnf:ripgrep", Prefix: "dnf", Name: "ripgrep", Paths: []string{"component:search", "profile:common"}},
+	}}
+	source := &facts.FakeSource{Commands: map[string][]byte{
+		facts.Key("dnf5", "--assumeno", "--cacheonly", "install", "fd-find", "ripgrep"): []byte("Package Arch Version Repository Size\nInstalling:\n fd-find x86_64 1-1.fc44 fedora 1 KiB\n ripgrep x86_64 1-1.fc44 fedora 1 KiB\nTransaction Summary:\n"),
+		facts.Key("dnf5", "--cacheonly", "check-upgrade"):                               nil,
+	}}
+	inputs := plan.Inputs{Resolved: desired, Facts: &facts.Facts{}, Source: source}
+	p, err := plan.Build(inputs)
+	if err != nil || !p.Complete {
+		t.Fatalf("plan: %+v, %v", p, err)
+	}
+	if slices.ContainsFunc(p.Operations, func(op plan.Operation) bool { return strings.HasPrefix(op.ID, "package:") }) {
+		t.Fatal("installable packages should use the merged transaction")
+	}
+	native := newScripted()
+	native.installs = []string{"fd-find", "ripgrep"}
+	root := t.TempDir()
+	opts := options(t, native, root)
+	opts.FirstApply = false
+	if result := Run(p, opts); result.Error != "" {
+		t.Fatal(result.Error)
+	}
+	applied, err := state.Read(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pkg := range desired.Packages {
+		r, ok := applied.Receipts["package:"+pkg.Canonical]
+		if !ok || !slices.Equal(r.Paths, pkg.Paths) {
+			t.Errorf("receipt for %s has paths %v, want %v", pkg.Canonical, r.Paths, pkg.Paths)
+		}
+	}
+	// Swapping provenance keeps the transaction's union of paths unchanged,
+	// but approval must still bind the paths recorded for each package.
+	desired.Packages[0].Paths, desired.Packages[1].Paths = desired.Packages[1].Paths, desired.Packages[0].Paths
+	changed, err := plan.Build(inputs)
+	if err != nil || changed.Digest == p.Digest {
+		t.Fatalf("changed receipt provenance did not change the plan digest: %+v, %v", changed, err)
 	}
 }
 
@@ -319,7 +362,11 @@ func TestVerificationFailureGetsNoReceipt(t *testing.T) {
 	opts := options(t, src, root)
 	// Install another application so verification catches the missing request.
 	p := samplePlan(t)
-	p.Operations[5].Steps[0].Argv = []string{"flatpak", "install", "--system", "--noninteractive", "flathub", "org.example.Other"}
+	i := slices.IndexFunc(p.Operations, func(op plan.Operation) bool { return op.ID == "flatpak:com.spotify.Client" })
+	if i < 0 {
+		t.Fatal("fixture has no Flatpak installation")
+	}
+	p.Operations[i].Steps[0].Argv = []string{"flatpak", "install", "--system", "--noninteractive", "flathub", "org.example.Other"}
 	r := Run(p, opts)
 	if r.Failed != "flatpak:com.spotify.Client" || !strings.Contains(r.Error, "not installed after") {
 		t.Fatalf("result = %+v", r)
@@ -340,7 +387,7 @@ func TestIncompletePlanIsRefusedAndOwnedRemovalRetiresReceipts(t *testing.T) {
 	}
 
 	src.installed = append(src.installed, "old")
-	if err := state.Record(root, "sha256:earlier", &state.Stage{Schema: state.Schema, PlanDigest: "sha256:earlier", Receipts: []state.Receipt{{Schema: state.Schema, Resource: "package:dnf:old", Provider: "dnf", Operation: "install", PlanDigest: "sha256:earlier", Verified: true}}}); err != nil {
+	if err := state.Record(root, "sha256:earlier", &state.Stage{Schema: state.Schema, PlanDigest: "sha256:earlier", Receipts: []state.Receipt{{Schema: state.ReceiptSchema, Resource: "package:dnf:old", Provider: "dnf", Operation: "install", PlanDigest: "sha256:earlier", Verified: true}}}); err != nil {
 		t.Fatal(err)
 	}
 	opts.FirstApply = false
@@ -369,7 +416,7 @@ func TestRetireRemovesOnlyTheReceipt(t *testing.T) {
 			root := t.TempDir()
 			opts := options(t, src, root)
 			opts.FirstApply = false
-			if err := state.Record(root, "sha256:earlier", &state.Stage{Schema: state.Schema, PlanDigest: "sha256:earlier", Receipts: []state.Receipt{{Schema: state.Schema, Resource: id, Provider: provider, Operation: "install", PlanDigest: "sha256:earlier", Verified: true}}}); err != nil {
+			if err := state.Record(root, "sha256:earlier", &state.Stage{Schema: state.Schema, PlanDigest: "sha256:earlier", Receipts: []state.Receipt{{Schema: state.ReceiptSchema, Resource: id, Provider: provider, Operation: "install", PlanDigest: "sha256:earlier", Verified: true}}}); err != nil {
 				t.Fatal(err)
 			}
 			p := &plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:retire", Operations: []plan.Operation{

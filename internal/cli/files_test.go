@@ -132,6 +132,9 @@ func acceptanceFixture(t *testing.T) (string, string, string) {
 	receipt := state.Receipt{Schema: state.ReceiptSchema, Resource: "file:/etc/nimbus-test.conf", Provider: "system-file", Verified: true, Machine: "test", PlanDigest: "sha256:test", Operation: "install"}
 	data, _ := json.Marshal(receipt)
 	os.MkdirAll(filepath.Join(stateRoot, state.ReceiptsDir), 0755)
+	if err := os.WriteFile(filepath.Join(stateRoot, state.SchemaFile), fmt.Appendln(nil, state.Schema), 0644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(stateRoot, state.ReceiptsDir, state.FileName(receipt.Resource)), data, 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -153,6 +156,88 @@ func TestFilesAcceptCapturesOnlySourceAndPreservesMode(t *testing.T) {
 	}
 	if !strings.Contains(out, "-old\n+new\n") || !strings.Contains(out, "must not contain secrets") {
 		t.Fatal(out)
+	}
+}
+
+func TestFilesAcceptReadsMatchingLegacyReceipts(t *testing.T) {
+	for _, foreign := range []bool{false, true} {
+		t.Run(fmt.Sprint(foreign), func(t *testing.T) {
+			checkout, source, _ := acceptanceFixture(t)
+			const resource = "file:/etc/nimbus-test.conf"
+			current := filepath.Join(stateRoot, state.ReceiptsDir, state.FileName(resource))
+			legacy := filepath.Join(stateRoot, state.ReceiptsDir, state.LegacyFileName(resource))
+			data, err := os.ReadFile(current)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if foreign {
+				var receipt state.Receipt
+				if err := json.Unmarshal(data, &receipt); err != nil {
+					t.Fatal(err)
+				}
+				receipt.Resource = "file:/etc/another.conf"
+				data, err = json.Marshal(receipt)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(legacy, data, 0644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(current); err != nil {
+				t.Fatal(err)
+			}
+			code, out, errOut := run(t, "files", "accept", "/etc/nimbus-test.conf", "--checkout", checkout, "--machine", "test", "--yes")
+			wantCode, wantSource := ExitOK, "new\n"
+			if foreign {
+				wantCode, wantSource = ExitFailure, "old\n"
+			}
+			if code != wantCode {
+				t.Fatalf("exit %d, want %d: %s%s", code, wantCode, out, errOut)
+			}
+			got, err := os.ReadFile(source)
+			if err != nil || string(got) != wantSource {
+				t.Fatalf("source = %q, %v; want %q", got, err, wantSource)
+			}
+			retained, err := os.ReadFile(legacy)
+			if err != nil || string(retained) != string(data) {
+				t.Fatalf("file acceptance changed the legacy receipt: %q, %v", retained, err)
+			}
+		})
+	}
+}
+
+func TestFilesAcceptRefusesAmbiguousOrUnsupportedState(t *testing.T) {
+	for _, scenario := range []string{"duplicate receipt", "future schema", "missing schema"} {
+		t.Run(scenario, func(t *testing.T) {
+			checkout, source, _ := acceptanceFixture(t)
+			switch scenario {
+			case "duplicate receipt":
+				const resource = "file:/etc/nimbus-test.conf"
+				data, err := os.ReadFile(filepath.Join(stateRoot, state.ReceiptsDir, state.FileName(resource)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(stateRoot, state.ReceiptsDir, state.LegacyFileName(resource)), data, 0644); err != nil {
+					t.Fatal(err)
+				}
+			case "future schema":
+				if err := os.WriteFile(filepath.Join(stateRoot, state.SchemaFile), []byte("999\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			case "missing schema":
+				if err := os.Remove(filepath.Join(stateRoot, state.SchemaFile)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if code, out, errOut := run(t, "files", "accept", "/etc/nimbus-test.conf", "--checkout", checkout, "--machine", "test", "--yes"); code != ExitFailure {
+				t.Fatalf("accepted ambiguous ownership state: %d %s%s", code, out, errOut)
+			}
+			data, err := os.ReadFile(source)
+			if err != nil || string(data) != "old\n" {
+				t.Fatalf("rejected ownership state changed the source: %q, %v", data, err)
+			}
+		})
 	}
 }
 

@@ -613,7 +613,7 @@ func (ex *executor) installTransaction(op plan.Operation) ([]state.Receipt, []st
 		if !ok {
 			return nil, nil, fmt.Errorf("verification: %s is not installed after the transaction", name)
 		}
-		sub := plan.Operation{ID: "package:" + canonical, Action: plan.ActionInstall, Paths: pathsFor(ex.p, "package:"+canonical)}
+		sub := plan.Operation{ID: "package:" + canonical, Action: plan.ActionInstall, Paths: op.ItemPaths[canonical]}
 		r := ex.receipt(sub, "dnf", "absent", "installed "+inst.ID()+" "+inst.EVR(), "dnf5 repoquery --installed lists "+inst.ID()+" "+inst.EVR())
 		r.Package = inst.ID()
 		receipts = append(receipts, r)
@@ -706,13 +706,6 @@ func transactionDifferences(tx *plan.Transaction, before, after map[string]facts
 	}
 	slices.Sort(diffs)
 	return diffs
-}
-
-func pathsFor(p *plan.Plan, id string) []string {
-	if i := slices.IndexFunc(p.Operations, func(op plan.Operation) bool { return op.ID == id }); i >= 0 {
-		return p.Operations[i].Paths
-	}
-	return nil
 }
 
 func (ex *executor) removeTransaction(op plan.Operation) ([]state.Receipt, []string, error) {

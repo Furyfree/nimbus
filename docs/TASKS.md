@@ -32,6 +32,11 @@ Phase 5 is complete; its prompt improvements are included below.
 - [x] Align ownership views and retained-source counts with the planner.
   Go 1.26.7 fixtures cover Flatpak adoption across origins, native RPM receipt
   identities, multilib ambiguity, and legacy receipts.
+- [x] Reject colliding receipt ownership and unencodable stages, retain legacy
+  receipt access, and preserve each merged-install package's provenance.
+  State schema 3 blocks older writers; receipt and baseline schemas stay 2.
+  Go 1.26.7 regressions also cover commented Git includes, native service
+  enablement, and installed Flatpaks without version metadata.
 - [ ] Pass reboot to greeter, normal login, logout/relogin, file-picker and
   screen-sharing portals, and recovery with absent/broken user configuration.
 - [ ] Prove second-sync convergence, failed-activation recovery, and component

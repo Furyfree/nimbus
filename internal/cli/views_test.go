@@ -22,7 +22,7 @@ func TestCargoOwnershipRequiresReceipt(t *testing.T) {
 		t.Fatalf("crate without receipt: %d %s%s", code, out, errOut)
 	}
 	stage := &state.Stage{Schema: state.Schema, PlanDigest: "sha256:p", Receipts: []state.Receipt{{
-		Schema: state.Schema, Resource: "package:cargo:demo", Provider: "cargo",
+		Schema: state.ReceiptSchema, Resource: "package:cargo:demo", Provider: "cargo",
 		Operation: "adopt", PlanDigest: "sha256:p", Verified: true,
 	}}}
 	if err := state.Record(stateRoot, "sha256:p", stage); err != nil {
@@ -280,7 +280,7 @@ func TestViewsReadReceiptsAndBaseline(t *testing.T) {
 	t.Cleanup(func() { stateRoot = saved })
 	st := &state.Stage{Schema: state.Schema, PlanDigest: "sha256:p",
 		Baseline: &state.Baseline{Packages: []string{"gzip"}},
-		Receipts: []state.Receipt{{Schema: state.Schema, Resource: "package:dnf:dnf5-plugins", Provider: "dnf", Operation: "adopt", PlanDigest: "sha256:p", Verified: true}}}
+		Receipts: []state.Receipt{{Schema: state.ReceiptSchema, Resource: "package:dnf:dnf5-plugins", Provider: "dnf", Operation: "adopt", PlanDigest: "sha256:p", Verified: true}}}
 	if err := state.Record(stateRoot, "sha256:p", st); err != nil {
 		t.Fatal(err)
 	}

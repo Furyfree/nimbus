@@ -68,6 +68,9 @@ type Operation struct {
 	// Items are the package references a merged transaction installs, one
 	// receipt each; Paths then explains the transaction as a whole.
 	Items []string `json:"items,omitempty"`
+	// ItemPaths preserves each requested package's selection provenance in a
+	// merged transaction; Paths explains the transaction as a whole.
+	ItemPaths map[string][]string `json:"item_paths,omitempty"`
 	// Resolved maps requested names to native RPM name.arch identities from
 	// the preview or installed state, including resolved provides.
 	Resolved    map[string]string `json:"resolved,omitempty"`
@@ -833,10 +836,12 @@ func (b *builder) installTransaction(pkgs []definitions.ResolvedPackage) Operati
 	// that selected its packages; the packages themselves are its command.
 	pathSet := map[string]bool{}
 	items := make([]string, 0, len(pkgs))
+	itemPaths := make(map[string][]string, len(pkgs))
 	for _, p := range pkgs {
 		names = append(names, p.Name)
 		byName[p.Name] = p
 		items = append(items, p.Canonical)
+		itemPaths[p.Canonical] = p.Paths
 		for _, path := range p.Paths {
 			pathSet[path] = true
 		}
@@ -854,7 +859,7 @@ func (b *builder) installTransaction(pkgs []definitions.ResolvedPackage) Operati
 	}
 	args = append(args, names...)
 	op := Operation{ID: "packages:install", Kind: KindPackage, Action: ActionInstall, Risk: RiskLow,
-		Summary: fmt.Sprintf("install %d packages through one DNF transaction", len(names)), Paths: paths, Items: items,
+		Summary: fmt.Sprintf("install %d packages through one DNF transaction", len(names)), Paths: paths, Items: items, ItemPaths: itemPaths,
 		Steps: []Step{{Description: "install through DNF", Argv: append([]string{"dnf5", "-y"}, args...), Privileged: true}}}
 	if b.waitsForRepositories(&op) {
 		return op

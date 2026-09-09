@@ -112,8 +112,8 @@ the installed RPM, stable checkout, or selector. Candidate sync still changes
 the disposable VM's real system and receipts; snapshot recovery separates
 tests. Stable COPR publication remains an independent manual release action.
 Phase 6 requires engine 0.2.0; development builds are explicitly labelled.
-The engine reads legacy state schema 1 and current schema 2. Its first
-successful state write upgrades the marker to 2, causing older engines to
+The engine reads legacy state schemas 1 and 2 and current schema 3. Its first
+successful state write upgrades the marker to 3, causing older engines to
 refuse that state. A failure before that write still requires snapshot
 recovery; the marker is not isolation or a rollback mechanism.
 
@@ -636,6 +636,12 @@ the plan digest. New receipts and baselines use schema 2 to retain native RPM
 name and
 architecture. Schema 1 remains readable; ambiguous legacy ownership blocks
 removal. Older engines must refuse version 2 rather than discard its identity.
+The state marker uses schema 3 so engines that derive colliding receipt
+filenames cannot modify the new layout; receipt and baseline schemas stay 2.
+A stage that cannot be JSON-encoded is rejected before state files change.
+Receipt replacement and removal must match the stored resource identity;
+distinct resource IDs never overwrite one another's ownership. Existing
+receipt filenames remain readable and usable without a migration.
 The first sync also records the baseline: the
 packages installed before Nimbus took over, which are never prune candidates
 and are listed by `unmanaged --all` as pre-existing. Selecting a baseline
@@ -647,7 +653,7 @@ data, not Nimbus state. A receipt records at least:
 
 - state and engine versions
 - definition origin, commit, dirty state, and digest
-- machine and resolved selections
+- machine and the resource's own selection paths, including merged installs
 - resource and provider
 - previous observation and intended state
 - exact lifecycle operation

@@ -571,7 +571,7 @@ func applied(receipts ...string) *state.Applied {
 		if strings.HasPrefix(r, "flatpak:") {
 			provider = "flatpak"
 		}
-		a.Receipts[r] = state.Receipt{Schema: state.Schema, Resource: r, Provider: provider, Package: facts.PackageID(PackageName(r), "x86_64"), Operation: "install", Verified: true}
+		a.Receipts[r] = state.Receipt{Schema: state.ReceiptSchema, Resource: r, Provider: provider, Package: facts.PackageID(PackageName(r), "x86_64"), Operation: "install", Verified: true}
 	}
 	return a
 }
@@ -586,7 +586,7 @@ func TestAppliedStateShapesThePlan(t *testing.T) {
 		baseline = append(baseline, p.Name)
 	}
 	slices.Sort(baseline)
-	a.Baseline = &state.Baseline{Schema: state.Schema, Packages: baseline}
+	a.Baseline = &state.Baseline{Schema: state.BaselineSchema, Packages: baseline}
 	f.Packages.Value = append(f.Packages.Value,
 		facts.Package{Name: "no-longer-wanted", Version: "1", Release: "1", Arch: "x86_64", FromRepo: "fedora", Reason: "user"},
 		facts.Package{Name: "hand-installed", Version: "1", Release: "1", Arch: "x86_64", FromRepo: "fedora", Reason: "user"},
@@ -848,7 +848,7 @@ func TestReleasePackagesBelongToTheirRepository(t *testing.T) {
 	src, f := readyHost(t, c)
 	f.Packages.Value = append(f.Packages.Value, facts.Package{Name: "rpmfusion-free-release", Version: "44", Release: "3", Arch: "noarch", FromRepo: "@commandline", Reason: "user"})
 	a := applied()
-	a.Baseline = &state.Baseline{Schema: state.Schema, Packages: []string{"bash"}}
+	a.Baseline = &state.Baseline{Schema: state.BaselineSchema, Packages: []string{"bash"}}
 	p, err := Build(Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src, Applied: a, Prune: true})
 	if err != nil {
 		t.Fatal(err)
@@ -871,7 +871,7 @@ func TestAPrefixChangeRetiresTheOldReceiptAndAdoptsTheNew(t *testing.T) {
 	// the package stays, the old receipt goes, the new identity is adopted.
 	f.Packages.Value = append(f.Packages.Value, facts.Package{Name: "ghostty", Version: "1", Release: "1", Arch: "x86_64", FromRepo: "nimbus-terra", Reason: "user"})
 	a := applied("package:dnf:ghostty")
-	a.Baseline = &state.Baseline{Schema: state.Schema, Packages: []string{"bash"}}
+	a.Baseline = &state.Baseline{Schema: state.BaselineSchema, Packages: []string{"bash"}}
 	p, err := Build(Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src, Applied: a})
 	if err != nil {
 		t.Fatal(err)
