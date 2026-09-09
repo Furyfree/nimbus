@@ -218,6 +218,8 @@ func Record(root, planDigest string, st *Stage) error {
 			if err := writeAtomic(filepath.Join(root, BaselineFile), data, 0o644); err != nil {
 				return err
 			}
+		} else if err != nil {
+			return fmt.Errorf("inspect baseline before recording: %w", err)
 		}
 	}
 	journal, err := os.OpenFile(filepath.Join(root, JournalFile), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
@@ -244,7 +246,7 @@ func Record(root, planDigest string, st *Stage) error {
 			return err
 		}
 	}
-	return nil
+	return journal.Close()
 }
 
 func writeAtomic(path string, data []byte, mode fs.FileMode) error {
@@ -253,23 +255,18 @@ func writeAtomic(path string, data []byte, mode fs.FileMode) error {
 		return err
 	}
 	name := tmp.Name()
+	defer os.Remove(name)
+	defer tmp.Close()
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(name)
 		return err
 	}
 	if err := tmp.Chmod(mode); err != nil {
-		tmp.Close()
-		os.Remove(name)
 		return err
 	}
 	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		os.Remove(name)
 		return err
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(name)
 		return err
 	}
 	return os.Rename(name, path)

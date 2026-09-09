@@ -61,18 +61,15 @@ func writeManifest(path string, content []byte) error {
 		return err
 	}
 	name := tmp.Name()
+	defer os.Remove(name)
+	defer tmp.Close()
 	if _, err := tmp.Write(append(content, '\n')); err != nil {
-		tmp.Close()
-		os.Remove(name)
 		return err
 	}
 	if err := tmp.Chmod(0o644); err != nil {
-		tmp.Close()
-		os.Remove(name)
 		return err
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(name)
 		return err
 	}
 	return os.Rename(name, path)

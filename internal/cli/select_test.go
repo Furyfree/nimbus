@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,6 +13,33 @@ import (
 
 	"github.com/Furyfree/nimbus/internal/definitions"
 )
+
+func TestWriteManifestCleansTemporaryFileOnRenameFailure(t *testing.T) {
+	dir := t.TempDir()
+	destination := filepath.Join(dir, "machine.toml")
+	if err := os.Mkdir(destination, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	preserved := filepath.Join(destination, "preserve")
+	if err := os.WriteFile(preserved, []byte("unchanged"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := writeManifest(destination, []byte("schema = 1"))
+	if renameErr, ok := errors.AsType[*os.LinkError](err); !ok || renameErr.Op != "rename" {
+		t.Fatalf("expected rename failure, got %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "machine.toml" {
+		t.Fatalf("failed replacement left temporary files: %v", entries)
+	}
+	data, err := os.ReadFile(preserved)
+	if err != nil || string(data) != "unchanged" {
+		t.Fatalf("destination changed: %q, %v", data, err)
+	}
+}
 
 func TestRenderManifestIsCanonicalAndKeepsComments(t *testing.T) {
 	existing := []byte("# Laptop.\n# Second line.\nschema = 1\nid = \"laptop\"\nprofiles = [\"common\"]\n")

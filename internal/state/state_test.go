@@ -1,11 +1,14 @@
 package state
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -64,6 +67,48 @@ func TestRecordWritesAtomicallyAndReadsBack(t *testing.T) {
 	journal, _ := os.ReadFile(filepath.Join(root, JournalFile))
 	if strings.Count(string(journal), "\n") != 3 || !strings.Contains(string(journal), `"action":"removed"`) {
 		t.Fatalf("journal:\n%s", journal)
+	}
+}
+
+func TestAtomicWriteCleansUpAfterRenameFailure(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "receipt.json")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	retained := filepath.Join(target, "keep")
+	if err := os.WriteFile(retained, []byte("unchanged"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeAtomic(target, []byte("replacement"), 0o644); err == nil {
+		t.Fatal("replaced a directory with a file")
+	}
+	data, err := os.ReadFile(retained)
+	if err != nil || string(data) != "unchanged" {
+		t.Fatalf("destination changed: %q, %v", data, err)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.ContainsFunc(entries, func(e os.DirEntry) bool { return strings.HasPrefix(e.Name(), ".nimbus-") }) {
+		t.Fatal("temporary file left behind after failed rename")
+	}
+}
+
+func TestRecordRejectsBaselineInspectionFailure(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Symlink(BaselineFile, filepath.Join(root, BaselineFile)); err != nil {
+		t.Fatal(err)
+	}
+	digest := "sha256:plan"
+	r := receipt("package:dnf:ripgrep", digest)
+	stage := &Stage{Schema: Schema, PlanDigest: digest, Baseline: &Baseline{Packages: []string{"bash"}}, Receipts: []Receipt{r}}
+	if err := Record(root, digest, stage); !errors.Is(err, syscall.ELOOP) {
+		t.Errorf("baseline inspection error = %v, want symlink loop", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ReceiptsDir, FileName(r.Resource))); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("receipt recorded after baseline inspection failed: %v", err)
 	}
 }
 

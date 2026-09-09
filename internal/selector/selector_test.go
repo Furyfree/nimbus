@@ -1,6 +1,7 @@
 package selector
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,6 +61,33 @@ func TestLoadSelector(t *testing.T) {
 		if _, err := Load(writeSelector(t, body)); err == nil {
 			t.Errorf("%s: expected an error", name)
 		}
+	}
+}
+
+func TestWriteRemovesTemporaryFileOnRenameFailure(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	preserved := filepath.Join(path, "preserved")
+	if err := os.WriteFile(preserved, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := Write(path, &Selector{Schema: CurrentSchema, Checkout: "checkout", Machine: "desktop", Origin: "github.com/Furyfree/nimbus"})
+	if rename, ok := errors.AsType[*os.LinkError](err); !ok || rename.Op != "rename" {
+		t.Fatalf("expected rename failure, got %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "config.toml" {
+		t.Fatalf("temporary file remains after failed rename: %v", entries)
+	}
+	content, err := os.ReadFile(preserved)
+	if err != nil || string(content) != "keep" {
+		t.Fatalf("destination changed: %q, %v", content, err)
 	}
 }
 
