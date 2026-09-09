@@ -48,3 +48,28 @@ func TestResourceDoctorDistinguishesFileDriftAndOwnership(t *testing.T) {
 		t.Fatalf("%+v", checks)
 	}
 }
+
+func TestResourceDoctorRequiresDisabledNativeEnablement(t *testing.T) {
+	for _, tc := range []struct {
+		name, native, want string
+		enabled            *bool
+	}{
+		{"disabled", "disabled", Pass, new(false)},
+		{"enabled", "enabled", Fail, new(false)},
+		{"runtime enablement", "enabled-runtime", Fail, new(false)},
+		{"missing enablement", "", Fail, new(false)},
+		{"enablement not selected", "static", Pass, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &defs.Resolved{Machine: "vm", Services: []defs.ResolvedService{{ServiceDecl: defs.ServiceDecl{Unit: "demo.service", Enabled: tc.enabled}}}}
+			src := &facts.FakeSource{Commands: map[string][]byte{
+				facts.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", "demo.service"): []byte("LoadState=loaded\nUnitFileState=" + tc.native + "\nActiveState=inactive\n"),
+			}}
+			applied := &state.Applied{Receipts: map[string]state.Receipt{"service:demo.service": {Verified: true, Resource: "service:demo.service", Machine: "vm", Provider: "service"}}}
+			checks := SystemResources(src, r, applied, "test")
+			if len(checks) != 1 || checks[0].Status != tc.want {
+				t.Fatalf("native enablement %q: checks=%+v, want %s", tc.native, checks, tc.want)
+			}
+		})
+	}
+}

@@ -63,7 +63,17 @@ func SystemResources(src facts.Source, r *defs.Resolved, applied *state.Applied,
 	}
 	for _, service := range r.Services {
 		have, err := facts.ObserveService(src, service.Unit)
-		matches := have.Load == "loaded" && (service.Enabled == nil || (have.Enabled == "enabled") == *service.Enabled) && (service.Running == nil || (have.Active == "active") == *service.Running)
+		matches := have.Load == "loaded"
+		if service.Enabled != nil {
+			want := "disabled"
+			if *service.Enabled {
+				want = "enabled"
+			}
+			matches = matches && have.Enabled == want
+		}
+		if service.Running != nil {
+			matches = matches && (have.Active == "active") == *service.Running
+		}
 		add("service:"+service.Unit, "service", fmt.Sprintf("%s: load %s, enablement %s, activity %s", service.Unit, have.Load, have.Enabled, have.Active), matches, err)
 		if service.Unit == "greetd.service" && err == nil && have.Active != "active" {
 			checks = append(checks, Check{ID: "greeter-login", Status: Fail, Observation: "greetd is not active; package installation and enablement do not prove graphical login", Impact: "the greeter may not appear", Remediation: "after reviewing the plan, reboot and inspect journalctl -b -u greetd; keep console recovery available"})
