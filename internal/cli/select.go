@@ -153,7 +153,19 @@ func newPackages(opts *options) *cobra.Command {
 			return nil, err
 		}
 		return &selectionEdit{cmdName: "packages install", summary: "install " + strings.Join(refs, ", "),
-			edit: func(m *definitions.Machine) { m.Packages = addUnique(m.Packages, refs...) }}, nil
+			edit: func(m *definitions.Machine) {
+				for _, raw := range refs {
+					ref, _ := definitions.ParseRef(raw) // pickAvailable already validated it.
+					matches := func(candidate string) bool {
+						other, err := definitions.ParseRef(candidate)
+						return err == nil && other == ref
+					}
+					m.PackageExclusions = slices.DeleteFunc(m.PackageExclusions, matches)
+					if !slices.ContainsFunc(m.Packages, matches) {
+						m.Packages = append(m.Packages, raw)
+					}
+				}
+			}}, nil
 	})
 	remove := newEditCommand(opts, "remove [QUERY]", "Remove desired packages from the selected machine and apply", func(s *selected, args []string) (*selectionEdit, error) {
 		query := ""
@@ -184,15 +196,17 @@ func newPackages(opts *options) *cobra.Command {
 		}
 		return &selectionEdit{cmdName: "packages remove", summary: "remove " + strings.Join(chosen, ", "),
 			edit: func(m *definitions.Machine) {
-				var exclusions []string
-				for _, c := range chosen {
-					if slices.Contains(m.Packages, c) || slices.Contains(m.Packages, strings.TrimPrefix(c, "dnf:")) {
-						m.Packages = removeAll(m.Packages, c, strings.TrimPrefix(c, "dnf:"))
-					} else {
-						exclusions = append(exclusions, c)
+				for _, raw := range chosen {
+					ref, _ := definitions.ParseRef(raw) // Picker items come from validated definitions.
+					m.Packages = slices.DeleteFunc(m.Packages, func(candidate string) bool {
+						other, err := definitions.ParseRef(candidate)
+						return err == nil && other == ref
+					})
+					i := slices.IndexFunc(s.Resolved.Packages, func(p definitions.ResolvedPackage) bool { return p.Canonical == ref.Canonical() })
+					if i >= 0 && slices.ContainsFunc(s.Resolved.Packages[i].Paths, func(path string) bool { return path != "machine" }) {
+						m.PackageExclusions = addUnique(m.PackageExclusions, ref.Canonical())
 					}
 				}
-				m.PackageExclusions = addUnique(m.PackageExclusions, exclusions...)
 			}}, nil
 	})
 	for _, cmd := range []*cobra.Command{install, remove} {

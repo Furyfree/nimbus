@@ -13,6 +13,8 @@ import (
 	"github.com/pelletier/go-toml/v2"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
+	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/state"
 )
 
 func TestSelectionStopsWhenReviewCannotBeWritten(t *testing.T) {
@@ -505,5 +507,171 @@ func TestSelectionEditDigestSurvivesTheManifestWrite(t *testing.T) {
 	lock, _ := os.ReadFile(filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), "nimbus", "operation.lock"))
 	if !strings.Contains(string(lock), `"command":"components add"`) {
 		t.Fatalf("lock was not taken by the edit: %q", lock)
+	}
+}
+
+func TestPackageSelectionRoundTrip(t *testing.T) {
+	for _, tc := range []struct {
+		name, explicit, exclusion string
+		profile                   bool
+	}{
+		{name: "profile", profile: true},
+		{name: "explicit and profile", explicit: "demo", profile: true},
+		{name: "qualified explicit and profile", explicit: "dnf:demo", profile: true},
+		{name: "explicit only", explicit: "demo"},
+		{name: "bare exclusion", exclusion: "demo", profile: true},
+		{name: "qualified exclusion", exclusion: "dnf:demo", profile: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, src := installerFixture(t)
+			profile := "schema=1\nid='common'\npackages=['untouched'"
+			if tc.profile {
+				profile += ",'demo'"
+			}
+			if err := os.WriteFile(filepath.Join(root, "profiles/common.toml"), []byte(profile+"]\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			m := &definitions.Machine{Schema: 1, ID: "vm", Profiles: []string{"common"}, PackageExclusions: []string{"untouched"}}
+			if tc.explicit != "" {
+				m.Packages = []string{tc.explicit}
+			}
+			if tc.exclusion != "" {
+				m.PackageExclusions = append(m.PackageExclusions, tc.exclusion)
+			}
+			data, err := renderManifest(nil, m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := manifestPath(root, "vm")
+			if err := writeManifest(path, data); err != nil {
+				t.Fatal(err)
+			}
+			inventory := facts.Key("dnf5", facts.PackageQueryArgs...)
+			installed := []byte("demo|0|1|1|x86_64|fedora|User\n")
+			src.Commands[inventory] = nil
+			if tc.exclusion == "" {
+				src.Commands[inventory] = installed
+				st := &state.Stage{Schema: state.Schema, PlanDigest: "earlier", Receipts: []state.Receipt{{
+					Schema: state.ReceiptSchema, Resource: "package:dnf:demo", Provider: "dnf", Package: "demo.x86_64",
+					Machine: "vm", Verified: true, Operation: "install", PlanDigest: "earlier",
+				}}}
+				if err := state.Record(stateRoot, st.PlanDigest, st); err != nil {
+					t.Fatal(err)
+				}
+			}
+			src.Commands["dnf5 -q --cacheonly repoquery --available --qf %{name}|%{evr}|%{reponame}\n *demo*"] = []byte("demo|1-1|fedora\n")
+			src.Commands["dnf5 --assumeno --cacheonly install demo"] = []byte("Repositories loaded.\nPackage Arch Version Repository Size\nInstalling:\n demo x86_64 1-1 fedora 1 KiB\n\nTransaction Summary:\n")
+			src.Commands["dnf5 --assumeno --cacheonly remove --no-autoremove demo.x86_64"] = []byte("Repositories loaded.\nPackage Arch Version Repository Size\nRemoving:\n demo x86_64 1-1 @System 1 KiB\n\nTransaction Summary:\n")
+			const install = "sudo dnf5 -y install demo"
+			const remove = "sudo dnf5 -y remove --no-autoremove demo.x86_64"
+			src.Commands[install], src.Commands[remove] = nil, nil
+			withSource(t, handoffOutputSource{Source: src, afterStream: func(name string, args []string) {
+				switch facts.Key(name, args...) {
+				case install:
+					src.Commands[inventory] = installed
+				case remove:
+					src.Commands[inventory] = nil
+				default:
+					t.Fatalf("unexpected mutation: %s %v", name, args)
+				}
+			}})
+			savedPick, savedApprover := pickerFn, approver
+			t.Cleanup(func() { pickerFn, approver = savedPick, savedApprover })
+			pickerFn = func(_ string, items []pickItem) ([]string, error) {
+				for _, item := range items {
+					if item.ID == "demo" || item.ID == "dnf:demo" {
+						return []string{item.ID}, nil
+					}
+				}
+				t.Fatalf("demo missing from picker: %+v", items)
+				return nil, nil
+			}
+			approver = func(io.Reader, io.Writer, string) bool { return false }
+			if tc.explicit != "" {
+				code, out, errOut := run(t, "packages", "install", "demo", "--checkout", root, "--machine", "vm", "--yes")
+				after, err := os.ReadFile(path)
+				if code != ExitOK || !strings.Contains(out, "already says that") || err != nil || string(after) != string(append(data, '\n')) || len(src.calls) != 0 {
+					t.Fatalf("equivalent explicit reference was not a no-op: %d %s%s; calls=%v, manifest=%q, error=%v", code, out, errOut, src.calls, after, err)
+				}
+			}
+			actions, wantCalls := []string{"install", "remove"}, []string{install, remove}
+			if tc.exclusion == "" {
+				actions, wantCalls = append([]string{"remove"}, actions...), append([]string{remove}, wantCalls...)
+			}
+			for _, action := range actions {
+				before, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				calls := len(src.calls)
+				code, out, errOut := run(t, "packages", action, "demo", "--checkout", root, "--machine", "vm")
+				after, err := os.ReadFile(path)
+				if code != ExitFailure || !strings.Contains(errOut, "not applied") || err != nil || string(after) != string(before) || len(src.calls) != calls {
+					t.Fatalf("declined %s changed state: %d %s%s; calls=%v, manifest=%q, error=%v", action, code, out, errOut, src.calls, after, err)
+				}
+				code, out, errOut = run(t, "packages", action, "demo", "--checkout", root, "--machine", "vm", "--yes")
+				if code != ExitOK || !strings.Contains(out, "plan for vm") || !strings.Contains(out, "wrote ") {
+					t.Fatalf("%s failed: %d %s%s", action, code, out, errOut)
+				}
+				s, err := loadSelected(machineFlags{checkout: root, machine: "vm"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantSelected := action == "install"
+				if selected := slices.ContainsFunc(s.Resolved.Packages, func(p definitions.ResolvedPackage) bool { return p.Canonical == "dnf:demo" }); selected != wantSelected {
+					t.Fatalf("%s left the wrong desired state: %+v", action, s.Resolved.Packages)
+				}
+				m := s.Checkout.Machines["vm"]
+				wantExclusions := []string{"untouched"}
+				if !wantSelected && tc.profile {
+					wantExclusions = append(wantExclusions, "dnf:demo")
+				}
+				if !slices.Equal(m.PackageExclusions, wantExclusions) || !wantSelected && len(m.Packages) != 0 {
+					t.Fatalf("%s changed unrelated exclusions or retained an explicit reference: %+v", action, m)
+				}
+				applied, err := state.Read(stateRoot)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, owned := applied.Receipts["package:dnf:demo"]; owned != wantSelected {
+					t.Fatalf("%s left the wrong receipt state: %+v", action, applied.Receipts)
+				}
+			}
+			if !slices.Equal(src.calls, wantCalls) {
+				t.Fatalf("native calls = %v, want %v", src.calls, wantCalls)
+			}
+		})
+	}
+}
+
+func TestPackagesRemoveRefusesRequiredComponentPackage(t *testing.T) {
+	root, src := installerFixture(t)
+	manifest := "schema=1\nid='vm'\nprofiles=['common']\ncomponents=['consumer']\npackages=['dnf:demo']\n"
+	for path, data := range map[string]string{
+		"profiles/common.toml":     "schema=1\nid='common'\n",
+		"components/runtime.toml":  "schema=1\nid='runtime'\npackages=['demo']\n",
+		"components/consumer.toml": "schema=1\nid='consumer'\nrequires=['runtime']\n",
+		"machines/vm.toml":         manifest,
+	} {
+		if err := os.WriteFile(filepath.Join(root, path), []byte(data), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	savedPick, savedApprover := pickerFn, approver
+	t.Cleanup(func() { pickerFn, approver = savedPick, savedApprover })
+	pickerFn = func(_ string, items []pickItem) ([]string, error) {
+		if len(items) != 1 || items[0].ID != "dnf:demo" {
+			t.Fatalf("unexpected package choices: %+v", items)
+		}
+		return []string{items[0].ID}, nil
+	}
+	approver = func(io.Reader, io.Writer, string) bool {
+		t.Fatal("required package removal reached approval")
+		return true
+	}
+	code, out, errOut := run(t, "packages", "remove", "demo", "--checkout", root, "--machine", "vm")
+	after, err := os.ReadFile(manifestPath(root, "vm"))
+	if code != ExitFailure || !strings.Contains(errOut, "another selected component requires") || strings.Contains(out, "plan for") || err != nil || string(after) != manifest || len(src.calls) != 0 || len(src.reads) != 0 {
+		t.Fatalf("required package removal was not refused before review: %d %s%s; manifest=%q, error=%v, calls=%v, reads=%v", code, out, errOut, after, err, src.calls, src.reads)
 	}
 }
