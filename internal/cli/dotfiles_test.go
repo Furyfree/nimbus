@@ -2,15 +2,81 @@ package cli
 
 import (
 	"encoding/json"
-	"github.com/Furyfree/nimbus/internal/facts"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
+	"github.com/Furyfree/nimbus/internal/facts"
 	"github.com/Furyfree/nimbus/internal/selector"
 )
+
+func TestDotfilesRequiresDisclosuresBeforeMutation(t *testing.T) {
+	for _, action := range []string{"apply", "update"} {
+		for _, jsonOutput := range []bool{false, true} {
+			for _, after := range []int{0, 1} {
+				t.Run(action+"/"+map[bool]string{false: "text", true: "json"}[jsonOutput]+"/"+[]string{"tools", "command"}[after], func(t *testing.T) {
+					root, src := installerFixture(t)
+					path, err := selector.DefaultPath()
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := selector.Write(path, &selector.Selector{Schema: selector.CurrentSchema, Checkout: root, Machine: "vm", Origin: "github.com/Furyfree/nimbus"}); err != nil {
+						t.Fatal(err)
+					}
+					args := []string{"dotfiles", action}
+					cmd := New()
+					cmd.SetOut(io.Discard)
+					cmd.SetErr(io.Discard)
+					out := &previewErrorWriter{after: after, err: syscall.ENOSPC}
+					if jsonOutput {
+						args = append(args, "--json")
+						cmd.SetErr(out)
+					} else {
+						cmd.SetOut(out)
+					}
+					cmd.SetArgs(args)
+					if err := cmd.Execute(); !errors.Is(err, syscall.ENOSPC) || len(src.calls) != 0 {
+						t.Fatalf("dotfiles error = %v, mutations = %v", err, src.calls)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestDotfilesPreservesNativeErrorWhenReportingFails(t *testing.T) {
+	for _, jsonOutput := range []bool{false, true} {
+		t.Run(map[bool]string{false: "text", true: "json"}[jsonOutput], func(t *testing.T) {
+			root, src := installerFixture(t)
+			path, err := selector.DefaultPath()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := selector.Write(path, &selector.Selector{Schema: selector.CurrentSchema, Checkout: root, Machine: "vm", Origin: "github.com/Furyfree/nimbus"}); err != nil {
+				t.Fatal(err)
+			}
+			src.Failures["chezmoi apply"] = "tool installation failed"
+			out := &previewErrorWriter{after: -1, err: syscall.ENOSPC}
+			withSource(t, handoffOutputSource{Source: src, afterStream: func(string, []string) { out.after = 0 }})
+			args := []string{"dotfiles", "apply"}
+			if jsonOutput {
+				args = append(args, "--json")
+			}
+			cmd := New()
+			cmd.SetArgs(args)
+			cmd.SetOut(out)
+			cmd.SetErr(io.Discard)
+			err = cmd.Execute()
+			if !errors.Is(err, syscall.ENOSPC) || !strings.Contains(err.Error(), "tool installation failed") || len(src.calls) != 1 {
+				t.Fatalf("dotfiles error = %v, mutations = %v", err, src.calls)
+			}
+		})
+	}
+}
 
 func TestDotfilesDiffDoesNotNeedASelectorOrOperationLock(t *testing.T) {
 	root, src := installerFixture(t)
@@ -21,7 +87,7 @@ func TestDotfilesDiffDoesNotNeedASelectorOrOperationLock(t *testing.T) {
 	if code != ExitOK || !strings.Contains(out, "a local configuration diff") {
 		t.Fatalf("%d %s%s", code, out, errOut)
 	}
-	if _, err := os.Stat(filepath.Join(root, "operation.lock")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, "operation.lock")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("diff created a lock")
 	}
 }

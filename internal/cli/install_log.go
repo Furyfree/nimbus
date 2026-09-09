@@ -97,12 +97,12 @@ func openInstallLog() (*installLog, error) {
 	}
 	i, err := f.Stat()
 	if err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, err
 	}
 	st, ok := i.Sys().(*syscall.Stat_t)
 	if !ok || st.Uid != uint32(os.Getuid()) || st.Nlink != 1 || !i.Mode().IsRegular() || i.Mode().Perm() != 0600 {
-		f.Close()
+		_ = f.Close()
 		return nil, errors.New("unsafe opened installation log file")
 	}
 	l := &installLog{file: f, dir: dir, owned: owned, started: time.Now()}
@@ -131,7 +131,7 @@ func logParents(path string, create bool) error {
 		return errors.New("installation log path must be absolute and clean")
 	}
 	current := string(filepath.Separator)
-	for _, part := range strings.Split(strings.TrimPrefix(path, current), string(filepath.Separator)) {
+	for part := range strings.SplitSeq(strings.TrimPrefix(path, current), string(filepath.Separator)) {
 		current = filepath.Join(current, part)
 		i, err := os.Lstat(current)
 		if errors.Is(err, os.ErrNotExist) && create {
@@ -167,7 +167,8 @@ func (l *installLog) Write(p []byte) (int, error) {
 }
 
 func (l *installLog) event(format string, args ...any) {
-	fmt.Fprintf(l, "[%s] %s\n", time.Now().UTC().Format(time.RFC3339Nano), fmt.Sprintf(format, args...))
+	// Write retains the first error for commandError and finish to report.
+	_, _ = fmt.Fprintf(l, "[%s] %s\n", time.Now().UTC().Format(time.RFC3339Nano), fmt.Sprintf(format, args...))
 }
 
 func (l *installLog) finish(runErr error) error {
@@ -216,6 +217,11 @@ func pruneInstallLogs(base string, keep int) error {
 	if err != nil {
 		return err
 	}
+	safe := func(dir string, children []os.DirEntry) bool {
+		return !slices.ContainsFunc(children, func(child os.DirEntry) bool {
+			return !slices.Contains([]string{".nimbus-install", ".finished", "bootstrap.log", "engine.log", "mise.log"}, child.Name()) || privateLogPath(filepath.Join(dir, child.Name()), false) != nil
+		})
+	}
 	var candidates []string
 	for _, entry := range entries {
 		if !strings.HasPrefix(entry.Name(), "run-") {
@@ -239,31 +245,16 @@ func pruneInstallLogs(base string, keep int) error {
 		if err != nil {
 			return err
 		}
-		safe := true
-		for _, child := range children {
-			if !slices.Contains([]string{".nimbus-install", ".finished", "bootstrap.log", "engine.log", "mise.log"}, child.Name()) || privateLogPath(filepath.Join(dir, child.Name()), false) != nil {
-				safe = false
-				break
-			}
-		}
-		if safe {
+		if safe(dir, children) {
 			candidates = append(candidates, dir)
 		}
 	}
-	slices.Sort(candidates)
 	for _, dir := range candidates[:max(0, len(candidates)-keep)] {
 		children, err := os.ReadDir(dir)
 		if err != nil {
 			return err
 		}
-		safe := true
-		for _, child := range children {
-			if !slices.Contains([]string{".nimbus-install", ".finished", "bootstrap.log", "engine.log", "mise.log"}, child.Name()) || privateLogPath(filepath.Join(dir, child.Name()), false) != nil {
-				safe = false
-				break
-			}
-		}
-		if !safe {
+		if !safe(dir, children) {
 			continue
 		}
 		for _, child := range children {
@@ -340,7 +331,7 @@ func (s installSource) Run(name string, args ...string) ([]byte, error) {
 	} else {
 		output, err = s.Source.Run(name, args...)
 		if publicInstallCommand(name, args) {
-			s.log.Write(output)
+			_, _ = s.log.Write(output)
 		}
 	}
 	s.log.commandEnd(label, start, err)
@@ -369,8 +360,7 @@ func (l *installLog) commandEnd(label string, start time.Time, err error) {
 	status := "0"
 	if err != nil {
 		status = "unavailable"
-		var exit *exec.ExitError
-		if errors.As(err, &exit) {
+		if exit, ok := errors.AsType[*exec.ExitError](err); ok {
 			status = fmt.Sprint(exit.ExitCode())
 		}
 	}
@@ -405,10 +395,15 @@ func (e privateInstallError) Error() string {
 func (e privateInstallError) Unwrap() error { return e.cause }
 func (s installSource) commandError(name string, args []string, err error, showDiagnostic bool) error {
 	if err != nil && !publicInstallCommand(name, args) {
+		shown := false
 		if s.terminal != nil && showDiagnostic {
-			fmt.Fprintln(s.terminal, err)
+			if _, writeErr := fmt.Fprintln(s.terminal, err); writeErr != nil {
+				err = errors.Join(err, writeErr)
+			} else {
+				shown = true
+			}
 		}
-		err = privateInstallError{filepath.Base(name), err, showDiagnostic}
+		err = privateInstallError{filepath.Base(name), err, shown}
 	}
 	s.log.mu.Lock()
 	logErr := s.log.err

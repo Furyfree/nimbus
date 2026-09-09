@@ -7,7 +7,7 @@ func TestObserveFileRefusesSymlinkAndUnknownParent(t *testing.T) {
 	if _, err := ObserveFile(src, "/etc/nimbus.conf"); err == nil {
 		t.Fatal("ancestor symlink accepted")
 	}
-	src.Dirs = map[string][]string{}
+	clear(src.Dirs)
 	if _, err := ObserveFile(src, "/etc/nimbus.conf"); err == nil {
 		t.Fatal("unknown parent treated as missing target")
 	}

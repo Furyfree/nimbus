@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -56,7 +57,7 @@ func Load(path string) (*Selector, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read selector: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	opened, err := f.Stat()
 	if err != nil {
 		return nil, fmt.Errorf("read selector: %w", err)
@@ -72,8 +73,7 @@ func Load(path string) (*Selector, error) {
 	d := toml.NewDecoder(bytes.NewReader(data))
 	d.DisallowUnknownFields()
 	if err := d.Decode(&s); err != nil {
-		var strict *toml.StrictMissingError
-		if errors.As(err, &strict) {
+		if strict, ok := errors.AsType[*toml.StrictMissingError](err); ok {
 			return nil, fmt.Errorf("selector %s: unknown field: %s", path, strings.TrimSpace(strict.String()))
 		}
 		return nil, fmt.Errorf("selector %s: %w", path, err)
@@ -105,8 +105,15 @@ func Write(path string, s *Selector) error {
 	if s.Schema != CurrentSchema || s.Checkout == "" || s.Machine == "" || s.Origin == "" {
 		return errors.New("selector: schema, checkout, machine, and origin are required")
 	}
+	if !utf8.ValidString(s.Checkout) || !utf8.ValidString(s.Machine) || !utf8.ValidString(s.Origin) {
+		return errors.New("selector: checkout, machine, and origin must be valid UTF-8")
+	}
 	if normalized, err := NormalizeOrigin(s.Origin); err != nil || normalized != s.Origin {
 		return fmt.Errorf("selector: origin %q is not a normalized identity", s.Origin)
+	}
+	content, err := toml.Marshal(s)
+	if err != nil {
+		return fmt.Errorf("encode selector: %w", err)
 	}
 	if info, err := os.Lstat(path); err == nil && info.Mode()&fs.ModeSymlink != 0 {
 		return fmt.Errorf("selector %s must not be a symlink", path)
@@ -114,23 +121,21 @@ func Write(path string, s *Selector) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	content := fmt.Sprintf("schema = %d\ncheckout = %q\nmachine = %q\norigin = %q\n", s.Schema, s.Checkout, s.Machine, s.Origin)
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.toml")
 	if err != nil {
 		return err
 	}
-	if _, err := tmp.WriteString(content); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
+	defer func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+	}()
+	if _, err := tmp.Write(content); err != nil {
 		return err
 	}
 	if err := tmp.Chmod(0o644); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
 		return err
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmp.Name())
 		return err
 	}
 	return os.Rename(tmp.Name(), path)
@@ -161,8 +166,7 @@ func NormalizeOrigin(locator string) (string, error) {
 		host, p = m[1], m[2]
 	} else if !strings.Contains(locator, ":") && strings.Count(locator, "/") >= 1 {
 		// Already an identity such as github.com/owner/repo.
-		i := strings.IndexByte(locator, '/')
-		host, p = locator[:i], locator[i:]
+		host, p, _ = strings.Cut(locator, "/")
 	} else {
 		return "", fmt.Errorf("unsupported locator %q", locator)
 	}
@@ -198,10 +202,11 @@ func CheckoutOrigin(root string) (string, error) {
 			return "", err
 		}
 		line := strings.TrimSpace(string(data))
-		if !strings.HasPrefix(line, "gitdir: ") {
+		dir, ok := strings.CutPrefix(line, "gitdir: ")
+		if !ok {
 			return "", fmt.Errorf("%s is not a worktree pointer", gitPath)
 		}
-		gitDir = strings.TrimPrefix(line, "gitdir: ")
+		gitDir = dir
 		if !filepath.IsAbs(gitDir) {
 			gitDir = filepath.Join(root, gitDir)
 		}
@@ -235,34 +240,47 @@ func CheckoutOrigin(root string) (string, error) {
 }
 
 // ParseOriginURL extracts remote.origin.url from Git configuration text.
-// Include directives are rejected so the value is always what the file says.
+// Include directives and multiline values are not supported.
 func ParseOriginURL(data []byte) (string, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
-	section := ""
+	section, subsection := "", ""
 	origin := ""
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	foundOrigin := false
+	for lineNumber := 1; scanner.Scan(); lineNumber++ {
+		raw := scanner.Text()
+		line := strings.TrimSpace(raw)
 		if line == "" || line[0] == '#' || line[0] == ';' {
 			continue
 		}
 		if line[0] == '[' {
-			section = sectionKey(line)
-			if section == "include" || strings.HasPrefix(section, "includeif") {
+			var err error
+			section, subsection, err = parseSection(line)
+			if err != nil {
+				return "", err
+			}
+			if section == "include" || section == "includeif" {
 				return "", fmt.Errorf("include directives are not supported; set remote.origin.url directly")
 			}
 			continue
 		}
-		if section != `remote "origin"` {
+		key, rawValue, assigned := strings.Cut(raw, "=")
+		if !assigned {
+			rawValue = raw
+		}
+		value, err := parseGitValue(rawValue)
+		if err != nil {
+			return "", fmt.Errorf("parse Git configuration line %d: %w", lineNumber, err)
+		}
+		if section != "remote" || subsection != "origin" || !strings.EqualFold(strings.TrimSpace(key), "url") {
 			continue
 		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok || !strings.EqualFold(strings.TrimSpace(key), "url") {
-			continue
-		}
-		if origin != "" {
+		if foundOrigin {
 			return "", fmt.Errorf("remote.origin.url is set more than once")
 		}
-		origin = strings.TrimSpace(value)
+		if !assigned {
+			value = ""
+		}
+		origin, foundOrigin = value, true
 	}
 	if err := scanner.Err(); err != nil {
 		return "", fmt.Errorf("unreadable configuration: %w", err)
@@ -273,16 +291,82 @@ func ParseOriginURL(data []byte) (string, error) {
 	return origin, nil
 }
 
-// sectionKey normalizes a Git config section header. Section names are
-// case-insensitive; a quoted subsection such as a remote name is not.
-func sectionKey(header string) string {
-	inner := strings.TrimSuffix(strings.TrimPrefix(header, "["), "]")
-	name, sub, quoted := strings.Cut(inner, " ")
-	name = strings.ToLower(strings.TrimSpace(name))
-	if !quoted {
-		return name
+// parseGitValue decodes Git's quoted segments, escapes, whitespace, and
+// comments while rejecting line continuations.
+func parseGitValue(raw string) (string, error) {
+	value := make([]byte, 0, len(raw))
+	end := 0
+	quoted, escaped := false, false
+	for i := range len(raw) {
+		char := raw[i]
+		if escaped {
+			switch char {
+			case 'n':
+				char = '\n'
+			case 't':
+				char = '\t'
+			case 'b':
+				char = '\b'
+			case '\\', '"':
+			default:
+				return "", fmt.Errorf("invalid escape \\%c", char)
+			}
+			escaped = false
+		} else {
+			switch char {
+			case '\\':
+				escaped = true
+				continue
+			case '"':
+				quoted = !quoted
+				end = len(value)
+				continue
+			case '#', ';':
+				if !quoted {
+					return string(value[:end]), nil
+				}
+			case ' ', '\t', '\r', '\v', '\f':
+				if !quoted {
+					if len(value) > 0 {
+						value = append(value, char)
+					}
+					continue
+				}
+			}
+		}
+		value = append(value, char)
+		end = len(value)
 	}
-	return name + " " + strings.TrimSpace(sub)
+	if escaped {
+		return "", fmt.Errorf("line continuations are not supported; write each value on one line")
+	}
+	if quoted {
+		return "", fmt.Errorf("unterminated quoted value")
+	}
+	return string(value[:end]), nil
+}
+
+var sectionHeaderRe = regexp.MustCompile(`^\[([A-Za-z0-9.-]+)(?:[ \t]+"((?:[^"\\]|\\.)*)")?\][ \t]*(?:[#;].*)?$`)
+
+// parseSection keeps comments and brackets inside quoted subsections intact.
+// Section names are case-insensitive; subsection names are not.
+func parseSection(header string) (string, string, error) {
+	match := sectionHeaderRe.FindStringSubmatch(header)
+	if match == nil {
+		return "", "", fmt.Errorf("invalid Git configuration section %q", header)
+	}
+	if strings.Contains(match[1], ".") {
+		return "", "", fmt.Errorf("legacy dotted Git configuration section %q is not supported; use a quoted subsection", header)
+	}
+	var sub strings.Builder
+	for i := 0; i < len(match[2]); i++ {
+		// Git removes the backslash before any escaped subsection byte.
+		if match[2][i] == '\\' {
+			i++
+		}
+		sub.WriteByte(match[2][i])
+	}
+	return strings.ToLower(match[1]), sub.String(), nil
 }
 
 // Verify checks that the checkout's origin matches the selector.

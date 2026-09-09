@@ -29,11 +29,44 @@ Phase 5 is complete; its prompt improvements are included below.
   boot-target or display-manager change; preserve foreign configuration.
 - [x] Extend doctor for the new resources, including actionable explanations
   of missing activation, effective configuration, and owned drift.
+- [x] Align ownership views and retained-source counts with the planner.
+  Go 1.26.7 fixtures cover Flatpak adoption across origins, native RPM receipt
+  identities, multilib ambiguity, and legacy receipts.
+- [x] Reject colliding receipt ownership and unencodable stages, retain legacy
+  receipt access, and preserve each merged-install package's provenance.
+  State schema 3 blocks older writers; receipt and baseline schemas stay 2.
+  Go 1.26.7 regressions also cover commented Git includes, native service
+  enablement, and installed Flatpaks without version metadata.
 - [ ] Pass reboot to greeter, normal login, logout/relogin, file-picker and
   screen-sharing portals, and recovery with absent/broken user configuration.
 - [ ] Prove second-sync convergence, failed-activation recovery, and component
   removal without losing console access. Run focused provider tests and
   `just check`; record the actual graphical VM evidence before proceeding.
+
+### PR 18 follow-up
+
+Plan: [Modern Go PR validation](ROADMAP.md#modern-go-pr-validation).
+
+- [x] Preserve verified file receipts and retirement when temporary payload
+  cleanup fails; surface the failure in the closing differences report.
+- [x] Normalize CRLF repository lines before parsing blank-line boundaries.
+  Both regressions failed before their fixes and pass with Go 1.26.7. The file
+  regression records real temporary state and checks install, retry, removal,
+  and retry; verification failures still reject successful receipts.
+- [x] Pass `just check` with Go 1.26.7 and inspect the final fix diff. Formatting,
+  vet, all Go tests, diff checks, markdownlint, and shellcheck passed.
+- [ ] Confirm the disposable VM and restore snapshot, then stage and identify
+  the candidate. Record read-only validation, doctor, and first-plan results.
+- [ ] Apply the reviewed first plan and prove second-sync convergence.
+- [ ] Prove managed-file/component removal, activation, receipt retirement,
+  and retry without losing console access; restore the snapshot.
+- [ ] Test legacy schema 1 and 2 baselines separately, including the schema 3
+  write boundary and older-engine refusal. Record recovery and all results.
+- [x] Obtain owner authorization for commits, push, marking PR 18 ready,
+  merging it after final checks, and closing superseded Voxtype PR 17.
+
+Native VM validation is planned, not completed. Existing Phase 6 desktop,
+portal, and recovery gaps remain open.
 
 ### Installer prompt polish carried from Phase 5
 
@@ -252,6 +285,30 @@ Google Maps and FotMob are still intentionally excluded by Chezmoi. Their
 prepared desktop entries call `nimbus launch webapp`, which the installed
 0.2.0 engine and current source do not implement. They cannot be enabled until
 the Phase 8 launcher is available; this is not a Noctalia discovery problem.
+
+## Next phase: 7. Application delivery and unified updates
+
+Plan: [First milestone](ROADMAP.md#first-milestone-application-delivery-and-unified-updates).
+Runtime implementation is deferred; Phase 6 VM and recovery gates remain open.
+
+- [ ] Reconcile the existing Phase 7 branch with the accepted direction.
+- [ ] Define and implement the official GitHub Copilot RPM lifecycle: trusted
+  artifact verification, release discovery, approval, native identity,
+  receipts, retry, removal, and downgrade refusal. Keep read-only paths offline.
+- [ ] Retain ChatGPT's official OpenAI repository and verify update ownership.
+- [ ] Add Voxtype source/version/build handling in the COPR repository; verify
+  a signed Fedora 44 x86_64 build and pin the accepted repository key before
+  selecting it in Nimbus. Publication remains a separate authorized action.
+- [ ] Resolve Voxtype dependencies, user configuration, typing backend, and
+  actual daemon unit with the dotfiles handoff.
+- [ ] Make Chezmoi-owned Topgrade configuration invoke Nimbus first on managed
+  hosts, then the explicit native user-manager allowlist. Cover standalone
+  hosts, disable duplicate system steps, and prevent recursion.
+- [ ] Test cancellation, Nimbus fail-stop, user-step continuation with final
+  failure status, and no privileged user updates against native Topgrade.
+- [ ] Pass focused lifecycle tests and every changed repository's local gate,
+  then an approved disposable Fedora VM install/update/removal/retry trial.
+  Record recovery limits; do not close the separate Snapper restore gate.
 
 ## Phase 5 evidence
 
@@ -884,11 +941,10 @@ skips
 - D-012 keeps hardware out of profiles and static resolution. A later
   `nimbus init` inspection proposes explicit components from DMI and PCI facts;
   the Phase 1 desktop and laptop fixtures select those components directly.
-- D-013, as amended by D-018, keeps exact system updates in Nimbus and runs
-  Topgrade with the user's Chezmoi-owned configuration and a command-line
-  `--only` allowlist. Topgrade dry-run shows command invocations rather than
-  resolved downstream versions, and the recovery topology excludes those
-  home-directory mutations.
+- D-018's 2026-09-09 amendment makes Topgrade the planned update entry point,
+  calling Nimbus for system updates before its allowed native user managers.
+  Chezmoi owns the conditional configuration. Dry-run shows commands rather
+  than resolved downstream versions; recovery excludes home mutations.
 - Current upstream installation evidence accepts Mise's recommended user-scope
   installer and self-update setting. Tailscale comes from Fedora 44, which
   carries it. Nix remains Fedora-owned because the upstream multi-user

@@ -1,10 +1,13 @@
 package facts
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/Furyfree/nimbus/internal/selector"
@@ -28,7 +31,7 @@ const (
 // checkout is selected; the checkout section then records that.
 func Inspect(src Source, checkoutRoot string) *Facts {
 	f := &Facts{Commands: map[string]string{}}
-	for _, name := range append(append([]string(nil), RequiredCommands...), OptionalCommands...) {
+	for _, name := range append(slices.Clone(RequiredCommands), OptionalCommands...) {
 		if p, err := src.LookPath(name); err == nil {
 			f.Commands[name] = p
 		} else {
@@ -65,7 +68,14 @@ func user(src Source) (User, error) {
 		u.Name = strings.TrimSpace(string(name))
 	}
 	cargo := filepath.Join(home, ".cargo", "bin", "cargo")
-	if names, err := src.ReadDir(filepath.Dir(cargo)); err != nil || !contains(names, "cargo") {
+	names, err := src.ReadDir(filepath.Dir(cargo))
+	if errors.Is(err, os.ErrNotExist) {
+		return u, nil
+	}
+	if err != nil {
+		return u, fmt.Errorf("inspect Cargo directory %s: %w", filepath.Dir(cargo), err)
+	}
+	if !slices.Contains(names, "cargo") {
 		return u, nil
 	}
 	u.Cargo = true
@@ -77,24 +87,22 @@ func user(src Source) (User, error) {
 	return u, nil
 }
 
-func contains(list []string, want string) bool {
-	for _, s := range list {
-		if s == want {
-			return true
-		}
-	}
-	return false
-}
-
 // ChezmoiDataArgs reads Chezmoi's template data without changing anything.
 var ChezmoiDataArgs = []string{"data", "--format", "json"}
 
 // ChezmoiInitialized reports whether the home holds a Chezmoi source
 // checkout. An empty source directory, which a failed clone leaves behind,
 // does not count.
-func ChezmoiInitialized(src Source, home string) bool {
-	names, err := src.ReadDir(filepath.Join(home, ".local", "share", "chezmoi"))
-	return err == nil && len(names) > 0
+func ChezmoiInitialized(src Source, home string) (bool, error) {
+	path := filepath.Join(home, ".local", "share", "chezmoi")
+	names, err := src.ReadDir(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspect Chezmoi source %s: %w", path, err)
+	}
+	return len(names) > 0, nil
 }
 
 // chezmoi reports whether Chezmoi is initialized in this home and what it
@@ -107,7 +115,11 @@ func chezmoi(src Source) (Chezmoi, error) {
 	if err != nil {
 		return Chezmoi{}, err
 	}
-	if !ChezmoiInitialized(src, home) {
+	initialized, err := ChezmoiInitialized(src, home)
+	if err != nil {
+		return Chezmoi{}, err
+	}
+	if !initialized {
 		return Chezmoi{}, nil
 	}
 	out, err := src.Run("chezmoi", ChezmoiDataArgs...)
@@ -225,7 +237,11 @@ func repositories(src Source) ([]Repository, error) {
 		if err != nil {
 			return nil, err
 		}
-		repos = append(repos, parseRepoFile(name, data)...)
+		sections, err := parseRepoFile(name, data)
+		if err != nil {
+			return nil, err
+		}
+		repos = append(repos, sections...)
 	}
 	// dnf5 config-manager setopt writes overrides here; they win over the
 	// repository file, so the effective values are what matter.
@@ -241,15 +257,26 @@ func repositories(src Source) ([]Repository, error) {
 		if err != nil {
 			return nil, err
 		}
-		for _, o := range parseRepoFile(name, data) {
+		sections, err := parseRepoFile(name, data)
+		if err != nil {
+			return nil, err
+		}
+		for _, o := range sections {
+			// DNF uses fnmatch with extended patterns and substitutes variables.
+			// Keep only the syntax whose meaning filepath.Match preserves.
+			if strings.ContainsAny(o.ID, "!()\\$") || strings.Contains(o.ID, "[[") {
+				return nil, fmt.Errorf("%s: unsupported repository override pattern %q; use literal IDs, *, ?, or ordinary bracket classes", name, o.ID)
+			}
 			for i := range repos {
-				if match, _ := filepath.Match(o.ID, repos[i].ID); match {
+				match, err := filepath.Match(o.ID, repos[i].ID)
+				if err != nil {
+					return nil, fmt.Errorf("%s: repository override pattern %q: %w", name, o.ID, err)
+				}
+				if match {
 					if repos[i].OverrideOptions == nil {
 						repos[i].OverrideOptions = map[string]string{}
 					}
-					for key, value := range o.Options {
-						repos[i].OverrideOptions[key] = value
-					}
+					maps.Copy(repos[i].OverrideOptions, o.Options)
 					if value, ok := o.Options["baseurl"]; ok {
 						repos[i].BaseURL = value
 					}
@@ -262,12 +289,8 @@ func repositories(src Source) ([]Repository, error) {
 					if _, ok := o.Options["gpgkey"]; ok {
 						repos[i].GPGKey = o.GPGKey
 					}
-					if o.Priority != "" {
-						repos[i].Priority = o.Priority
-					}
-					if o.GPGCheck != "" {
-						repos[i].GPGCheck = o.GPGCheck
-					}
+					repos[i].Priority = cmp.Or(o.Priority, repos[i].Priority)
+					repos[i].GPGCheck = cmp.Or(o.GPGCheck, repos[i].GPGCheck)
 					if _, ok := o.Options["enabled"]; ok {
 						repos[i].Enabled = o.Enabled
 					}
@@ -403,10 +426,11 @@ func checkoutOrigin(src Source, root string) (string, error) {
 	switch {
 	case err == nil:
 		line := strings.TrimSpace(string(data))
-		if !strings.HasPrefix(line, "gitdir: ") {
+		dir, ok := strings.CutPrefix(line, "gitdir: ")
+		if !ok {
 			return "", fmt.Errorf("%s is not a worktree pointer", gitPath)
 		}
-		gitDir = strings.TrimPrefix(line, "gitdir: ")
+		gitDir = dir
 		if !filepath.IsAbs(gitDir) {
 			gitDir = filepath.Join(root, gitDir)
 		}

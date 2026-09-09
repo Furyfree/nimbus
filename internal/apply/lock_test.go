@@ -1,9 +1,11 @@
 package apply
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -19,11 +21,11 @@ func TestLockIsExclusiveAndDiagnostic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st, _ := os.Stat(filepath.Dir(path)); st.Mode().Perm() != 0o700 {
-		t.Fatalf("directory mode %o", st.Mode().Perm())
+	if st, err := os.Stat(filepath.Dir(path)); err != nil || st.Mode().Perm() != 0o700 {
+		t.Fatalf("directory metadata: %v, %v", st, err)
 	}
-	if st, _ := os.Stat(path); st.Mode().Perm() != 0o600 {
-		t.Fatalf("lock mode %o", st.Mode().Perm())
+	if st, err := os.Stat(path); err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("lock metadata: %v, %v", st, err)
 	}
 	if _, err := Acquire(path, info); err == nil || !strings.Contains(err.Error(), "op-1") {
 		t.Fatalf("second acquire: %v", err)
@@ -32,12 +34,33 @@ func TestLockIsExclusiveAndDiagnostic(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Stale content never counts as a held lock.
-	os.WriteFile(path, []byte(`{"command":"apply","operation":"stale","pid":1}`), 0o600)
+	if err := os.WriteFile(path, []byte(`{"command":"apply","operation":"stale","pid":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	l2, err := Acquire(path, info)
 	if err != nil {
 		t.Fatalf("stale content blocked the lock: %v", err)
 	}
-	l2.Release()
+	if err := l2.Release(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLockReleasePreservesUnlockAndCloseFailures(t *testing.T) {
+	lock, err := Acquire(filepath.Join(t.TempDir(), "operation.lock"), LockInfo{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	err = lock.Release()
+	if !errors.Is(err, syscall.EBADF) || !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("release lost an unlock or close failure: %v", err)
+	}
+	if err := lock.Release(); err != nil {
+		t.Fatalf("repeated release: %v", err)
+	}
 }
 
 func TestLockPathNeedsAValidRuntimeDir(t *testing.T) {
@@ -51,11 +74,12 @@ func TestLockPathNeedsAValidRuntimeDir(t *testing.T) {
 	}
 	real := t.TempDir()
 	link := filepath.Join(t.TempDir(), "link")
-	if err := os.Symlink(real, link); err == nil {
-		t.Setenv("XDG_RUNTIME_DIR", link)
-		if _, err := LockPath(); err == nil {
-			t.Fatal("symlinked runtime dir accepted")
-		}
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", link)
+	if _, err := LockPath(); err == nil {
+		t.Fatal("symlinked runtime dir accepted")
 	}
 }
 
@@ -71,9 +95,14 @@ func TestLockDoesNotTruncateSymlinkTarget(t *testing.T) {
 	}
 	lock, err := Acquire(link, LockInfo{})
 	if lock != nil {
-		lock.Release()
+		if err := lock.Release(); err != nil {
+			t.Fatal(err)
+		}
 	}
-	data, _ := os.ReadFile(target)
+	data, readErr := os.ReadFile(target)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
 	if err == nil || string(data) != "keep me" {
 		t.Fatalf("symlink accepted or target changed: error=%v contents=%q", err, data)
 	}
@@ -100,12 +129,17 @@ func TestLockRejectsLinkedDirectoriesAndHardlinks(t *testing.T) {
 			}
 			lock, err := Acquire(path, LockInfo{})
 			if lock != nil {
-				lock.Release()
+				if err := lock.Release(); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if err == nil {
 				t.Fatal("linked lock accepted")
 			}
-			data, _ := os.ReadFile(target)
+			data, err := os.ReadFile(target)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if string(data) != "keep me" {
 				t.Fatalf("target overwritten: %q", data)
 			}

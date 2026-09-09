@@ -236,6 +236,9 @@ technical component rather than user intent shared with Chezmoi.
 
 #### D-013: Topgrade aggregates only the user-owned upgrade phase
 
+Superseded 2026-09-09 by the amendment to D-018 below. The earlier direction
+is retained here as rationale history, not the current integration contract.
+
 Decided 2026-09-03. `nimbus upgrade` is the primary workstation update entry
 point. Nimbus retains exact DNF and Flatpak planning and surrounds the workflow
 with its recovery point. After system verification it offers a separately
@@ -298,6 +301,12 @@ name. Corrected 2026-09-04 by the first VM run: the container search that
 found the package had Terra enabled, and Fedora 44 itself carries no lazygit.
 
 #### D-015: One fixed source order replaces the tiers
+
+Amended 2026-09-09 for the next phase: the requested GitHub application is
+the official GitHub Copilot app from `github/app`, replacing the earlier
+GitHub Desktop COPR selection. Keep ChatGPT on OpenAI's repository. Voxtype
+is an explicit exception to the community-before-own-COPR order: maintain our
+own recipe from verified upstream releases for native DNF updates.
 
 Decided 2026-09-03. The owner found the tier table inconsistent from package
 to package. SECURITY.md now states one order applied to every package: Fedora;
@@ -381,6 +390,16 @@ Amended 2026-09-03 after the passthrough. Topgrade 17.9 exposes more than
 adds. Nimbus passes `--only` with the declared allowlist plus
 `--no-self-update` instead. The root post snapshot closes as soon as the
 system phase is verified, before this phase starts.
+
+Amended 2026-09-09 for Phase 7: Topgrade becomes the overall update entry
+point. Chezmoi owns the explicit allowlist and managed-host selection. On
+managed hosts Topgrade calls Nimbus for system updates, then native user
+managers; duplicate system and system-Flatpak steps are disabled. Nimbus
+never calls Topgrade. This reverses D-013 and the earlier direction above
+while retaining Nimbus's system transaction and recovery boundaries. A failed
+Nimbus phase stops the run; independent user-step failures retain a failing
+final status while allowing other user steps. Prove the ordering and failure
+contract against the installed Topgrade version before implementation ships.
 
 #### D-019: Passthrough corrections before code
 

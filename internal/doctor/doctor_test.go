@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -27,10 +28,8 @@ func healthyConfig() Config {
 }
 
 func status(r Report, id string) Check {
-	for _, c := range r.Checks {
-		if c.ID == id {
-			return c
-		}
+	if i := slices.IndexFunc(r.Checks, func(c Check) bool { return c.ID == id }); i >= 0 {
+		return r.Checks[i]
 	}
 	return Check{}
 }

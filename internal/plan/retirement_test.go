@@ -1,6 +1,7 @@
 package plan
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -37,7 +38,7 @@ func TestSourceRetirementUsesOwnedIdentityAndPreservesPreexistingSources(t *test
 			if strings.Contains(strings.Join(ops[0].Steps[0].Argv, " "), "--force") {
 				t.Fatal("remote deletion can never force past installed refs")
 			}
-			receipt.Source.Original = append([]state.NativeSource(nil), receipt.Source.Applied...)
+			receipt.Source.Original = slices.Clone(receipt.Source.Applied)
 			b.in.Applied.Receipts[receipt.Resource] = receipt
 			ops = b.sourceRetirements()
 			if ops[0].Action != ActionRetire || len(ops[0].Steps) != 0 || ops[0].Blocked != "" {
@@ -196,18 +197,17 @@ func TestReselectedDisabledRepositoryPlansVerifiedEnablement(t *testing.T) {
 	for _, repo := range f.Repositories.Value {
 		b.repos[repo.ID] = append(b.repos[repo.ID], repo)
 	}
-	for _, op := range b.repositories() {
-		if op.ID != "repository:"+id {
-			continue
-		}
-		var steps strings.Builder
-		for _, step := range op.Steps {
-			steps.WriteString(strings.Join(step.Argv, " ") + "\n")
-		}
-		if op.Action != ActionRepair || op.Blocked != "" || !strings.Contains(steps.String(), "nimbus-brave.enabled=1") || !strings.Contains(steps.String(), "--overwrite") {
-			t.Fatalf("disabled source cannot converge when reselected: %+v", op)
-		}
-		return
+	ops := b.repositories()
+	i := slices.IndexFunc(ops, func(op Operation) bool { return op.ID == "repository:"+id })
+	if i < 0 {
+		t.Fatal("missing re-enable operation")
 	}
-	t.Fatal("missing re-enable operation")
+	op := ops[i]
+	var steps strings.Builder
+	for _, step := range op.Steps {
+		steps.WriteString(strings.Join(step.Argv, " ") + "\n")
+	}
+	if op.Action != ActionRepair || op.Blocked != "" || !strings.Contains(steps.String(), "nimbus-brave.enabled=1") || !strings.Contains(steps.String(), "--overwrite") {
+		t.Fatalf("disabled source cannot converge when reselected: %+v", op)
+	}
 }

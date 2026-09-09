@@ -2,6 +2,7 @@ package apply
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -59,7 +60,10 @@ func (ex *executor) systemResource(op plan.Operation) ([]state.Receipt, []string
 			for _, resource := range ex.p.Operations {
 				if resource.Kind == plan.KindService && resource.Resource != nil {
 					out, err := ex.opts.Source.Run("systemctl", "show", "--property=NeedDaemonReload", "--value", "--", resource.Resource.Name)
-					if err != nil || strings.TrimSpace(string(out)) != "no" {
+					if err != nil {
+						return nil, nil, fmt.Errorf("daemon reload verification failed for %s: %w", resource.Resource.Name, err)
+					}
+					if strings.TrimSpace(string(out)) != "no" {
 						return nil, nil, fmt.Errorf("daemon reload verification failed for %s", resource.Resource.Name)
 					}
 				}
@@ -134,8 +138,17 @@ func (ex *executor) verifyResource(op plan.Operation, after bool) error {
 		if have.Load != "loaded" {
 			return fmt.Errorf("unit is not loaded")
 		}
-		if c.Enabled != nil && (have.Enabled == "enabled") != *c.Enabled {
+		if have.Enabled == "masked" || have.Enabled == "masked-runtime" {
 			return fmt.Errorf("unit enablement is %s", have.Enabled)
+		}
+		if c.Enabled != nil {
+			want := "disabled"
+			if *c.Enabled {
+				want = "enabled"
+			}
+			if have.Enabled != want {
+				return fmt.Errorf("unit enablement is %s", have.Enabled)
+			}
 		}
 		if c.Running != nil && (have.Active == "active") != *c.Running {
 			return fmt.Errorf("unit activity is %s", have.Active)
@@ -193,9 +206,18 @@ func (ex *executor) systemFile(op plan.Operation) (receipts []state.Receipt, rem
 			return nil, nil, err
 		}
 		staged := f.Name()
-		defer os.Remove(staged)
+		defer func() {
+			if err := os.Remove(staged); err != nil && !errors.Is(err, os.ErrNotExist) {
+				cleanupErr := fmt.Errorf("remove staged file payload: %w", err)
+				if resultErr != nil {
+					resultErr = errors.Join(resultErr, cleanupErr)
+				} else {
+					ex.differences = append(ex.differences, cleanupErr.Error())
+				}
+			}
+		}()
 		if _, err = f.Write(payload); err != nil {
-			f.Close()
+			_ = f.Close()
 			return nil, nil, err
 		}
 		if err = f.Close(); err != nil {

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -108,16 +109,18 @@ func (s *installerSource) Stream(out, errOut io.Writer, name string, args ...str
 	}
 	lock, err := apply.Acquire(path, apply.LockInfo{})
 	if err == nil {
-		lock.Release()
+		_ = lock.Release() // Cleanup cannot change the failed lock assertion.
 		s.t.Fatal("installer released its lock between stages")
 	}
 	home := os.Getenv("HOME")
 	if key == "chezmoi apply" && s.failApply {
-		fmt.Fprintln(out, "FAKE-RENDERED-SECRET")
+		if _, err := fmt.Fprintln(out, "FAKE-RENDERED-SECRET"); err != nil {
+			return err
+		}
 		return errors.New("required secret unavailable")
 	}
 	if name == filepath.Join(home, ".cargo/bin/cargo") {
-		if !contains(s.calls, "chezmoi apply") {
+		if !slices.Contains(s.calls, "chezmoi apply") {
 			s.t.Fatal("Cargo ran before user configuration was applied")
 		}
 		s.Commands[facts.Key(name, facts.CargoListArgs...)] = []byte("demo v1.0.0:\n    demo\n")
@@ -195,10 +198,8 @@ func TestInitAppliesDotfilesBeforeCargoAndRetriesAFailure(t *testing.T) {
 			t.Fatalf("missing stage diagnostic %s", detail)
 		}
 	}
-	for _, call := range src.calls {
-		if strings.Contains(call, "cargo install demo") {
-			t.Fatal("Cargo ran after failed apply")
-		}
+	if slices.ContainsFunc(src.calls, func(call string) bool { return strings.Contains(call, "cargo install demo") }) {
+		t.Fatal("Cargo ran after failed apply")
 	}
 	src.failApply = false
 	src.calls = nil
@@ -206,24 +207,34 @@ func TestInitAppliesDotfilesBeforeCargoAndRetriesAFailure(t *testing.T) {
 	if code != ExitOK || !strings.Contains(out, "succeeded  remaining Nimbus user tools") {
 		t.Fatalf("%d %s%s", code, out, errOut)
 	}
-	if !contains(src.calls, facts.Key(filepath.Join(os.Getenv("HOME"), ".cargo/bin/cargo"), "install", "demo")) {
+	if !slices.Contains(src.calls, facts.Key(filepath.Join(os.Getenv("HOME"), ".cargo/bin/cargo"), "install", "demo")) {
 		t.Fatal("Cargo was not installed")
 	}
 }
 
 func TestInitCannotWriteWhileAnotherOperationHoldsTheLock(t *testing.T) {
 	root, _ := installerFixture(t)
-	path, _ := apply.LockPath()
+	path, err := apply.LockPath()
+	if err != nil {
+		t.Fatal(err)
+	}
 	lock, err := apply.Acquire(path, apply.LockInfo{Command: "other", PID: os.Getpid()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lock.Release()
+	t.Cleanup(func() {
+		if err := lock.Release(); err != nil {
+			t.Error(err)
+		}
+	})
 	code, _, _ := run(t, "init", "--checkout", root, "--machine", "vm", "-y")
 	if code != ExitFailure {
 		t.Fatal("concurrent init succeeded")
 	}
-	path, _ = selector.DefaultPath()
+	path, err = selector.DefaultPath()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("selector written: %v", err)
 	}
@@ -238,7 +249,7 @@ func TestUnsupportedPlatformDoesNotRefreshMetadataOrWriteSelector(t *testing.T) 
 			if code != ExitFailure || !strings.Contains(out+errOut, "unsupported platform") {
 				t.Fatalf("%d %s%s", code, out, errOut)
 			}
-			if len(src.calls) > 0 || contains(src.reads, "dnf5 makecache") {
+			if len(src.calls) > 0 || slices.Contains(src.reads, "dnf5 makecache") {
 				t.Fatalf("mutation calls: %v", src.calls)
 			}
 			path, _ := selector.DefaultPath()
@@ -361,7 +372,7 @@ func TestInitRefusesUnrelatedChezmoiStateBeforeApplying(t *testing.T) {
 			if code != ExitFailure || !strings.Contains(out+errOut, want) {
 				t.Fatalf("%d %s%s", code, out, errOut)
 			}
-			if contains(src.calls, "chezmoi apply") {
+			if slices.Contains(src.calls, "chezmoi apply") {
 				t.Fatal("unrelated source was applied")
 			}
 		})
@@ -459,7 +470,7 @@ func TestInitRefreshPreservesEnabledSSH(t *testing.T) {
 	root, src := installerFixture(t)
 	src.Commands[facts.Key("chezmoi", facts.ChezmoiDataArgs...)] = []byte(`{"Machine":"other","ManagedByNimbus":true,"Profiles":["common"],"onePasswordSsh":true}`)
 	code, out, errOut := run(t, "init", "--checkout", root, "--machine", "vm", "-y")
-	if code != ExitFailure || !strings.Contains(out+errOut, "'Enable 1Password SSH integration=true'") || contains(src.calls, "chezmoi apply") {
+	if code != ExitFailure || !strings.Contains(out+errOut, "'Enable 1Password SSH integration=true'") || slices.Contains(src.calls, "chezmoi apply") {
 		t.Fatalf("refresh lost SSH: %d %s%s", code, out, errOut)
 	}
 }

@@ -33,7 +33,8 @@ source order. This list feeds the definitions and shrinks as they land.
 - T3 Code (`DNF/Terra: t3code`)
 - ChatGPT Desktop (`DNF/OpenAI repository: chatgpt`; the RPM's own script
   would add the repository, Nimbus declares it directly)
-- GitHub Desktop (own COPR, pending)
+- GitHub Copilot app (official `github/app` RPM; lifecycle pending Phase 7)
+- Voxtype (own COPR; packaging and Nimbus selection pending Phase 7)
 - Vesktop (`DNF/Terra: vesktop`)
 - VSCodium (`DNF/VSCodium repository: codium`)
 - 1Password and 1Password CLI

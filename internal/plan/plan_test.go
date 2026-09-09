@@ -1,18 +1,21 @@
 package plan
 
 import (
+	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/rpm"
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
@@ -77,7 +80,7 @@ func host(t *testing.T) (*facts.FakeSource, *facts.Facts) {
 
 // previewText renders a DNF5 preview table the way the fixture shows it.
 func previewText(rows []TxPackage) []byte {
-	var b strings.Builder
+	var b bytes.Buffer
 	b.WriteString("Updating and loading repositories:\nRepositories loaded.\nPackage Arch Version Repository Size\n")
 	section := ""
 	for _, r := range rows {
@@ -93,27 +96,18 @@ func previewText(rows []TxPackage) []byte {
 		fmt.Fprintf(&b, " %s %s %s %s 1.0 KiB\n", r.Name, r.Arch, r.EVR, r.Repository)
 	}
 	b.WriteString("\nTransaction Summary:\n Installing: 1 package\n\nOperation aborted by the user.\n")
-	return []byte(b.String())
+	return b.Bytes()
 }
 
 // installArgs returns the exact preview argv the planner will run for the
 // packages it can install now, so the fixture can answer it.
 func installArgs(p *Plan) []string {
-	for _, op := range p.Operations {
-		if op.ID == "packages:install" {
-			args := []string{"--assumeno", "--cacheonly"}
-			argv := op.Steps[0].Argv[2:] // drop dnf5 -y
-			for i := 0; i < len(argv); i++ {
-				if argv[i] == "--store" {
-					i++ // the stage path is apply's, not the preview's
-					continue
-				}
-				args = append(args, argv[i])
-			}
-			return args
-		}
+	op := find(p, "packages:install")
+	if op == nil {
+		return nil
 	}
-	return nil
+	args := []string{"--assumeno", "--cacheonly"}
+	return append(args, op.Steps[0].Argv[2:]...) // drop dnf5 -y
 }
 
 func installNames(args []string) []string {
@@ -144,10 +138,8 @@ func answerInstall(t *testing.T, src *facts.FakeSource, in Inputs, mutate func([
 				repo = DNFRepoIDs(p.Prefix, in.Root.Repositories[p.Prefix])[0]
 			}
 		}
-		native, arch := facts.SplitPackageRequest(name)
-		if arch == "" {
-			arch = "x86_64"
-		}
+		native, arch := rpm.SplitRequest(name)
+		arch = cmp.Or(arch, "x86_64")
 		rows = append(rows, TxPackage{Name: native, Arch: arch, EVR: "0:1-1.fc44", Repository: repo, Section: "installing"})
 	}
 	if mutate != nil {
@@ -163,10 +155,8 @@ func answerInstall(t *testing.T, src *facts.FakeSource, in Inputs, mutate func([
 }
 
 func find(p *Plan, id string) *Operation {
-	for i := range p.Operations {
-		if p.Operations[i].ID == id {
-			return &p.Operations[i]
-		}
+	if i := slices.IndexFunc(p.Operations, func(op Operation) bool { return op.ID == id }); i >= 0 {
+		return &p.Operations[i]
 	}
 	return nil
 }
@@ -233,7 +223,7 @@ func TestPlanOnFreshFedora(t *testing.T) {
 	in := Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src}
 	p = answerInstall(t, src, in, nil)
 	inst := find(p, "packages:install")
-	if inst.Blocked != "" || inst.After != "" || inst.Transaction == nil || !contains(inst.Steps[0].Argv, "--allowerasing") || !contains(inst.Steps[0].Argv, "docker-ce") || !strings.Contains(inst.Summary, "packages through one DNF transaction") {
+	if inst.Blocked != "" || inst.After != "" || inst.Transaction == nil || !slices.Contains(inst.Steps[0].Argv, "--allowerasing") || !slices.Contains(inst.Steps[0].Argv, "docker-ce") || !strings.Contains(inst.Summary, "packages through one DNF transaction") {
 		t.Fatalf("install = %+v", inst)
 	}
 	if len(inst.Steps) != 1 || !strings.HasPrefix(strings.Join(inst.Steps[0].Argv, " "), "dnf5 -y install --allowerasing ") || !inst.Steps[0].Privileged {
@@ -271,15 +261,13 @@ func TestPlanOnFreshFedora(t *testing.T) {
 		case KindDNFConfig, KindRepository, KindFlatpakRemote:
 			lastRepo = i
 		default:
-			if i < firstPkg {
-				firstPkg = i
-			}
+			firstPkg = min(firstPkg, i)
 		}
 	}
 	if lastRepo > firstPkg {
 		t.Fatalf("repository operation after a package operation: %d > %d", lastRepo, firstPkg)
 	}
-	if !sort.SliceIsSorted(p.Prune, func(i, j int) bool { return p.Prune[i].Name < p.Prune[j].Name }) {
+	if !slices.IsSortedFunc(p.Prune, func(a, b Prune) int { return cmp.Compare(a.Name, b.Name) }) {
 		t.Fatal("prune candidates are not sorted")
 	}
 }
@@ -434,10 +422,8 @@ func TestPlanIsCompleteOnAFreshHostWithoutForeignFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, op := range p.Operations {
-		if op.Blocked != "" {
-			t.Fatalf("blocked on a fresh host: %s: %s", op.ID, op.Blocked)
-		}
+	if i := slices.IndexFunc(p.Operations, func(op Operation) bool { return op.Blocked != "" }); i >= 0 {
+		t.Fatalf("blocked on a fresh host: %s: %s", p.Operations[i].ID, p.Operations[i].Blocked)
 	}
 	if !p.Complete {
 		t.Fatal("a fresh host with pending operations must still produce a complete plan")
@@ -454,7 +440,7 @@ func readyHost(t *testing.T, c *definitions.Checkout) (*facts.FakeSource, *facts
 	t.Helper()
 	src, f := host(t)
 	withoutTerraFile(f)
-	for _, id := range sortedKeys(c.Definitions().Repositories) {
+	for _, id := range slices.Sorted(maps.Keys(c.Definitions().Repositories)) {
 		r := c.Definitions().Repositories[id]
 		switch {
 		case r.Kind == "flatpak":
@@ -586,7 +572,7 @@ func applied(receipts ...string) *state.Applied {
 		if strings.HasPrefix(r, "flatpak:") {
 			provider = "flatpak"
 		}
-		a.Receipts[r] = state.Receipt{Schema: state.Schema, Resource: r, Provider: provider, Package: facts.PackageID(PackageName(r), "x86_64"), Operation: "install", Verified: true}
+		a.Receipts[r] = state.Receipt{Schema: state.ReceiptSchema, Resource: r, Provider: provider, Package: facts.PackageID(PackageName(r), "x86_64"), Operation: "install", Verified: true}
 	}
 	return a
 }
@@ -600,8 +586,8 @@ func TestAppliedStateShapesThePlan(t *testing.T) {
 	for _, p := range f.Packages.Value {
 		baseline = append(baseline, p.Name)
 	}
-	sort.Strings(baseline)
-	a.Baseline = &state.Baseline{Schema: state.Schema, Packages: baseline}
+	slices.Sort(baseline)
+	a.Baseline = &state.Baseline{Schema: state.BaselineSchema, Packages: baseline}
 	f.Packages.Value = append(f.Packages.Value,
 		facts.Package{Name: "no-longer-wanted", Version: "1", Release: "1", Arch: "x86_64", FromRepo: "fedora", Reason: "user"},
 		facts.Package{Name: "hand-installed", Version: "1", Release: "1", Arch: "x86_64", FromRepo: "fedora", Reason: "user"},
@@ -616,7 +602,7 @@ func TestAppliedStateShapesThePlan(t *testing.T) {
 		t.Fatalf("managed package = %+v", op)
 	}
 	owned := find(p, "packages:remove-owned")
-	if owned == nil || owned.Blocked != "" || strings.Join(owned.Steps[0].Argv, " ") != "dnf5 -y remove --no-autoremove no-longer-wanted.x86_64" || !contains(owned.Paths, "package:dnf:no-longer-wanted") {
+	if owned == nil || owned.Blocked != "" || strings.Join(owned.Steps[0].Argv, " ") != "dnf5 -y remove --no-autoremove no-longer-wanted.x86_64" || !slices.Contains(owned.Paths, "package:dnf:no-longer-wanted") {
 		t.Fatalf("owned removal = %+v", owned)
 	}
 	names := map[string]bool{}
@@ -638,7 +624,7 @@ func TestAppliedStateShapesThePlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if op := find(p, "packages:prune"); op == nil || op.Action != ActionPrune || op.Blocked != "" || !contains(op.Paths, "unmanaged:hand-installed.x86_64") {
+	if op := find(p, "packages:prune"); op == nil || op.Action != ActionPrune || op.Blocked != "" || !slices.Contains(op.Paths, "unmanaged:hand-installed.x86_64") {
 		t.Fatalf("prune transaction = %+v", op)
 	}
 	if find(p, "packages:remove-owned") == nil {
@@ -721,6 +707,7 @@ func TestARequestedProvideMayResolveToAnotherName(t *testing.T) {
 	p := answerInstall(t, src, in, func(rows []TxPackage) []TxPackage {
 		requested = rows[0].Name
 		rows[0].Name = requested + "-real"
+		src.Commands[facts.Key("dnf5", "--cacheonly", "repoquery", "--available", "--whatprovides", requested, "--queryformat", "%{name}|%{arch}|%{evr}|%{repoid}\\n")] = []byte(rows[0].Name + "|" + rows[0].Arch + "|" + rows[0].EVR + "|" + rows[0].Repository + "\n")
 		return rows
 	})
 	op := find(p, "packages:install")
@@ -863,15 +850,13 @@ func TestReleasePackagesBelongToTheirRepository(t *testing.T) {
 	src, f := readyHost(t, c)
 	f.Packages.Value = append(f.Packages.Value, facts.Package{Name: "rpmfusion-free-release", Version: "44", Release: "3", Arch: "noarch", FromRepo: "@commandline", Reason: "user"})
 	a := applied()
-	a.Baseline = &state.Baseline{Schema: state.Schema, Packages: []string{"bash"}}
+	a.Baseline = &state.Baseline{Schema: state.BaselineSchema, Packages: []string{"bash"}}
 	p, err := Build(Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src, Applied: a, Prune: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, pr := range p.Prune {
-		if pr.Name == "rpmfusion-free-release" {
-			t.Fatal("the release package Nimbus installed is a prune candidate")
-		}
+	if slices.ContainsFunc(p.Prune, func(pr Prune) bool { return pr.Name == "rpmfusion-free-release.noarch" }) {
+		t.Fatal("the release package Nimbus installed is a prune candidate")
 	}
 	if !IsReleasePackage(c.Definitions(), "rpmfusion-free-release") || IsReleasePackage(c.Definitions(), "rpmfusion") {
 		t.Fatal("release package recognition is wrong")
@@ -888,7 +873,7 @@ func TestAPrefixChangeRetiresTheOldReceiptAndAdoptsTheNew(t *testing.T) {
 	// the package stays, the old receipt goes, the new identity is adopted.
 	f.Packages.Value = append(f.Packages.Value, facts.Package{Name: "ghostty", Version: "1", Release: "1", Arch: "x86_64", FromRepo: "nimbus-terra", Reason: "user"})
 	a := applied("package:dnf:ghostty")
-	a.Baseline = &state.Baseline{Schema: state.Schema, Packages: []string{"bash"}}
+	a.Baseline = &state.Baseline{Schema: state.BaselineSchema, Packages: []string{"bash"}}
 	p, err := Build(Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src, Applied: a})
 	if err != nil {
 		t.Fatal(err)
@@ -967,12 +952,8 @@ func TestMiseBootstrapLeavesConfiguredToolsToChezmoi(t *testing.T) {
 		if strings.HasPrefix(op.ID, "package:cargo:") {
 			t.Fatalf("Mise-owned Cargo tool must not also be installed directly: %+v", op)
 		}
-		if op.Kind == KindUser {
-			for _, st := range op.Steps {
-				if st.Privileged {
-					t.Fatalf("user-scope step marked privileged: %+v", op)
-				}
-			}
+		if op.Kind == KindUser && slices.ContainsFunc(op.Steps, func(st Step) bool { return st.Privileged }) {
+			t.Fatalf("user-scope step marked privileged: %+v", op)
 		}
 	}
 	// Unknown user-scope state blocks instead of dropping the tools.
@@ -983,5 +964,74 @@ func TestMiseBootstrapLeavesConfiguredToolsToChezmoi(t *testing.T) {
 	}
 	if find(p, "user:mise") != nil || find(p, "package:cargo:sheldon") != nil {
 		t.Fatal("user tools planned without their facts")
+	}
+}
+
+type userDirectorySource struct {
+	*facts.FakeSource
+	readErrors map[string]error
+}
+
+func (s userDirectorySource) ReadDir(path string) ([]string, error) {
+	if err := s.readErrors[path]; err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	return s.FakeSource.ReadDir(path)
+}
+
+func TestInstallerPlanningDistinguishesMissingAndUnreadableFiles(t *testing.T) {
+	for _, tc := range []struct {
+		name                   string
+		binaryDir, configDir   []string
+		binaryErr, configErr   error
+		wantAction, wantAfter  string
+		blockedID, blockedPath string
+	}{
+		{name: "missing binary directory", wantAction: ActionInstall, wantAfter: "user:mise"},
+		{name: "missing binary", binaryDir: []string{}, wantAction: ActionInstall, wantAfter: "user:mise"},
+		{name: "unreadable binary directory", binaryErr: os.ErrPermission, wantAction: ActionInstall, wantAfter: "user:mise", blockedID: "user:mise", blockedPath: ".local/bin/mise"},
+		{name: "binary inspection failure", binaryErr: errors.New("filesystem unavailable"), wantAction: ActionInstall, wantAfter: "user:mise", blockedID: "user:mise", blockedPath: ".local/bin/mise"},
+		{name: "config waits for binary", configErr: os.ErrPermission, wantAction: ActionInstall, wantAfter: "user:mise"},
+		{name: "missing config directory", binaryDir: []string{"mise"}, wantAction: ActionKeep, wantAfter: AfterHandoff},
+		{name: "missing config", binaryDir: []string{"mise"}, configDir: []string{}, wantAction: ActionKeep, wantAfter: AfterHandoff},
+		{name: "unreadable config directory", binaryDir: []string{"mise"}, configErr: os.ErrPermission, wantAction: ActionKeep, blockedID: "user:mise:install", blockedPath: ".config/mise/config.toml"},
+		{name: "config inspection failure", binaryDir: []string{"mise"}, configErr: errors.New("filesystem unavailable"), wantAction: ActionKeep, blockedID: "user:mise:install", blockedPath: ".config/mise/config.toml"},
+		{name: "ready", binaryDir: []string{"mise"}, configDir: []string{"config.toml"}, wantAction: ActionKeep},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			binaryDir := filepath.Join(home, ".local/bin")
+			configDir := filepath.Join(home, ".config/mise")
+			src := userDirectorySource{FakeSource: &facts.FakeSource{Dirs: map[string][]string{}, Commands: map[string][]byte{
+				facts.Key("dnf5", "--cacheonly", "check-upgrade"): nil,
+			}}, readErrors: map[string]error{binaryDir: tc.binaryErr, configDir: tc.configErr}}
+			if tc.binaryDir != nil {
+				src.Dirs[binaryDir] = tc.binaryDir
+			}
+			if tc.configDir != nil {
+				src.Dirs[configDir] = tc.configDir
+			}
+			resolved := &definitions.Resolved{Machine: "vm", Installers: []definitions.ResolvedInstaller{{Component: "mise", Installer: definitions.Installer{
+				URL: "https://mise.run", Binary: ".local/bin/mise", Config: ".config/mise/config.toml", Install: []string{HomeDir + "/.local/bin/mise", "install"},
+			}}}}
+			p, err := Build(Inputs{Resolved: resolved, Facts: &facts.Facts{User: facts.Section[facts.User]{Value: facts.User{Home: home}}}, Source: src})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if p.Complete != (tc.blockedID == "") {
+				t.Fatalf("plan completeness does not reflect inspection failure: %+v", p)
+			}
+			binary, runtime := find(p, "user:mise"), find(p, "user:mise:install")
+			if binary == nil || runtime == nil || binary.Action != tc.wantAction || runtime.After != tc.wantAfter {
+				t.Fatalf("installer ordering changed: binary=%+v runtime=%+v", binary, runtime)
+			}
+			if tc.blockedID != "" {
+				op := find(p, tc.blockedID)
+				cause := cmp.Or(tc.binaryErr, tc.configErr)
+				if op == nil || !strings.Contains(op.Blocked, tc.blockedPath) || !strings.Contains(op.Blocked, cause.Error()) {
+					t.Fatalf("inspection failure lost path or cause: %+v", op)
+				}
+			}
+		})
 	}
 }

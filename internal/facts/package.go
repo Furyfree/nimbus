@@ -1,6 +1,6 @@
 package facts
 
-import "strings"
+import "github.com/Furyfree/nimbus/internal/rpm"
 
 // PackageID is the native RPM name and architecture, independent of version.
 func PackageID(name, arch string) string {
@@ -12,19 +12,8 @@ func PackageID(name, arch string) string {
 
 func (p Package) ID() string { return PackageID(p.Name, p.Arch) }
 
-// SplitPackageRequest recognizes architecture qualifiers supported by the
-// Fedora target without splitting dots that belong to a package's name.
-func SplitPackageRequest(request string) (name, arch string) {
-	for _, suffix := range []string{"x86_64", "i686", "i586", "i486", "i386", "noarch", "aarch64", "ppc64le", "s390x"} {
-		if name, ok := strings.CutSuffix(request, "."+suffix); ok {
-			return name, suffix
-		}
-	}
-	return request, ""
-}
-
 func (p Package) Matches(request string) bool {
-	name, arch := SplitPackageRequest(request)
+	name, arch := rpm.SplitRequest(request)
 	return p.Name == name && (arch == "" || p.Arch == arch)
 }
 

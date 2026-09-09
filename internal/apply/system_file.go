@@ -22,9 +22,10 @@ import (
 // The real privileged command passes "/"; tests use a temporary directory.
 // Every directory is opened with O_NOFOLLOW, so a rename cannot redirect a
 // later lookup through a symlink. Parent directories must not be user-writable.
-func ApplySystemFile(root string, change plan.FileChange) error {
+func ApplySystemFile(root string, change plan.FileChange) (resultErr error) {
 	target := change.Target
-	if path.Clean(target) != target || (!strings.HasPrefix(target, "/etc/") && !(change.Recovery && definitions.RecoveryTarget(target))) {
+	allowed := strings.HasPrefix(target, "/etc/") || change.Recovery && definitions.RecoveryTarget(target)
+	if path.Clean(target) != target || !allowed {
 		return fmt.Errorf("target is outside the allowed system-file boundary")
 	}
 	if strings.HasPrefix(target, "/etc/") && change.Recovery {
@@ -38,7 +39,7 @@ func ApplySystemFile(root string, change plan.FileChange) error {
 	if err != nil {
 		return err
 	}
-	defer func() { unix.Close(fd) }()
+	defer func() { _ = unix.Close(fd) }()
 	parts := strings.Split(strings.TrimPrefix(target, "/"), "/")
 	for _, part := range parts[:len(parts)-1] {
 		created := false
@@ -61,20 +62,20 @@ func ApplySystemFile(root string, change plan.FileChange) error {
 		}
 		if created {
 			if err := unix.Fchmod(next, 0755); err != nil {
-				unix.Close(next)
+				_ = unix.Close(next)
 				return err
 			}
 		}
 		var st unix.Stat_t
 		if err := unix.Fstat(next, &st); err != nil {
-			unix.Close(next)
+			_ = unix.Close(next)
 			return err
 		}
 		if st.Uid != allowedOwner || st.Mode&0022 != 0 {
-			unix.Close(next)
+			_ = unix.Close(next)
 			return fmt.Errorf("target directory %s has unsafe ownership or permissions", part)
 		}
-		unix.Close(fd)
+		_ = unix.Close(fd)
 		fd = next
 	}
 	base := parts[len(parts)-1]
@@ -115,30 +116,32 @@ func ApplySystemFile(root string, change plan.FileChange) error {
 		return fmt.Errorf("invalid file mode")
 	}
 	var nonce [12]byte
-	if _, err := rand.Read(nonce[:]); err != nil {
-		return err
-	}
+	rand.Read(nonce[:])
 	temp := ".nimbus-" + hex.EncodeToString(nonce[:])
 	tf, err := unix.Openat(fd, temp, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
 	if err != nil {
 		return err
 	}
-	defer unix.Unlinkat(fd, temp, 0)
+	defer func() {
+		if err := unix.Unlinkat(fd, temp, 0); err != nil && !errors.Is(err, unix.ENOENT) {
+			resultErr = errors.Join(resultErr, fmt.Errorf("remove staged system file: %w", err))
+		}
+	}()
 	f := os.NewFile(uintptr(tf), temp)
 	if _, err := f.Write(change.After.Content); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	if err := f.Chown(owner, group); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	if err := f.Chmod(os.FileMode(mode)); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	if err := f.Sync(); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	if err := f.Close(); err != nil {
@@ -168,7 +171,7 @@ func readFileAt(dir int, name string) (facts.SystemFile, error) {
 		return result, err
 	}
 	f := os.NewFile(uintptr(fd), name)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	var st unix.Stat_t
 	if err := unix.Fstat(fd, &st); err != nil {
 		return result, err

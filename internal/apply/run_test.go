@@ -1,11 +1,13 @@
 package apply
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -23,7 +25,6 @@ type scripted struct {
 	installed []string // package names the fake host has
 	remotes   []string
 	apps      []string
-	repoIDs   []string
 	log       []string
 	fail      map[string]string // command prefix -> error
 	installs  []string          // what dnf5 install adds
@@ -61,37 +62,37 @@ func (s *scripted) Run(name string, args ...string) ([]byte, error) {
 	}
 	switch {
 	case name == "dnf5" && len(args) > 2 && args[2] == "repoquery":
-		var b strings.Builder
+		b := []byte{}
 		for _, n := range s.installed {
-			fmt.Fprintf(&b, "%s|0|1|1.fc44|x86_64|fedora|User\n", n)
+			b = fmt.Appendf(b, "%s|0|1|1.fc44|x86_64|fedora|User\n", n)
 		}
-		return []byte(b.String()), nil
+		return b, nil
 	case name == "uname":
 		return []byte("x86_64\n"), nil
 	case name == "gpg":
 		return []byte("pub:::::::::\nfpr:::::::::" + s.fpr + ":\n"), nil
 	case name == "flatpak" && args[0] == "remotes":
-		var b strings.Builder
+		b := []byte{}
 		for _, r := range s.remotes {
-			fmt.Fprintf(&b, "%s\thttps://dl.flathub.org/repo/\n", r)
+			b = fmt.Appendf(b, "%s\thttps://dl.flathub.org/repo/\n", r)
 		}
-		return []byte(b.String()), nil
+		return b, nil
 	case name == "flatpak" && args[0] == "list":
-		var b strings.Builder
+		b := []byte{}
 		for _, a := range s.apps {
-			fmt.Fprintf(&b, "%s\t1.0\tflathub\n", a)
+			b = fmt.Appendf(b, "%s\t1.0\tflathub\n", a)
 		}
-		return []byte(b.String()), nil
+		return b, nil
 	case name == "systemctl":
 		return []byte("active\n"), nil
 	case name == "sudo":
 		return s.privileged(args)
 	case strings.HasSuffix(name, "/.cargo/bin/cargo") && args[0] == "install" && args[1] == "--list":
-		var b strings.Builder
+		b := []byte{}
 		for _, c := range s.crates {
-			fmt.Fprintf(&b, "%s v1.0.0:\n    %s\n", c, c)
+			b = fmt.Appendf(b, "%s v1.0.0:\n    %s\n", c, c)
 		}
-		return []byte(b.String()), nil
+		return b, nil
 	case strings.HasSuffix(name, "/.cargo/bin/cargo") && args[0] == "install":
 		s.crates = append(s.crates, args[1])
 		return nil, nil
@@ -119,35 +120,35 @@ func (s *scripted) privileged(argv []string) ([]byte, error) {
 		// test scripted, which may differ from the preview.
 		s.installed = append(s.installed, s.installs...)
 	case argv[0] == "dnf5" && argv[1] == "config-manager" && argv[2] == "setopt":
-		var override string
+		var override bytes.Buffer
 		for _, a := range argv[3:] {
 			option, value, ok := strings.Cut(a, "=")
 			if dot := strings.LastIndexByte(option, '.'); ok && dot > 0 {
-				override += "[" + option[:dot] + "]\n" + option[dot+1:] + "=" + value + "\n"
+				override.WriteString("[" + option[:dot] + "]\n" + option[dot+1:] + "=" + value + "\n")
 			}
 		}
-		if override != "" {
+		if override.Len() != 0 {
 			s.Dirs[facts.RepoOverride] = []string{"99-config_manager.repo"}
-			s.Files[filepath.Join(facts.RepoOverride, "99-config_manager.repo")] = []byte(override)
+			s.Files[filepath.Join(facts.RepoOverride, "99-config_manager.repo")] = override.Bytes()
 		}
 	case argv[0] == "dnf5" && argv[1] == "-y" && argv[2] == "remove":
 		var kept []string
 		for _, n := range s.installed {
-			if !contains(argv[4:], n) {
+			if !slices.Contains(argv[4:], n) {
 				kept = append(kept, n)
 			}
 		}
 		s.installed = kept
 	case argv[0] == "dnf5" && argv[1] == "config-manager" && argv[2] == "addrepo":
-		s.repoIDs = append(s.repoIDs, strings.TrimPrefix(argv[3], "--id="))
-		file := "[nimbus-terra]\nenabled=1\n"
+		var file bytes.Buffer
+		file.WriteString("[nimbus-terra]\nenabled=1\n")
 		for _, a := range argv[4:] {
-			if strings.HasPrefix(a, "--set=") {
-				file += strings.TrimPrefix(a, "--set=") + "\n"
+			if value, ok := strings.CutPrefix(a, "--set="); ok {
+				file.WriteString(value + "\n")
 			}
 		}
 		s.Dirs[facts.RepoDir] = []string{"nimbus-terra.repo"}
-		s.Files[filepath.Join(facts.RepoDir, "nimbus-terra.repo")] = []byte(file)
+		s.Files[filepath.Join(facts.RepoDir, "nimbus-terra.repo")] = file.Bytes()
 	case argv[0] == "flatpak" && argv[1] == "remote-add":
 		s.remotes = append(s.remotes, argv[5])
 		s.Files[filepath.Join(facts.FlatpakRepoPath, "config")] = []byte("[remote \"" + argv[5] + "\"]\ngpg-verify=true\n")
@@ -168,18 +169,12 @@ func (s *scripted) ReadFile(path string) ([]byte, error) {
 }
 
 func (s *scripted) ran(prefix string) bool {
-	for _, l := range s.log {
-		if strings.HasPrefix(l, prefix) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(s.log, func(l string) bool { return strings.HasPrefix(l, prefix) })
 }
 
 func terra() definitions.Repository {
-	prio := 100
 	return definitions.Repository{Kind: "dnf", BaseURL: "https://repos.fyralabs.com/terra44", KeyURL: "https://repos.fyralabs.com/terra44/key.asc",
-		Key: "AE09 157A 4DE8 8B49 7EA1 D5D3 00CD AB43 DE22 6D6F", Priority: &prio}
+		Key: "AE09 157A 4DE8 8B49 7EA1 D5D3 00CD AB43 DE22 6D6F", Priority: new(100)}
 }
 
 func samplePlan(t *testing.T) *plan.Plan {
@@ -192,9 +187,8 @@ func samplePlan(t *testing.T) *plan.Plan {
 		{ID: "repository:terra", Kind: plan.KindRepository, Action: plan.ActionEnable, Risk: plan.RiskMedium, Summary: "enable terra"},
 		{ID: "flatpak-remote:flathub", Kind: plan.KindFlatpakRemote, Action: plan.ActionEnable, Summary: "add flathub"},
 		{ID: "package:dnf:bash", Kind: plan.KindPackage, Action: plan.ActionAdopt, Summary: "adopt bash", Paths: []string{"profile:common"}},
-		{ID: "packages:install", Kind: plan.KindPackage, Action: plan.ActionInstall, Summary: "install 1", Paths: []string{"profile:common"}, Items: []string{"dnf:ripgrep"}, Transaction: tx,
+		{ID: "packages:install", Kind: plan.KindPackage, Action: plan.ActionInstall, Summary: "install 1", Paths: []string{"profile:common"}, Items: []string{"dnf:ripgrep"}, ItemPaths: map[string][]string{"dnf:ripgrep": {"profile:common"}}, Transaction: tx,
 			Steps: []plan.Step{{Argv: []string{"dnf5", "-y", "install", "ripgrep"}, Privileged: true}}},
-		{ID: "package:dnf:ripgrep", Kind: plan.KindPackage, Action: plan.ActionInstall, Summary: "install ripgrep", Paths: []string{"profile:common"}, After: "packages:install"},
 		{ID: "flatpak:com.spotify.Client", Kind: plan.KindFlatpak, Action: plan.ActionInstall, Summary: "install spotify", Paths: []string{"profile:hyprland-noctalia"},
 			Steps: []plan.Step{{Argv: []string{"flatpak", "install", "--system", "--noninteractive", "flathub", "com.spotify.Client"}, Privileged: true}}},
 	}}
@@ -235,7 +229,7 @@ func TestRunExecutesVerifiesAndRecords(t *testing.T) {
 	if r.Error != "" || r.Failed != "" {
 		t.Fatalf("run failed: %+v\n%s", r, strings.Join(src.log, "\n"))
 	}
-	if strings.Join(r.Executed, ",") != "repository:terra,flatpak-remote:flathub,package:dnf:bash,packages:install,flatpak:com.spotify.Client" || strings.Join(r.Pending, ",") != "package:dnf:ripgrep" {
+	if strings.Join(r.Executed, ",") != "repository:terra,flatpak-remote:flathub,package:dnf:bash,packages:install,flatpak:com.spotify.Client" || len(r.Pending) != 0 {
 		t.Fatalf("executed %v pending %v", r.Executed, r.Pending)
 	}
 	for _, want := range []string{
@@ -262,6 +256,114 @@ func TestRunExecutesVerifiesAndRecords(t *testing.T) {
 	}
 	if a.Baseline == nil || !a.InBaseline("coreutils.x86_64") || a.InBaseline("ripgrep.x86_64") {
 		t.Fatalf("baseline = %+v", a.Baseline)
+	}
+}
+
+func TestMergedInstallPreservesEachPackagesProvenance(t *testing.T) {
+	desired := &definitions.Resolved{Machine: "desktop", Packages: []definitions.ResolvedPackage{
+		{Canonical: "dnf:fd-find", Prefix: "dnf", Name: "fd-find", Paths: []string{"profile:development"}},
+		{Canonical: "dnf:ripgrep", Prefix: "dnf", Name: "ripgrep", Paths: []string{"component:search", "profile:common"}},
+	}}
+	source := &facts.FakeSource{Commands: map[string][]byte{
+		facts.Key("dnf5", "--assumeno", "--cacheonly", "install", "fd-find", "ripgrep"): []byte("Package Arch Version Repository Size\nInstalling:\n fd-find x86_64 1-1.fc44 fedora 1 KiB\n ripgrep x86_64 1-1.fc44 fedora 1 KiB\nTransaction Summary:\n"),
+		facts.Key("dnf5", "--cacheonly", "check-upgrade"):                               nil,
+	}}
+	inputs := plan.Inputs{Resolved: desired, Facts: &facts.Facts{}, Source: source}
+	p, err := plan.Build(inputs)
+	if err != nil || !p.Complete {
+		t.Fatalf("plan: %+v, %v", p, err)
+	}
+	if slices.ContainsFunc(p.Operations, func(op plan.Operation) bool { return strings.HasPrefix(op.ID, "package:") }) {
+		t.Fatal("installable packages should use the merged transaction")
+	}
+	native := newScripted()
+	native.installs = []string{"fd-find", "ripgrep"}
+	root := t.TempDir()
+	opts := options(t, native, root)
+	opts.FirstApply = false
+	if result := Run(p, opts); result.Error != "" {
+		t.Fatal(result.Error)
+	}
+	applied, err := state.Read(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pkg := range desired.Packages {
+		r, ok := applied.Receipts["package:"+pkg.Canonical]
+		if !ok || !slices.Equal(r.Paths, pkg.Paths) {
+			t.Errorf("receipt for %s has paths %v, want %v", pkg.Canonical, r.Paths, pkg.Paths)
+		}
+	}
+	// Swapping provenance keeps the transaction's union of paths unchanged,
+	// but approval must still bind the paths recorded for each package.
+	desired.Packages[0].Paths, desired.Packages[1].Paths = desired.Packages[1].Paths, desired.Packages[0].Paths
+	changed, err := plan.Build(inputs)
+	if err != nil || changed.Digest == p.Digest {
+		t.Fatalf("changed receipt provenance did not change the plan digest: %+v, %v", changed, err)
+	}
+}
+
+func TestFlatpakAdoptionVerifiesAndRecordsObservedState(t *testing.T) {
+	for _, tc := range []struct {
+		name, version, origin, failure string
+		missing                        bool
+	}{
+		{name: "other remote", version: "2.0", origin: "fedora"},
+		{name: "no version", origin: "flathub"},
+		{name: "disappeared after plan", version: "2.0", origin: "fedora", missing: true},
+		{name: "unknown after plan", version: "2.0", origin: "fedora", failure: "inventory unavailable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const id = "org.example.App"
+			const key = "AE09157A4DE88B497EA1D5D300CDAB43DE226D6F"
+			root := definitions.Root{Repositories: map[string]definitions.Repository{"flathub": {Kind: "flatpak", URL: "https://dl.flathub.org/repo/flathub.flatpakrepo", Key: key}}}
+			list := facts.Key("flatpak", "list", "--system", "--app", "--columns=application,version,origin")
+			src := &facts.FakeSource{
+				Dirs:  map[string][]string{facts.RepoDir: {}},
+				Files: map[string][]byte{filepath.Join(facts.FlatpakRepoPath, "config"): []byte("[remote \"flathub\"]\ngpg-verify=true\n")},
+				Commands: map[string][]byte{
+					facts.Key("dnf5", facts.PackageQueryArgs...):                                                               nil,
+					facts.Key("dnf5", "--cacheonly", "check-upgrade"):                                                          nil,
+					facts.Key("flatpak", "remotes", "--system", "--columns=name,url"):                                          []byte("flathub\thttps://dl.flathub.org/repo/\n"),
+					facts.Key("gpg", facts.KeyInspectArgs(filepath.Join(facts.FlatpakRepoPath, "flathub.trustedkeys.gpg"))...): []byte("pub:::::::::\nfpr:::::::::" + key + ":\n"),
+					list: []byte(id + "\t1.0\tflathub\n"),
+				},
+			}
+			desired := &definitions.Resolved{Machine: "vm", Repositories: []string{"flathub"}, Packages: []definitions.ResolvedPackage{{Canonical: "flatpak:" + id, Prefix: definitions.PrefixFlatpak, Name: id}}}
+			p, err := plan.Build(plan.Inputs{Resolved: desired, Root: root, Facts: facts.Inspect(src, ""), Source: src})
+			if err != nil || !p.Complete || len(p.Operations) != 1 || p.Operations[0].Action != plan.ActionAdopt {
+				t.Fatalf("adoption plan: %+v %v", p, err)
+			}
+			src.Commands[list] = fmt.Appendf(nil, "%s\t%s\t%s\n", id, tc.version, tc.origin)
+			if tc.missing {
+				src.Commands[list] = nil
+			}
+			if tc.failure != "" {
+				src.Failures = map[string]string{list: tc.failure}
+			}
+			var recorded []state.Receipt
+			result := Run(p, Options{Source: src, Record: func(_ string, stage *state.Stage) error {
+				recorded = append(recorded, stage.Receipts...)
+				return nil
+			}})
+			if tc.missing || tc.failure != "" {
+				want := tc.failure
+				if tc.missing {
+					want = "not installed"
+				}
+				if result.Error == "" || !strings.Contains(result.Error, want) || len(recorded) != 0 || len(result.Executed) != 0 {
+					t.Fatalf("unverified adoption: %+v receipts=%+v", result, recorded)
+				}
+				return
+			}
+			if result.Error != "" || len(recorded) != 1 || len(result.Executed) != 1 {
+				t.Fatalf("adoption failed: %+v receipts=%+v", result, recorded)
+			}
+			want := "installed " + tc.version + " from " + tc.origin
+			if r := recorded[0]; r.Previous != want || r.Intended != want || !r.Verified || r.Operation != plan.ActionAdopt {
+				t.Fatalf("adopted observation lost: %+v", r)
+			}
+		})
 	}
 }
 
@@ -320,15 +422,15 @@ func TestKeyFingerprintMismatchStopsBeforeAnyPrivilegedCommand(t *testing.T) {
 
 func TestVerificationFailureGetsNoReceipt(t *testing.T) {
 	src := newScripted()
-	src.fail["sudo flatpak install"] = "" // succeeds silently but installs nothing
-	delete(src.fail, "sudo flatpak install")
 	root := t.TempDir()
 	opts := options(t, src, root)
-	// Make the Flatpak install a no-op so verification must catch it.
-	orig := src.privileged
-	_ = orig
+	// Install another application so verification catches the missing request.
 	p := samplePlan(t)
-	p.Operations[5].Steps[0].Argv = []string{"flatpak", "install", "--system", "--noninteractive", "flathub", "org.example.Other"}
+	i := slices.IndexFunc(p.Operations, func(op plan.Operation) bool { return op.ID == "flatpak:com.spotify.Client" })
+	if i < 0 {
+		t.Fatal("fixture has no Flatpak installation")
+	}
+	p.Operations[i].Steps[0].Argv = []string{"flatpak", "install", "--system", "--noninteractive", "flathub", "org.example.Other"}
 	r := Run(p, opts)
 	if r.Failed != "flatpak:com.spotify.Client" || !strings.Contains(r.Error, "not installed after") {
 		t.Fatalf("result = %+v", r)
@@ -349,7 +451,7 @@ func TestIncompletePlanIsRefusedAndOwnedRemovalRetiresReceipts(t *testing.T) {
 	}
 
 	src.installed = append(src.installed, "old")
-	if err := state.Record(root, "sha256:earlier", &state.Stage{Schema: state.Schema, PlanDigest: "sha256:earlier", Receipts: []state.Receipt{{Schema: state.Schema, Resource: "package:dnf:old", Provider: "dnf", Operation: "install", PlanDigest: "sha256:earlier", Verified: true}}}); err != nil {
+	if err := state.Record(root, "sha256:earlier", &state.Stage{Schema: state.Schema, PlanDigest: "sha256:earlier", Receipts: []state.Receipt{{Schema: state.ReceiptSchema, Resource: "package:dnf:old", Provider: "dnf", Operation: "install", PlanDigest: "sha256:earlier", Verified: true}}}); err != nil {
 		t.Fatal(err)
 	}
 	opts.FirstApply = false
@@ -378,7 +480,7 @@ func TestRetireRemovesOnlyTheReceipt(t *testing.T) {
 			root := t.TempDir()
 			opts := options(t, src, root)
 			opts.FirstApply = false
-			if err := state.Record(root, "sha256:earlier", &state.Stage{Schema: state.Schema, PlanDigest: "sha256:earlier", Receipts: []state.Receipt{{Schema: state.Schema, Resource: id, Provider: provider, Operation: "install", PlanDigest: "sha256:earlier", Verified: true}}}); err != nil {
+			if err := state.Record(root, "sha256:earlier", &state.Stage{Schema: state.Schema, PlanDigest: "sha256:earlier", Receipts: []state.Receipt{{Schema: state.ReceiptSchema, Resource: id, Provider: provider, Operation: "install", PlanDigest: "sha256:earlier", Verified: true}}}); err != nil {
 				t.Fatal(err)
 			}
 			p := &plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:retire", Operations: []plan.Operation{
@@ -401,8 +503,7 @@ func TestRepositoryRepairIsVerifiedAsDeclared(t *testing.T) {
 	root := t.TempDir()
 	opts := options(t, src, root)
 	// The scripted addrepo honours every --set, so the enabled repository
-	// verifies as declared; drop the priority from what it writes and the
-	// verification must fail.
+	// verifies as declared.
 	p := &plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:repo", Operations: []plan.Operation{
 		{ID: "repository:terra", Kind: plan.KindRepository, Action: plan.ActionEnable, Summary: "enable terra"},
 	}}
@@ -410,10 +511,7 @@ func TestRepositoryRepairIsVerifiedAsDeclared(t *testing.T) {
 		t.Fatalf("enable failed: %+v", r)
 	}
 	src2 := newScripted()
-	src2.Files = map[string][]byte{}
 	opts2 := options(t, src2, t.TempDir())
-	src2.fail["sudo dnf5 config-manager addrepo"] = ""
-	delete(src2.fail, "sudo dnf5 config-manager addrepo")
 	// Pre-write a file with gpgcheck off that addrepo will not replace.
 	src2.Dirs[facts.RepoDir] = []string{"nimbus-terra.repo"}
 	src2.Files[filepath.Join(facts.RepoDir, "nimbus-terra.repo")] = []byte("[nimbus-terra]\nenabled=1\ngpgcheck=0\nbaseurl=https://repos.fyralabs.com/terra44\npriority=100\n")
@@ -423,6 +521,83 @@ func TestRepositoryRepairIsVerifiedAsDeclared(t *testing.T) {
 	src2.privilegedNoop = true
 	if r := Run(p2, opts2); r.Error == "" || !strings.Contains(r.Error, "gpgcheck") {
 		t.Fatalf("repair that left gpgcheck off was verified: %+v", r)
+	}
+}
+
+type dnfDropInSource struct {
+	*facts.FakeSource
+	readErr error
+}
+
+func (s dnfDropInSource) ReadFile(path string) ([]byte, error) {
+	if s.readErr != nil {
+		return nil, fmt.Errorf("read %s: %w", path, s.readErr)
+	}
+	return s.FakeSource.ReadFile(path)
+}
+
+func TestDNFDropInAdoptionVerifiesCurrentContent(t *testing.T) {
+	root := definitions.Root{DNF: map[string]any{"fastestmirror": true}}
+	for _, tc := range []struct {
+		name    string
+		content *string
+		readErr error
+		valid   bool
+	}{
+		{name: "matching", content: new(plan.DNFDropIn(root)), valid: true},
+		{name: "changed", content: new("[main]\nfastestmirror=False\n")},
+		{name: "empty", content: new("")},
+		{name: "absent"},
+		{name: "unreadable", readErr: os.ErrPermission},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := dnfDropInSource{FakeSource: &facts.FakeSource{Files: map[string][]byte{}}, readErr: tc.readErr}
+			if tc.content != nil {
+				src.Files[facts.DNFDropInPath] = []byte(*tc.content)
+			}
+			ex := &executor{p: &plan.Plan{}, opts: Options{Source: src, Root: root, Now: time.Now}}
+			receipts, removed, err := ex.dnfConfig(plan.Operation{ID: "dnf:config", Kind: plan.KindDNFConfig, Action: plan.ActionAdopt})
+			if (err == nil) != tc.valid || (len(receipts) == 1) != tc.valid || len(removed) != 0 {
+				t.Fatalf("adoption: receipts=%v removed=%v err=%v; want valid=%t", receipts, removed, err, tc.valid)
+			}
+			if tc.readErr != nil && !errors.Is(err, tc.readErr) {
+				t.Fatalf("inspection cause lost: %v", err)
+			}
+		})
+	}
+}
+
+func TestDNFDropInRemovalRequiresVerifiedAbsence(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		content *string
+		readErr error
+		valid   bool
+	}{
+		{name: "absent", valid: true},
+		{name: "present", content: new("[main]\nfastestmirror=True\n")},
+		{name: "empty", content: new("")},
+		{name: "unreadable", readErr: os.ErrPermission},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			argv := []string{"rm", "-f", facts.DNFDropInPath}
+			src := dnfDropInSource{FakeSource: &facts.FakeSource{Commands: map[string][]byte{facts.Key("sudo", argv...): nil}, Files: map[string][]byte{}}, readErr: tc.readErr}
+			if tc.content != nil {
+				src.Files[facts.DNFDropInPath] = []byte(*tc.content)
+			}
+			ex := &executor{opts: Options{Source: src, Out: io.Discard}}
+			op := plan.Operation{ID: "dnf:config", Kind: plan.KindDNFConfig, Action: plan.ActionRemove, Steps: []plan.Step{{Argv: argv}}}
+			receipts, removed, err := ex.dnfConfig(op)
+			if (err == nil) != tc.valid || (len(removed) == 1) != tc.valid || len(receipts) != 0 {
+				t.Fatalf("removal: receipts=%v removed=%v err=%v; want valid=%t", receipts, removed, err, tc.valid)
+			}
+			if tc.valid && removed[0] != op.ID {
+				t.Fatalf("retired unrelated receipt: %v", removed)
+			}
+			if tc.readErr != nil && !errors.Is(err, tc.readErr) {
+				t.Fatalf("inspection cause lost: %v", err)
+			}
+		})
 	}
 }
 
@@ -438,17 +613,17 @@ func TestDNFDropInIsWrittenThenReadBack(t *testing.T) {
 	p := &plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:dnf", Operations: []plan.Operation{op}}
 	// The privileged install is a no-op in the fake, so the file never
 	// appears: verification must refuse the receipt.
-	if r := Run(p, opts); r.Error == "" || !strings.Contains(r.Error, "does not hold the rendered drop-in") {
+	if r := Run(p, opts); r.Error == "" || !strings.Contains(r.Error, facts.DNFDropInPath) || !strings.Contains(r.Error, os.ErrNotExist.Error()) {
 		t.Fatalf("unwritten drop-in verified: %+v", r)
 	}
 	staged, err := os.ReadFile(filepath.Join(opts.Stage, "dnf-drop-in.conf"))
 	if err != nil || string(staged) != want {
 		t.Fatalf("staged content = %q, %v", staged, err)
 	}
-	for _, l := range src.log {
-		if strings.HasPrefix(l, "sudo install") && (strings.Contains(l, plan.DNFDropInPlaceholder) || !strings.Contains(l, opts.Stage)) {
-			t.Fatalf("placeholder not filled: %s", l)
-		}
+	if i := slices.IndexFunc(src.log, func(l string) bool {
+		return strings.HasPrefix(l, "sudo install") && (strings.Contains(l, plan.DNFDropInPlaceholder) || !strings.Contains(l, opts.Stage))
+	}); i >= 0 {
+		t.Fatalf("placeholder not filled: %s", src.log[i])
 	}
 	src.Files[facts.DNFDropInPath] = []byte(want)
 	r := Run(p, opts)
@@ -469,11 +644,12 @@ func TestADuplicateRepositoryIsDisabledAndVerified(t *testing.T) {
 	root := t.TempDir()
 	opts := options(t, src, root)
 	src.Dirs[facts.RepoDir] = []string{"nimbus-terra.repo", "terra-maker.repo"}
-	owned := "[nimbus-terra]\n"
+	var owned bytes.Buffer
+	owned.WriteString("[nimbus-terra]\n")
 	for _, o := range plan.OwnedRepoOptions("terra", opts.Root.Repositories["terra"]) {
-		owned += o.Key + "=" + o.Value + "\n"
+		owned.WriteString(o.Key + "=" + o.Value + "\n")
 	}
-	src.Files[filepath.Join(facts.RepoDir, "nimbus-terra.repo")] = []byte(owned)
+	src.Files[filepath.Join(facts.RepoDir, "nimbus-terra.repo")] = owned.Bytes()
 	src.Files[filepath.Join(facts.RepoDir, "terra-maker.repo")] = []byte("[terra-maker]\nname=Terra\nbaseurl=" + opts.Root.Repositories["terra"].BaseURL + "\nenabled=1\ngpgcheck=1\n")
 	src.privilegedNoop = false
 	p := &plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:dup", Operations: []plan.Operation{
@@ -565,8 +741,7 @@ func TestCOPRImportsTheVerifiedKeyBeforeEnabling(t *testing.T) {
 	op := plan.Operation{ID: "repository:hyprland-copr", Kind: plan.KindRepository, Action: plan.ActionEnable, Summary: "enable copr"}
 	ex := &executor{p: &plan.Plan{}, opts: opts, seen: map[string]facts.Package{}}
 	ex.opts.Out = io.Discard
-	priority := 130
-	copr := definitions.Repository{Kind: "copr", Project: "lionheartp/Hyprland", Key: "97E2 3476 C896 3513 5407 C7D5 E9BA 4134 2C4B 2995", Priority: &priority}
+	copr := definitions.Repository{Kind: "copr", Project: "lionheartp/Hyprland", Key: "97E2 3476 C896 3513 5407 C7D5 E9BA 4134 2C4B 2995", Priority: new(130)}
 	if err := ex.enableCOPR("hyprland-copr", copr, op); err != nil {
 		t.Fatal(err)
 	}
@@ -616,10 +791,8 @@ func TestUserToolsRunAsTheUserAndAreVerifiedByPresence(t *testing.T) {
 			t.Errorf("missing %q\n%s\n%s", want, strings.Join(src.log, "\n"), out.String())
 		}
 	}
-	for _, l := range src.log {
-		if strings.HasPrefix(l, "sudo ") {
-			t.Fatalf("a user-scope step went through sudo: %s", l)
-		}
+	if i := slices.IndexFunc(src.log, func(l string) bool { return strings.HasPrefix(l, "sudo ") }); i >= 0 {
+		t.Fatalf("a user-scope step went through sudo: %s", src.log[i])
 	}
 	if a, _ := state.Read(root); a != nil && len(a.Receipts) != 0 {
 		t.Fatalf("user-scope steps must write no receipt: %v", a.Receipts)
@@ -629,8 +802,36 @@ func TestUserToolsRunAsTheUserAndAreVerifiedByPresence(t *testing.T) {
 	src2.installerLeavesNothing = true
 	opts2 := options(t, src2, t.TempDir())
 	opts2.Fetch = opts.Fetch
-	if r := Run(&plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:user2", Operations: p.Operations[:1]}, opts2); r.Error == "" || !strings.Contains(r.Error, "~/.local/bin/mise does not exist") {
+	if r := Run(&plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:user2", Operations: p.Operations[:1]}, opts2); r.Error == "" || !strings.Contains(r.Error, "~/.local/bin/mise") || !strings.Contains(r.Error, os.ErrNotExist.Error()) {
 		t.Fatalf("missing binary passed verification: %+v", r)
+	}
+}
+
+type unreadableUserDirectory struct{ facts.Source }
+
+func (s unreadableUserDirectory) ReadDir(path string) ([]string, error) {
+	return nil, fmt.Errorf("read %s: %w", path, os.ErrPermission)
+}
+
+func TestUserToolVerificationPreservesDirectoryReadError(t *testing.T) {
+	ex := &executor{opts: Options{Source: unreadableUserDirectory{Source: &facts.FakeSource{}}}}
+	op := plan.Operation{ID: "user:mise", Steps: []plan.Step{{Description: "verify ~/.local/bin/mise exists"}}}
+	if err := ex.verifyUserTool(op, t.TempDir()); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("directory inspection cause lost: %v", err)
+	}
+}
+
+func TestCargoVerificationReportsUnknownInventory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cargoDir := filepath.Join(home, ".cargo", "bin")
+	src := &facts.FakeSource{
+		Dirs:     map[string][]string{cargoDir: {"cargo"}},
+		Failures: map[string]string{facts.Key(filepath.Join(cargoDir, "cargo"), facts.CargoListArgs...): "inventory locked"},
+	}
+	ex := &executor{opts: Options{Source: src}}
+	if err := ex.verifyUserTool(plan.Operation{ID: "package:cargo:demo"}, home); err == nil || !strings.Contains(err.Error(), "inventory locked") {
+		t.Fatalf("Cargo inspection cause lost: %v", err)
 	}
 }
 
@@ -642,5 +843,80 @@ func TestRemovalWithoutNamedPackagesIsRefusedBeforeNativeExecution(t *testing.T)
 	result := Run(p, opts)
 	if result.Error == "" || src.ran("sudo ") {
 		t.Fatalf("empty removal executed: %+v", result)
+	}
+}
+
+type failingProgressWriter struct {
+	prefix string
+	err    error
+}
+
+func (w failingProgressWriter) Write(p []byte) (int, error) {
+	if strings.HasPrefix(string(p), w.prefix) {
+		return 0, w.err
+	}
+	return len(p), nil
+}
+
+func TestProgressFailureStopsBeforeNativeExecution(t *testing.T) {
+	for _, kind := range []string{"operation", "privileged command", "user command", "installer digest"} {
+		t.Run(kind, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			src := newScripted()
+			opts := options(t, src, t.TempDir())
+			opts.FirstApply = false
+			cause := errors.New("output unavailable")
+			prefix := "-> "
+			op := plan.Operation{ID: "packages:install", Kind: plan.KindPackage, Action: plan.ActionInstall, Items: []string{"dnf:ripgrep"},
+				Transaction: &plan.Transaction{Packages: []plan.TxPackage{{Name: "ripgrep", Arch: "x86_64", EVR: "1-1.fc44", Repository: "fedora", Section: "installing"}}},
+				Steps:       []plan.Step{{Argv: []string{"dnf5", "-y", "install", "ripgrep"}}}}
+			switch kind {
+			case "privileged command":
+				prefix = "   $ sudo "
+			case "user command":
+				prefix = "   $ env "
+				op = plan.Operation{ID: "user:tools", Kind: plan.KindUser, Action: plan.ActionInstall, Steps: []plan.Step{{Argv: []string{"env", "tool", "install"}}}}
+			case "installer digest":
+				prefix = "   downloaded "
+				op = plan.Operation{ID: "user:mise", Kind: plan.KindUser, Action: plan.ActionInstall, Steps: []plan.Step{{Description: "download https://mise.run to the stage directory and show its sha256"}, {Argv: []string{"sh", plan.InstallerScript}}}}
+				opts.Fetch = func(string) ([]byte, error) { return []byte("#!/bin/sh\n"), nil }
+			}
+			opts.Out = failingProgressWriter{prefix: prefix, err: cause}
+			recorded := false
+			opts.Record = func(string, *state.Stage) error { recorded = true; return nil }
+			result := Run(&plan.Plan{Complete: true, Operations: []plan.Operation{op}}, opts)
+			if !strings.Contains(result.Error, cause.Error()) || result.Failed != op.ID || len(result.Failures) != 1 || len(result.Executed) != 0 || recorded {
+				t.Fatalf("output failure lost or recorded: %+v recorded=%t", result, recorded)
+			}
+			if src.ran("sudo ") || src.ran("env ") || src.ran("sh ") {
+				t.Fatalf("native execution after output failure: %v", src.log)
+			}
+		})
+	}
+}
+
+func TestDiagnosticWriteFailurePreservesPrimaryOperationError(t *testing.T) {
+	for _, kind := range []string{"execution", "record"} {
+		t.Run(kind, func(t *testing.T) {
+			src := newScripted()
+			opts := options(t, src, t.TempDir())
+			opts.FirstApply = false
+			prefix := "   failed: "
+			const primary = "primary operation failure"
+			if kind == "execution" {
+				src.fail["sudo dnf5"] = primary
+			} else {
+				prefix = "   operation applied and verified"
+				opts.Record = func(string, *state.Stage) error { return errors.New(primary) }
+			}
+			opts.Out = failingProgressWriter{prefix: prefix, err: errors.New("secondary output failure")}
+			op := plan.Operation{ID: "packages:install", Kind: plan.KindPackage, Action: plan.ActionInstall, Items: []string{"dnf:ripgrep"},
+				Transaction: &plan.Transaction{Packages: []plan.TxPackage{{Name: "ripgrep", Arch: "x86_64", EVR: "1-1.fc44", Repository: "fedora", Section: "installing"}}},
+				Steps:       []plan.Step{{Argv: []string{"dnf5", "-y", "install", "ripgrep"}}}}
+			result := Run(&plan.Plan{Complete: true, Operations: []plan.Operation{op}}, opts)
+			if !strings.Contains(result.Error, primary) || len(result.Failures) != 1 || !strings.Contains(result.Failures[0].Error, primary) || len(result.Executed) != 0 {
+				t.Fatalf("primary failure lost: %+v", result)
+			}
+		})
 	}
 }

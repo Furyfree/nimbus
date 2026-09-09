@@ -118,13 +118,14 @@ func Execute(args []string, stdout, stderr io.Writer) int {
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	err := root.Execute()
-	switch {
-	case err == nil:
+	if err == nil {
 		return ExitOK
-	case errors.As(err, &usageError{}):
-		fmt.Fprintln(stderr, "error:", err)
+	}
+	if _, ok := errors.AsType[usageError](err); ok {
+		_, _ = fmt.Fprintln(stderr, "error:", err)
 		return ExitUsage
-	case errors.Is(err, reported{}):
+	}
+	if errors.Is(err, reported{}) {
 		return ExitFailure
 	}
 	if opts.json {
@@ -132,6 +133,6 @@ func Execute(args []string, stdout, stderr io.Writer) int {
 			return ExitFailure
 		}
 	}
-	fmt.Fprintln(stderr, "error:", err)
+	_, _ = fmt.Fprintln(stderr, "error:", err)
 	return ExitFailure
 }

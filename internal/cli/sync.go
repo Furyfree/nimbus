@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -31,7 +33,7 @@ var (
 			if err != nil {
 				return nil, err
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != http.StatusOK {
 				return nil, fmt.Errorf("%s: HTTP %s", url, resp.Status)
 			}
@@ -52,7 +54,7 @@ var (
 			if err := os.WriteFile(path, data, 0o644); err != nil {
 				return err
 			}
-			defer os.Remove(path)
+			defer func() { _ = os.Remove(path) }()
 			_, err = src.Run("sudo", exe, "internal", "record", "--plan", digest, "--stage", path)
 			return err
 		}
@@ -62,7 +64,9 @@ var (
 	// long transaction does not ask again. Tests replace it.
 	sudoKeepalive = func(src facts.Source, out, errOut io.Writer) (func(), error) {
 		if _, err := src.Run("sudo", "-n", "-v"); err != nil {
-			fmt.Fprintln(out, "sudo is needed for the privileged commands; the password is asked once")
+			if _, err := fmt.Fprintln(out, "sudo is needed for the privileged commands; the password is asked once"); err != nil {
+				return nil, err
+			}
 			if err := src.Stream(out, errOut, "sudo", "-v"); err != nil {
 				return nil, err
 			}
@@ -71,13 +75,12 @@ var (
 		stopped := make(chan struct{})
 		go func() {
 			defer close(stopped)
-			t := time.NewTicker(time.Minute)
-			defer t.Stop()
+			ticks := time.Tick(time.Minute)
 			for {
 				select {
 				case <-done:
 					return
-				case <-t.C:
+				case <-ticks:
 					_, _ = src.Run("sudo", "-n", "-v")
 				}
 			}
@@ -86,10 +89,12 @@ var (
 	}
 	// approver reads the interactive answer. Tests replace it.
 	approver = func(in io.Reader, out io.Writer, _ string) bool {
-		fmt.Fprint(out, "Proceed? [Y/n] ")
+		if _, err := fmt.Fprint(out, "Proceed? [Y/n] "); err != nil {
+			return false
+		}
 		reader := bufio.NewReader(in)
 		line, err := reader.ReadString('\n')
-		if err != nil && !(errors.Is(err, io.EOF) && strings.TrimSpace(line) != "") {
+		if err != nil && (!errors.Is(err, io.EOF) || strings.TrimSpace(line) == "") {
 			return false
 		}
 		answer := strings.TrimSpace(strings.ToLower(line))
@@ -141,8 +146,8 @@ type syncResult struct {
 	Executed    []string        `json:"executed"`
 	Differences []string        `json:"differences"`
 	Upgraded    bool            `json:"upgraded"`
-	Reboot      bool            `json:"reboot_required,omitempty"`
-	Logout      bool            `json:"logout_required,omitempty"`
+	Reboot      bool            `json:"reboot_required,omitzero"`
+	Logout      bool            `json:"logout_required,omitzero"`
 	Failed      string          `json:"failed,omitempty"`
 	Error       string          `json:"error,omitempty"`
 	Steps       []runStep       `json:"steps"`
@@ -180,7 +185,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			}
 			if currentPlan != nil {
 				for _, op := range syncOperations(currentPlan, sf).Operations {
-					if op.Action == plan.ActionKeep || contains(result.Executed, op.ID) || failedIDs[op.ID] {
+					if op.Action == plan.ActionKeep || slices.Contains(result.Executed, op.ID) || failedIDs[op.ID] {
 						continue
 					}
 					detail := "an earlier stage did not complete"
@@ -192,25 +197,32 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 					result.Steps = append(result.Steps, runStep{Name: op.ID, Status: "skipped", Detail: detail})
 				}
 			}
+			var reportErr error
 			if opts.json {
-				if err := writeJSON(out, result, nil); err != nil {
-					retErr = err
-					return
-				}
+				reportErr = writeJSON(out, result, nil)
 			} else {
-				renderRunSummary(out, "sync", result.Steps)
+				var summary bytes.Buffer
+				_ = renderRunSummary(&summary, "sync", result.Steps)
 				if result.Reboot {
-					fmt.Fprintln(out, "Reboot required to use the configured boot target or greeter.")
+					fmt.Fprintln(&summary, "Reboot required to use the configured boot target or greeter.")
 				}
 				if result.Logout {
-					fmt.Fprintln(out, "Log out and log in again to use changed group memberships.")
+					fmt.Fprintln(&summary, "Log out and log in again to use changed group memberships.")
 				}
 				if len(result.Differences) > 0 {
-					fmt.Fprintln(out, "differences from the plan:")
+					fmt.Fprintln(&summary, "differences from the plan:")
 					for _, d := range result.Differences {
-						fmt.Fprintf(out, "  %s\n", d)
+						fmt.Fprintf(&summary, "  %s\n", d)
 					}
 				}
+				_, reportErr = summary.WriteTo(out)
+			}
+			if reportErr != nil {
+				if errors.Is(retErr, reported{}) {
+					retErr = errors.New(result.Error)
+				}
+				retErr = errors.Join(retErr, reportErr)
+				return
 			}
 			if retErr != nil {
 				retErr = reported{}
@@ -246,11 +258,13 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	// reads the cache as it is and touches nothing.
 	if !sf.plan && sf.approvedDigest == "" && !sf.userOnly {
 		if _, err := src.Run("dnf5", "makecache"); err != nil {
-			fmt.Fprintf(errOut, "metadata not refreshed: %v\n", err)
+			if _, writeErr := fmt.Fprintf(errOut, "metadata not refreshed: %v\n", err); writeErr != nil {
+				return errors.Join(err, writeErr)
+			}
 			result.Steps = append(result.Steps, runStep{Name: "metadata refresh", Status: "warning", Detail: err.Error() + "; using cached metadata"})
 		}
 	}
-	p, applied, err := planWithState(s, src, sf.prune)
+	p, _, err := planWithState(s, src, sf.prune)
 	if err != nil {
 		return err
 	}
@@ -265,8 +279,12 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 				return err
 			}
 		} else {
-			out.Write(renderPlan(p, sf.prune, !sf.noUpgrade))
-			fmt.Fprintln(out, "\nfrom the local metadata cache; sync refreshes it before it runs")
+			if _, err := out.Write(renderPlan(p, sf.prune, !sf.noUpgrade)); err != nil {
+				return fmt.Errorf("show plan: %w", err)
+			}
+			if _, err := fmt.Fprintln(out, "\nfrom the local metadata cache; sync refreshes it before it runs"); err != nil {
+				return err
+			}
 		}
 		if !p.Complete {
 			return reported{}
@@ -281,7 +299,9 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	}
 	if !p.Complete {
 		if !opts.json {
-			out.Write(renderPlan(p, sf.prune, !sf.noUpgrade))
+			if _, err := out.Write(renderPlan(p, sf.prune, !sf.noUpgrade)); err != nil {
+				return fmt.Errorf("show plan: %w", err)
+			}
 		}
 		return errors.New("the plan has problems; see above")
 	}
@@ -289,8 +309,8 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 		if opts.json {
 			return nil
 		}
-		fmt.Fprintln(out, "nothing to do; the system matches the definitions")
-		return nil
+		_, err := fmt.Fprintln(out, "nothing to do; the system matches the definitions")
+		return err
 	}
 	// Everything left waits for something outside this run, such as the
 	// Chezmoi handoff: say so and touch nothing, sudo included.
@@ -301,8 +321,12 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			}
 			return nil
 		}
-		out.Write(renderPlan(p, sf.prune, false))
-		fmt.Fprintln(out, "\n"+waitingLine(p))
+		if _, err := out.Write(renderPlan(p, sf.prune, false)); err != nil {
+			return fmt.Errorf("show plan: %w", err)
+		}
+		if _, err := fmt.Fprintln(out, "\n"+waitingLine(p)); err != nil {
+			return err
+		}
 		if !sf.deferUser {
 			return errors.New(waitingLine(p))
 		}
@@ -312,7 +336,9 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	// host that names the packages; DNF prints the exact transaction as it
 	// starts, and the report at the end names what differed.
 	if !opts.json {
-		out.Write(renderPlan(p, sf.prune, !sf.noUpgrade))
+		if _, err := out.Write(renderPlan(p, sf.prune, !sf.noUpgrade)); err != nil {
+			return fmt.Errorf("show plan: %w", err)
+		}
 		if !sf.yes && !approver(cmd.InOrStdin(), out, p.Digest) {
 			return errors.New("not applied")
 		}
@@ -329,7 +355,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 		}
 	}
 	if held == nil {
-		defer lock.Release()
+		defer func() { _ = lock.Release() }()
 	}
 	// Another Nimbus run may have finished while the question was open;
 	// the plan answered must still be the plan that runs.
@@ -340,7 +366,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	if freshSelection.Root != s.Root || freshSelection.Resolved.Machine != s.Resolved.Machine {
 		return errors.New("the selection changed while the question was open; run sync again")
 	}
-	fresh, freshApplied, err := planWithState(freshSelection, src, sf.prune)
+	fresh, applied, err := planWithState(freshSelection, src, sf.prune)
 	if err != nil {
 		return err
 	}
@@ -353,7 +379,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	if err := facts.CheckPlatform(src, freshSelection.Checkout.Definitions().Compatibility.Fedora); err != nil {
 		return err
 	}
-	p, applied, currentPlan = fresh, freshApplied, fresh
+	p, currentPlan = fresh, fresh
 	approvedCheckout := p.Checkout
 	s = freshSelection
 	stage := filepath.Join(filepath.Dir(lockPath), "stage")
@@ -391,17 +417,21 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	// Sources first, so the transactions that follow resolve against them;
 	// then whatever the plan holds, in passes until nothing waits.
 	phase = "apply"
-	for pass := 0; pass < 4; pass++ {
+	for pass := range 4 {
 		if pass > 0 {
 			if p, applied, err = replanUnchanged(s, flags, src, sf.prune, approvedCheckout); err != nil {
 				return err
 			}
 			currentPlan = p
 			if !p.Complete {
-				execOut.Write(renderPlan(p, sf.prune, false))
+				if _, err := execOut.Write(renderPlan(p, sf.prune, false)); err != nil {
+					return fmt.Errorf("show updated plan: %w", err)
+				}
 				return errors.New("the plan has problems; see above")
 			}
-			showReplanned(execOut, p, sf.prune, &result)
+			if err := showReplanned(execOut, p, sf.prune, &result); err != nil {
+				return err
+			}
 			if nothingToRun(p) {
 				break
 			}
@@ -432,17 +462,21 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			}
 			currentPlan = p
 			if !p.Complete {
-				execOut.Write(renderPlan(p, sf.prune, false))
+				if _, err := execOut.Write(renderPlan(p, sf.prune, false)); err != nil {
+					return fmt.Errorf("show updated plan: %w", err)
+				}
 				return errors.New("the plan has problems; see above")
 			}
 		}
 		if len(prep) > 0 {
-			showReplanned(execOut, p, sf.prune, &result)
+			if err := showReplanned(execOut, p, sf.prune, &result); err != nil {
+				return err
+			}
 		}
 		currentPlan = p
 		executable := syncOperations(p, sf)
 		for i := range executable.Operations {
-			if executable.Operations[i].Kind == plan.KindUser && contains(result.Executed, executable.Operations[i].ID) {
+			if executable.Operations[i].Kind == plan.KindUser && slices.Contains(result.Executed, executable.Operations[i].ID) {
 				executable.Operations[i].Action = plan.ActionKeep
 			}
 		}
@@ -470,7 +504,9 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	}
 	if !sf.noUpgrade {
 		phase = "upgrade"
-		fmt.Fprintln(execOut, "-> upgrade the system")
+		if _, err := fmt.Fprintln(execOut, "-> upgrade the system"); err != nil {
+			return err
+		}
 		r := apply.Upgrade(options(p), s.Checkout.Definitions())
 		result.Executed = append(result.Executed, r.Executed...)
 		result.Differences = append(result.Differences, r.Differences...)
@@ -489,7 +525,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 		return reported{}
 	}
 	for _, op := range syncOperations(p, sf).Operations {
-		if op.After != "" && op.Action != plan.ActionKeep && !contains(result.Executed, op.ID) {
+		if op.After != "" && op.Action != plan.ActionKeep && !slices.Contains(result.Executed, op.ID) {
 			return fail("dependencies", waitingLine(syncOperations(p, sf)))
 		}
 	}
@@ -551,12 +587,7 @@ func sourceOperations(p *plan.Plan) []plan.Operation {
 // changedRepositories reports whether a pass enabled or repaired a DNF
 // repository, which is when the next plan needs fresh metadata.
 func changedRepositories(executed []string) bool {
-	for _, id := range executed {
-		if strings.HasPrefix(id, "repository:") {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(executed, func(id string) bool { return strings.HasPrefix(id, "repository:") })
 }
 
 // runnable counts the operations this run can execute now: not kept, not
@@ -578,12 +609,7 @@ func needsSudo(p *plan.Plan, noUpgrade, statePresent bool) bool {
 	if !noUpgrade || !statePresent {
 		return true
 	}
-	for _, op := range p.Operations {
-		if op.Action != plan.ActionKeep && op.Kind != plan.KindUser {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(p.Operations, func(op plan.Operation) bool { return op.Action != plan.ActionKeep && op.Kind != plan.KindUser })
 }
 
 // waitingLine names what the pending operations wait for, or "" when
@@ -596,7 +622,7 @@ func waitingLine(p *plan.Plan) string {
 			continue
 		}
 		n++
-		if d := describeAfter(p, op.After); !contains(targets, d) {
+		if d := describeAfter(p, op.After); !slices.Contains(targets, d) {
 			targets = append(targets, d)
 		}
 	}
@@ -607,12 +633,7 @@ func waitingLine(p *plan.Plan) string {
 }
 
 func nothingToRun(p *plan.Plan) bool {
-	for _, op := range p.Operations {
-		if op.Action != plan.ActionKeep {
-			return false
-		}
-	}
-	return true
+	return !slices.ContainsFunc(p.Operations, func(op plan.Operation) bool { return op.Action != plan.ActionKeep })
 }
 
 // planWithState builds the plan with the applied state read as the user.
@@ -633,30 +654,25 @@ func onlyUserFailures(r *apply.Result, p *plan.Plan) bool {
 	if len(r.Failures) == 0 {
 		return false
 	}
-	for _, failure := range r.Failures {
-		user := false
-		for _, op := range p.Operations {
-			if op.ID == failure.ID && op.Kind == plan.KindUser {
-				user = true
-				break
-			}
-		}
-		if !user {
-			return false
-		}
-	}
-	return true
+	return !slices.ContainsFunc(r.Failures, func(failure apply.Failure) bool {
+		return !slices.ContainsFunc(p.Operations, func(op plan.Operation) bool { return op.ID == failure.ID && op.Kind == plan.KindUser })
+	})
 }
 
-func showReplanned(out io.Writer, p *plan.Plan, prune bool, result *syncResult) {
-	fmt.Fprintln(out, "updated plan after completed operations:")
-	out.Write(renderPlan(p, prune, false))
+func showReplanned(out io.Writer, p *plan.Plan, prune bool, result *syncResult) error {
+	if _, err := fmt.Fprintln(out, "updated plan after completed operations:"); err != nil {
+		return fmt.Errorf("show updated plan: %w", err)
+	}
+	if _, err := out.Write(renderPlan(p, prune, false)); err != nil {
+		return fmt.Errorf("show updated plan: %w", err)
+	}
 	for _, op := range p.Operations {
 		for _, note := range op.Notes {
 			message := "replanned " + op.ID + ": " + note
-			if !contains(result.Differences, message) {
+			if !slices.Contains(result.Differences, message) {
 				result.Differences = append(result.Differences, message)
 			}
 		}
 	}
+	return nil
 }

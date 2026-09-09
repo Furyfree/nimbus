@@ -2,8 +2,10 @@ package cli
 
 import (
 	"bytes"
+	"cmp"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -14,23 +16,6 @@ import (
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
-func flatpakRemote(root definitions.Root) string {
-	for id, r := range root.Repositories {
-		if r.Kind == "flatpak" {
-			return id
-		}
-	}
-	return ""
-}
-
-// Ownership views are provider-independent read-only lists over the same
-// resolver, facts, and applied state the plan uses. Every package is in one
-// state: managed (a receipt exists), adopt (desired and installed from an
-// acceptable source, no receipt yet), blocked (desired and installed from
-// another source, which plan refuses to adopt), desired (not installed),
-// pre-existing (in the baseline recorded when Nimbus took over), unmanaged
-// (installed by hand since), or dependency.
-
 type packageView struct {
 	Canonical  string   `json:"canonical"`
 	Name       string   `json:"name"`
@@ -38,18 +23,39 @@ type packageView struct {
 	Installed  string   `json:"installed,omitempty"`
 	Repository string   `json:"repository,omitempty"`
 	Reason     string   `json:"reason,omitempty"`
+	Blocked    string   `json:"blocked,omitempty"`
 	Paths      []string `json:"paths,omitempty"`
 }
 
 // packageViews joins desired packages with installed ones and receipts.
 func packageViews(s *selected, f *facts.Facts, applied *state.Applied) []packageView {
+	managedRPMs := map[string]bool{}
+	blockedRPMs := map[string]string{}
+	blockedReceipts := map[string]string{}
+	for _, id := range slices.Sorted(maps.Keys(applied.Receipts)) {
+		r := applied.Receipts[id]
+		if r.Provider != "dnf" || !r.Verified {
+			continue
+		}
+		r.Resource = id
+		native, err := plan.ReceiptPackage(r, f.Packages.Value)
+		if err == nil {
+			managedRPMs[native] = true
+			continue
+		}
+		blockedReceipts[id] = err.Error()
+		for _, p := range f.Packages.Value {
+			if p.Matches(plan.PackageName(id)) {
+				blockedRPMs[p.ID()] = err.Error()
+			}
+		}
+	}
 	desired := map[string]bool{}
 	var views []packageView
 	for _, p := range s.Resolved.Packages {
 		desired[p.Name] = true
 		v := packageView{Canonical: p.Canonical, Name: p.Name, State: "desired", Paths: p.Paths}
 		id := "package:" + p.Canonical
-		remote := flatpakRemote(s.Checkout.Definitions())
 		if p.Prefix == definitions.PrefixFlatpak {
 			id = "flatpak:" + p.Name
 			if f.Flatpak.Known() {
@@ -57,23 +63,28 @@ func packageViews(s *selected, f *facts.Facts, applied *state.Applied) []package
 					if app.ID == p.Name {
 						v.Installed, v.Repository = app.Version, app.Origin
 						v.State = "adopt"
-						if app.Origin != remote {
-							v.State = "blocked"
-						}
 					}
 				}
 			}
 		} else if p.Prefix == definitions.PrefixCargo {
-			if f.User.Known() && contains(f.User.Value.Crates, p.Name) {
+			if f.User.Known() && slices.Contains(f.User.Value.Crates, p.Name) {
 				v.Installed, v.Repository, v.State = "installed", "cargo", "adopt"
 			}
 		} else if inst, ok := plan.InstalledPackage(p.Name, applied.Receipts[id], f.Packages.Value); ok {
 			desired[inst.ID()] = true
 			v.Installed, v.Repository, v.Reason = inst.EVR(), inst.FromRepo, inst.Reason
 			v.State = "adopt"
+			if managedRPMs[inst.ID()] {
+				v.State = "managed"
+			}
+			if reason := blockedReceipts[id]; reason != "" {
+				v.State, v.Blocked = "blocked", reason
+			}
 		}
-		if _, ok := applied.Receipts[id]; ok && v.Installed != "" {
-			v.State = "managed"
+		if p.Prefix == definitions.PrefixFlatpak || p.Prefix == definitions.PrefixCargo {
+			if _, ok := applied.Receipts[id]; ok && v.State == "adopt" {
+				v.State = "managed"
+			}
 		}
 		views = append(views, v)
 	}
@@ -82,7 +93,12 @@ func packageViews(s *selected, f *facts.Facts, applied *state.Applied) []package
 			continue
 		}
 		st := "dependency"
+		blocked := ""
 		switch {
+		case managedRPMs[p.ID()]:
+			st = "managed"
+		case blockedRPMs[p.ID()] != "":
+			st, blocked = "blocked", blockedRPMs[p.ID()]
 		case applied.InBaseline(p.ID()) || applied.InBaseline(p.Name):
 			st = "pre-existing"
 		case plan.IsReleasePackage(s.Checkout.Definitions(), p.Name):
@@ -91,7 +107,7 @@ func packageViews(s *selected, f *facts.Facts, applied *state.Applied) []package
 		default:
 			st = "unmanaged"
 		}
-		views = append(views, packageView{Canonical: "dnf:" + p.ID(), Name: p.ID(), State: st, Installed: p.EVR(), Repository: p.FromRepo, Reason: p.Reason})
+		views = append(views, packageView{Canonical: "dnf:" + p.ID(), Name: p.ID(), State: st, Installed: p.EVR(), Repository: p.FromRepo, Reason: p.Reason, Blocked: blocked})
 	}
 	if f.Flatpak.Known() {
 		for _, app := range f.Flatpak.Value.Apps {
@@ -105,7 +121,7 @@ func packageViews(s *selected, f *facts.Facts, applied *state.Applied) []package
 			views = append(views, packageView{Canonical: "flatpak:" + app.ID, Name: app.ID, State: st, Installed: app.Version, Repository: app.Origin})
 		}
 	}
-	sort.Slice(views, func(i, j int) bool { return views[i].Canonical < views[j].Canonical })
+	slices.SortFunc(views, func(a, b packageView) int { return cmp.Compare(a.Canonical, b.Canonical) })
 	return views
 }
 
@@ -115,12 +131,15 @@ func renderPackageViews(views []packageView) []byte {
 		line := fmt.Sprintf("%-10s %s", v.State, v.Canonical)
 		if v.Installed != "" {
 			line += " " + v.Installed
-			if v.Repository != "" {
-				line += " (" + v.Repository + ")"
-			}
+		}
+		if v.Repository != "" {
+			line += " (" + v.Repository + ")"
 		}
 		if len(v.Paths) > 0 {
 			line += "  <- " + strings.Join(v.Paths, ", ")
+		}
+		if v.Blocked != "" {
+			line += "  " + v.Blocked
 		}
 		b.WriteString(line + "\n")
 	}
@@ -200,7 +219,7 @@ func newUnmanaged(opts *options) *cobra.Command {
 func newPackagesInstalled(opts *options) *cobra.Command {
 	list := newListCommand(opts, "installed [QUERY]", "Browse explicitly installed packages with their desired and managed state",
 		func(query string, _ bool, v packageView) bool {
-			return v.Installed != "" && v.State != "dependency" && strings.Contains(v.Name, query)
+			return v.State != "desired" && v.State != "dependency" && strings.Contains(v.Name, query)
 		}, 1, "")
 	packages := &cobra.Command{Use: "packages", Short: "Package views over the selected machine", Args: noArgs, RunE: func(cmd *cobra.Command, args []string) error { return cmd.Help() }}
 	packages.AddCommand(list)
@@ -278,39 +297,32 @@ func explain(s *selected, resource string) (*whyResult, error) {
 			}
 		}
 	}
-	for _, service := range r.Services {
-		if resource == "service:"+service.Unit {
-			return owned("service", resource, service.Component), nil
-		}
+	if i := slices.IndexFunc(r.Services, func(service definitions.ResolvedService) bool { return resource == "service:"+service.Unit }); i >= 0 {
+		return owned("service", resource, r.Services[i].Component), nil
 	}
-	for _, group := range r.Groups {
-		if resource == "group:"+group.Name || resource == "group:"+group.Name+":"+group.User {
-			return owned("group", "group:"+group.Name+":"+group.User, group.Component), nil
-		}
+	if i := slices.IndexFunc(r.Groups, func(group definitions.ResolvedGroup) bool {
+		return resource == "group:"+group.Name || resource == "group:"+group.Name+":"+group.User
+	}); i >= 0 {
+		group := r.Groups[i]
+		return owned("group", "group:"+group.Name+":"+group.User, group.Component), nil
 	}
 	if resource == "default-target" && r.DefaultTarget != "" {
-		for _, c := range r.Components {
-			if s.Checkout.Components[c.ID].DefaultTarget != "" {
-				return owned("default-target", resource, c.ID), nil
-			}
+		if i := slices.IndexFunc(r.Components, func(c definitions.ResolvedComponent) bool { return s.Checkout.Components[c.ID].DefaultTarget != "" }); i >= 0 {
+			return owned("default-target", resource, r.Components[i].ID), nil
 		}
 	}
-	for _, p := range r.Profiles {
-		if p == resource {
-			return &whyResult{Kind: "profile", ID: p, Paths: []string{"machine"}}, nil
-		}
+	if slices.Contains(r.Profiles, resource) {
+		return &whyResult{Kind: "profile", ID: resource, Paths: []string{"machine"}}, nil
 	}
-	for _, c := range r.Components {
-		if c.ID == resource {
-			return &whyResult{Kind: "component", ID: c.ID, Paths: c.Paths}, nil
-		}
+	if i := slices.IndexFunc(r.Components, func(c definitions.ResolvedComponent) bool { return c.ID == resource }); i >= 0 {
+		c := r.Components[i]
+		return &whyResult{Kind: "component", ID: c.ID, Paths: c.Paths}, nil
 	}
 	ref, err := definitions.ParseRef(resource)
 	if err == nil {
-		for _, p := range r.Packages {
-			if p.Canonical == ref.Canonical() || p.Name == resource {
-				return &whyResult{Kind: "package", ID: p.Canonical, Paths: p.Paths}, nil
-			}
+		if i := slices.IndexFunc(r.Packages, func(p definitions.ResolvedPackage) bool { return p.Canonical == ref.Canonical() || p.Name == resource }); i >= 0 {
+			p := r.Packages[i]
+			return &whyResult{Kind: "package", ID: p.Canonical, Paths: p.Paths}, nil
 		}
 	}
 	return nil, fmt.Errorf("%q is not selected for machine %s", resource, r.Machine)

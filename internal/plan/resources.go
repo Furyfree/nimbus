@@ -2,10 +2,11 @@ package plan
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -15,13 +16,13 @@ import (
 )
 
 type FileChange struct {
-	ActivationChanged bool             `json:"activation_changed,omitempty"`
-	ChangedAt         time.Time        `json:"changed_at,omitempty"`
+	ActivationChanged bool             `json:"activation_changed,omitzero"`
+	ChangedAt         time.Time        `json:"changed_at,omitzero"`
 	Target            string           `json:"target"`
 	Before            facts.SystemFile `json:"before"`
 	After             facts.SystemFile `json:"after"`
 	Previous          string           `json:"previous"`
-	Recovery          bool             `json:"recovery,omitempty"`
+	Recovery          bool             `json:"recovery,omitzero"`
 	Triggers          []string         `json:"triggers,omitempty"`
 }
 
@@ -79,10 +80,8 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 				break
 			}
 			op.File.ActivationChanged = !SameFile(before, recorded)
-			for _, trigger := range file.Triggers {
-				if !slices.Contains(receipt.Triggers, trigger) {
-					op.File.ActivationChanged = true
-				}
+			if slices.ContainsFunc(file.Triggers, func(trigger string) bool { return !slices.Contains(receipt.Triggers, trigger) }) {
+				op.File.ActivationChanged = true
 			}
 			if SameFile(before, after) && receipt.Definitions.Digest == b.in.Definitions && slices.Equal(receipt.Triggers, file.Triggers) && !op.File.ActivationChanged {
 				op.Action = ActionKeep
@@ -162,7 +161,10 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 		case managed:
 			op.Resource.Previous = receipt.Previous
 			if before == target {
-				op.Action = ActionKeep
+				op.Action = ActionAdopt
+				if receipt.Intended == target {
+					op.Action = ActionKeep
+				}
 			}
 		case before == target:
 			op.Action = ActionAdopt
@@ -176,7 +178,7 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 		ops = append(ops, op)
 	}
 	// Retirement uses only verified ownership and restores the original state.
-	for _, id := range sortedKeys(b.in.Applied.Receipts) {
+	for _, id := range slices.Sorted(maps.Keys(b.in.Applied.Receipts)) {
 		receipt := b.in.Applied.Receipts[id]
 		if selected[id] {
 			continue
@@ -205,39 +207,25 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 			triggers[id] = true
 		}
 	}
-	for _, id := range sortedKeys(triggers) {
+	for _, id := range slices.Sorted(maps.Keys(triggers)) {
 		triggerID := "trigger:" + id
 		receipt, ok := b.in.Applied.Receipts[triggerID]
 		changed := !ok || !ownedResource(receipt, triggerID, KindTrigger, b.in.Resolved.Machine)
-		for _, file := range b.in.Resolved.Files {
-			for _, requested := range file.Triggers {
-				if requested == id {
-					if recorded, ok := b.in.Applied.Receipts["file:"+file.Target]; ok && (recorded.ChangeTime().After(receipt.Timestamp) || !slices.Contains(recorded.Triggers, id)) {
-						changed = true
-					}
-				}
+		changed = changed || slices.ContainsFunc(b.in.Resolved.Files, func(file definitions.ResolvedFile) bool {
+			if !slices.Contains(file.Triggers, id) {
+				return false
 			}
-		}
-		for _, op := range ops {
-			if op.Kind == KindFile && op.Action != ActionKeep && (op.Action != ActionAdopt || (op.File != nil && op.File.ActivationChanged)) {
-				if op.File != nil {
-					for _, requested := range op.File.Triggers {
-						if requested == id {
-							changed = true
-						}
-					}
-				}
-				for _, file := range b.in.Resolved.Files {
-					if op.ID == "file:"+file.Target {
-						for _, requested := range file.Triggers {
-							if requested == id {
-								changed = true
-							}
-						}
-					}
-				}
+			recorded, ok := b.in.Applied.Receipts["file:"+file.Target]
+			return ok && (recorded.ChangeTime().After(receipt.Timestamp) || !slices.Contains(recorded.Triggers, id))
+		})
+		changed = changed || slices.ContainsFunc(ops, func(op Operation) bool {
+			if op.Kind != KindFile || op.Action == ActionKeep || (op.Action == ActionAdopt && (op.File == nil || !op.File.ActivationChanged)) {
+				return false
 			}
-		}
+			return (op.File != nil && slices.Contains(op.File.Triggers, id)) || slices.ContainsFunc(b.in.Resolved.Files, func(file definitions.ResolvedFile) bool {
+				return op.ID == "file:"+file.Target && slices.Contains(file.Triggers, id)
+			})
+		})
 		if changed {
 			op := Operation{ID: triggerID, Kind: KindTrigger, Action: ActionRepair, Risk: RiskMedium, Summary: "run trigger " + id, After: pendingPackages, Steps: []Step{{Description: "run fixed trigger", Argv: definitions.TriggerArgs(id), Privileged: true}}}
 			if id == "noctalia-state-directory" {
@@ -254,7 +242,7 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 		}
 	}
 	// Files and memberships precede service activation; reload definitions first.
-	sort.SliceStable(ops, func(i, j int) bool {
+	slices.SortStableFunc(ops, func(a, b Operation) int {
 		rank := func(op Operation) int {
 			if op.Action == ActionRemove {
 				switch op.Kind {
@@ -281,7 +269,7 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 				return 4
 			}
 		}
-		return rank(ops[i]) < rank(ops[j])
+		return cmp.Compare(rank(a), rank(b))
 	})
 	return ops
 }
@@ -291,9 +279,15 @@ func (b *builder) serviceOperation(id string, want definitions.ServiceDecl, comp
 	have, err := facts.ObserveService(b.in.Source, want.Unit)
 	op.Resource = &ResourceChange{Name: want.Unit, Before: encodeResource(have), After: encodeResource(want), Previous: encodeResource(have), Enabled: want.Enabled, Running: want.Running}
 	receipt, managed := b.in.Applied.Receipts[id]
-	switch {
-	case err != nil:
+	if managed {
+		op.Resource.Previous = receipt.Previous
+	}
+	if err != nil {
 		op.Blocked = err.Error()
+		op.After = pending
+		return op
+	}
+	switch {
 	case have.Load == "not-found" && pending != "":
 		op.After = pending
 	case have.Load != "loaded":
@@ -302,9 +296,6 @@ func (b *builder) serviceOperation(id string, want definitions.ServiceDecl, comp
 		op.Blocked = "masked unit requires explicit manual migration"
 	case managed && !ownedResource(receipt, id, KindService, b.in.Resolved.Machine):
 		op.Blocked = "service receipt is invalid or foreign"
-	}
-	if managed {
-		op.Resource.Previous = receipt.Previous
 	}
 	if want.Enabled != nil {
 		enabled := have.Enabled == "enabled"
@@ -327,10 +318,14 @@ func (b *builder) serviceOperation(id string, want definitions.ServiceDecl, comp
 		op.Steps = append(op.Steps, Step{Description: verb + " unit", Argv: []string{"systemctl", verb, "--", want.Unit}, Privileged: true})
 	}
 	if len(op.Steps) == 0 {
-		if managed {
-			op.Action = ActionKeep
-		} else {
-			op.Action = ActionAdopt
+		op.Action = ActionAdopt
+		if managed && op.Blocked == "" {
+			var intended definitions.ServiceDecl
+			if json.Unmarshal([]byte(receipt.Intended), &intended) != nil {
+				op.Blocked = "service receipt lacks desired state"
+			} else if encodeResource(intended) == op.Resource.After {
+				op.Action = ActionKeep
+			}
 		}
 	}
 	if want.Unit == "greetd.service" && want.Enabled != nil && *want.Enabled {
@@ -338,12 +333,12 @@ func (b *builder) serviceOperation(id string, want definitions.ServiceDecl, comp
 		if e != nil {
 			op.Blocked = "cannot inspect display-manager ownership: " + e.Error()
 		} else {
-			for _, name := range names {
-				if name == "display-manager.service" {
-					out, e := b.in.Source.Run("readlink", "--", "/etc/systemd/system/display-manager.service")
-					if e != nil || !strings.HasSuffix(strings.TrimSpace(string(out)), "/greetd.service") {
-						op.Blocked = "another display manager owns display-manager.service; explicit migration is required"
-					}
+			if slices.Contains(names, "display-manager.service") {
+				out, e := b.in.Source.Run("readlink", "--", "/etc/systemd/system/display-manager.service")
+				if e != nil {
+					op.Blocked = "cannot inspect display-manager ownership: " + e.Error()
+				} else if !strings.HasSuffix(strings.TrimSpace(string(out)), "/greetd.service") {
+					op.Blocked = "another display manager owns display-manager.service; explicit migration is required"
 				}
 			}
 		}
@@ -418,12 +413,10 @@ func (b *builder) retireResource(id string, receipt state.Receipt) Operation {
 				op.Blocked = "unsupported prior enablement state"
 				break
 			}
-			enabled := previous.Enabled == "enabled"
-			desired.Enabled = &enabled
+			desired.Enabled = new(previous.Enabled == "enabled")
 		}
 		if intended.Running != nil {
-			running := previous.Active == "active"
-			desired.Running = &running
+			desired.Running = new(previous.Active == "active")
 		}
 		op = b.serviceOperation(id, desired, "retired", "")
 		op.Action = ActionRemove
@@ -446,6 +439,10 @@ func (b *builder) retireResource(id string, receipt state.Receipt) Operation {
 			op.Blocked = err.Error()
 		}
 		op.Resource = &ResourceChange{Name: fields[1], User: fields[2], Before: fmt.Sprint(present), After: receipt.Previous, Previous: receipt.Previous}
+		if receipt.Previous == "true" {
+			op.Resource.After = op.Resource.Before
+			op.Summary = "retire tracking of preexisting membership " + id
+		}
 		if present && receipt.Previous == "false" {
 			primary, e := b.in.Source.Run("id", "-gn", "--", fields[2])
 			if e != nil {
@@ -454,6 +451,9 @@ func (b *builder) retireResource(id string, receipt state.Receipt) Operation {
 				op.Blocked = "membership is now the primary group; removal is forbidden"
 			}
 			op.Steps = []Step{{Description: "remove Nimbus-added membership", Argv: []string{"gpasswd", "--delete", fields[2], fields[1]}, Privileged: true}}
+			if op.Blocked == "" {
+				op.Notes = []string{"Changed group membership requires logout and login."}
+			}
 		}
 	case KindTarget:
 		if receipt.Previous != "graphical.target" && receipt.Previous != "multi-user.target" {
@@ -461,30 +461,31 @@ func (b *builder) retireResource(id string, receipt state.Receipt) Operation {
 			break
 		}
 		out, err := b.in.Source.Run("systemctl", "get-default")
+		before := strings.TrimSpace(string(out))
 		if err != nil {
 			op.Blocked = err.Error()
-		}
-		before := strings.TrimSpace(string(out))
-		if before != receipt.Intended {
+		} else if before != receipt.Intended {
 			op.Blocked = "boot target changed since last receipt"
 		}
 		op.Resource = &ResourceChange{Name: id, Before: before, After: receipt.Previous, Previous: receipt.Previous}
-		op.Steps = []Step{{Description: "restore prior default target", Argv: []string{"systemctl", "set-default", receipt.Previous}, Privileged: true}}
+		if before != receipt.Previous {
+			op.Steps = []Step{{Description: "restore prior default target", Argv: []string{"systemctl", "set-default", receipt.Previous}, Privileged: true}}
+			if op.Blocked == "" {
+				op.Notes = []string{"Takes effect on the next boot; the current graphical session is not stopped."}
+			}
+		}
 	}
 	return op
 }
 
 func deferPackageRemovalForResources(ops []Operation) {
-	pending := ""
-	for _, op := range ops {
-		if op.After != "" && op.Action == ActionRemove && (op.Kind == KindFile || op.Kind == KindService || op.Kind == KindGroup || op.Kind == KindTarget) {
-			pending = op.ID
-			break
-		}
-	}
-	if pending == "" {
+	first := slices.IndexFunc(ops, func(op Operation) bool {
+		return op.After != "" && op.Action == ActionRemove && (op.Kind == KindFile || op.Kind == KindService || op.Kind == KindGroup || op.Kind == KindTarget)
+	})
+	if first < 0 {
 		return
 	}
+	pending := ops[first].ID
 	for i := range ops {
 		if ops[i].Kind == KindPackage && (ops[i].Action == ActionRemove || ops[i].Action == ActionPrune) {
 			ops[i].After = pending

@@ -1,9 +1,12 @@
 package facts
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -67,10 +70,8 @@ func TestInspectFedora44Fixture(t *testing.T) {
 }
 
 func findPackage(f *Facts, name string) *Package {
-	for i := range f.Packages.Value {
-		if f.Packages.Value[i].Name == name {
-			return &f.Packages.Value[i]
-		}
+	if i := slices.IndexFunc(f.Packages.Value, func(p Package) bool { return p.Name == name }); i >= 0 {
+		return &f.Packages.Value[i]
 	}
 	return nil
 }
@@ -143,9 +144,9 @@ func TestParsersRejectMalformedOutput(t *testing.T) {
 	if _, err := parseColumns([]byte("only-one-column\n"), 2); err == nil {
 		t.Fatal("short column row accepted")
 	}
-	repos := parseRepoFile("x.repo", []byte("junk before section\n[a]\nenabled=0\ngpgcheck=true\n[b]\n"))
-	if len(repos) != 2 || repos[0].Enabled || repos[0].GPGCheck != "1" || !repos[1].Enabled || repos[1].GPGCheck != "" {
-		t.Fatalf("repos = %+v", repos)
+	repos, err := parseRepoFile("x.repo", []byte("[a]\nenabled=0\ngpgcheck=true\n[b]\n"))
+	if err != nil || len(repos) != 2 || repos[0].Enabled || repos[0].GPGCheck != "1" || !repos[1].Enabled || repos[1].GPGCheck != "" {
+		t.Fatalf("repos = %+v, %v", repos, err)
 	}
 	values := parseOSRelease([]byte("ID=fedora\nPRETTY_NAME=\"Fedora Linux 44\"\n# comment\nBROKEN\n"))
 	if values["ID"] != "fedora" || values["PRETTY_NAME"] != "Fedora Linux 44" {
@@ -153,6 +154,48 @@ func TestParsersRejectMalformedOutput(t *testing.T) {
 	}
 	if (Package{Epoch: "1", Version: "2", Release: "3"}).EVR() != "1:2-3" {
 		t.Fatal("epoch rendering")
+	}
+}
+
+func TestPlatformReadsPastLongComments(t *testing.T) {
+	src := &FakeSource{
+		Files: map[string][]byte{OSReleasePath: []byte(strings.Join([]string{
+			"ID=fedora", "VERSION_ID=\"44\"", "#" + strings.Repeat("x", 70*1024), "ID=other",
+		}, "\r\n"))},
+		Commands: map[string][]byte{Key("uname", "-m"): []byte("x86_64\n")},
+	}
+	if err := CheckPlatform(src, []string{"44"}); err == nil || !strings.Contains(err.Error(), "unsupported platform other 44") {
+		t.Fatalf("platform override after long comment was ignored: %v", err)
+	}
+}
+
+func TestRepositoriesReadPastLongComments(t *testing.T) {
+	src := &FakeSource{
+		Dirs: map[string][]string{RepoDir: {"maker.repo"}},
+		Files: map[string][]byte{filepath.Join(RepoDir, "maker.repo"): []byte(strings.Join([]string{
+			"[maker]", "enabled=1", "#" + strings.Repeat("x", 70*1024), "enabled=0", "[other]", "enabled=0",
+		}, "\r\n"))},
+	}
+	repos, err := repositories(src)
+	if err != nil || len(repos) != 2 {
+		t.Fatalf("repository sections after long comment were lost: %+v, %v", repos, err)
+	}
+	if repos[0].ID != "maker" || repos[0].Enabled || repos[1].ID != "other" || repos[1].Enabled {
+		t.Fatalf("repository settings after long comment were ignored: %+v", repos)
+	}
+}
+
+func TestFlatpakTrustReadsPastLongComments(t *testing.T) {
+	src := &FakeSource{
+		Files: map[string][]byte{filepath.Join(FlatpakRepoPath, "config"): []byte(strings.Join([]string{
+			`[remote "flathub"]`, "gpg-verify=true", "#" + strings.Repeat("x", 70*1024), "gpg-verify=false",
+		}, "\r\n"))},
+		Commands: map[string][]byte{Key("gpg", KeyInspectArgs(filepath.Join(FlatpakRepoPath, "flathub.trustedkeys.gpg"))...): keyOutput(keyA)},
+	}
+	remote := FlatpakRemote{Name: "flathub"}
+	inspectRemoteTrust(src, &remote)
+	if remote.GPGVerify || remote.KeyError != "" || !slices.Equal(remote.KeyFingerprints, []string{keyA}) {
+		t.Fatalf("trust settings after long comment were ignored: %+v", remote)
 	}
 }
 
@@ -340,5 +383,61 @@ func TestChezmoiDataUsesExactProfileKey(t *testing.T) {
 	}
 	if _, err := ParseChezmoiData([]byte(`{"Profiles":"common"}`)); err == nil {
 		t.Fatal("invalid machine selection was accepted")
+	}
+}
+
+type directoryReadFailureSource struct {
+	Source
+	target string
+	cause  error
+}
+
+func (s directoryReadFailureSource) ReadDir(path string) ([]string, error) {
+	if path == s.target {
+		return nil, &os.PathError{Op: "readdir", Path: path, Err: s.cause}
+	}
+	return s.Source.ReadDir(path)
+}
+
+func TestOptionalUserDirectoryErrorsRemainUnknown(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, cause := range []error{os.ErrPermission, syscall.EIO} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			base := &FakeSource{Paths: map[string]string{"chezmoi": "/usr/bin/chezmoi"}}
+			src := directoryReadFailureSource{Source: base, target: filepath.Join(home, ".local", "share", "chezmoi"), cause: cause}
+			if initialized, err := ChezmoiInitialized(src, home); initialized || !errors.Is(err, cause) || !strings.Contains(err.Error(), src.target) {
+				t.Fatalf("Chezmoi source read failure = %v, %v", initialized, err)
+			}
+			if _, err := chezmoi(src); !errors.Is(err, cause) {
+				t.Fatalf("Chezmoi inspection lost the source read failure: %v", err)
+			}
+			if observed := Inspect(src, "").Chezmoi; observed.Known() || !strings.Contains(observed.Error, src.target) {
+				t.Fatalf("Chezmoi source read failure was treated as absence: %+v", observed)
+			}
+
+			src.target = filepath.Join(home, ".cargo", "bin")
+			if _, err := user(src); !errors.Is(err, cause) || !strings.Contains(err.Error(), src.target) {
+				t.Fatalf("Cargo inspection lost the directory read failure: %v", err)
+			}
+			if observed := Inspect(src, "").User; observed.Known() || !strings.Contains(observed.Error, src.target) {
+				t.Fatalf("Cargo directory read failure was treated as absence: %+v", observed)
+			}
+		})
+	}
+}
+
+func TestMissingAndEmptyCargoDirectoriesRemainKnown(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	src := &FakeSource{Dirs: map[string][]string{}}
+	for _, empty := range []bool{false, true} {
+		if empty {
+			src.Dirs[filepath.Join(home, ".cargo", "bin")] = []string{}
+		}
+		observed := Inspect(src, "").User
+		if !observed.Known() || observed.Value.Cargo || len(observed.Value.Crates) != 0 || observed.Value.Home != home {
+			t.Fatalf("Cargo absence (directory exists=%v) = %+v", empty, observed)
+		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/facts"
 	"github.com/Furyfree/nimbus/internal/plan"
 )
@@ -89,6 +90,19 @@ func TestStatusSummarizesThePlan(t *testing.T) {
 	}
 }
 
+func TestStatusCountsRetainedSourcesAsManaged(t *testing.T) {
+	s := &selected{Resolved: &definitions.Resolved{Machine: "vm"}}
+	p := &plan.Plan{Machine: "vm", Complete: true, Operations: []plan.Operation{
+		{ID: "repository:retained", Kind: plan.KindRepository, Action: plan.ActionKeep, Summary: "retain source retained while installed software needs it"},
+		{ID: "flatpak-remote:retained", Kind: plan.KindFlatpakRemote, Action: plan.ActionKeep, Summary: "retain source retained while installed software needs it"},
+		{ID: "repository:new", Kind: plan.KindRepository, Action: plan.ActionEnable},
+	}}
+	st := summarize(s, p)
+	if st.Managed != 2 || st.Repositories != 1 || st.ToInstall != 0 || st.ToRemove != 0 {
+		t.Fatalf("retained sources are not pending preparation: %+v", st)
+	}
+}
+
 func TestMachineOverridesWithoutSelector(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	root := repoRoot(t)
@@ -121,7 +135,7 @@ func TestPlanReadsTheCacheAndARunRefreshesIt(t *testing.T) {
 
 func TestPlanReadsLikeAnInstaller(t *testing.T) {
 	tx := &plan.Transaction{Download: "2.8 GiB"}
-	for i := 0; i < 40; i++ {
+	for i := range 40 {
 		tx.Packages = append(tx.Packages,
 			plan.TxPackage{Section: "installing", Name: fmt.Sprintf("requested-package-%02d", i), EVR: "0:1.0-1.fc44", Repository: "fedora"},
 			plan.TxPackage{Section: "installing dependencies", Name: fmt.Sprintf("dependency-%02d", i), EVR: "0:2.0-1.fc44", Repository: "updates"},
@@ -129,7 +143,7 @@ func TestPlanReadsLikeAnInstaller(t *testing.T) {
 	}
 	tx.Packages = append(tx.Packages, plan.TxPackage{Section: "upgrading", Name: "openssl-libs", EVR: "1:3.5.8-1.fc44", Repository: "updates"})
 	var items []string
-	for i := 0; i < 40; i++ {
+	for i := range 40 {
 		items = append(items, fmt.Sprintf("dnf:requested-package-%02d", i))
 	}
 	p := &plan.Plan{Machine: "laptop", Complete: true, Operations: []plan.Operation{
@@ -146,7 +160,7 @@ func TestPlanReadsLikeAnInstaller(t *testing.T) {
 		{ID: "package:cargo:resvg", Kind: plan.KindUser, Action: plan.ActionInstall, Summary: "cargo install resvg as the user", After: "user:mise:install", Notes: []string{"cargo comes with the Rust runtime Mise installs"}},
 	}}
 	out := string(renderPlan(p, false, true))
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if len(line) > planWidth {
 			t.Errorf("line longer than %d columns: %q", planWidth, line)
 		}

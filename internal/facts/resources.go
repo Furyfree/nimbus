@@ -3,6 +3,7 @@ package facts
 import (
 	"fmt"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -21,17 +22,18 @@ type SystemFile struct {
 // treating an arbitrary stat failure as absence.
 func ObserveFile(src Source, target string) (SystemFile, error) {
 	var result SystemFile
-	if !strings.HasPrefix(target, "/") || path.Clean(target) != target || target == "/" {
+	rel, absolute := strings.CutPrefix(target, "/")
+	if !absolute || path.Clean(target) != target || target == "/" {
 		return result, fmt.Errorf("invalid absolute file target %q", target)
 	}
 	current := "/"
-	parts := strings.Split(strings.TrimPrefix(target, "/"), "/")
+	parts := strings.Split(rel, "/")
 	for i, part := range parts {
 		names, err := src.ReadDir(current)
 		if err != nil {
 			return result, fmt.Errorf("inspect parent %s: %w", current, err)
 		}
-		if !contains(names, part) {
+		if !slices.Contains(names, part) {
 			return result, nil
 		}
 		current = path.Join(current, part)
@@ -78,7 +80,7 @@ func ObserveService(src Source, unit string) (Service, error) {
 	if err != nil {
 		return s, err
 	}
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		key, value, ok := strings.Cut(line, "=")
 		if !ok {
 			continue
@@ -104,7 +106,7 @@ func ObserveMembership(src Source, user, group string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return contains(strings.Fields(string(out)), group), nil
+	return slices.Contains(strings.Fields(string(out)), group), nil
 }
 
 // Directory describes a real directory reached only through root-controlled
@@ -118,17 +120,18 @@ type Directory struct {
 
 func ObserveDirectory(src Source, target string) (Directory, error) {
 	var result Directory
-	if path.Clean(target) != target || !strings.HasPrefix(target, "/") || target == "/" {
+	rel, absolute := strings.CutPrefix(target, "/")
+	if path.Clean(target) != target || !absolute || target == "/" {
 		return result, fmt.Errorf("invalid directory target")
 	}
 	current := "/"
-	parts := strings.Split(strings.TrimPrefix(target, "/"), "/")
+	parts := strings.Split(rel, "/")
 	for i, part := range parts {
 		names, err := src.ReadDir(current)
 		if err != nil {
 			return result, err
 		}
-		if !contains(names, part) {
+		if !slices.Contains(names, part) {
 			return result, nil
 		}
 		current = path.Join(current, part)

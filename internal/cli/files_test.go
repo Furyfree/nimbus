@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,81 @@ import (
 
 	"github.com/Furyfree/nimbus/internal/state"
 )
+
+func TestFilesAcceptStopsWhenPreviewCannotBeWritten(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		yes   bool
+		after int
+	}{
+		{name: "interactive preview"},
+		{name: "automatic preview", yes: true},
+		{name: "interactive prompt", after: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			checkout, source, _ := acceptanceFixture(t)
+			before, err := os.ReadFile(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeErr := errors.New("preview output unavailable")
+			cmd := newFiles(&options{})
+			cmd.SilenceErrors, cmd.SilenceUsage = true, true
+			args := []string{"accept", "/etc/nimbus-test.conf", "--checkout", checkout, "--machine", "test"}
+			if tc.yes {
+				args = append(args, "--yes")
+			}
+			cmd.SetArgs(args)
+			cmd.SetIn(strings.NewReader("yes\n"))
+			cmd.SetOut(&previewErrorWriter{after: tc.after, err: writeErr})
+			cmd.SetErr(io.Discard)
+			if err := cmd.Execute(); err == nil || tc.after == 0 && !errors.Is(err, writeErr) {
+				t.Fatalf("preview failure not reported: %v", err)
+			}
+			after, err := os.ReadFile(source)
+			if err != nil || string(after) != string(before) {
+				t.Fatalf("failed preview changed source: %q, %v", after, err)
+			}
+			if _, err := os.Stat(filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), "nimbus", "operation.lock")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("failed preview reached mutation lock: %v", err)
+			}
+		})
+	}
+}
+
+func TestFilesAcceptReportsClosingOutputFailure(t *testing.T) {
+	for _, mode := range []string{"capture", "preview", "unchanged"} {
+		t.Run(mode, func(t *testing.T) {
+			checkout, source, live := acceptanceFixture(t)
+			if mode == "unchanged" {
+				if err := os.WriteFile(live, []byte("old\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			args := []string{"accept", "/etc/nimbus-test.conf", "--checkout", checkout, "--machine", "test", "--yes"}
+			if mode == "preview" {
+				args = append(args, "--plan")
+			}
+			writeErr := errors.New("result output unavailable")
+			cmd := newFiles(&options{})
+			cmd.SilenceErrors, cmd.SilenceUsage = true, true
+			cmd.SetArgs(args)
+			cmd.SetOut(&previewErrorWriter{after: 1, err: writeErr})
+			cmd.SetErr(io.Discard)
+			if err := cmd.Execute(); !errors.Is(err, writeErr) {
+				t.Fatalf("closing output failure not reported: %v", err)
+			}
+			want := "old\n"
+			if mode == "capture" {
+				want = "new\n"
+			}
+			data, err := os.ReadFile(source)
+			if err != nil || string(data) != want {
+				t.Fatalf("source = %q, %v; want %q", data, err, want)
+			}
+		})
+	}
+}
 
 func acceptanceFixture(t *testing.T) (string, string, string) {
 	t.Helper()
@@ -47,15 +123,28 @@ func acceptanceFixture(t *testing.T) (string, string, string) {
 			t.Fatal(err)
 		}
 	}
-	os.MkdirAll(filepath.Join(checkout, "profiles"), 0755)
 	source := filepath.Join(checkout, "system/root/etc/nimbus-test.conf")
-	os.Chmod(source, 0755)
+	if err := os.Chmod(source, 0755); err != nil {
+		t.Fatal(err)
+	}
 	live := filepath.Join(filesSystemRoot, "etc/nimbus-test.conf")
-	os.MkdirAll(filepath.Dir(live), 0755)
-	os.WriteFile(live, []byte("new\n"), 0644)
+	if err := os.MkdirAll(filepath.Dir(live), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(live, []byte("new\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	receipt := state.Receipt{Schema: state.ReceiptSchema, Resource: "file:/etc/nimbus-test.conf", Provider: "system-file", Verified: true, Machine: "test", PlanDigest: "sha256:test", Operation: "install"}
-	data, _ := json.Marshal(receipt)
-	os.MkdirAll(filepath.Join(stateRoot, state.ReceiptsDir), 0755)
+	data, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(stateRoot, state.ReceiptsDir), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stateRoot, state.SchemaFile), fmt.Appendln(nil, state.Schema), 0644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(stateRoot, state.ReceiptsDir, state.FileName(receipt.Resource)), data, 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -64,19 +153,113 @@ func acceptanceFixture(t *testing.T) (string, string, string) {
 
 func TestFilesAcceptCapturesOnlySourceAndPreservesMode(t *testing.T) {
 	checkout, source, live := acceptanceFixture(t)
-	before, _ := os.Stat(live)
+	before, err := os.Stat(live)
+	if err != nil {
+		t.Fatal(err)
+	}
 	code, out, errOut := run(t, "files", "accept", "/etc/nimbus-test.conf", "--checkout", checkout, "--machine", "test", "--yes")
 	if code != ExitOK {
 		t.Fatalf("%d %s %s", code, out, errOut)
 	}
-	data, _ := os.ReadFile(source)
-	info, _ := os.Stat(source)
-	after, _ := os.Stat(live)
+	data, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(live)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if string(data) != "new\n" || info.Mode().Perm() != 0755 || !os.SameFile(before, after) || !before.ModTime().Equal(after.ModTime()) {
 		t.Fatal("capture changed metadata/target or lost content")
 	}
 	if !strings.Contains(out, "-old\n+new\n") || !strings.Contains(out, "must not contain secrets") {
 		t.Fatal(out)
+	}
+}
+
+func TestFilesAcceptReadsMatchingLegacyReceipts(t *testing.T) {
+	for _, foreign := range []bool{false, true} {
+		t.Run(fmt.Sprint(foreign), func(t *testing.T) {
+			checkout, source, _ := acceptanceFixture(t)
+			const resource = "file:/etc/nimbus-test.conf"
+			current := filepath.Join(stateRoot, state.ReceiptsDir, state.FileName(resource))
+			legacy := filepath.Join(stateRoot, state.ReceiptsDir, state.LegacyFileName(resource))
+			data, err := os.ReadFile(current)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if foreign {
+				var receipt state.Receipt
+				if err := json.Unmarshal(data, &receipt); err != nil {
+					t.Fatal(err)
+				}
+				receipt.Resource = "file:/etc/another.conf"
+				data, err = json.Marshal(receipt)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(legacy, data, 0644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(current); err != nil {
+				t.Fatal(err)
+			}
+			code, out, errOut := run(t, "files", "accept", "/etc/nimbus-test.conf", "--checkout", checkout, "--machine", "test", "--yes")
+			wantCode, wantSource := ExitOK, "new\n"
+			if foreign {
+				wantCode, wantSource = ExitFailure, "old\n"
+			}
+			if code != wantCode {
+				t.Fatalf("exit %d, want %d: %s%s", code, wantCode, out, errOut)
+			}
+			got, err := os.ReadFile(source)
+			if err != nil || string(got) != wantSource {
+				t.Fatalf("source = %q, %v; want %q", got, err, wantSource)
+			}
+			retained, err := os.ReadFile(legacy)
+			if err != nil || string(retained) != string(data) {
+				t.Fatalf("file acceptance changed the legacy receipt: %q, %v", retained, err)
+			}
+		})
+	}
+}
+
+func TestFilesAcceptRefusesAmbiguousOrUnsupportedState(t *testing.T) {
+	for _, scenario := range []string{"duplicate receipt", "future schema", "missing schema"} {
+		t.Run(scenario, func(t *testing.T) {
+			checkout, source, _ := acceptanceFixture(t)
+			switch scenario {
+			case "duplicate receipt":
+				const resource = "file:/etc/nimbus-test.conf"
+				data, err := os.ReadFile(filepath.Join(stateRoot, state.ReceiptsDir, state.FileName(resource)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(stateRoot, state.ReceiptsDir, state.LegacyFileName(resource)), data, 0644); err != nil {
+					t.Fatal(err)
+				}
+			case "future schema":
+				if err := os.WriteFile(filepath.Join(stateRoot, state.SchemaFile), []byte("999\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			case "missing schema":
+				if err := os.Remove(filepath.Join(stateRoot, state.SchemaFile)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if code, out, errOut := run(t, "files", "accept", "/etc/nimbus-test.conf", "--checkout", checkout, "--machine", "test", "--yes"); code != ExitFailure {
+				t.Fatalf("accepted ambiguous ownership state: %d %s%s", code, out, errOut)
+			}
+			data, err := os.ReadFile(source)
+			if err != nil || string(data) != "old\n" {
+				t.Fatalf("rejected ownership state changed the source: %q, %v", data, err)
+			}
+		})
 	}
 }
 
@@ -91,13 +274,21 @@ func TestFilesAcceptPreviewCancellationAndChangedInput(t *testing.T) {
 				case "cancel":
 					return false
 				case "target":
-					os.WriteFile(live, []byte("changed\n"), 0644)
+					if err := os.WriteFile(live, []byte("changed\n"), 0644); err != nil {
+						t.Fatal(err)
+					}
 				case "source":
-					os.WriteFile(source, []byte("changed source\n"), 0755)
+					if err := os.WriteFile(source, []byte("changed source\n"), 0755); err != nil {
+						t.Fatal(err)
+					}
 				case "receipt":
-					os.Remove(filepath.Join(stateRoot, state.ReceiptsDir, state.FileName("file:/etc/nimbus-test.conf")))
+					if err := os.Remove(filepath.Join(stateRoot, state.ReceiptsDir, state.FileName("file:/etc/nimbus-test.conf"))); err != nil {
+						t.Fatal(err)
+					}
 				case "head":
-					os.WriteFile(filepath.Join(checkout, ".git/HEAD"), []byte("other\n"), 0644)
+					if err := os.WriteFile(filepath.Join(checkout, ".git/HEAD"), []byte("other\n"), 0644); err != nil {
+						t.Fatal(err)
+					}
 				}
 				return true
 			}
@@ -109,9 +300,69 @@ func TestFilesAcceptPreviewCancellationAndChangedInput(t *testing.T) {
 			if scenario == "preview" && code != ExitOK || scenario != "preview" && code != ExitFailure {
 				t.Fatalf("%d %s %s", code, out, errOut)
 			}
-			data, _ := os.ReadFile(source)
+			data, err := os.ReadFile(source)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if string(data) == "new\n" {
 				t.Fatal("captured despite cancellation/input change")
+			}
+		})
+	}
+}
+
+func TestFilesAcceptRejectsUnencodableOwnershipReceipts(t *testing.T) {
+	for _, tc := range []struct {
+		name, want            string
+		malformedBeforeReview bool
+		changePlan            bool
+	}{
+		{"unchanged malformed receipt", "encode reviewed ownership receipt", true, false},
+		{"changed malformed receipt", "encode reviewed ownership receipt", true, true},
+		{"receipt malformed after review", "encode current ownership receipt", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			checkout, source, _ := acceptanceFixture(t)
+			path := filepath.Join(stateRoot, state.ReceiptsDir, state.FileName("file:/etc/nimbus-test.conf"))
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var receipt map[string]json.RawMessage
+			if err := json.Unmarshal(data, &receipt); err != nil {
+				t.Fatal(err)
+			}
+			write := func() {
+				t.Helper()
+				// This offset decodes as time.Time but cannot be encoded again.
+				receipt["timestamp"] = json.RawMessage(`"2026-09-09T12:00:00+24:00"`)
+				data, err := json.Marshal(receipt)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, data, 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.malformedBeforeReview {
+				write()
+			}
+			saved := approver
+			t.Cleanup(func() { approver = saved })
+			approver = func(io.Reader, io.Writer, string) bool {
+				if tc.changePlan {
+					receipt["plan_digest"] = json.RawMessage(`"sha256:changed"`)
+				}
+				write()
+				return true
+			}
+			code, out, errOut := run(t, "files", "accept", "/etc/nimbus-test.conf", "--checkout", checkout, "--machine", "test")
+			if code != ExitFailure || !strings.Contains(errOut, tc.want) {
+				t.Errorf("receipt encoding failure not reported: %d %s%s", code, out, errOut)
+			}
+			data, err = os.ReadFile(source)
+			if err != nil || string(data) != "old\n" {
+				t.Fatalf("receipt encoding failure changed source: %q, %v", data, err)
 			}
 		})
 	}
@@ -130,32 +381,60 @@ func TestFilesAcceptRefusesUnsafeTargetsAndOwnership(t *testing.T) {
 			case "unselected":
 				target = "/etc/other"
 			case "symlink":
-				os.Remove(live)
-				os.Symlink("/etc/passwd", live)
+				if err := os.Remove(live); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink("/etc/passwd", live); err != nil {
+					t.Fatal(err)
+				}
 			case "ancestor":
-				os.Rename(filepath.Dir(live), filepath.Join(filesSystemRoot, "real-etc"))
-				os.Symlink("real-etc", filepath.Dir(live))
+				if err := os.Rename(filepath.Dir(live), filepath.Join(filesSystemRoot, "real-etc")); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink("real-etc", filepath.Dir(live)); err != nil {
+					t.Fatal(err)
+				}
 			case "hardlink":
-				os.Link(live, live+".link")
+				if err := os.Link(live, live+".link"); err != nil {
+					t.Fatal(err)
+				}
 			case "directory":
-				os.Remove(live)
-				os.Mkdir(live, 0755)
+				if err := os.Remove(live); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(live, 0755); err != nil {
+					t.Fatal(err)
+				}
 			case "unverified", "foreign":
 				path := filepath.Join(stateRoot, state.ReceiptsDir, state.FileName("file:"+target))
-				data, _ := os.ReadFile(path)
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
 				var r state.Receipt
-				json.Unmarshal(data, &r)
+				if err := json.Unmarshal(data, &r); err != nil {
+					t.Fatal(err)
+				}
 				if scenario == "unverified" {
 					r.Verified = false
 				} else {
 					r.Machine = "other"
 				}
-				data, _ = json.Marshal(r)
-				os.WriteFile(path, data, 0644)
+				data, err = json.Marshal(r)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, data, 0644); err != nil {
+					t.Fatal(err)
+				}
 			case "metadata":
-				os.Chmod(live, 0600)
+				if err := os.Chmod(live, 0600); err != nil {
+					t.Fatal(err)
+				}
 			case "binary":
-				os.WriteFile(live, []byte{0}, 0644)
+				if err := os.WriteFile(live, []byte{0}, 0644); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if code, out, errOut := run(t, "files", "accept", target, "--checkout", checkout, "--machine", "test", "--yes"); code != ExitFailure {
 				t.Fatalf("%d %s %s", code, out, errOut)
@@ -173,7 +452,10 @@ func TestFilesAcceptJSONRequiresExplicitMode(t *testing.T) {
 	if code, out, errOut := run(t, append(args, "--plan")...); code != ExitOK || !strings.Contains(out, `"changed": false`) {
 		t.Fatalf("%d %s %s", code, out, errOut)
 	}
-	data, _ := os.ReadFile(source)
+	data, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if string(data) != "old\n" {
 		t.Fatal("JSON preview mutated source")
 	}

@@ -10,8 +10,7 @@ import (
 )
 
 func TestResourceDoctorReportsGreeterReadinessAndUnknownState(t *testing.T) {
-	enabled := true
-	r := &defs.Resolved{Machine: "vm", Services: []defs.ResolvedService{{ServiceDecl: defs.ServiceDecl{Unit: "greetd.service", Enabled: &enabled}}}}
+	r := &defs.Resolved{Machine: "vm", Services: []defs.ResolvedService{{ServiceDecl: defs.ServiceDecl{Unit: "greetd.service", Enabled: new(true)}}}}
 	src := &facts.FakeSource{Commands: map[string][]byte{
 		facts.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", "greetd.service"): []byte("LoadState=loaded\nUnitFileState=enabled\nActiveState=inactive\n"),
 	}}
@@ -20,7 +19,7 @@ func TestResourceDoctorReportsGreeterReadinessAndUnknownState(t *testing.T) {
 	if len(checks) != 2 || checks[0].Status != Pass || checks[1].ID != "greeter-login" || checks[1].Status != Fail {
 		t.Fatalf("%+v", checks)
 	}
-	src.Commands = map[string][]byte{}
+	clear(src.Commands)
 	checks = SystemResources(src, r, applied, "test")
 	if len(checks) != 1 || checks[0].Status != Unknown {
 		t.Fatalf("%+v", checks)
@@ -47,5 +46,32 @@ func TestResourceDoctorDistinguishesFileDriftAndOwnership(t *testing.T) {
 	checks = SystemResources(src, r, applied, "test")
 	if checks[0].Status != Fail || !strings.Contains(checks[0].Observation, "content matches false") {
 		t.Fatalf("%+v", checks)
+	}
+}
+
+func TestResourceDoctorRequiresDisabledNativeEnablement(t *testing.T) {
+	for _, tc := range []struct {
+		name, native, want string
+		enabled            *bool
+	}{
+		{"disabled", "disabled", Pass, new(false)},
+		{"enabled", "enabled", Fail, new(false)},
+		{"runtime enablement", "enabled-runtime", Fail, new(false)},
+		{"missing enablement", "", Fail, new(false)},
+		{"enablement not selected", "static", Pass, nil},
+		{"masked with enablement not selected", "masked", Fail, nil},
+		{"runtime mask with enablement not selected", "masked-runtime", Fail, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &defs.Resolved{Machine: "vm", Services: []defs.ResolvedService{{ServiceDecl: defs.ServiceDecl{Unit: "demo.service", Enabled: tc.enabled, Running: new(false)}}}}
+			src := &facts.FakeSource{Commands: map[string][]byte{
+				facts.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", "demo.service"): []byte("LoadState=loaded\nUnitFileState=" + tc.native + "\nActiveState=inactive\n"),
+			}}
+			applied := &state.Applied{Receipts: map[string]state.Receipt{"service:demo.service": {Verified: true, Resource: "service:demo.service", Machine: "vm", Provider: "service"}}}
+			checks := SystemResources(src, r, applied, "test")
+			if len(checks) != 1 || checks[0].Status != tc.want {
+				t.Fatalf("native enablement %q: checks=%+v, want %s", tc.native, checks, tc.want)
+			}
+		})
 	}
 }

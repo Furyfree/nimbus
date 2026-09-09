@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -16,12 +17,12 @@ func readKeysFromArchive(archive []byte) (map[string][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 	keys := map[string][]byte{}
 	tr := tar.NewReader(gz)
 	for {
 		hdr, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {

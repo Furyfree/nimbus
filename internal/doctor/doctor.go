@@ -4,7 +4,7 @@ package doctor
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/Furyfree/nimbus/internal/facts"
@@ -100,7 +100,7 @@ func platform(f *facts.Facts, cfg Config) Check {
 		c.Status = Unknown
 		c.Observation += "; supported releases unknown because the checkout definitions are unavailable"
 		c.Remediation = "fix the checkout, then rerun doctor"
-	case !contains(cfg.SupportedReleases, p.VersionID):
+	case !slices.Contains(cfg.SupportedReleases, p.VersionID):
 		c.Status = Fail
 		c.Impact = "Nimbus refuses every mutation on an unsupported release"
 		c.Remediation = fmt.Sprintf("use a checkout that supports Fedora %s (this one supports %s) or upgrade Fedora with its native tooling", p.VersionID, strings.Join(cfg.SupportedReleases, ", "))
@@ -149,10 +149,7 @@ func describeCheckout(co facts.Checkout) string {
 	if co.Dirty {
 		state = "dirty"
 	}
-	commit := co.Commit
-	if len(commit) > 12 {
-		commit = commit[:12]
-	}
+	commit := co.Commit[:min(len(co.Commit), 12)]
 	return fmt.Sprintf("%s at %s (%s)", co.Origin, commit, state)
 }
 
@@ -176,7 +173,7 @@ func commands(f *facts.Facts) Check {
 			missing = append(missing, name)
 		}
 	}
-	sort.Strings(missing)
+	slices.Sort(missing)
 	if len(missing) > 0 {
 		c.Status = Fail
 		c.Observation = "missing: " + strings.Join(missing, ", ")
@@ -291,15 +288,6 @@ func firewalld(f *facts.Facts) Check {
 	return c
 }
 
-func contains(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
-}
-
 // chezmoiSelection compares what Chezmoi stored at its initialization with
 // the selected machine and its profiles; a profile change after the handoff
 // is refreshed by hand with the command profiles add prints.
@@ -342,10 +330,5 @@ func sameSet(a, b []string) bool {
 	for _, x := range a {
 		set[x] = true
 	}
-	for _, y := range b {
-		if !set[y] {
-			return false
-		}
-	}
-	return true
+	return !slices.ContainsFunc(b, func(y string) bool { return !set[y] })
 }

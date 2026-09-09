@@ -1,8 +1,10 @@
 package definitions
 
 import (
+	"cmp"
+	"maps"
 	"regexp"
-	"sort"
+	"slices"
 )
 
 type ResolvedService struct {
@@ -47,7 +49,7 @@ func validateResources(comp *Component, where string, errs *ErrorList) {
 		}
 		seen[service.Unit] = true
 	}
-	seen = map[string]bool{}
+	clear(seen)
 	for _, group := range comp.Groups {
 		if !accountRe.MatchString(group.Name) || (group.User != "<user>" && !accountRe.MatchString(group.User)) {
 			errs.Add(where, "invalid group membership %q/%q", group.Name, group.User)
@@ -75,7 +77,7 @@ func resolveResources(c *Checkout, r *Resolved, errs *ErrorList) {
 	for _, rc := range r.Components {
 		comp := c.Components[rc.ID]
 		if comp.Recovery != nil && comp.Recovery.Enabled {
-			for _, source := range sortedKeys(RecoveryFiles) {
+			for _, source := range slices.Sorted(maps.Keys(RecoveryFiles)) {
 				entry, ok := c.Entry(source)
 				if !ok {
 					errs.Add("components/"+rc.ID+".toml", "recovery source %s is missing", source)
@@ -114,9 +116,9 @@ func resolveResources(c *Checkout, r *Resolved, errs *ErrorList) {
 			r.DefaultTarget = comp.DefaultTarget
 		}
 	}
-	sort.Slice(r.Services, func(i, j int) bool { return r.Services[i].Unit < r.Services[j].Unit })
-	sort.Slice(r.Groups, func(i, j int) bool {
-		return r.Groups[i].Name+":"+r.Groups[i].User < r.Groups[j].Name+":"+r.Groups[j].User
+	slices.SortFunc(r.Services, func(a, b ResolvedService) int { return cmp.Compare(a.Unit, b.Unit) })
+	slices.SortFunc(r.Groups, func(a, b ResolvedGroup) int {
+		return cmp.Compare(a.Name+":"+a.User, b.Name+":"+b.User)
 	})
 }
 
@@ -127,7 +129,7 @@ var RecoveryFiles = map[string]string{
 }
 
 func RecoveryTarget(target string) bool {
-	for _, t := range RecoveryFiles {
+	for t := range maps.Values(RecoveryFiles) {
 		if target == t {
 			return true
 		}

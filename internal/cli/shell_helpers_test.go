@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"cmp"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -46,7 +48,7 @@ installer_run bash -c 'echo visible-output; echo diagnostic >&2; read -r ignored
 	if strings.Contains(text, "private-input") {
 		t.Fatal("logged command input")
 	}
-	if _, err := os.Stat(filepath.Join(runs[0], ".active")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(runs[0], ".active")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("run remains active: %v", err)
 	}
 	finished, err := os.ReadFile(filepath.Join(runs[0], ".finished"))
@@ -61,7 +63,7 @@ func TestShellLogRetentionPreservesUnknownAndActiveRuns(t *testing.T) {
 	if err := os.Mkdir(root, 0700); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		dir := filepath.Join(root, fmt.Sprintf("run-%03d", i))
 		if err := os.Mkdir(dir, 0700); err != nil {
 			t.Fatal(err)
@@ -99,11 +101,11 @@ func TestShellLogRetentionPreservesUnknownAndActiveRuns(t *testing.T) {
 		t.Fatalf("prune: %v %s", err, out)
 	}
 	// Keep all six protected directories plus the newest 20 completed runs.
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		name := fmt.Sprintf("run-%03d", i)
 		_, err := os.Stat(filepath.Join(root, name))
 		if i >= 3 && i <= 6 {
-			if !os.IsNotExist(err) {
+			if !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("did not prune %s: %v", name, err)
 			}
 		} else if err != nil {
@@ -140,7 +142,7 @@ func TestShellRejectsArgumentsBeforeStartingRun(t *testing.T) {
 			if err == nil {
 				t.Fatalf("accepted %s: %s", args, out)
 			}
-			if _, err := os.Stat(filepath.Join(home, ".local")); !os.IsNotExist(err) {
+			if _, err := os.Stat(filepath.Join(home, ".local")); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("wrote before validating arguments: %v", err)
 			}
 		})
@@ -201,7 +203,7 @@ installer_handoff bash -c 'printf "%s" "$BASHPID" > "$READY"; exec sleep 20'
 			if len(runs) != 1 {
 				t.Fatalf("logs missing: %s", out.String())
 			}
-			if _, err := os.Stat(filepath.Join(runs[0], ".active")); !os.IsNotExist(err) {
+			if _, err := os.Stat(filepath.Join(runs[0], ".active")); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("interrupted run still active: %v", err)
 			}
 		})
@@ -277,11 +279,8 @@ tee() { cat; return 23; }
 installer_run bash -c 'echo native-output; exit %d'
 `, native)
 			out, err := shellHelper(t, home, body)
-			exit, ok := err.(*exec.ExitError)
-			want := native
-			if want == 0 {
-				want = 1
-			}
+			exit, ok := errors.AsType[*exec.ExitError](err)
+			want := cmp.Or(native, 1)
 			if !ok || exit.ExitCode() != want || !strings.Contains(string(out), "installation log write failed (tee status=23)") {
 				t.Fatalf("lost command/log error: %v %s", err, out)
 			}
@@ -332,7 +331,7 @@ printf 'exported-log=%s\n' "$NIMBUS_INSTALL_LOG_DIR"
 				t.Fatalf("slash normalization: %v %s", err, out)
 			}
 			found := false
-			for _, line := range strings.Split(string(out), "\n") {
+			for line := range strings.SplitSeq(string(out), "\n") {
 				if path, ok := strings.CutPrefix(line, "exported-log="); ok {
 					found = true
 					if path != filepath.Clean(path) {
@@ -353,7 +352,7 @@ func TestShellStillRejectsTraversalInLogBase(t *testing.T) {
 	if err == nil || !strings.Contains(string(out), "absolute and normalized") {
 		t.Fatalf("accepted log traversal: %v %s", err, out)
 	}
-	if _, err := os.Stat(filepath.Join(home, "nimbus")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(home, "nimbus")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("wrote before rejecting traversal: %v", err)
 	}
 }

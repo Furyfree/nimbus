@@ -1,9 +1,11 @@
 package definitions
 
 import (
+	"cmp"
+	"maps"
 	"path"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -39,20 +41,20 @@ func NormalizeFingerprint(s string) string {
 func Validate(c *Checkout) ErrorList {
 	var errs ErrorList
 	validateRoot(c, &errs)
-	for _, id := range sortedKeys(c.Profiles) {
+	for _, id := range slices.Sorted(maps.Keys(c.Profiles)) {
 		validateProfile(c, c.Profiles[id], &errs)
 	}
-	for _, id := range sortedKeys(c.Components) {
+	for _, id := range slices.Sorted(maps.Keys(c.Components)) {
 		validateComponent(c, c.Components[id], &errs)
 	}
 	validateRequireCycles(c, &errs)
-	for _, id := range sortedKeys(c.Machines) {
+	for _, id := range slices.Sorted(maps.Keys(c.Machines)) {
 		validateMachine(c, c.Machines[id], &errs)
 	}
 	if len(errs) > 0 {
 		return errs
 	}
-	for _, id := range sortedKeys(c.Machines) {
+	for _, id := range slices.Sorted(maps.Keys(c.Machines)) {
 		if _, rerrs := Resolve(c, id); len(rerrs) > 0 {
 			errs = append(errs, rerrs...)
 		}
@@ -83,7 +85,7 @@ func validateRoot(c *Checkout, errs *ErrorList) {
 	} else if release, ok := releaseVersion(version.Engine); ok && compareVersions(release, r.Compatibility.MinEngine) < 0 {
 		errs.Add(RootFile, "compatibility.min_engine %s is newer than this engine %s", r.Compatibility.MinEngine, version.Engine)
 	}
-	for _, key := range sortedKeys(r.DNF) {
+	for _, key := range slices.Sorted(maps.Keys(r.DNF)) {
 		if !dnfOptionRe.MatchString(key) {
 			errs.Add(RootFile, "dnf.%s: option names are lowercase letters, digits, and underscores", key)
 		}
@@ -99,7 +101,7 @@ func validateRoot(c *Checkout, errs *ErrorList) {
 	}
 	flatpaks := 0
 	priorities := map[int]string{}
-	for _, id := range sortedKeys(r.Repositories) {
+	for _, id := range slices.Sorted(maps.Keys(r.Repositories)) {
 		repo := r.Repositories[id]
 		where := "repositories." + id
 		if repo.Priority != nil {
@@ -200,10 +202,10 @@ func (c *Checkout) FlatpakRepository() string {
 	return ""
 }
 
-func (c *Checkout) validateRefs(where string, raws []string, errs *ErrorList) []Ref {
-	refs := make([]Ref, 0, len(raws))
+func (c *Checkout) validateRefs(where string, raws []string, errs *ErrorList) {
 	seen := map[string]bool{}
 	prefixByName := map[string]string{}
+	var sources []Ref
 	for _, raw := range raws {
 		ref, err := ParseRef(raw)
 		if err != nil {
@@ -232,18 +234,22 @@ func (c *Checkout) validateRefs(where string, raws []string, errs *ErrorList) []
 			errs.Add(where, "%q is also listed as %s:%s; one package has one source", raw, prev, ref.Name)
 		}
 		prefixByName[ref.Name] = ref.Prefix
-		refs = append(refs, ref)
+		for _, prev := range sources {
+			if prev.Name != ref.Name && conflictingSources(prev, ref) {
+				errs.Add(where, "%q overlaps %s; one package has one source", raw, prev.Canonical())
+			}
+		}
+		sources = append(sources, ref)
 	}
-	return refs
 }
 
-// cleanRelativePath accepts a relative, already-clean path with no ".."
+// cleanRelativePath accepts an already-clean relative file path with no ".."
 // segment. Two dots inside a name are fine.
 func cleanRelativePath(p string) bool {
-	if p == "" || strings.HasPrefix(p, "/") || path.Clean(p) != p {
+	if p == "" || p == "." || strings.HasPrefix(p, "/") || path.Clean(p) != p {
 		return false
 	}
-	for _, seg := range strings.Split(p, "/") {
+	for seg := range strings.SplitSeq(p, "/") {
 		if seg == ".." {
 			return false
 		}
@@ -263,14 +269,11 @@ func releaseVersion(engine string) (string, bool) {
 
 func compareVersions(a, b string) int {
 	as, bs := strings.Split(a, "."), strings.Split(b, ".")
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		x, _ := strconv.Atoi(as[i])
 		y, _ := strconv.Atoi(bs[i])
-		if x != y {
-			if x < y {
-				return -1
-			}
-			return 1
+		if order := cmp.Compare(x, y); order != 0 {
+			return order
 		}
 	}
 	return 0
@@ -353,7 +356,7 @@ func validateComponent(c *Checkout, comp *Component, errs *ErrorList) {
 	}
 	sources := map[string]bool{}
 	for i, f := range comp.Files {
-		fw := where + " files[" + itoa(i) + "]"
+		fw := where + " files[" + strconv.Itoa(i) + "]"
 		switch {
 		case f.Source == "":
 			errs.Add(fw, "source is required")
@@ -394,13 +397,7 @@ func validateMachine(c *Checkout, m *Machine, errs *ErrorList) {
 		errs.Add(where, "profiles must not be empty")
 	}
 	validateIDList(where, "profile", m.Profiles, c.hasProfile, "", errs)
-	hasCommon := false
-	for _, id := range m.Profiles {
-		if id == "common" {
-			hasCommon = true
-		}
-	}
-	if !hasCommon {
+	if !slices.Contains(m.Profiles, "common") {
 		errs.Add(where, "profiles must include \"common\"; the resolver never adds it")
 	}
 	validateIDList(where, "component", m.Components, c.hasComponent, "", errs)
@@ -438,31 +435,10 @@ func validateRequireCycles(c *Checkout, errs *ErrorList) {
 		}
 		state[id] = done
 	}
-	for _, id := range sortedKeys(c.Components) {
+	for _, id := range slices.Sorted(maps.Keys(c.Components)) {
 		visit(id, nil)
 	}
 }
 
 func (c *Checkout) hasComponent(id string) bool { _, ok := c.Components[id]; return ok }
 func (c *Checkout) hasProfile(id string) bool   { _, ok := c.Profiles[id]; return ok }
-
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-func itoa(i int) string {
-	if i == 0 {
-		return "0"
-	}
-	var b []byte
-	for i > 0 {
-		b = append([]byte{byte('0' + i%10)}, b...)
-		i /= 10
-	}
-	return string(b)
-}

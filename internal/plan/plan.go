@@ -1,15 +1,17 @@
 package plan
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"maps"
 	"path"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -50,7 +52,7 @@ const (
 type Step struct {
 	Description string   `json:"description"`
 	Argv        []string `json:"argv,omitempty"`
-	Privileged  bool     `json:"privileged,omitempty"`
+	Privileged  bool     `json:"privileged,omitzero"`
 }
 
 // Operation is one reviewed unit of the plan.
@@ -67,11 +69,17 @@ type Operation struct {
 	// Items are the package references a merged transaction installs, one
 	// receipt each; Paths then explains the transaction as a whole.
 	Items []string `json:"items,omitempty"`
+	// ItemPaths preserves each requested package's selection provenance in a
+	// merged transaction; Paths explains the transaction as a whole.
+	ItemPaths map[string][]string `json:"item_paths,omitempty"`
 	// Resolved maps requested names to native RPM name.arch identities from
 	// the preview or installed state, including resolved provides.
 	Resolved    map[string]string `json:"resolved,omitempty"`
 	Steps       []Step            `json:"steps,omitempty"`
 	Transaction *Transaction      `json:"transaction,omitempty"`
+	// AbsentPackage is the native identity whose absence authorizes receipt
+	// retirement. Ownership transfers leave it empty.
+	AbsentPackage string `json:"absent_package,omitempty"`
 	// After names the operation this one waits for. Apply runs the earlier
 	// operation, then re-plans so the exact transaction can be shown; a
 	// pending operation does not make the plan incomplete.
@@ -101,8 +109,8 @@ type Updates struct {
 // Plan is the complete result for one machine.
 type Plan struct {
 	Machine string `json:"machine"`
-	// Definitions is the definition digest the plan was built from, and
-	// Checkout the Git identity of the checkout; both bind the plan digest.
+	// Definitions is the definition digest used for planning. Checkout
+	// records Git identity, which approval rechecks separately.
 	Definitions string         `json:"definitions"`
 	Checkout    facts.Checkout `json:"checkout"`
 	Operations  []Operation    `json:"operations"`
@@ -132,9 +140,9 @@ type Inputs struct {
 	Prune bool
 }
 
-// Build produces the plan. It returns an error only when the facts needed
-// for any planning are missing; individual problems become blocked
-// operations so the whole picture is still shown.
+// Build produces the plan. Missing required facts and digest encoding failures
+// return errors; individual problems become blocked operations so the whole
+// picture is still shown.
 func Build(in Inputs) (*Plan, error) {
 	if in.Resolved == nil || in.Facts == nil {
 		return nil, fmt.Errorf("planning needs resolved configuration and facts")
@@ -153,12 +161,11 @@ func Build(in Inputs) (*Plan, error) {
 		b.repos[r.ID] = append(b.repos[r.ID], r)
 	}
 	p := &Plan{Machine: in.Resolved.Machine, Definitions: in.Definitions, Checkout: in.Facts.Checkout.Value, Complete: true}
-	for _, id := range in.Resolved.Repositories {
+	if slices.ContainsFunc(in.Resolved.Repositories, func(id string) bool {
 		r := in.Root.Repositories[id]
-		if r.Kind == "dnf" && r.ReleasePackage == "" {
-			p.RepositoryReconciliation = "After package transactions, disable new duplicate providers of declared baseurls through DNF overrides; preserve vendor files and keys, and verify the declared sources."
-			break
-		}
+		return r.Kind == "dnf" && r.ReleasePackage == ""
+	}) {
+		p.RepositoryReconciliation = "After package transactions, disable new duplicate providers of declared baseurls through DNF overrides; preserve vendor files and keys, and verify the declared sources."
 	}
 	p.Operations = append(p.Operations, b.dnfConfig()...)
 	p.Operations = append(p.Operations, b.repositories()...)
@@ -177,7 +184,7 @@ func Build(in Inputs) (*Plan, error) {
 	p.Operations = append(p.Operations, b.ownedRemovals()...)
 	p.Operations = append(p.Operations, b.sourceRetirements(p.Operations)...)
 	p.Prune = b.prune()
-	if in.Prune && (in.Applied == nil || in.Applied.Baseline == nil) {
+	if in.Prune && in.Applied.Baseline == nil {
 		p.PruneUnavailable = "prune needs the baseline the first sync records; run sync once first"
 	}
 	if in.Prune && len(p.Prune) > 0 {
@@ -185,12 +192,14 @@ func Build(in Inputs) (*Plan, error) {
 	}
 	deferPackageRemovalForResources(p.Operations)
 	p.Updates = b.updates()
-	for _, op := range p.Operations {
-		if op.Blocked != "" {
-			p.Complete = false
-		}
+	if slices.ContainsFunc(p.Operations, func(op Operation) bool { return op.Blocked != "" }) {
+		p.Complete = false
 	}
-	p.Digest = digest(p)
+	planDigest, err := digest(p)
+	if err != nil {
+		return nil, err
+	}
+	p.Digest = planDigest
 	return p, nil
 }
 
@@ -221,12 +230,9 @@ func (b *builder) installsPackage(name string) bool {
 	if _, installed := facts.FindPackage(b.in.Facts.Packages.Value, name); installed {
 		return false
 	}
-	for _, p := range b.in.Resolved.Packages {
-		if p.Prefix == definitions.PrefixDNF && p.Name == name {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(b.in.Resolved.Packages, func(p definitions.ResolvedPackage) bool {
+		return p.Prefix == definitions.PrefixDNF && p.Name == name
+	})
 }
 
 // DNFRepoIDs returns the repository IDs a declared repository creates on the
@@ -296,10 +302,8 @@ func (b *builder) inspectRepo(id string, r definitions.Repository) (ready bool, 
 			return false, "reconcile signing key: repository is disabled", ""
 		}
 		if r.Kind == "dnf" && r.ReleasePackage == "" {
-			for _, have := range b.repos[id] {
-				if have.Enabled {
-					return false, "", fmt.Sprintf("repository %s is already enabled through %s, which Nimbus does not own; remove that file or keep the repository unmanaged", id, have.File)
-				}
+			if i := slices.IndexFunc(b.repos[id], func(have facts.Repository) bool { return have.Enabled }); i >= 0 {
+				return false, "", fmt.Sprintf("repository %s is already enabled through %s, which Nimbus does not own; remove that file or keep the repository unmanaged", id, b.repos[id][i].File)
 			}
 		}
 		return false, "", ""
@@ -356,8 +360,8 @@ func (b *builder) inspectRepo(id string, r definitions.Repository) (ready bool, 
 		}
 	}
 	if r.Kind == "dnf" && r.ReleasePackage == "" {
-		for _, host := range sortedKeys(b.repos) {
-			if contains(ids, host) {
+		for _, host := range slices.Sorted(maps.Keys(b.repos)) {
+			if slices.Contains(ids, host) {
 				continue
 			}
 			for _, have := range b.repos[host] {
@@ -404,7 +408,7 @@ const DisableDuplicateDescription = "disable the duplicate repository through a 
 // package of a declared repository, which Nimbus installs while enabling
 // it and which therefore belongs to that repository, never to prune.
 func IsReleasePackage(root definitions.Root, name string) bool {
-	for _, r := range root.Repositories {
+	for r := range maps.Values(root.Repositories) {
 		if r.ReleasePackage != "" && ReleasePackageName(r.ReleasePackage) == name {
 			return true
 		}
@@ -440,7 +444,7 @@ func DNFDropIn(root definitions.Root) string {
 	}
 	var b strings.Builder
 	b.WriteString("# Written by Nimbus from the [dnf] table of nimbus.toml; edit that instead.\n[main]\n")
-	for _, key := range sortedKeys(root.DNF) {
+	for _, key := range slices.Sorted(maps.Keys(root.DNF)) {
 		fmt.Fprintf(&b, "%s=%s\n", key, dnfValue(root.DNF[key]))
 	}
 	return b.String()
@@ -496,7 +500,7 @@ func (b *builder) dnfConfig() []Operation {
 	default:
 		op.Action, op.Summary = ActionRepair, "rewrite "+facts.DNFDropInPath+", which differs from the declared options"
 	}
-	for _, key := range sortedKeys(b.in.Root.DNF) {
+	for _, key := range slices.Sorted(maps.Keys(b.in.Root.DNF)) {
 		op.Steps = append(op.Steps, Step{Description: "set " + key + "=" + dnfValue(b.in.Root.DNF[key])})
 	}
 	op.Steps = append(op.Steps, Step{Description: "write the drop-in", Argv: []string{"install", "-m", "0644", DNFDropInPlaceholder, facts.DNFDropInPath}, Privileged: true})
@@ -637,7 +641,7 @@ func ownedFileDrift(id string, r definitions.Repository, have facts.Repository) 
 			drift = append(drift, fmt.Sprintf("%s has %s=%s, declared %s", have.File, o.Key, got, o.Value))
 		}
 	}
-	for _, key := range sortedKeys(have.Options) {
+	for _, key := range slices.Sorted(maps.Keys(have.Options)) {
 		if !expected[key] {
 			drift = append(drift, fmt.Sprintf("%s has %s=%s, which Nimbus does not write", have.File, key, have.Options[key]))
 		}
@@ -728,23 +732,23 @@ func (b *builder) flatpakRemote(id string, r definitions.Repository) (Operation,
 		b.blockedRepo[id] = op.Blocked
 		return op, true
 	}
-	for _, remote := range b.in.Facts.Flatpak.Value.Remotes {
-		if remote.Name != id {
-			continue
-		}
-		if remote.URL == r.URL || strings.TrimSuffix(remote.URL, "/") == strings.TrimSuffix(strings.TrimSuffix(r.URL, "flathub.flatpakrepo"), "/") {
-			if reason := FlatpakKeyDrift(r, remote); reason != "" {
-				op.Blocked = "system remote " + id + ": " + reason + "; inspect and correct its signing keys with the native Flatpak tools before retrying"
-				b.blockedRepo[id] = op.Blocked
-				return op, true
-			}
-			b.ready[id] = true
-			return Operation{}, false
-		}
-		op.Blocked = fmt.Sprintf("system remote %s points to %s, not the declared %s; remove or fix it first", id, remote.URL, r.URL)
-		b.blockedRepo[id] = op.Blocked
+	remotes := b.in.Facts.Flatpak.Value.Remotes
+	i := slices.IndexFunc(remotes, func(remote facts.FlatpakRemote) bool { return remote.Name == id })
+	if i < 0 {
 		return op, true
 	}
+	remote := remotes[i]
+	if remote.URL == r.URL || strings.TrimSuffix(remote.URL, "/") == strings.TrimSuffix(strings.TrimSuffix(r.URL, "flathub.flatpakrepo"), "/") {
+		if reason := FlatpakKeyDrift(r, remote); reason != "" {
+			op.Blocked = "system remote " + id + ": " + reason + "; inspect and correct its signing keys with the native Flatpak tools before retrying"
+			b.blockedRepo[id] = op.Blocked
+			return op, true
+		}
+		b.ready[id] = true
+		return Operation{}, false
+	}
+	op.Blocked = fmt.Sprintf("system remote %s points to %s, not the declared %s; remove or fix it first", id, remote.URL, r.URL)
+	b.blockedRepo[id] = op.Blocked
 	return op, true
 }
 
@@ -767,7 +771,7 @@ func (b *builder) waitOrBlock(repoID, opKind string) (after, blocked string) {
 }
 
 func (b *builder) packages() []Operation {
-	var adopt, pending, blocked []Operation
+	var adopt, pending []Operation
 	var install []definitions.ResolvedPackage
 	for _, p := range b.in.Resolved.Packages {
 		if p.Prefix == definitions.PrefixFlatpak || p.Prefix == definitions.PrefixCargo {
@@ -781,7 +785,7 @@ func (b *builder) packages() []Operation {
 			}
 			if receipt, managed := b.in.Applied.Receipts[op.ID]; managed && receipt.Package == "" {
 				receipt.Resource = op.ID
-				if _, err := receiptPackage(receipt, b.in.Facts.Packages.Value); err != nil {
+				if _, err := ReceiptPackage(receipt, b.in.Facts.Packages.Value); err != nil {
 					op.Blocked = err.Error()
 				}
 			}
@@ -800,7 +804,7 @@ func (b *builder) packages() []Operation {
 		}
 		install = append(install, p)
 	}
-	ops := append(adopt, blocked...)
+	ops := adopt
 	var installTx *Transaction
 	if len(install) > 0 {
 		op := b.installTransaction(install)
@@ -825,14 +829,14 @@ func PackageName(id string) string {
 func (b *builder) sourceNote(p definitions.ResolvedPackage, inst facts.Package) string {
 	from := inst.FromRepo
 	// The installer and local files record no repository worth noting.
-	if from == "" || from == "anaconda" || strings.HasPrefix(from, "@") || contains(b.expectedRepos(p.Prefix), from) {
+	if from == "" || from == "anaconda" || strings.HasPrefix(from, "@") || slices.Contains(b.expectedRepos(p.Prefix), from) {
 		return ""
 	}
 	return fmt.Sprintf("%s is installed from %s, not from %s", p.Name, from, strings.Join(b.expectedRepos(p.Prefix), " or "))
 }
 
-// installTransaction previews one DNF transaction for every installable
-// package and refuses anything the definitions did not ask for.
+// installTransaction previews one DNF transaction for installable packages
+// and records effects beyond the requested selections as notes.
 func (b *builder) installTransaction(pkgs []definitions.ResolvedPackage) Operation {
 	names := make([]string, 0, len(pkgs))
 	byName := map[string]definitions.ResolvedPackage{}
@@ -840,21 +844,19 @@ func (b *builder) installTransaction(pkgs []definitions.ResolvedPackage) Operati
 	// that selected its packages; the packages themselves are its command.
 	pathSet := map[string]bool{}
 	items := make([]string, 0, len(pkgs))
+	itemPaths := make(map[string][]string, len(pkgs))
 	for _, p := range pkgs {
 		names = append(names, p.Name)
 		byName[p.Name] = p
 		items = append(items, p.Canonical)
+		itemPaths[p.Canonical] = p.Paths
 		for _, path := range p.Paths {
 			pathSet[path] = true
 		}
 	}
-	sort.Strings(names)
-	sort.Strings(items)
-	paths := make([]string, 0, len(pathSet))
-	for path := range pathSet {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
+	slices.Sort(names)
+	slices.Sort(items)
+	paths := slices.Sorted(maps.Keys(pathSet))
 	args := []string{"install"}
 	removes := map[string]bool{}
 	for _, r := range b.in.Resolved.Removes {
@@ -865,7 +867,7 @@ func (b *builder) installTransaction(pkgs []definitions.ResolvedPackage) Operati
 	}
 	args = append(args, names...)
 	op := Operation{ID: "packages:install", Kind: KindPackage, Action: ActionInstall, Risk: RiskLow,
-		Summary: fmt.Sprintf("install %d packages through one DNF transaction", len(names)), Paths: paths, Items: items,
+		Summary: fmt.Sprintf("install %d packages through one DNF transaction", len(names)), Paths: paths, Items: items, ItemPaths: itemPaths,
 		Steps: []Step{{Description: "install through DNF", Argv: append([]string{"dnf5", "-y"}, args...), Privileged: true}}}
 	if b.waitsForRepositories(&op) {
 		return op
@@ -888,24 +890,31 @@ func (b *builder) installTransaction(pkgs []definitions.ResolvedPackage) Operati
 		// The size summary is on stderr, which Run folds into the error.
 		tx.Download = DownloadSize(err.Error())
 	}
-	// A requested name may be a provide that DNF resolves to a package with
-	// another name; such rows are accepted only while a requested name is
-	// still unaccounted for, and each substitution is noted for review.
-	seen := map[string]bool{}
+	if tx.NothingToDo {
+		op.Blocked = "dnf5 reports nothing to do although packages are missing"
+		return op
+	}
+	// Direct names bind to their installing rows. Provides need native
+	// evidence for the exact reviewed package, independent of row order.
+	op.Resolved = map[string]string{}
+	var installing []facts.Package
 	for _, row := range tx.Packages {
 		if row.Section == "installing" {
-			for _, n := range names {
-				if (facts.Package{Name: row.Name, Arch: row.Arch}).Matches(n) {
-					seen[n] = true
-				}
-			}
+			installing = append(installing, facts.Package{Name: row.Name, Arch: row.Arch})
 		}
 	}
-	var unmatched []string
 	for _, n := range names {
-		if !seen[n] {
-			unmatched = append(unmatched, n)
+		if direct, ok := facts.FindPackage(installing, n); ok {
+			op.Resolved[n] = direct.ID()
+			continue
 		}
+		provider, err := b.resolveProvide(n, tx)
+		if err != nil {
+			op.Blocked = err.Error()
+			return op
+		}
+		op.Resolved[n] = facts.PackageID(provider.Name, provider.Arch)
+		op.Notes = append(op.Notes, fmt.Sprintf("%s resolves to the package %s", n, provider.Name))
 	}
 	var problems, needed []string
 	upgraded := map[string]bool{}
@@ -917,30 +926,19 @@ func (b *builder) installTransaction(pkgs []definitions.ResolvedPackage) Operati
 	for _, row := range tx.Packages {
 		switch row.Section {
 		case "installing":
-			p, wanted := byName[facts.PackageID(row.Name, row.Arch)]
-			if !wanted {
-				p, wanted = byName[row.Name]
-			}
-			if !wanted {
-				if len(unmatched) == 0 {
-					problems = append(problems, "would install "+row.Name+", which nothing selects")
+			wanted := false
+			for _, n := range names {
+				if op.Resolved[n] != facts.PackageID(row.Name, row.Arch) {
 					continue
 				}
-				requested := unmatched[0]
-				unmatched = unmatched[1:]
-				p = byName[requested]
-				if op.Resolved == nil {
-					op.Resolved = map[string]string{}
+				wanted = true
+				p := byName[n]
+				if !slices.Contains(b.expectedRepos(p.Prefix), row.Repository) {
+					problems = append(problems, fmt.Sprintf("%s would come from repository %s, not %s", row.Name, row.Repository, strings.Join(b.expectedRepos(p.Prefix), " or ")))
 				}
-				op.Resolved[requested] = facts.PackageID(row.Name, row.Arch)
-				op.Notes = append(op.Notes, fmt.Sprintf("%s resolves to the package %s", requested, row.Name))
 			}
-			if op.Resolved == nil {
-				op.Resolved = map[string]string{}
-			}
-			op.Resolved[p.Name] = facts.PackageID(row.Name, row.Arch)
-			if !contains(b.expectedRepos(p.Prefix), row.Repository) {
-				problems = append(problems, fmt.Sprintf("%s would come from repository %s, not %s", row.Name, row.Repository, strings.Join(b.expectedRepos(p.Prefix), " or ")))
+			if !wanted {
+				problems = append(problems, "would install "+row.Name+", which nothing selects")
 			}
 		case "installing dependencies", "installing weak dependencies":
 		case "removing", "removing dependent packages", "removing unused dependencies":
@@ -971,10 +969,39 @@ func (b *builder) installTransaction(pkgs []definitions.ResolvedPackage) Operati
 	for _, problem := range problems {
 		op.Notes = append(op.Notes, "beyond the definitions: "+problem)
 	}
-	if tx.NothingToDo {
-		op.Blocked = "dnf5 reports nothing to do although packages are missing"
-	}
 	return op
+}
+
+func (b *builder) resolveProvide(request string, tx *Transaction) (TxPackage, error) {
+	out, err := b.in.Source.Run("dnf5", "--cacheonly", "repoquery", "--available", "--whatprovides", request, "--queryformat", "%{name}|%{arch}|%{evr}|%{repoid}\\n")
+	if err != nil {
+		return TxPackage{}, fmt.Errorf("resolve provider for %s: %w", request, err)
+	}
+	var matches []TxPackage
+	for line := range strings.SplitSeq(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.Split(line, "|")
+		if len(fields) != 4 || slices.Contains(fields, "") {
+			return TxPackage{}, fmt.Errorf("resolve provider for %s: invalid provider row %q", request, line)
+		}
+		for _, row := range tx.Packages {
+			if row.Section == "installing" && row.Name == fields[0] && row.Arch == fields[1] &&
+				strings.TrimPrefix(row.EVR, "0:") == strings.TrimPrefix(fields[2], "0:") && row.Repository == fields[3] &&
+				!slices.Contains(matches, row) {
+				matches = append(matches, row)
+			}
+		}
+	}
+	if len(matches) == 0 {
+		return TxPackage{}, fmt.Errorf("resolve provider for %s: no reviewed package matches the native provider evidence", request)
+	}
+	if len(matches) != 1 {
+		return TxPackage{}, fmt.Errorf("resolve provider for %s: multiple reviewed packages match the native provider evidence", request)
+	}
+	return matches[0], nil
 }
 
 // removeTransaction previews the removal of declared removes that are still
@@ -990,11 +1017,8 @@ func (b *builder) removeTransaction(installTx *Transaction) (Operation, bool) {
 	}
 	var names []string
 	for _, name := range b.in.Resolved.Removes {
-		for _, inst := range b.in.Facts.Packages.Value {
-			if inst.Matches(name) && !erased[inst.ID()] {
-				names = append(names, name)
-				break
-			}
+		if slices.ContainsFunc(b.in.Facts.Packages.Value, func(inst facts.Package) bool { return inst.Matches(name) && !erased[inst.ID()] }) {
+			names = append(names, name)
 		}
 	}
 	if len(names) == 0 {
@@ -1026,7 +1050,7 @@ func (b *builder) waitsForRepositories(op *Operation) bool {
 func uncachedRepositories(blocked string, byName map[string]definitions.ResolvedPackage) []string {
 	seen := map[string]bool{}
 	var repos []string
-	for _, problem := range strings.Split(strings.TrimPrefix(blocked, "dnf5 could not resolve the transaction: "), "; ") {
+	for problem := range strings.SplitSeq(strings.TrimPrefix(blocked, "dnf5 could not resolve the transaction: "), "; ") {
 		name, ok := strings.CutPrefix(problem, "No match for argument: ")
 		if !ok {
 			continue
@@ -1038,7 +1062,7 @@ func uncachedRepositories(blocked string, byName map[string]definitions.Resolved
 		seen[p.Prefix] = true
 		repos = append(repos, p.Prefix)
 	}
-	sort.Strings(repos)
+	slices.Sort(repos)
 	return repos
 }
 
@@ -1048,8 +1072,7 @@ func uncachedRepositories(blocked string, byName map[string]definitions.Resolved
 func previewFailure(out []byte, runErr, parseErr error) string {
 	if runErr != nil {
 		if _, err := ParsePreview([]byte(runErr.Error())); err != nil {
-			var resolve *ResolveError
-			if errors.As(err, &resolve) {
+			if resolve, ok := errors.AsType[*ResolveError](err); ok {
 				return resolve.Error()
 			}
 		}
@@ -1108,7 +1131,9 @@ func InstalledPackage(request string, receipt state.Receipt, packages []facts.Pa
 	return facts.FindPackage(packages, request)
 }
 
-func receiptPackage(r state.Receipt, packages []facts.Package) (string, error) {
+// ReceiptPackage resolves recorded RPM ownership without guessing a legacy
+// receipt's architecture or the native package behind a provide.
+func ReceiptPackage(r state.Receipt, packages []facts.Package) (string, error) {
 	if r.Package != "" {
 		return r.Package, nil
 	}
@@ -1122,7 +1147,7 @@ func receiptPackage(r state.Receipt, packages []facts.Package) (string, error) {
 	if len(matches) > 1 {
 		return "", fmt.Errorf("legacy receipt for %s does not identify which installed architecture Nimbus owns; select each installed architecture explicitly to establish ownership", request)
 	}
-	for id := range matches {
+	for id := range maps.Keys(matches) {
 		return id, nil
 	}
 	// Old provide receipts recorded a native name only in prose. That is
@@ -1155,7 +1180,7 @@ func (b *builder) ownedRemovals() []Operation {
 	}
 	var names, receiptIDs []string
 	var ops []Operation
-	for _, id := range sortedKeys(b.in.Applied.Receipts) {
+	for _, id := range slices.Sorted(maps.Keys(b.in.Applied.Receipts)) {
 		r := b.in.Applied.Receipts[id]
 		if desired[id] {
 			continue
@@ -1163,7 +1188,7 @@ func (b *builder) ownedRemovals() []Operation {
 		switch r.Provider {
 		case "dnf":
 			r.Resource = id
-			name, err := receiptPackage(r, b.in.Facts.Packages.Value)
+			name, err := ReceiptPackage(r, b.in.Facts.Packages.Value)
 			if err != nil {
 				// Explicit selections of every matching architecture transfer
 				// ownership without guessing which one the old receipt meant.
@@ -1183,7 +1208,11 @@ func (b *builder) ownedRemovals() []Operation {
 			}
 			_, present := facts.FindPackage(b.in.Facts.Packages.Value, name)
 			if desiredNative[name] || !present {
-				ops = append(ops, Operation{ID: id, Kind: KindPackage, Action: ActionRetire, Risk: RiskLow, Summary: "retire the receipt of " + name + ", which is absent or selected by another reference", Paths: []string{"receipt"}})
+				op := Operation{ID: id, Kind: KindPackage, Action: ActionRetire, Risk: RiskLow, Summary: "retire the receipt of " + name + ", which is absent or selected by another reference", Paths: []string{"receipt"}}
+				if !present {
+					op.AbsentPackage = name
+				}
+				ops = append(ops, op)
 				continue
 			}
 			names = append(names, name)
@@ -1194,19 +1223,16 @@ func (b *builder) ownedRemovals() []Operation {
 				ops = append(ops, Operation{ID: id, Kind: KindFlatpak, Action: ActionRemove, Risk: RiskMedium, Summary: "inspect Flatpak " + name + " before removal", Blocked: b.in.Facts.Flatpak.Error})
 				continue
 			}
-			present := false
-			for _, app := range b.in.Facts.Flatpak.Value.Apps {
-				present = present || app.ID == name
-			}
+			present := slices.ContainsFunc(b.in.Facts.Flatpak.Value.Apps, func(app facts.FlatpakApp) bool { return app.ID == name })
 			if !present {
-				ops = append(ops, Operation{ID: id, Kind: KindFlatpak, Action: ActionRetire, Risk: RiskLow, Summary: "retire the receipt of Flatpak " + name + ", which is absent", Paths: []string{"receipt"}})
+				ops = append(ops, Operation{ID: id, Kind: KindFlatpak, Action: ActionRetire, Risk: RiskLow, Summary: "retire the receipt of Flatpak " + name + ", which is absent", Paths: []string{"receipt"}, AbsentPackage: name})
 				continue
 			}
 			ops = append(ops, Operation{ID: id, Kind: KindFlatpak, Action: ActionRemove, Risk: RiskMedium, Summary: "remove Flatpak " + name + ", no longer selected", Paths: []string{"receipt"}, Steps: []Step{{Description: "remove the application", Argv: []string{"flatpak", "uninstall", "--system", "--noninteractive", name}, Privileged: true}}})
 		}
 	}
 	if len(names) > 0 {
-		sort.Strings(names)
+		slices.Sort(names)
 		names = slices.Compact(names)
 		op := b.previewRemoval("packages:remove-owned", names, "remove "+strings.Join(names, ", ")+", installed by Nimbus and no longer selected")
 		op.Paths = receiptIDs
@@ -1218,7 +1244,7 @@ func (b *builder) ownedRemovals() []Operation {
 // previewRemoval previews the removal of exactly these packages and blocks
 // when DNF would remove anything else.
 func (b *builder) previewRemoval(id string, names []string, summary string) Operation {
-	sort.Strings(names)
+	slices.Sort(names)
 	op := Operation{ID: id, Kind: KindPackage, Action: ActionRemove, Risk: RiskMedium, Summary: summary,
 		Steps: []Step{{Description: "run the reviewed removal", Argv: append([]string{"dnf5", "-y", "remove", "--no-autoremove"}, names...), Privileged: true}}}
 	if b.waitsForRepositories(&op) {
@@ -1231,17 +1257,10 @@ func (b *builder) previewRemoval(id string, names []string, summary string) Oper
 		return op
 	}
 	op.Transaction = tx
-	declared := map[string]bool{}
-	for _, n := range names {
-		declared[n] = true
-	}
 	var extra []string
 	for _, row := range tx.Packages {
-		matched := false
-		for name := range declared {
-			matched = matched || (facts.Package{Name: row.Name, Arch: row.Arch}).Matches(name)
-		}
-		if !matched {
+		pkg := facts.Package{Name: row.Name, Arch: row.Arch}
+		if !slices.ContainsFunc(names, pkg.Matches) {
 			extra = append(extra, row.Name)
 		}
 	}
@@ -1265,10 +1284,8 @@ func (b *builder) pruneTransaction(cands []Prune) Operation {
 	return op
 }
 
-// prune lists the third bucket: installed with the user reason, not
-// desired, not managed by a receipt, and not in the baseline of packages
-// that existed before Nimbus took over. Before the first apply there is no
-// baseline, so every such package is a candidate.
+// prune lists user-installed packages with no desired selection or receipt
+// that are outside the baseline. It waits for the first sync to record it.
 func (b *builder) prune() []Prune {
 	if b.in.Applied == nil || b.in.Applied.Baseline == nil {
 		// Without the baseline every pre-existing package would look
@@ -1289,11 +1306,7 @@ func (b *builder) prune() []Prune {
 	managed := map[string]bool{}
 	for id, r := range b.in.Applied.Receipts {
 		if r.Provider == "dnf" {
-			if r.Package != "" {
-				managed[r.Package] = true
-			} else {
-				managed[PackageName(id)] = true
-			}
+			managed[cmp.Or(r.Package, PackageName(id))] = true
 		}
 	}
 	var out []Prune
@@ -1303,7 +1316,7 @@ func (b *builder) prune() []Prune {
 		}
 		out = append(out, Prune{Name: p.ID(), EVR: p.EVR(), Repository: p.FromRepo})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	slices.SortFunc(out, func(a, b Prune) int { return cmp.Compare(a.Name, b.Name) })
 	if out == nil {
 		out = []Prune{}
 	}
@@ -1331,34 +1344,19 @@ func (b *builder) updates() Updates {
 // excluded; the checkout commit is reported beside the digest, not inside
 // it, so a documentation-only commit does not invalidate an approved plan
 // while the definition digest still does.
-func digest(p *Plan) string {
+func digest(p *Plan) (string, error) {
 	type canon struct {
 		Machine                  string      `json:"machine"`
 		Definitions              string      `json:"definitions"`
 		Operations               []Operation `json:"operations"`
 		RepositoryReconciliation string      `json:"repository_reconciliation,omitempty"`
 	}
-	data, _ := json.Marshal(canon{Machine: p.Machine, Definitions: p.Definitions, Operations: p.Operations, RepositoryReconciliation: p.RepositoryReconciliation})
+	data, err := json.Marshal(canon{Machine: p.Machine, Definitions: p.Definitions, Operations: p.Operations, RepositoryReconciliation: p.RepositoryReconciliation})
+	if err != nil {
+		return "", fmt.Errorf("encode plan digest: %w", err)
+	}
 	sum := sha256.Sum256(data)
-	return "sha256:" + hex.EncodeToString(sum[:])
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-func contains(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
 // InstallerScript stands for the downloaded installer in a plan step; apply
@@ -1389,7 +1387,7 @@ func (b *builder) userTools() []Operation {
 	var runtimeOps []string
 	for _, in := range b.in.Resolved.Installers {
 		id := "user:" + in.Component
-		binary := b.userFile(u.Home, in.Installer.Binary)
+		binary, err := b.userFile(u.Home, in.Installer.Binary)
 		op := Operation{ID: id, Kind: KindUser, Risk: RiskLow, Paths: in.Paths}
 		if binary {
 			op.Action, op.Summary = ActionKeep, fmt.Sprintf("%s is installed at ~/%s", in.Component, in.Installer.Binary)
@@ -1401,17 +1399,21 @@ func (b *builder) userTools() []Operation {
 				{Description: "verify ~/" + in.Installer.Binary + " exists"},
 			}
 		}
+		if err != nil {
+			op.Blocked = err.Error()
+		}
 		ops = append(ops, op)
 		if len(in.Installer.Install) == 0 {
 			continue
 		}
 		rt := Operation{ID: id + ":install", Kind: KindUser, Action: ActionInstall, Risk: RiskLow, Paths: in.Paths,
 			Summary: fmt.Sprintf("install the %s runtimes declared in ~/%s", in.Component, in.Installer.Config),
-			Steps:   []Step{{Description: "run as the user, repeatable", Argv: append([]string(nil), in.Installer.Install...)}}}
-		switch {
-		case !binary:
+			Steps:   []Step{{Description: "run as the user, repeatable", Argv: slices.Clone(in.Installer.Install)}}}
+		if !binary {
 			rt.After = id
-		case !b.userFile(u.Home, in.Installer.Config):
+		} else if config, err := b.userFile(u.Home, in.Installer.Config); err != nil {
+			rt.Blocked = err.Error()
+		} else if !config {
 			rt.After = AfterHandoff
 			rt.Notes = append(rt.Notes, fmt.Sprintf("~/%s does not exist yet; the Chezmoi handoff writes it", in.Installer.Config))
 		}
@@ -1449,18 +1451,19 @@ func (b *builder) userTools() []Operation {
 
 // hasPrefix reports whether any desired package uses the prefix.
 func (b *builder) hasPrefix(prefix string) bool {
-	for _, p := range b.in.Resolved.Packages {
-		if p.Prefix == prefix {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(b.in.Resolved.Packages, func(p definitions.ResolvedPackage) bool { return p.Prefix == prefix })
 }
 
 // userFile reports whether a file relative to the home directory exists,
 // read through the source so a test can say what the home holds.
-func (b *builder) userFile(home, rel string) bool {
+func (b *builder) userFile(home, rel string) (bool, error) {
 	path := filepath.Join(home, rel)
 	names, err := b.in.Source.ReadDir(filepath.Dir(path))
-	return err == nil && contains(names, filepath.Base(path))
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspect ~/%s: %w", rel, err)
+	}
+	return slices.Contains(names, filepath.Base(path)), nil
 }

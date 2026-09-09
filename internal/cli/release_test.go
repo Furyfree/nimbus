@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -102,7 +103,7 @@ esac
 					if string(data) != "preserve existing output" {
 						t.Fatal("overwrote existing output")
 					}
-				} else if _, err := os.Stat(output); !os.IsNotExist(err) {
+				} else if _, err := os.Stat(output); !errors.Is(err, os.ErrNotExist) {
 					t.Fatalf("failed build left output: %v", err)
 				}
 				return
@@ -118,12 +119,12 @@ esac
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer gz.Close()
+			defer func() { _ = gz.Close() }() // Decoder cleanup; reads report decompression errors.
 			archive := tar.NewReader(gz)
 			files := map[string]string{}
 			for {
 				header, err := archive.Next()
-				if err == io.EOF {
+				if errors.Is(err, io.EOF) {
 					break
 				}
 				if err != nil {

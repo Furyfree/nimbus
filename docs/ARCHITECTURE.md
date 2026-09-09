@@ -12,6 +12,7 @@ cmd/nimbus/            main: calls cli.Execute and exits with its code
 internal/cli/          Cobra command tree, output rendering, exit codes
 internal/definitions/  desired configuration: load, validate, resolve, hash
 internal/facts/        observed system: read-only inspection behind a Source
+internal/rpm/          shared native RPM request syntax
 internal/doctor/       health checks over facts, each with its remediation
 internal/plan/         desired versus observed: operations, digest, previews
 internal/state/        applied state: receipts, baseline, journal, record action
@@ -51,7 +52,9 @@ one way: `cli` uses `definitions`, `facts`, `doctor`, `plan`, `apply`,
 `state`;
 `version` reads supported receipt and baseline schemas from `state`;
 `facts` uses `selector` for the origin read; `definitions` uses `version`
-for the engine check; nothing imports `cli`, and `facts` never imports
+for the engine check. `definitions` and `facts` share RPM architecture
+qualifier parsing through `rpm`, which handles syntax without desired or
+observed state. Nothing imports `cli`, and `facts` never imports
 `definitions`, so observed state cannot leak into desired state.
 
 ## The flow of `nimbus validate`
@@ -155,6 +158,10 @@ replacement. DNF receipts also record the
 native name and architecture separately from the requested package reference;
 ambiguous legacy ownership blocks removal. Every DNF transaction, including
 removal and upgrade, compares the installed set before and after execution.
+New receipt filenames hash the complete resource ID to avoid collisions.
+Existing matching legacy files stay in place; replacement and removal check
+the embedded identity. State schema 3 prevents older writers from accepting
+this layout while receipt and baseline contents remain schema 2.
 The selection commands edit a
 manifest in memory, validate and plan it, show the diff and plan, ask once,
 and then write the file and sync without system updates.

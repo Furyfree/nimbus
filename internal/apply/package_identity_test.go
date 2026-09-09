@@ -4,12 +4,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/facts"
 	"github.com/Furyfree/nimbus/internal/plan"
+	"github.com/Furyfree/nimbus/internal/state"
 )
 
 func rpm(name, arch, version string) facts.Package {
@@ -55,11 +58,11 @@ func (s *packageSource) Run(name string, args ...string) ([]byte, error) {
 		if s.ranNative && s.verifyErr != nil {
 			return nil, s.verifyErr
 		}
-		var out strings.Builder
+		out := []byte{}
 		for _, p := range s.packages {
-			fmt.Fprintf(&out, "%s|%s|%s|%s|%s|%s|user\n", p.Name, p.Epoch, p.Version, p.Release, p.Arch, p.FromRepo)
+			out = fmt.Appendf(out, "%s|%s|%s|%s|%s|%s|user\n", p.Name, p.Epoch, p.Version, p.Release, p.Arch, p.FromRepo)
 		}
-		return []byte(out.String()), nil
+		return out, nil
 	}
 	return s.scripted.Run(name, args...)
 }
@@ -140,5 +143,132 @@ func TestUpgradeReportsExtraDependencyAndPartialFailure(t *testing.T) {
 	r := Upgrade(opts, opts.Root)
 	if len(r.Failures) != 1 || r.Failures[0].ID != "upgrade:dnf" || !strings.Contains(strings.Join(r.Differences, "\n"), "DNF also installed extra.i686") {
 		t.Fatalf("result: %+v", r)
+	}
+}
+
+func TestAbsentRetirementRechecksInventoryAfterEarlierOperations(t *testing.T) {
+	for _, kind := range []string{plan.KindPackage, plan.KindFlatpak} {
+		for _, transition := range []string{"absent", "present", "unknown"} {
+			t.Run(kind+"/"+transition, func(t *testing.T) {
+				src := newScripted()
+				id, provider, native := "package:dnf:virtual-tool", "dnf", "actual-tool.x86_64"
+				if kind == plan.KindFlatpak {
+					id, provider, native = "flatpak:org.example.Gone", "flatpak", ""
+				}
+				r := state.Receipt{Schema: state.ReceiptSchema, Resource: id, Provider: provider, Package: native,
+					Machine: "vm", Operation: plan.ActionInstall, PlanDigest: "old", Verified: true}
+				root := t.TempDir()
+				if err := state.Record(root, "old", &state.Stage{Schema: state.Schema, PlanDigest: "old", Receipts: []state.Receipt{r}}); err != nil {
+					t.Fatal(err)
+				}
+				applied, err := state.Read(root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				// An earlier adoption completes after Run's initial inventory. The
+				// retirement must inspect again before deleting its own receipt.
+				desired := &definitions.Resolved{Machine: "vm", Packages: []definitions.ResolvedPackage{{Name: "bash", Prefix: "dnf", Canonical: "dnf:bash"}}}
+				p, err := plan.Build(plan.Inputs{Resolved: desired, Facts: facts.Inspect(src, ""), Applied: applied, Source: src})
+				if err != nil || !p.Complete || len(p.Operations) != 2 || p.Operations[1].Action != plan.ActionRetire {
+					t.Fatalf("retirement plan: %+v %v", p, err)
+				}
+				opts := options(t, src, root)
+				opts.FirstApply = false
+				opts.Record = func(digest string, stage *state.Stage) error {
+					if err := state.Record(root, digest, stage); err != nil {
+						return err
+					}
+					if len(stage.Receipts) != 0 {
+						if kind == plan.KindPackage {
+							switch transition {
+							case "present":
+								src.installed = append(src.installed, "actual-tool")
+							case "unknown":
+								src.fail["dnf5"] = "package inventory unavailable"
+							}
+						} else {
+							switch transition {
+							case "present":
+								src.apps = []string{"org.example.Gone"}
+							case "unknown":
+								src.fail["flatpak list"] = "app inventory unavailable"
+							}
+						}
+					}
+					return nil
+				}
+				result := Run(p, opts)
+				after, err := state.Read(root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, retained := after.Receipts[id]
+				valid := transition == "absent"
+				if (result.Error == "") != valid || retained == valid || slices.Contains(result.Executed, id) != valid {
+					t.Fatalf("retirement after %s: %+v; receipt retained=%t", transition, result, retained)
+				}
+				if transition == "unknown" && !strings.Contains(result.Error, "inventory unavailable") {
+					t.Fatalf("inspection failure lost: %+v", result)
+				}
+				if !after.Receipts["package:dnf:bash"].Verified || !slices.Contains(result.Executed, "package:dnf:bash") {
+					t.Fatalf("earlier adoption lost: %+v receipts=%+v", result, after.Receipts)
+				}
+				if src.ran("sudo ") {
+					t.Fatal("receipt-only retirement invoked a native mutation")
+				}
+			})
+		}
+	}
+}
+
+func TestRetirementPreservesQualifiedAndLegacyOwnershipTransfers(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		t.Run(map[bool]string{false: "qualified selection", true: "legacy multilib"}[legacy], func(t *testing.T) {
+			src := &packageSource{scripted: newScripted(), packages: []facts.Package{rpm("tool", "x86_64", "1")}}
+			const oldID = "package:dnf:tool"
+			r := state.Receipt{Schema: state.ReceiptSchema, Resource: oldID, Provider: "dnf", Package: "tool.x86_64",
+				Machine: "vm", Operation: plan.ActionInstall, PlanDigest: "old", Verified: true}
+			desired := []definitions.ResolvedPackage{{Name: "tool.x86_64", Prefix: "dnf", Canonical: "dnf:tool.x86_64"}}
+			if legacy {
+				r.Package = ""
+				src.packages = append(src.packages, rpm("tool", "i686", "1"))
+				desired = append(desired, definitions.ResolvedPackage{Name: "tool.i686", Prefix: "dnf", Canonical: "dnf:tool.i686"})
+			}
+			root := t.TempDir()
+			if err := state.Record(root, "old", &state.Stage{Schema: state.Schema, PlanDigest: "old", Receipts: []state.Receipt{r}}); err != nil {
+				t.Fatal(err)
+			}
+			applied, err := state.Read(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p, err := plan.Build(plan.Inputs{Resolved: &definitions.Resolved{Machine: "vm", Packages: desired}, Facts: facts.Inspect(src, ""), Applied: applied, Source: src})
+			if err != nil || !p.Complete {
+				t.Fatalf("transfer plan: %+v %v", p, err)
+			}
+			if !slices.ContainsFunc(p.Operations, func(op plan.Operation) bool {
+				return op.ID == oldID && op.Action == plan.ActionRetire && op.AbsentPackage == ""
+			}) {
+				t.Fatal("missing ownership transfer")
+			}
+			opts := options(t, src.scripted, root)
+			opts.Source, opts.FirstApply = src, false
+			result := Run(p, opts)
+			after, err := state.Read(root)
+			if err != nil || result.Error != "" || len(after.Receipts) != len(desired) {
+				t.Fatalf("transfer: %+v receipts=%+v error=%v", result, after, err)
+			}
+			if _, retained := after.Receipts[oldID]; retained {
+				t.Fatal("old ownership retained")
+			}
+			for _, pkg := range desired {
+				if got := after.Receipts["package:"+pkg.Canonical]; got.Package != pkg.Name || !got.Verified {
+					t.Fatalf("new ownership lost: %+v", got)
+				}
+			}
+			if src.ran("sudo ") || src.ranNative {
+				t.Fatal("ownership transfer mutated native packages")
+			}
+		})
 	}
 }

@@ -6,20 +6,24 @@
 package state
 
 import (
+	"cmp"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
+	"syscall"
 	"time"
 )
 
-// Schema 2 protects system-resource ownership from older package-only engines.
-// Reads accept schema 1, but every new write upgrades the state to schema 2.
-const Schema = 2
+// Schema 3 protects hashed receipt filenames from older writers and removers.
+// Reads accept schemas 1 and 2; every new write upgrades the state to schema 3.
+const Schema = 3
 
 // Version 2 records native RPM identity; version 1 remains readable.
 const ReceiptSchema = 2
@@ -58,9 +62,9 @@ type Receipt struct {
 	Verification  string           `json:"verification"`
 	RecoveryPoint string           `json:"recovery_point,omitempty"`
 	Timestamp     time.Time        `json:"timestamp"`
-	ChangedAt     time.Time        `json:"changed_at,omitempty"`
-	Reboot        bool             `json:"reboot,omitempty"`
-	Logout        bool             `json:"logout,omitempty"`
+	ChangedAt     time.Time        `json:"changed_at,omitzero"`
+	Reboot        bool             `json:"reboot,omitzero"`
+	Logout        bool             `json:"logout,omitzero"`
 	Triggers      []string         `json:"triggers,omitempty"`
 }
 
@@ -97,8 +101,49 @@ type Applied struct {
 
 // FileName maps a resource ID to its receipt file.
 func FileName(resource string) string {
+	sum := sha256.Sum256([]byte(resource))
+	return hex.EncodeToString(sum[:]) + ".json"
+}
+
+// LegacyFileName locates receipts written before resource IDs were hashed.
+func LegacyFileName(resource string) string {
 	r := strings.NewReplacer(":", "_", "/", "_", " ", "_")
 	return r.Replace(resource) + ".json"
+}
+
+func receiptPath(root, resource string, create bool) (string, error) {
+	canonical := filepath.Join(root, ReceiptsDir, FileName(resource))
+	legacy := filepath.Join(root, ReceiptsDir, LegacyFileName(resource))
+	matched := ""
+	foreignLegacy := false
+	for _, path := range []string{canonical, legacy} {
+		data, err := os.ReadFile(path)
+		if errors.Is(err, fs.ErrNotExist) || (path == legacy && errors.Is(err, syscall.ENAMETOOLONG)) {
+			continue
+		}
+		if err != nil {
+			return "", fmt.Errorf("read receipt for %s: %w", resource, err)
+		}
+		var receipt Receipt
+		if err := json.Unmarshal(data, &receipt); err != nil {
+			return "", fmt.Errorf("receipt %s: %w", filepath.Base(path), err)
+		}
+		if receipt.Resource != resource {
+			if path == canonical {
+				return "", fmt.Errorf("receipt %s belongs to %s, not %s", filepath.Base(path), receipt.Resource, resource)
+			}
+			foreignLegacy = true
+			continue
+		}
+		if matched != "" {
+			return "", fmt.Errorf("resource %s has duplicate receipts", resource)
+		}
+		matched = path
+	}
+	if matched == "" && foreignLegacy && !create {
+		return "", fmt.Errorf("legacy receipt for %s belongs to another resource; refusing removal", resource)
+	}
+	return cmp.Or(matched, canonical), nil
 }
 
 // Read loads the applied state below root. A missing directory means Nimbus
@@ -147,6 +192,9 @@ func Read(root string) (*Applied, error) {
 		if r.Schema != 1 && r.Schema != ReceiptSchema {
 			return nil, fmt.Errorf("receipt %s: schema %d is not supported", e.Name(), r.Schema)
 		}
+		if _, exists := a.Receipts[r.Resource]; exists {
+			return nil, fmt.Errorf("resource %s has duplicate receipts", r.Resource)
+		}
 		a.Receipts[r.Resource] = r
 	}
 	return a, nil
@@ -157,8 +205,8 @@ func (a *Applied) InBaseline(name string) bool {
 	if a == nil || a.Baseline == nil {
 		return false
 	}
-	i := sort.SearchStrings(a.Baseline.Packages, name)
-	return i < len(a.Baseline.Packages) && a.Baseline.Packages[i] == name
+	_, found := slices.BinarySearch(a.Baseline.Packages, name)
+	return found
 }
 
 // Stage is the data one record action writes. It is produced by the normal
@@ -195,6 +243,9 @@ func Record(root, planDigest string, st *Stage) error {
 			return fmt.Errorf("receipt %s is incomplete", r.Resource)
 		}
 	}
+	if _, err := json.Marshal(st); err != nil {
+		return fmt.Errorf("encode state stage before recording: %w", err)
+	}
 	// Reject newer or corrupt existing state before writing a schema marker.
 	if data, err := os.ReadFile(filepath.Join(root, SchemaFile)); err == nil {
 		if err := checkStateSchema(data); err != nil {
@@ -206,29 +257,42 @@ func Record(root, planDigest string, st *Stage) error {
 	if err := os.MkdirAll(filepath.Join(root, ReceiptsDir), 0o755); err != nil {
 		return err
 	}
-	if err := writeAtomic(filepath.Join(root, SchemaFile), []byte(fmt.Sprintln(Schema)), 0o644); err != nil {
+	if err := writeAtomic(filepath.Join(root, SchemaFile), fmt.Appendln(nil, Schema), 0o644); err != nil {
 		return err
 	}
 	if st.Baseline != nil {
 		if _, err := os.Stat(filepath.Join(root, BaselineFile)); errors.Is(err, fs.ErrNotExist) {
 			b := *st.Baseline
 			b.Schema = BaselineSchema
-			sort.Strings(b.Packages)
-			data, _ := json.MarshalIndent(b, "", "  ")
+			b.Packages = slices.Clone(b.Packages)
+			slices.Sort(b.Packages)
+			data, err := json.MarshalIndent(b, "", "  ")
+			if err != nil {
+				return fmt.Errorf("encode baseline: %w", err)
+			}
 			if err := writeAtomic(filepath.Join(root, BaselineFile), data, 0o644); err != nil {
 				return err
 			}
+		} else if err != nil {
+			return fmt.Errorf("inspect baseline before recording: %w", err)
 		}
 	}
 	journal, err := os.OpenFile(filepath.Join(root, JournalFile), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
-	defer journal.Close()
+	defer func() { _ = journal.Close() }()
 	enc := json.NewEncoder(journal)
 	for _, r := range st.Receipts {
-		data, _ := json.MarshalIndent(r, "", "  ")
-		if err := writeAtomic(filepath.Join(root, ReceiptsDir, FileName(r.Resource)), data, 0o644); err != nil {
+		data, err := json.MarshalIndent(r, "", "  ")
+		if err != nil {
+			return fmt.Errorf("encode receipt %s: %w", r.Resource, err)
+		}
+		path, err := receiptPath(root, r.Resource, true)
+		if err != nil {
+			return err
+		}
+		if err := writeAtomic(path, data, 0o644); err != nil {
 			return err
 		}
 		if err := enc.Encode(JournalEntry{Action: "recorded", Receipt: &r, Time: st.Time}); err != nil {
@@ -236,7 +300,10 @@ func Record(root, planDigest string, st *Stage) error {
 		}
 	}
 	for _, resource := range st.Remove {
-		path := filepath.Join(root, ReceiptsDir, FileName(resource))
+		path, err := receiptPath(root, resource, false)
+		if err != nil {
+			return err
+		}
 		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
@@ -244,7 +311,7 @@ func Record(root, planDigest string, st *Stage) error {
 			return err
 		}
 	}
-	return nil
+	return journal.Close()
 }
 
 func writeAtomic(path string, data []byte, mode fs.FileMode) error {
@@ -253,23 +320,20 @@ func writeAtomic(path string, data []byte, mode fs.FileMode) error {
 		return err
 	}
 	name := tmp.Name()
+	defer func() {
+		_ = tmp.Close()
+		_ = os.Remove(name)
+	}()
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(name)
 		return err
 	}
 	if err := tmp.Chmod(mode); err != nil {
-		tmp.Close()
-		os.Remove(name)
 		return err
 	}
 	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		os.Remove(name)
 		return err
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(name)
 		return err
 	}
 	return os.Rename(name, path)
@@ -277,8 +341,8 @@ func writeAtomic(path string, data []byte, mode fs.FileMode) error {
 
 func checkStateSchema(data []byte) error {
 	value := strings.TrimSpace(string(data))
-	if value != "1" && value != fmt.Sprint(Schema) {
-		return fmt.Errorf("state schema %q is not supported; this engine reads 1 and %d", value, Schema)
+	if value != "1" && value != "2" && value != fmt.Sprint(Schema) {
+		return fmt.Errorf("state schema %q is not supported; this engine reads 1, 2 and %d", value, Schema)
 	}
 	return nil
 }

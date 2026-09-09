@@ -2,15 +2,18 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/Furyfree/nimbus/internal/apply"
 
@@ -26,18 +29,18 @@ import (
 // Test hooks for the interactive parts of init.
 var (
 	// promptLineFn asks one line with a default and returns the answer.
-	promptLineFn = func(in io.Reader, out io.Writer, prompt, def string) string {
+	promptLineFn = func(in io.Reader, out io.Writer, prompt, def string) (string, error) {
 		if def != "" {
-			fmt.Fprintf(out, "%s [%s]: ", prompt, def)
-		} else {
-			fmt.Fprintf(out, "%s: ", prompt)
+			prompt += " [" + def + "]"
 		}
-		line, _ := bufio.NewReader(in).ReadString('\n')
-		line = strings.TrimSpace(line)
-		if line == "" {
-			return def
+		if _, err := fmt.Fprintf(out, "%s: ", prompt); err != nil {
+			return "", err
 		}
-		return line
+		line, err := bufio.NewReader(in).ReadString('\n')
+		if err != nil && (!errors.Is(err, io.EOF) || strings.TrimSpace(line) == "") {
+			return "", err
+		}
+		return cmp.Or(strings.TrimSpace(line), def), nil
 	}
 )
 
@@ -131,18 +134,19 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	if err != nil {
 		return fmt.Errorf("start installation log: %w", err)
 	}
-	fmt.Fprintf(out, "Installation logs: %s\n", log.dir)
+	if _, err := fmt.Fprintf(out, "Installation logs: %s\n", log.dir); err != nil {
+		return errors.Join(err, log.finish(err))
+	}
+	oldEnv, hadEnv := os.LookupEnv("NIMBUS_INSTALL_LOG_DIR")
+	if err := os.Setenv("NIMBUS_INSTALL_LOG_DIR", log.dir); err != nil {
+		return errors.Join(err, log.finish(err))
+	}
 	previousLog := opts.installLog
 	opts.installLog = log
 	oldOut, oldErr := cmd.OutOrStdout(), cmd.ErrOrStderr()
 	cmd.SetOut(installWriter{oldOut, log})
 	cmd.SetErr(installWriter{oldErr, log})
 	out = cmd.OutOrStdout()
-	oldEnv, hadEnv := os.LookupEnv("NIMBUS_INSTALL_LOG_DIR")
-	if err := os.Setenv("NIMBUS_INSTALL_LOG_DIR", log.dir); err != nil {
-		log.finish(err)
-		return err
-	}
 	defer func() {
 		if hadEnv {
 			_ = os.Setenv("NIMBUS_INSTALL_LOG_DIR", oldEnv)
@@ -152,9 +156,15 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 		opts.installLog = previousLog
 		cmd.SetOut(oldOut)
 		cmd.SetErr(oldErr)
-		fmt.Fprintf(oldOut, "Installation time: %s; logs: %s\n", time.Since(log.started).Round(time.Second), log.dir)
+		if _, err := fmt.Fprintf(oldOut, "Installation time: %s; logs: %s\n", time.Since(log.started).Round(time.Second), log.dir); err != nil {
+			if errors.Is(retErr, reported{}) {
+				retErr = err
+			} else {
+				retErr = errors.Join(retErr, err)
+			}
+		}
 		if err := log.finish(retErr); err != nil {
-			fmt.Fprintf(oldErr, "installation logging failed: %v\n", err)
+			_, _ = fmt.Fprintf(oldErr, "installation logging failed: %v\n", err)
 			retErr = errors.Join(retErr, err)
 		}
 	}()
@@ -172,13 +182,20 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 		}
 		steps[active].DurationMS = time.Since(stageStarted).Milliseconds()
 		log.event("stage end name=%s status=%s elapsed_ms=%d", steps[active].Name, steps[active].Status, steps[active].DurationMS)
-		renderRunSummary(out, "init", steps)
-		notes.render(out)
+		if err := errors.Join(renderRunSummary(out, "init", steps), notes.render(out)); err != nil {
+			if errors.Is(retErr, reported{}) {
+				retErr = err
+			} else {
+				retErr = errors.Join(retErr, err)
+			}
+		}
 	}()
 	originalDigest := c.Digest()
 	hw := facts.Inspect(src, root).Hardware
 	if hw.Known() {
-		fmt.Fprintf(out, "hardware: %s\n", describeHardware(hw.Value))
+		if _, err := fmt.Fprintf(out, "hardware: %s\n", describeHardware(hw.Value)); err != nil {
+			return err
+		}
 	}
 
 	// The machine: a tracked manifest, or a new one from the dialog.
@@ -191,7 +208,7 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 		return selectorErr
 	}
 	if existingSelector != nil && (existingSelector.Checkout != root || existingSelector.Origin != origin) {
-		fmt.Fprintf(out, "Selector trust change:\n  previous: %s (%s)\n  requested: %s (%s)\n", existingSelector.Checkout, existingSelector.Origin, root, origin)
+		_, _ = fmt.Fprintf(out, "Selector trust change:\n  previous: %s (%s)\n  requested: %s (%s)\n", existingSelector.Checkout, existingSelector.Origin, root, origin)
 		return fmt.Errorf("selector trust change refused; %s is unchanged; use the existing trusted checkout, or inspect and explicitly update the selector's checkout and origin before retrying", selectorPath)
 	}
 	machine := f.machine
@@ -206,12 +223,21 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 		if _, err := os.Stat(path); err == nil {
 			return fmt.Errorf("machine %s already exists at %s; pick it with --machine or choose another ID", m.ID, path)
 		}
-		header := fmt.Sprintf("# %s: %s.\n", m.ID, describeHardware(hw.Value))
-		newManifest = renderManifest([]byte(header), m)
+		description := strings.Map(func(r rune) rune {
+			if unicode.IsControl(r) || unicode.IsSpace(r) {
+				return ' '
+			}
+			return r
+		}, describeHardware(hw.Value))
+		header := fmt.Sprintf("# %s: %s.\n", m.ID, description)
+		newManifest, err = renderManifest([]byte(header), m)
+		if err != nil {
+			return err
+		}
 		newManifestPath = path
 		c.Machines[m.ID] = m
-		c.Entries = append(c.Entries, definitions.Entry{Path: "machines/" + m.ID + ".toml", Mode: 0o100644, Content: append(append([]byte(nil), newManifest...), '\n')})
-		sort.Slice(c.Entries, func(i, j int) bool { return c.Entries[i].Path < c.Entries[j].Path })
+		c.Entries = append(c.Entries, definitions.Entry{Path: "machines/" + m.ID + ".toml", Mode: 0o100644, Content: append(bytes.Clone(newManifest), '\n')})
+		slices.SortFunc(c.Entries, func(a, b definitions.Entry) int { return cmp.Compare(a.Path, b.Path) })
 		if errs := definitions.Validate(c); len(errs) > 0 {
 			return fmt.Errorf("the new manifest does not validate: %s", errs[0])
 		}
@@ -220,11 +246,13 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	if machine == "" {
 		if existingSelector != nil && existingSelector.Checkout == root {
 			machine = existingSelector.Machine
-			fmt.Fprintf(out, "the selector already names %s for this checkout\n", machine)
+			if _, err := fmt.Fprintf(out, "the selector already names %s for this checkout\n", machine); err != nil {
+				return err
+			}
 		}
 	}
 	if machine == "" {
-		return usageError{fmt.Errorf("no machine selected; pass --machine ID (available: %s), or explicitly create one with --new ID", strings.Join(sortedKeysOf(c.Machines), ", "))}
+		return usageError{fmt.Errorf("no machine selected; pass --machine ID (available: %s), or explicitly create one with --new ID", strings.Join(slices.Sorted(maps.Keys(c.Machines)), ", "))}
 	}
 	if f.onePasswordSSH && c.Machines[machine] != nil && c.Machines[machine].Dotfiles == nil {
 		return usageError{errors.New("--onepassword-ssh requires a machine with dotfiles")}
@@ -238,13 +266,8 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	}
 	// Only explicit Nimbus declarations need a second pass. Chezmoi owns
 	// the tracked Mise tool installation within its apply stage.
-	deferredTools := false
-	for _, pkg := range r.Packages {
-		deferredTools = deferredTools || pkg.Prefix == definitions.PrefixCargo
-	}
-	for _, installer := range r.Installers {
-		deferredTools = deferredTools || len(installer.Installer.Install) > 0
-	}
+	deferredTools := slices.ContainsFunc(r.Packages, func(pkg definitions.ResolvedPackage) bool { return pkg.Prefix == definitions.PrefixCargo }) ||
+		slices.ContainsFunc(r.Installers, func(installer definitions.ResolvedInstaller) bool { return len(installer.Installer.Install) > 0 })
 	if deferredTools {
 		steps = append(steps, runStep{Name: "remaining Nimbus user tools", Status: "skipped"})
 	}
@@ -256,7 +279,7 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	if err != nil {
 		return err
 	}
-	defer lock.Release()
+	defer func() { _ = lock.Release() }()
 	fresh, err := loadCheckout(root)
 	if err != nil {
 		return err
@@ -283,18 +306,24 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 		if err := writeManifest(newManifestPath, newManifest); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "wrote %s; the Git change is yours to commit\n", newManifestPath)
+		if _, err := fmt.Fprintf(out, "wrote %s; the Git change is yours to commit\n", newManifestPath); err != nil {
+			return fmt.Errorf("report written manifest %s: %w", newManifestPath, err)
+		}
 	}
 	if err := selector.Write(selectorPath, &selector.Selector{Schema: selector.CurrentSchema, Checkout: root, Machine: machine, Origin: origin}); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "selected %s; selector written to %s\n\n", machine, selectorPath)
+	if _, err := fmt.Fprintf(out, "selected %s; selector written to %s\n\n", machine, selectorPath); err != nil {
+		return fmt.Errorf("report written selector %s: %w", selectorPath, err)
+	}
 
 	steps[0].Status = "succeeded"
 	log.event("selection machine=%s profiles=%s definitions=%s", machine, strings.Join(r.Profiles, ","), c.Digest())
 	m := c.Machines[machine]
 	if m.Dotfiles != nil {
-		fmt.Fprintf(out, "Installation will initialize Chezmoi from %s if needed, then run chezmoi apply, including its declared user-tool installation scripts.\n", m.Dotfiles.Repo)
+		if _, err := fmt.Fprintf(out, "Installation will initialize Chezmoi from %s if needed, then run chezmoi apply, including its declared user-tool installation scripts.\n", m.Dotfiles.Repo); err != nil {
+			return err
+		}
 	} else {
 		steps[2].Detail = "no dotfiles repository declared"
 	}
@@ -303,7 +332,7 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	stageStarted = time.Now()
 	active = 1
 	flags := machineFlags{checkout: root, machine: machine}
-	if err := runSyncWith(cmd, opts, flags, syncFlags{yes: true, deferUser: true}, lock); err != nil {
+	if err := runSyncWith(cmd, opts, flags, syncFlags{yes: true, deferUser: true, definitionsDigest: c.Digest()}, lock); err != nil {
 		for i := 2; i < len(steps); i++ {
 			steps[i].Detail = "system installation did not complete"
 		}
@@ -347,8 +376,8 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 // loadCheckout loads and validates the definitions of a checkout.
 func loadCheckout(root string) (*definitions.Checkout, error) {
 	c, err := definitions.Load(root)
-	var errs definitions.ErrorList
-	if err != nil && !errors.As(err, &errs) {
+	errs, ok := errors.AsType[definitions.ErrorList](err)
+	if err != nil && !ok {
 		return nil, err
 	}
 	if len(errs) == 0 {
@@ -389,7 +418,7 @@ func newMachineDialog(in io.Reader, out io.Writer, c *definitions.Checkout, hw f
 		return nil, fmt.Errorf("machine ID: %w", err)
 	}
 	var profileItems []pickItem
-	for _, pid := range sortedKeysOf(c.Profiles) {
+	for _, pid := range slices.Sorted(maps.Keys(c.Profiles)) {
 		profileItems = append(profileItems, pickItem{ID: pid, Selected: pid == "common"})
 	}
 	profiles, err := pickerFn("profiles for "+id+" (common is always selected)", profileItems)
@@ -399,15 +428,13 @@ func newMachineDialog(in io.Reader, out io.Writer, c *definitions.Checkout, hw f
 	profiles = addUnique(profiles, "common")
 	proposed := plan.ProposeComponents(c.Components, hw)
 	var componentItems []pickItem
-	for _, cid := range sortedKeysOf(c.Components) {
+	for _, cid := range slices.Sorted(maps.Keys(c.Components)) {
 		item := pickItem{ID: cid}
 		if c.Components[cid].Detect != nil {
 			item.Detail = "hardware"
 		}
-		for _, p := range proposed {
-			if p == cid {
-				item.Selected, item.Detail = true, "detected"
-			}
+		if slices.Contains(proposed, cid) {
+			item.Selected, item.Detail = true, "detected"
 		}
 		componentItems = append(componentItems, item)
 	}
@@ -415,13 +442,16 @@ func newMachineDialog(in io.Reader, out io.Writer, c *definitions.Checkout, hw f
 	if err != nil {
 		return nil, err
 	}
-	m := &definitions.Machine{Schema: definitions.CurrentSchema, ID: id, Hardware: hw.Product, Profiles: sortedCopy(profiles), Components: sortedCopy(components), Packages: []string{}, PackageExclusions: []string{}}
+	m := &definitions.Machine{Schema: definitions.CurrentSchema, ID: id, Hardware: hw.Product, Profiles: slices.Sorted(slices.Values(profiles)), Components: slices.Sorted(slices.Values(components)), Packages: []string{}, PackageExclusions: []string{}}
 	switch {
 	case f.noDotfiles:
 	case f.dotfiles != "":
 		m.Dotfiles = &definitions.Dotfiles{Repo: f.dotfiles}
 	default:
-		repo := promptLineFn(in, out, "dotfiles repository for Chezmoi (empty for none)", sharedDotfiles(c))
+		repo, err := promptLineFn(in, out, "dotfiles repository for Chezmoi (empty for none)", sharedDotfiles(c))
+		if err != nil {
+			return nil, err
+		}
 		if repo != "" {
 			m.Dotfiles = &definitions.Dotfiles{Repo: repo}
 		}
@@ -433,7 +463,7 @@ func newMachineDialog(in io.Reader, out io.Writer, c *definitions.Checkout, hw f
 // or "" when they disagree or none names one.
 func sharedDotfiles(c *definitions.Checkout) string {
 	repos := map[string]bool{}
-	for _, m := range c.Machines {
+	for m := range maps.Values(c.Machines) {
 		if m.Dotfiles != nil {
 			repos[m.Dotfiles.Repo] = true
 		}
@@ -441,7 +471,7 @@ func sharedDotfiles(c *definitions.Checkout) string {
 	if len(repos) != 1 {
 		return ""
 	}
-	for repo := range repos {
+	for repo := range maps.Keys(repos) {
 		return repo
 	}
 	return ""
@@ -451,8 +481,8 @@ func sharedDotfiles(c *definitions.Checkout) string {
 // Chezmoi owns conflict handling and secrets; Nimbus never forces overwrites.
 func chezmoiHandoff(src facts.Source, out io.Writer, machine string, profiles []string, dotfiles *definitions.Dotfiles, onePasswordSSH bool) error {
 	if dotfiles == nil {
-		fmt.Fprintln(out, "no dotfiles repository is declared; dotfiles skipped")
-		return nil
+		_, err := fmt.Fprintln(out, "no dotfiles repository is declared; dotfiles skipped")
+		return err
 	}
 	wantOrigin, err := selector.NormalizeOrigin(dotfiles.Repo)
 	if err != nil {
@@ -465,16 +495,24 @@ func chezmoiHandoff(src facts.Source, out io.Writer, machine string, profiles []
 	if err != nil {
 		return err
 	}
+	initialized, err := facts.ChezmoiInitialized(src, home)
+	if err != nil {
+		return fmt.Errorf("inspect Chezmoi source before handoff: %w", err)
+	}
 	flags := []string{"--promptString", "Machine=" + machine, "--promptBool", "ManagedByNimbus=true", "--promptMultichoice", "Profiles=" + strings.Join(profiles, "/")}
-	if !facts.ChezmoiInitialized(src, home) {
+	if !initialized {
 		flags = append(flags, "--promptBool", fmt.Sprintf("Enable 1Password SSH integration=%t", onePasswordSSH))
 		argv := append([]string{"init"}, append(flags, "--", dotfiles.Repo)...)
-		fmt.Fprintf(out, "-> initialize Chezmoi from %s\n   $ chezmoi %s\n", dotfiles.Repo, strings.Join(argv, " "))
+		if _, err := fmt.Fprintf(out, "-> initialize Chezmoi from %s\n   $ chezmoi %s\n", dotfiles.Repo, strings.Join(argv, " ")); err != nil {
+			return err
+		}
 		if err := src.Stream(out, out, "chezmoi", argv...); err != nil {
 			return fmt.Errorf("chezmoi init: %w", err)
 		}
 	} else {
-		fmt.Fprintln(out, "Chezmoi is already initialized; applying its existing local source")
+		if _, err := fmt.Fprintln(out, "Chezmoi is already initialized; applying its existing local source"); err != nil {
+			return err
+		}
 	}
 	sourcePath, err := src.Run("chezmoi", "source-path")
 	if err != nil {
@@ -482,7 +520,7 @@ func chezmoiHandoff(src facts.Source, out io.Writer, machine string, profiles []
 	}
 	root := strings.TrimSpace(string(sourcePath))
 	if !filepath.IsAbs(root) {
-		return errors.New("Chezmoi returned no absolute source path")
+		return errors.New("chezmoi returned no absolute source path")
 	}
 	origin, err := src.Run("git", facts.GitArgs(root, "config", "--get", "remote.origin.url")...)
 	if err != nil {
@@ -503,14 +541,18 @@ func chezmoiHandoff(src facts.Source, out io.Writer, machine string, profiles []
 	if err != nil {
 		return fmt.Errorf("read Chezmoi selection: %w", err)
 	}
-	if selection.Machine != machine || !selection.ManagedByNimbus || !slices.Equal(sortedCopy(selection.Profiles), sortedCopy(profiles)) {
-		return fmt.Errorf("Chezmoi's stored selection differs; refresh it before retrying: %s", doctor.ChezmoiRefresh(machine, profiles, selection.OnePasswordSSH))
+	if selection.Machine != machine || !selection.ManagedByNimbus || !slices.Equal(slices.Sorted(slices.Values(selection.Profiles)), slices.Sorted(slices.Values(profiles))) {
+		return fmt.Errorf("chezmoi's stored selection differs; refresh it before retrying: %s", doctor.ChezmoiRefresh(machine, profiles, selection.OnePasswordSSH))
 	}
 	if onePasswordSSH && !selection.OnePasswordSSH {
 		return fmt.Errorf("the existing Chezmoi configuration has 1Password SSH disabled; enable it explicitly with: %s", doctor.ChezmoiRefresh(machine, profiles, true))
 	}
-	fmt.Fprintf(out, "Setup note: To change your Chezmoi answers, run: %s\n", doctor.ChezmoiRefresh(machine, profiles, selection.OnePasswordSSH))
-	fmt.Fprintln(out, "-> apply user configuration and install its declared tools\n   $ chezmoi apply")
+	if _, err := fmt.Fprintf(out, "Setup note: To change your Chezmoi answers, run: %s\n", doctor.ChezmoiRefresh(machine, profiles, selection.OnePasswordSSH)); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(out, "-> apply user configuration and install its declared tools\n   $ chezmoi apply"); err != nil {
+		return err
+	}
 	if err := src.Stream(out, out, "chezmoi", "apply"); err != nil {
 		return fmt.Errorf("chezmoi apply: %w", err)
 	}

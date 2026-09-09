@@ -1,8 +1,10 @@
 package definitions
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -88,7 +90,7 @@ func loadAndValidate(t *testing.T, root string) ErrorList {
 	t.Helper()
 	c, err := Load(root)
 	if err != nil {
-		if errs, ok := err.(ErrorList); ok {
+		if errs, ok := errors.AsType[ErrorList](err); ok {
 			return errs
 		}
 		t.Fatalf("load: %v", err)
@@ -98,10 +100,8 @@ func loadAndValidate(t *testing.T, root string) ErrorList {
 
 func requireError(t *testing.T, errs ErrorList, want string) {
 	t.Helper()
-	for _, e := range errs {
-		if strings.Contains(e.Error(), want) {
-			return
-		}
+	if slices.ContainsFunc(errs, func(e Error) bool { return strings.Contains(e.Error(), want) }) {
+		return
 	}
 	t.Fatalf("expected an error containing %q, got:\n%s", want, errs.Error())
 }

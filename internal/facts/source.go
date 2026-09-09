@@ -11,7 +11,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"sort"
 	"strings"
 	"syscall"
 )
@@ -87,7 +86,6 @@ func (ExecSource) ReadDir(path string) ([]string, error) {
 	for _, e := range entries {
 		names = append(names, e.Name())
 	}
-	sort.Strings(names)
 	return names, nil
 }
 

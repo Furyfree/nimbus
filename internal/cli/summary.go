@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"slices"
@@ -11,7 +12,7 @@ import (
 )
 
 type runStep struct {
-	DurationMS int64  `json:"duration_ms,omitempty"`
+	DurationMS int64  `json:"duration_ms,omitzero"`
 	Name       string `json:"name"`
 	Status     string `json:"status"`
 	Detail     string `json:"detail,omitempty"`
@@ -51,7 +52,7 @@ func (w *setupNoteWriter) finishLine() {
 		line := strings.TrimSuffix(string(w.line), "\r")
 		if note, ok := strings.CutPrefix(line, "Setup note: "); ok {
 			note = strings.TrimSpace(note)
-			if note != "" && strings.IndexFunc(note, unicode.IsControl) < 0 && len(w.notes) < 32 && !slices.Contains(w.notes, note) {
+			if note != "" && !strings.ContainsFunc(note, unicode.IsControl) && len(w.notes) < 32 && !slices.Contains(w.notes, note) {
 				w.notes = append(w.notes, note)
 			}
 		}
@@ -59,32 +60,38 @@ func (w *setupNoteWriter) finishLine() {
 	w.line, w.tooLong = nil, false
 }
 
-func (w *setupNoteWriter) render(out io.Writer) {
+func (w *setupNoteWriter) render(out io.Writer) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.finishLine()
 	if len(w.notes) == 0 {
-		return
+		return nil
 	}
-	fmt.Fprintln(out, "\nSetup notes:")
+	var summary bytes.Buffer
+	fmt.Fprintln(&summary, "\nSetup notes:")
 	for _, note := range w.notes {
-		fmt.Fprintf(out, "  - %s\n", note)
+		fmt.Fprintf(&summary, "  - %s\n", note)
 	}
+	_, err := summary.WriteTo(out)
+	return err
 }
 
-func renderRunSummary(out io.Writer, command string, steps []runStep) {
-	fmt.Fprintf(out, "\n%s summary:\n", command)
+func renderRunSummary(out io.Writer, command string, steps []runStep) error {
+	var summary bytes.Buffer
+	fmt.Fprintf(&summary, "\n%s summary:\n", command)
 	if len(steps) == 0 {
-		fmt.Fprintln(out, "  unchanged: nothing needed to run")
+		fmt.Fprintln(&summary, "  unchanged: nothing needed to run")
 	}
 	for _, step := range steps {
-		fmt.Fprintf(out, "  %-10s %s", step.Status, step.Name)
+		fmt.Fprintf(&summary, "  %-10s %s", step.Status, step.Name)
 		if step.DurationMS > 0 {
-			fmt.Fprintf(out, " (%s)", (time.Duration(step.DurationMS) * time.Millisecond).Round(time.Millisecond))
+			fmt.Fprintf(&summary, " (%s)", (time.Duration(step.DurationMS) * time.Millisecond).Round(time.Millisecond))
 		}
 		if step.Detail != "" {
-			fmt.Fprintf(out, ": %s", step.Detail)
+			fmt.Fprintf(&summary, ": %s", step.Detail)
 		}
-		fmt.Fprintln(out)
+		fmt.Fprintln(&summary)
 	}
+	_, err := summary.WriteTo(out)
+	return err
 }

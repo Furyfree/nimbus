@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"cmp"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/Furyfree/nimbus/internal/apply"
@@ -27,14 +29,18 @@ func reconcileRepositories(s *selected, flags machineFlags, src facts.Source, ap
 	if len(repairs.Operations) == 0 {
 		return nil
 	}
-	fmt.Fprintln(out, "repository reconciliation after package transaction:")
-	out.Write(renderPlan(repairs, false, false))
+	if _, err := fmt.Fprintln(out, "repository reconciliation after package transaction:"); err != nil {
+		return fmt.Errorf("show repository reconciliation: %w", err)
+	}
+	if _, err := out.Write(renderPlan(repairs, false, false)); err != nil {
+		return fmt.Errorf("show repository reconciliation: %w", err)
+	}
 	r := apply.Run(repairs, options(p))
 	result.Executed = append(result.Executed, r.Executed...)
 	result.Differences = append(result.Differences, r.Differences...)
 	result.Failures = append(result.Failures, r.Failures...)
 	for _, op := range repairs.Operations {
-		if contains(r.Executed, op.ID) {
+		if slices.Contains(r.Executed, op.ID) {
 			result.Differences = append(result.Differences, "after package transaction: "+op.Summary)
 		}
 	}
@@ -67,24 +73,15 @@ func duplicateRepositoryRepairs(p *plan.Plan) (*plan.Plan, error) {
 		if op.Kind != plan.KindRepository || op.Action == plan.ActionKeep {
 			continue
 		}
-		allowed := op.Action == plan.ActionRepair && op.Blocked == "" && op.After == "" && len(op.Steps) > 0
-		for _, step := range op.Steps {
+		allowed := op.Action == plan.ActionRepair && op.Blocked == "" && op.After == "" && len(op.Steps) > 0 && !slices.ContainsFunc(op.Steps, func(step plan.Step) bool {
 			argv := step.Argv
 			if step.Description != plan.DisableDuplicateDescription || !step.Privileged || len(argv) < 4 || strings.Join(argv[:3], " ") != "dnf5 config-manager setopt" {
-				allowed = false
-				continue
+				return true
 			}
-			for _, option := range argv[3:] {
-				if !strings.HasSuffix(option, ".enabled=0") {
-					allowed = false
-				}
-			}
-		}
+			return slices.ContainsFunc(argv[3:], func(option string) bool { return !strings.HasSuffix(option, ".enabled=0") })
+		})
 		if !allowed {
-			reason := op.Summary
-			if op.Blocked != "" {
-				reason = op.Blocked
-			}
+			reason := cmp.Or(op.Blocked, op.Summary)
 			return nil, fmt.Errorf("repository changed beyond duplicate reconciliation: %s; run sync again", reason)
 		}
 		repairs.Operations = append(repairs.Operations, op)

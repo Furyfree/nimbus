@@ -1,6 +1,7 @@
 package plan
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -20,12 +21,11 @@ func TestChangedDeclaredPinRequiresKeyReconciliation(t *testing.T) {
 	if op == nil || op.Action != ActionRepair || !strings.Contains(op.Summary, "reconcile signing key") {
 		t.Fatalf("changed pin did not schedule verification: %+v", op)
 	}
-	var verify, install, override bool
-	for _, step := range op.Steps {
-		verify = verify || strings.Contains(step.Description, "fingerprint is "+r.Key)
-		install = install || len(step.Argv) > 0 && step.Argv[0] == "install"
-		override = override || strings.Contains(strings.Join(step.Argv, " "), ".gpgkey=file://"+KeyPath("docker"))
-	}
+	verify := slices.ContainsFunc(op.Steps, func(step Step) bool { return strings.Contains(step.Description, "fingerprint is "+r.Key) })
+	install := slices.ContainsFunc(op.Steps, func(step Step) bool { return len(step.Argv) > 0 && step.Argv[0] == "install" })
+	override := slices.ContainsFunc(op.Steps, func(step Step) bool {
+		return strings.Contains(strings.Join(step.Argv, " "), ".gpgkey=file://"+KeyPath("docker"))
+	})
 	if !verify || !install || !override {
 		t.Fatalf("incomplete key reconciliation: %+v", op.Steps)
 	}

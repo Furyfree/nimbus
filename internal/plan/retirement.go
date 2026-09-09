@@ -3,6 +3,7 @@ package plan
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -35,9 +36,7 @@ func SourceSnapshot(kind string, ids []string, f *facts.Facts) []state.NativeSou
 }
 
 func sourceKeys(keys []string) string {
-	copy := slices.Clone(keys)
-	slices.Sort(copy)
-	return strings.Join(copy, ",")
+	return strings.Join(slices.Sorted(slices.Values(keys)), ",")
 }
 
 func (b *builder) sourceOwnership(op Operation, ids []string) *state.SourceOwnership {
@@ -45,15 +44,14 @@ func (b *builder) sourceOwnership(op Operation, ids []string) *state.SourceOwner
 		if receipt.Source == nil || !receipt.Verified || receipt.Machine != b.in.Resolved.Machine {
 			return nil // Repair does not invent ownership for legacy/foreign state.
 		}
-		copy := *receipt.Source
-		return &copy
+		return new(*receipt.Source)
 	}
 	return &state.SourceOwnership{Original: SourceSnapshot(op.Kind, ids, b.in.Facts)}
 }
 
 func (b *builder) sourceRetirements(prior ...[]Operation) []Operation {
 	var result []Operation
-	for _, id := range sortedKeys(b.in.Applied.Receipts) {
+	for _, id := range slices.Sorted(maps.Keys(b.in.Applied.Receipts)) {
 		r := b.in.Applied.Receipts[id]
 		if r.Provider != KindRepository && r.Provider != KindFlatpakRemote {
 			continue
@@ -69,16 +67,14 @@ func (b *builder) sourceRetirements(prior ...[]Operation) []Operation {
 			result = append(result, op)
 			continue
 		}
-		shared := false
-		for _, selected := range b.in.Resolved.Repositories {
+		native := SourceIDs(r.Source)
+		shared := slices.ContainsFunc(b.in.Resolved.Repositories, func(selected string) bool {
 			ids := DNFRepoIDs(selected, b.in.Root.Repositories[selected])
 			if b.in.Root.Repositories[selected].Kind == "flatpak" {
 				ids = []string{selected}
 			}
-			for _, native := range SourceIDs(r.Source) {
-				shared = shared || slices.Contains(ids, native)
-			}
-		}
+			return slices.ContainsFunc(native, func(id string) bool { return slices.Contains(ids, id) })
+		})
 		if shared {
 			op.Action = ActionKeep
 			op.Summary = "retain source " + name + "; its native identity is still selected"
@@ -86,8 +82,7 @@ func (b *builder) sourceRetirements(prior ...[]Operation) []Operation {
 			continue
 		}
 		if err := CheckSourceRetirement(op, b.in.Facts, b.in.Source); err != nil {
-			var inUse sourceInUse
-			if errors.As(err, &inUse) {
+			if inUse, ok := errors.AsType[sourceInUse](err); ok {
 				var earlier []Operation
 				if len(prior) > 0 {
 					earlier = prior[0]
@@ -132,10 +127,9 @@ func (b *builder) sourceRetirements(prior ...[]Operation) []Operation {
 }
 
 func sourceOriginal(ownership *state.SourceOwnership, id string) *state.NativeSource {
-	for i := range ownership.Original {
-		if ownership.Original[i].ID == id {
-			return &ownership.Original[i]
-		}
+	i := slices.IndexFunc(ownership.Original, func(source state.NativeSource) bool { return source.ID == id })
+	if i >= 0 {
+		return &ownership.Original[i]
 	}
 	return nil
 }
@@ -178,12 +172,13 @@ func sourceRemovalDependency(inUse sourceInUse, ops []Operation) string {
 			}
 		}
 		if op.Kind == KindFlatpak {
-			for consumer := range pending {
+			before := len(pending)
+			maps.DeleteFunc(pending, func(consumer string, _ bool) bool {
 				parts := strings.Split(consumer, "/")
-				if len(parts) == 4 && parts[0] == "app" && op.ID == "flatpak:"+parts[1] {
-					delete(pending, consumer)
-					last = op.ID
-				}
+				return len(parts) == 4 && parts[0] == "app" && op.ID == "flatpak:"+parts[1]
+			})
+			if len(pending) < before {
+				last = op.ID
 			}
 		}
 	}
@@ -200,16 +195,14 @@ func CheckSourceRetirement(op Operation, f *facts.Facts, src facts.Source) error
 		return fmt.Errorf("source ownership identity is missing")
 	}
 	if op.Kind == KindFlatpakRemote && !f.Flatpak.Known() {
-		return fmt.Errorf("Flatpak state is unknown: %s", f.Flatpak.Error)
+		return fmt.Errorf("flatpak state is unknown: %s", f.Flatpak.Error)
 	}
 	if op.Kind == KindRepository && (!f.Repositories.Known() || !f.Packages.Known()) {
 		return fmt.Errorf("repository or installed package state is unknown")
 	}
 	ids := SourceIDs(op.Source)
-	for _, id := range ids {
-		if !nativeSourceID.MatchString(id) {
-			return fmt.Errorf("receipt contains an unsafe native source ID")
-		}
+	if slices.ContainsFunc(ids, func(id string) bool { return !nativeSourceID.MatchString(id) }) {
+		return fmt.Errorf("receipt contains an unsafe native source ID")
 	}
 	current := SourceSnapshot(op.Kind, ids, f)
 	seen := map[string]bool{}
@@ -276,7 +269,7 @@ func CheckSourceRetirement(op Operation, f *facts.Facts, src facts.Source) error
 		return fmt.Errorf("inspect all Flatpak refs before retirement: %w", err)
 	}
 	var consumers []string
-	for _, line := range strings.Split(strings.TrimSuffix(string(out), "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSuffix(string(out), "\n"), "\n") {
 		if line == "" {
 			continue
 		}

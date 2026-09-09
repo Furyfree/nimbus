@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -48,7 +49,6 @@ type pickerModel struct {
 	cursor   int
 	filter   string
 	aborted  bool
-	done     bool
 }
 
 func (m pickerModel) Init() tea.Cmd { return nil }
@@ -74,12 +74,9 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.aborted = true
 		return m, tea.Quit
 	case "enter":
-		m.done = true
 		return m, tea.Quit
 	case "up", "ctrl+p":
-		if m.cursor > 0 {
-			m.cursor--
-		}
+		m.cursor = max(0, m.cursor-1)
 	case "down", "ctrl+n":
 		if m.cursor < len(vis)-1 {
 			m.cursor++
@@ -91,7 +88,8 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case "backspace":
 		if len(m.filter) > 0 {
-			m.filter = m.filter[:len(m.filter)-1]
+			_, size := utf8.DecodeLastRuneInString(m.filter)
+			m.filter = m.filter[:len(m.filter)-size]
 			m.cursor = 0
 		}
 	default:
@@ -117,10 +115,7 @@ func (m pickerModel) View() string {
 		fmt.Fprintf(&b, "filter: %s\n", m.filter)
 	}
 	vis := m.visible()
-	start := 0
-	if m.cursor >= 20 {
-		start = m.cursor - 19
-	}
+	start := max(0, m.cursor-19)
 	for n, i := range vis {
 		if n < start || n >= start+20 {
 			continue

@@ -60,9 +60,10 @@ candidate staging is isolation of delivery, not isolation of system effects.
 Recover the VM snapshot between destructive or failed ownership drills. Do not
 run an older stable engine against candidate-written state unless compatibility
 has been established.
-The first successful state write upgrades the schema marker to 2, which
-0.1.1 refuses. Failures before that write still require snapshot restoration;
-never reset the marker manually to make an older engine accept the state.
+The first successful state write upgrades the schema marker to 3, which
+older engines refuse. Failures before that write still require snapshot
+restoration; never reset the marker manually to make an older engine accept
+the state.
 
 Verify reboot to the greeter, normal login/logout, portal file selection and
 screen sharing, and recovery with missing or broken user configuration. Repeat

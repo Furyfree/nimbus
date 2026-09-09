@@ -7,7 +7,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/Furyfree/nimbus/internal/apply"
@@ -42,7 +44,7 @@ func (s *reconcileSource) Stream(_, _ io.Writer, name string, args ...string) er
 }
 
 func TestReconcileVendorRepositoriesAfterPackageTransaction(t *testing.T) {
-	for _, mode := range []string{"success", "native failure", "verification failure", "key drift", "checkout drift"} {
+	for _, mode := range []string{"success", "native failure", "verification failure", "key drift", "checkout drift", "preview header failure", "preview plan failure"} {
 		t.Run(mode, func(t *testing.T) {
 			root := applyEnv(t)
 			fake := fixtureSource(t, root)
@@ -78,19 +80,29 @@ func TestReconcileVendorRepositoriesAfterPackageTransaction(t *testing.T) {
 				fake.Commands[facts.Key("git", facts.GitArgs(root, "rev-parse", "HEAD")...)] = []byte("different-head\n")
 			}
 			var out bytes.Buffer
+			var review io.Writer = &out
+			switch mode {
+			case "preview header failure":
+				review = &previewErrorWriter{err: syscall.ENOSPC}
+			case "preview plan failure":
+				review = &previewErrorWriter{after: 1, err: syscall.ENOSPC}
+			}
 			options := func(p *plan.Plan) apply.Options {
 				return apply.Options{Source: src, Root: s.Checkout.Definitions(), Out: &out, Record: func(digest string, st *state.Stage) error {
 					return state.Record(stateRoot, digest, st)
 				}}
 			}
 			result := &syncResult{}
-			err = reconcileRepositories(s, flags, src, approved.Checkout, options, &out, result)
+			err = reconcileRepositories(s, flags, src, approved.Checkout, options, review, result)
 			if mode != "success" {
 				if err == nil {
 					t.Fatal("reconciliation accepted a failed or unsafe state")
 				}
 				if (mode == "key drift" || mode == "checkout drift") && len(src.calls) != 0 {
 					t.Fatalf("mutated after unapproved drift: %v", src.calls)
+				}
+				if strings.HasPrefix(mode, "preview ") && (!errors.Is(err, syscall.ENOSPC) || len(src.calls) != 0) {
+					t.Fatalf("mutated after failed preview: %v calls=%v", err, src.calls)
 				}
 				applied, readErr := state.Read(stateRoot)
 				if readErr != nil || len(applied.Receipts) != 0 {
@@ -129,6 +141,10 @@ func TestDuplicateReconciliationRejectsOtherRepositoryChanges(t *testing.T) {
 		{Action: plan.ActionRepair, Blocked: "foreign file"},
 		{Action: plan.ActionRepair, Steps: []plan.Step{{Description: "write repository", Argv: []string{"install", "new.repo", "owned.repo"}, Privileged: true}}},
 		{Action: plan.ActionRepair, Steps: []plan.Step{{Description: plan.DisableDuplicateDescription, Argv: []string{"dnf5", "config-manager", "setopt", "nimbus-example.gpgcheck=0"}, Privileged: true}}},
+		{Action: plan.ActionRepair, Steps: []plan.Step{
+			{Description: plan.DisableDuplicateDescription, Argv: []string{"dnf5", "config-manager", "setopt", "vendor.enabled=0"}, Privileged: true},
+			{Description: plan.DisableDuplicateDescription, Argv: []string{"dnf5", "config-manager", "setopt", "nimbus-example.gpgcheck=0"}, Privileged: true},
+		}},
 	} {
 		op.Kind = plan.KindRepository
 		if _, err := duplicateRepositoryRepairs(&plan.Plan{Operations: []plan.Operation{op}}); err == nil {
@@ -149,7 +165,7 @@ func (s *transactionReconcileSource) Stream(out, errOut io.Writer, name string, 
 	s.calls = append(s.calls, call)
 	host := "vendor-install"
 	if call == "sudo dnf5 -y upgrade" {
-		if !contains(s.calls, "sudo dnf5 config-manager setopt vendor-install.enabled=0") {
+		if !slices.Contains(s.calls, "sudo dnf5 config-manager setopt vendor-install.enabled=0") {
 			return errors.New("upgrade started while install-created duplicate remained enabled")
 		}
 		host = "vendor-upgrade"

@@ -11,7 +11,7 @@ import (
 )
 
 func TestShellHandoffSupervisor(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "/usr/bin/python3", "-I", "-B", filepath.Join(repoRoot(t), "tools/install/test_handoff.py"))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}

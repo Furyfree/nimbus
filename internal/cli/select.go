@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/doctor"
 	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/plan"
 )
 
 // The selection commands edit the two manifest lists a user would otherwise
@@ -43,8 +46,8 @@ func newProfiles(opts *options) *cobra.Command {
 	parent.AddCommand(newEditCommand(opts, "add [ID...]", "Add profiles to the selected machine", func(s *selected, ids []string) (*selectionEdit, error) {
 		if len(ids) == 0 {
 			var items []pickItem
-			for _, id := range sortedKeysOf(s.Checkout.Profiles) {
-				items = append(items, pickItem{ID: id, Selected: contains(s.Resolved.Profiles, id)})
+			for _, id := range slices.Sorted(maps.Keys(s.Checkout.Profiles)) {
+				items = append(items, pickItem{ID: id, Selected: slices.Contains(s.Resolved.Profiles, id)})
 			}
 			chosen, err := pickerFn("profiles to select", items)
 			if err != nil {
@@ -78,7 +81,7 @@ func newProfiles(opts *options) *cobra.Command {
 			if id == "common" {
 				return nil, errors.New("common cannot be removed; every machine selects it")
 			}
-			if !contains(s.Resolved.Profiles, id) {
+			if !slices.Contains(s.Resolved.Profiles, id) {
 				return nil, fmt.Errorf("profile %q is not selected", id)
 			}
 		}
@@ -97,7 +100,7 @@ func newComponents(opts *options) *cobra.Command {
 		}
 		if len(ids) == 0 {
 			var items []pickItem
-			for _, id := range sortedKeysOf(s.Checkout.Components) {
+			for _, id := range slices.Sorted(maps.Keys(s.Checkout.Components)) {
 				items = append(items, pickItem{ID: id, Selected: explicit[id]})
 			}
 			chosen, err := pickerFn("components to select", items)
@@ -128,7 +131,7 @@ func newComponents(opts *options) *cobra.Command {
 			ids = chosen
 		}
 		for _, id := range ids {
-			if !contains(explicit, id) {
+			if !slices.Contains(explicit, id) {
 				return nil, fmt.Errorf("component %q is not listed explicitly in the manifest; a component selected through a profile is removed by removing the profile", id)
 			}
 		}
@@ -140,7 +143,7 @@ func newComponents(opts *options) *cobra.Command {
 
 func newPackages(opts *options) *cobra.Command {
 	packages := newPackagesInstalled(opts)
-	packages.AddCommand(newEditCommand(opts, "install [QUERY]", "Add packages to the selected machine and apply", func(s *selected, args []string) (*selectionEdit, error) {
+	install := newEditCommand(opts, "install [QUERY]", "Add packages to the selected machine and apply", func(s *selected, args []string) (*selectionEdit, error) {
 		query := ""
 		if len(args) > 0 {
 			query = args[0]
@@ -150,9 +153,21 @@ func newPackages(opts *options) *cobra.Command {
 			return nil, err
 		}
 		return &selectionEdit{cmdName: "packages install", summary: "install " + strings.Join(refs, ", "),
-			edit: func(m *definitions.Machine) { m.Packages = addUnique(m.Packages, refs...) }}, nil
-	}))
-	packages.AddCommand(newEditCommand(opts, "remove [QUERY]", "Remove desired packages from the selected machine and apply", func(s *selected, args []string) (*selectionEdit, error) {
+			edit: func(m *definitions.Machine) {
+				for _, raw := range refs {
+					ref, _ := definitions.ParseRef(raw) // pickAvailable already validated it.
+					matches := func(candidate string) bool {
+						other, err := definitions.ParseRef(candidate)
+						return err == nil && other == ref
+					}
+					m.PackageExclusions = slices.DeleteFunc(m.PackageExclusions, matches)
+					if !slices.ContainsFunc(m.Packages, matches) {
+						m.Packages = append(m.Packages, raw)
+					}
+				}
+			}}, nil
+	})
+	remove := newEditCommand(opts, "remove [QUERY]", "Remove desired packages from the selected machine and apply", func(s *selected, args []string) (*selectionEdit, error) {
 		query := ""
 		if len(args) > 0 {
 			query = args[0]
@@ -165,7 +180,7 @@ func newPackages(opts *options) *cobra.Command {
 			}
 		}
 		for _, p := range s.Resolved.Packages {
-			if !contains(m.Packages, p.Canonical) && strings.Contains(p.Name, query) && !contains(m.Packages, p.Name) {
+			if !slices.Contains(m.Packages, p.Canonical) && strings.Contains(p.Name, query) && !slices.Contains(m.Packages, p.Name) {
 				items = append(items, pickItem{ID: p.Canonical, Detail: "selected by " + strings.Join(p.Paths, ", ") + "; removing adds an exclusion"})
 			}
 		}
@@ -181,17 +196,28 @@ func newPackages(opts *options) *cobra.Command {
 		}
 		return &selectionEdit{cmdName: "packages remove", summary: "remove " + strings.Join(chosen, ", "),
 			edit: func(m *definitions.Machine) {
-				var exclusions []string
-				for _, c := range chosen {
-					if contains(m.Packages, c) || contains(m.Packages, strings.TrimPrefix(c, "dnf:")) {
-						m.Packages = removeAll(m.Packages, c, strings.TrimPrefix(c, "dnf:"))
-					} else {
-						exclusions = append(exclusions, c)
+				for _, raw := range chosen {
+					ref, _ := definitions.ParseRef(raw) // Picker items come from validated definitions.
+					m.Packages = slices.DeleteFunc(m.Packages, func(candidate string) bool {
+						other, err := definitions.ParseRef(candidate)
+						return err == nil && other == ref
+					})
+					i := slices.IndexFunc(s.Resolved.Packages, func(p definitions.ResolvedPackage) bool { return p.Canonical == ref.Canonical() })
+					if i >= 0 && slices.ContainsFunc(s.Resolved.Packages[i].Paths, func(path string) bool { return path != "machine" }) {
+						m.PackageExclusions = addUnique(m.PackageExclusions, ref.Canonical())
 					}
 				}
-				m.PackageExclusions = addUnique(m.PackageExclusions, exclusions...)
 			}}, nil
-	}))
+	})
+	for _, cmd := range []*cobra.Command{install, remove} {
+		cmd.Args = func(cmd *cobra.Command, args []string) error {
+			if err := cobra.MaximumNArgs(1)(cmd, args); err != nil {
+				return usageError{err}
+			}
+			return nil
+		}
+	}
+	packages.AddCommand(install, remove)
 	return packages
 }
 
@@ -206,7 +232,7 @@ func pickAvailable(s *selected, query string) ([]string, error) {
 	}
 	seen := map[string]bool{}
 	var items []pickItem
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 		fields := strings.Split(line, "|")
 		if len(fields) != 3 || seen[fields[0]] {
 			continue
@@ -221,7 +247,7 @@ func pickAvailable(s *selected, query string) ([]string, error) {
 	if len(items) == 0 {
 		return nil, fmt.Errorf("no available package matches %q", query)
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
+	slices.SortFunc(items, func(a, b pickItem) int { return cmp.Compare(a.ID, b.ID) })
 	chosen, err := pickerFn("packages to install", items)
 	if err != nil {
 		return nil, err
@@ -241,27 +267,11 @@ func pickAvailable(s *selected, query string) ([]string, error) {
 // "" for Fedora.
 func prefixForRepo(root definitions.Root, repoID string) string {
 	for id, r := range root.Repositories {
-		for _, host := range dnfRepoIDs(id, r) {
-			if host == repoID {
-				return id
-			}
+		if slices.Contains(plan.DNFRepoIDs(id, r), repoID) {
+			return id
 		}
 	}
 	return ""
-}
-
-func dnfRepoIDs(id string, r definitions.Repository) []string {
-	switch r.Kind {
-	case "dnf":
-		if r.ReleasePackage != "" {
-			return []string{id, id + "-updates"}
-		}
-		return []string{"nimbus-" + id}
-	case "copr":
-		owner, project, _ := strings.Cut(r.Project, "/")
-		return []string{"copr:copr.fedorainfracloud.org:" + owner + ":" + project}
-	}
-	return nil
 }
 
 // newEditCommand wraps one manifest edit in the shared flow.
@@ -299,18 +309,22 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 	}
 	original := s.Checkout.Machines[s.Resolved.Machine]
 	edited := *original
-	edited.Profiles = append([]string(nil), original.Profiles...)
-	edited.Components = append([]string(nil), original.Components...)
-	edited.Packages = append([]string(nil), original.Packages...)
-	edited.PackageExclusions = append([]string(nil), original.PackageExclusions...)
+	edited.Profiles = slices.Clone(original.Profiles)
+	edited.Components = slices.Clone(original.Components)
+	edited.Packages = slices.Clone(original.Packages)
+	edited.PackageExclusions = slices.Clone(original.PackageExclusions)
 	edit.edit(&edited)
-	after := renderManifest(before, &edited)
-	if string(after) == strings.TrimRight(string(before), "\n") {
+	if slices.Equal(edited.Profiles, original.Profiles) && slices.Equal(edited.Components, original.Components) &&
+		slices.Equal(edited.Packages, original.Packages) && slices.Equal(edited.PackageExclusions, original.PackageExclusions) {
 		if opts.json {
 			return writeJSON(out, map[string]string{"manifest": "unchanged"}, nil)
 		}
-		fmt.Fprintf(out, "%s: the manifest already says that\n", edit.cmdName)
-		return nil
+		_, err := fmt.Fprintf(out, "%s: the manifest already says that\n", edit.cmdName)
+		return err
+	}
+	after, err := renderManifest(before, &edited)
+	if err != nil {
+		return err
 	}
 
 	// Validate and plan the edited manifest in memory before touching it.
@@ -318,12 +332,9 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 	// digest, and therefore the plan digest, is the one the written
 	// manifest will produce.
 	trialCheckout := *s.Checkout
-	trialCheckout.Machines = map[string]*definitions.Machine{}
-	for id, m := range s.Checkout.Machines {
-		trialCheckout.Machines[id] = m
-	}
+	trialCheckout.Machines = maps.Clone(s.Checkout.Machines)
 	trialCheckout.Machines[s.Resolved.Machine] = &edited
-	trialCheckout.Entries = append([]definitions.Entry(nil), s.Checkout.Entries...)
+	trialCheckout.Entries = slices.Clone(s.Checkout.Entries)
 	rel := "machines/" + s.Resolved.Machine + ".toml"
 	for i := range trialCheckout.Entries {
 		if trialCheckout.Entries[i].Path == rel {
@@ -343,7 +354,9 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 		return err
 	}
 	if _, err := src.Run("dnf5", "makecache"); err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "metadata not refreshed: %v; using cached metadata\n", err)
+		if _, writeErr := fmt.Fprintf(cmd.ErrOrStderr(), "metadata not refreshed: %v; using cached metadata\n", err); writeErr != nil {
+			return errors.Join(err, writeErr)
+		}
 	}
 	p, _, err := planWithState(trial, src, false)
 	if err != nil {
@@ -358,13 +371,19 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 	if opts.json {
 		review, yes = cmd.ErrOrStderr(), true
 	}
-	fmt.Fprintf(review, "%s: %s\n\n%s\n", edit.cmdName, edit.summary, unifiedDiff(path, before, append(after, '\n')))
-	review.Write(renderPlan(p, false, false))
+	if _, err := fmt.Fprintf(review, "%s: %s\n\n%s\n", edit.cmdName, edit.summary, unifiedDiff(path, before, append(after, '\n'))); err != nil {
+		return fmt.Errorf("write selection diff: %w", err)
+	}
+	if _, err := review.Write(renderPlan(p, false, false)); err != nil {
+		return fmt.Errorf("write selection plan: %w", err)
+	}
 	if !p.Complete {
 		return errors.New("the plan for the edited manifest is incomplete; resolve the blocked operations first")
 	}
 	if !yes {
-		fmt.Fprintln(review, "proceeding writes the manifest change shown and then applies the plan")
+		if _, err := fmt.Fprintln(review, "proceeding writes the manifest change shown and then applies the plan"); err != nil {
+			return fmt.Errorf("write selection approval notice: %w", err)
+		}
 		if !approver(cmd.InOrStdin(), out, p.Digest) {
 			return errors.New("not applied; the manifest is unchanged")
 		}
@@ -379,7 +398,7 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 	if err != nil {
 		return err
 	}
-	defer lock.Release()
+	defer func() { _ = lock.Release() }()
 	fresh, err := loadSelected(flags)
 	if err != nil {
 		return err
@@ -399,24 +418,26 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 	}
 	current, err := os.ReadFile(path)
 	if err != nil || string(current) != string(before) {
-		lock.Release()
 		return errors.New("the manifest changed while the plan was being reviewed; run the command again")
 	}
 	if err := writeManifest(path, after); err != nil {
-		lock.Release()
 		return err
 	}
-	fmt.Fprintf(review, "wrote %s; the Git change is yours to commit\n", path)
+	if _, err := fmt.Fprintf(review, "wrote %s; the Git change is yours to commit\n", path); err != nil {
+		return err
+	}
 	if strings.HasPrefix(edit.cmdName, "profiles ") && edited.Dotfiles != nil {
 		selection := facts.Inspect(src, "").Chezmoi
 		if selection.Known() && selection.Value.Initialized {
-			fmt.Fprintf(review, "Chezmoi keeps its own copy of the profiles; refresh it with:\n  %s\n", doctor.ChezmoiRefresh(edited.ID, r.Profiles, selection.Value.OnePasswordSSH))
+			_, err = fmt.Fprintf(review, "Chezmoi keeps its own copy of the profiles; refresh it with:\n  %s\n", doctor.ChezmoiRefresh(edited.ID, r.Profiles, selection.Value.OnePasswordSSH))
 		} else {
-			fmt.Fprintln(review, "Chezmoi selection is unavailable; run nimbus doctor after initializing Chezmoi to obtain the refresh command.")
+			_, err = fmt.Fprintln(review, "Chezmoi selection is unavailable; run nimbus doctor after initializing Chezmoi to obtain the refresh command.")
+		}
+		if err != nil {
+			return err
 		}
 	}
 	if nothingToRun(p) {
-		lock.Release()
 		if opts.json {
 			return writeJSON(out, syncResult{Digest: p.Digest, Executed: []string{}, Differences: []string{}}, nil)
 		}
@@ -434,7 +455,7 @@ func listProfiles(s *selected) []selectionView {
 		selectedIDs[p] = true
 	}
 	var views []selectionView
-	for _, id := range sortedKeysOf(s.Checkout.Profiles) {
+	for _, id := range slices.Sorted(maps.Keys(s.Checkout.Profiles)) {
 		v := selectionView{ID: id, Selected: selectedIDs[id]}
 		if v.Selected {
 			v.Paths = []string{"machine"}
@@ -450,27 +471,9 @@ func listComponents(s *selected) []selectionView {
 		paths[c.ID] = c.Paths
 	}
 	var views []selectionView
-	for _, id := range sortedKeysOf(s.Checkout.Components) {
+	for _, id := range slices.Sorted(maps.Keys(s.Checkout.Components)) {
 		p, ok := paths[id]
 		views = append(views, selectionView{ID: id, Selected: ok, Paths: p})
 	}
 	return views
-}
-
-func sortedKeysOf[V any](m map[string]V) []string {
-	ids := make([]string, 0, len(m))
-	for id := range m {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	return ids
-}
-
-func contains(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }

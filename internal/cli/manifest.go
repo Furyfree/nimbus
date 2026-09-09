@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
+	"unicode/utf8"
+
+	"github.com/pelletier/go-toml/v2"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
 )
@@ -14,39 +16,25 @@ import (
 // renderManifest writes a machine manifest in the canonical layout. Leading
 // comment lines of the existing file are kept; everything else is derived
 // from the manifest so the file always says exactly what it means.
-func renderManifest(existing []byte, m *definitions.Machine) []byte {
+func renderManifest(existing []byte, m *definitions.Machine) ([]byte, error) {
+	if !utf8.ValidString(m.Hardware) {
+		return nil, fmt.Errorf("machine hardware contains invalid UTF-8")
+	}
+	if m.Dotfiles != nil && !utf8.ValidString(m.Dotfiles.Repo) {
+		return nil, fmt.Errorf("machine dotfiles.repo contains invalid UTF-8")
+	}
 	var b bytes.Buffer
-	for _, line := range strings.Split(string(existing), "\n") {
+	for line := range strings.SplitSeq(string(existing), "\n") {
 		if strings.HasPrefix(line, "#") {
 			b.WriteString(line + "\n")
 			continue
 		}
 		break
 	}
-	fmt.Fprintf(&b, "schema = %d\nid = %q\n", m.Schema, m.ID)
-	if m.Hardware != "" {
-		fmt.Fprintf(&b, "hardware = %q\n", m.Hardware)
+	if err := toml.NewEncoder(&b).SetArraysMultiline(true).SetIndentSymbol("  ").Encode(m); err != nil {
+		return nil, fmt.Errorf("encode machine manifest: %w", err)
 	}
-	b.WriteString("\n")
-	list := func(name string, items []string) {
-		if len(items) == 0 {
-			fmt.Fprintf(&b, "%s = []\n\n", name)
-			return
-		}
-		fmt.Fprintf(&b, "%s = [\n", name)
-		for _, it := range items {
-			fmt.Fprintf(&b, "  %q,\n", it)
-		}
-		b.WriteString("]\n\n")
-	}
-	list("profiles", m.Profiles)
-	list("components", m.Components)
-	list("packages", m.Packages)
-	list("package_exclusions", m.PackageExclusions)
-	if m.Dotfiles != nil {
-		fmt.Fprintf(&b, "[dotfiles]\nrepo = %q\n", m.Dotfiles.Repo)
-	}
-	return bytes.TrimRight(b.Bytes(), "\n")
+	return bytes.TrimRight(b.Bytes(), "\n"), nil
 }
 
 // manifestPath is the tracked manifest file of a machine.
@@ -62,18 +50,15 @@ func writeManifest(path string, content []byte) error {
 		return err
 	}
 	name := tmp.Name()
+	defer func() { _ = os.Remove(name) }()
+	defer func() { _ = tmp.Close() }()
 	if _, err := tmp.Write(append(content, '\n')); err != nil {
-		tmp.Close()
-		os.Remove(name)
 		return err
 	}
 	if err := tmp.Chmod(0o644); err != nil {
-		tmp.Close()
-		os.Remove(name)
 		return err
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(name)
 		return err
 	}
 	return os.Rename(name, path)
@@ -93,10 +78,8 @@ func unifiedDiff(path string, before, after []byte) string {
 		for j := m - 1; j >= 0; j-- {
 			if a[i] == b[j] {
 				lcs[i][j] = lcs[i+1][j+1] + 1
-			} else if lcs[i+1][j] >= lcs[i][j+1] {
-				lcs[i][j] = lcs[i+1][j]
 			} else {
-				lcs[i][j] = lcs[i][j+1]
+				lcs[i][j] = max(lcs[i+1][j], lcs[i][j+1])
 			}
 		}
 	}
@@ -145,11 +128,5 @@ func removeAll(list []string, items ...string) []string {
 			out = append(out, v)
 		}
 	}
-	return out
-}
-
-func sortedCopy(list []string) []string {
-	out := append([]string(nil), list...)
-	sort.Strings(out)
 	return out
 }

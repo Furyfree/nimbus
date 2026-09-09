@@ -28,7 +28,7 @@ func TestInstallLogPrivateLifecycleAndRetention(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("NIMBUS_INSTALL_LOG_DIR", "")
 	var first, last string
-	for i := 0; i < 23; i++ {
+	for i := range 23 {
 		l, err := openInstallLog()
 		if err != nil {
 			t.Fatal(err)
@@ -158,7 +158,7 @@ func TestInstallLogRejectsUnsafePaths(t *testing.T) {
 			}
 			t.Setenv("NIMBUS_INSTALL_LOG_DIR", dir)
 			if got, err := openInstallLog(); err == nil {
-				got.finish(nil)
+				_ = got.finish(nil) // Cleanup cannot change the failed safety assertion.
 				t.Fatal("unsafe log accepted")
 			}
 			data, _ := os.ReadFile(target)
@@ -189,7 +189,7 @@ func TestInstallLogReusesOnlyActiveRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	if child, err := openInstallLog(); err == nil {
-		child.finish(nil)
+		_ = child.finish(nil) // Cleanup cannot change the failed lifecycle assertion.
 		t.Fatal("finished run reused")
 	}
 }
@@ -218,9 +218,11 @@ func TestInstallLogCompletionRefusesSymlink(t *testing.T) {
 type transcriptSource struct{ *facts.FakeSource }
 
 func (s transcriptSource) Stream(out, errOut io.Writer, name string, args ...string) error {
-	io.WriteString(out, "NATIVE-STDOUT\n")
-	io.WriteString(errOut, "NATIVE-STDERR\n")
-	return nil
+	if _, err := io.WriteString(out, "NATIVE-STDOUT\n"); err != nil {
+		return err
+	}
+	_, err := io.WriteString(errOut, "NATIVE-STDERR\n")
+	return err
 }
 
 func TestInstallLogExcludesSecretsAndPreservesNativeDiagnostics(t *testing.T) {
@@ -236,7 +238,9 @@ func TestInstallLogExcludesSecretsAndPreservesNativeDiagnostics(t *testing.T) {
 	if err == nil {
 		t.Fatal("failed secret command succeeded")
 	}
-	fmt.Fprintln(installWriter{&terminal, l}, err)
+	if _, err := fmt.Fprintln(installWriter{&terminal, l}, err); err != nil {
+		t.Fatal(err)
+	}
 	if err := src.Stream(installWriter{&terminal, l}, installWriter{&terminal, l}, "chezmoi", "apply"); err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +266,9 @@ func TestInstallLogExcludesSecretsAndPreservesNativeDiagnostics(t *testing.T) {
 
 func TestInstallLogWriteFailureIsReported(t *testing.T) {
 	l := testInstallLog(t)
-	l.file.Close()
+	if err := l.file.Close(); err != nil {
+		t.Fatal(err)
+	}
 	s := installSource{&facts.FakeSource{Commands: map[string][]byte{"dnf5 makecache": []byte("output")}}, l, io.Discard}
 	if _, err := s.Run("dnf5", "makecache"); err == nil {
 		t.Fatal("log failure hidden")
@@ -272,11 +278,65 @@ func TestInstallLogWriteFailureIsReported(t *testing.T) {
 	}
 }
 
+func TestInstallLogPrivateDiagnosticsPreserveOutputFailure(t *testing.T) {
+	for _, mode := range []string{"shown", "unavailable", "failed"} {
+		t.Run(mode, func(t *testing.T) {
+			l := testInstallLog(t)
+			const nativeSecret = "FAKE-NATIVE-SECRET"
+			writeErr := errors.New("FAKE-WRITER-SECRET")
+			var terminal strings.Builder
+			var diagnostic io.Writer = &terminal
+			switch mode {
+			case "unavailable":
+				diagnostic = nil
+			case "failed":
+				diagnostic = resultErrorWriter{match: nativeSecret, err: writeErr}
+			}
+			src := installSource{&facts.FakeSource{Failures: map[string]string{"chezmoi data": nativeSecret}}, l, diagnostic}
+			_, err := src.Run("chezmoi", "data")
+			if err == nil {
+				t.Fatal("private native command failure disappeared")
+			}
+			if mode == "failed" && !errors.Is(err, writeErr) {
+				t.Errorf("terminal write cause was lost: %v", err)
+			}
+			if mode == "shown" {
+				if !strings.Contains(terminal.String(), nativeSecret) || !strings.Contains(err.Error(), "see terminal diagnostics") {
+					t.Errorf("displayed diagnostic was not reported accurately: %q, %v", terminal.String(), err)
+				}
+			} else if !strings.Contains(err.Error(), "output not logged") || strings.Contains(err.Error(), "see terminal diagnostics") {
+				t.Errorf("unavailable diagnostic was reported as shown: %v", err)
+			}
+			if _, writeErr := fmt.Fprintln(installWriter{&terminal, l}, err); writeErr != nil {
+				t.Fatal(writeErr)
+			}
+			if finishErr := l.finish(err); finishErr != nil {
+				t.Fatal(finishErr)
+			}
+			data, readErr := os.ReadFile(filepath.Join(l.dir, "engine.log"))
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			for _, secret := range []string{nativeSecret, writeErr.Error()} {
+				if strings.Contains(err.Error(), secret) || strings.Contains(string(data), secret) {
+					t.Errorf("secret-capable diagnostics entered logged error text: %q", secret)
+				}
+			}
+		})
+	}
+}
+
 func TestReadOnlyCommandsDoNotCreateInstallationLogs(t *testing.T) {
 	root, _ := installerFixture(t)
 	base := os.Getenv("XDG_STATE_HOME")
 	for _, args := range [][]string{{"validate"}, {"status"}, {"doctor"}, {"sync", "--plan"}} {
-		run(t, append(args, "--checkout", root, "--machine", "vm")...)
+		args = append(args, "--checkout", root)
+		if args[0] != "validate" {
+			args = append(args, "--machine", "vm")
+		}
+		if code, out, errOut := run(t, args...); code == ExitUsage {
+			t.Fatalf("inspection arguments were rejected: %v\n%s%s", args, out, errOut)
+		}
 	}
 	entries, err := os.ReadDir(base)
 	if err != nil || len(entries) != 0 {
@@ -309,7 +369,9 @@ func TestInstallLogKeepsRecorderAndKeyExtractionFailuresVisible(t *testing.T) {
 			if err == nil {
 				t.Fatal("native failure disappeared")
 			}
-			fmt.Fprintln(installWriter{&terminal, l}, err)
+			if _, err := fmt.Fprintln(installWriter{&terminal, l}, err); err != nil {
+				t.Fatal(err)
+			}
 			if !strings.Contains(terminal.String(), "FIXTURE-DETAIL") {
 				t.Fatal("native cause hidden from terminal")
 			}

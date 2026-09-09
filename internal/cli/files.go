@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -66,7 +67,9 @@ func newFiles(opts *options) *cobra.Command {
 			}
 			out := cmd.OutOrStdout()
 			if !opts.json {
-				fmt.Fprintf(out, "Capture %s into %s\nSystem-file sources must not contain secrets.\n%s", before.result.Target, before.result.Source, before.result.Diff)
+				if _, err := fmt.Fprintf(out, "Capture %s into %s\nSystem-file sources must not contain secrets.\n%s", before.result.Target, before.result.Source, before.result.Diff); err != nil {
+					return fmt.Errorf("write file acceptance preview: %w", err)
+				}
 			}
 			if !bytes.Equal(before.source, before.target) && !preview {
 				if opts.json && !yes {
@@ -83,12 +86,16 @@ func newFiles(opts *options) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				defer lock.Release()
+				defer func() { _ = lock.Release() }()
 				fresh, err := prepareAcceptance(flags, args[0])
 				if err != nil {
 					return err
 				}
-				if !sameAcceptance(before, fresh) {
+				same, err := sameAcceptance(before, fresh)
+				if err != nil {
+					return fmt.Errorf("recheck file acceptance approval: %w", err)
+				}
+				if !same {
 					return errors.New("file acceptance inputs changed after approval; review again")
 				}
 				if err := replaceAcceptedSource(before); err != nil {
@@ -100,13 +107,13 @@ func newFiles(opts *options) *cobra.Command {
 				return writeJSON(out, before.result, nil)
 			}
 			if before.result.Changed {
-				fmt.Fprintln(out, "Source updated. Run validate, then sync --plan and sync to verify the new definition.")
+				_, err = fmt.Fprintln(out, "Source updated. Run validate, then sync --plan and sync to verify the new definition.")
 			} else if preview {
-				fmt.Fprintln(out, "Preview only; source unchanged.")
+				_, err = fmt.Fprintln(out, "Preview only; source unchanged.")
 			} else {
-				fmt.Fprintln(out, "Source already matches the live file.")
+				_, err = fmt.Fprintln(out, "Source already matches the live file.")
 			}
-			return nil
+			return err
 		},
 	}
 	addMachineFlags(&flags, cmd.Flags())
@@ -128,17 +135,25 @@ func prepareAcceptance(flags machineFlags, target string) (*acceptInput, error) 
 	if err != nil {
 		return nil, err
 	}
-	var decl *definitions.ResolvedFile
-	for i := range s.Resolved.Files {
-		if s.Resolved.Files[i].Target == target {
-			decl = &s.Resolved.Files[i]
-			break
-		}
-	}
-	if decl == nil || !strings.HasPrefix(decl.Source, "system/root/etc/") {
+	i := slices.IndexFunc(s.Resolved.Files, func(file definitions.ResolvedFile) bool {
+		return file.Target == target
+	})
+	if i < 0 || !strings.HasPrefix(s.Resolved.Files[i].Source, "system/root/etc/") {
 		return nil, errors.New("target is not a selected generic system file")
 	}
-	receiptData, ri, err := readAcceptFile(stateRoot, filepath.Join(state.ReceiptsDir, state.FileName("file:"+target)))
+	decl := &s.Resolved.Files[i]
+	applied, err := state.Read(stateRoot)
+	if err != nil {
+		return nil, fmt.Errorf("ownership state: %w", err)
+	}
+	if !applied.Present {
+		return nil, errors.New("no recorded Nimbus ownership state")
+	}
+	resource := "file:" + target
+	receiptData, ri, err := readAcceptFile(stateRoot, filepath.Join(state.ReceiptsDir, state.FileName(resource)))
+	if errors.Is(err, os.ErrNotExist) {
+		receiptData, ri, err = readAcceptFile(stateRoot, filepath.Join(state.ReceiptsDir, state.LegacyFileName(resource)))
+	}
 	if err != nil {
 		return nil, fmt.Errorf("ownership receipt: %w", err)
 	}
@@ -177,7 +192,7 @@ func prepareAcceptance(flags machineFlags, target string) (*acceptInput, error) 
 	if !utf8.Valid(source) || !utf8.Valid(live) || bytes.IndexByte(source, 0) >= 0 || bytes.IndexByte(live, 0) >= 0 {
 		return nil, errors.New("file acceptance requires text content without NUL bytes")
 	}
-	entries := append([]definitions.Entry(nil), s.Checkout.Entries...)
+	entries := slices.Clone(s.Checkout.Entries)
 	for i := range entries {
 		if entries[i].Path == decl.Source {
 			entries[i].Content = live
@@ -190,10 +205,16 @@ func prepareAcceptance(flags machineFlags, target string) (*acceptInput, error) 
 	return &acceptInput{selected: s, decl: *decl, source: source, target: live, sourceInfo: si, targetInfo: ti, receipt: receipt, checkoutIdentity: identity, result: result}, nil
 }
 
-func sameAcceptance(a, b *acceptInput) bool {
-	ar, _ := json.Marshal(a.receipt)
-	br, _ := json.Marshal(b.receipt)
-	return a.selected.Root == b.selected.Root && a.checkoutIdentity == b.checkoutIdentity && a.selected.Checkout.Digest() == b.selected.Checkout.Digest() && a.result.Definitions == b.result.Definitions && bytes.Equal(ar, br) && bytes.Equal(a.source, b.source) && bytes.Equal(a.target, b.target) && os.SameFile(a.sourceInfo, b.sourceInfo) && os.SameFile(a.targetInfo, b.targetInfo) && a.sourceInfo.Mode() == b.sourceInfo.Mode() && a.targetInfo.Mode() == b.targetInfo.Mode()
+func sameAcceptance(a, b *acceptInput) (bool, error) {
+	ar, err := json.Marshal(a.receipt)
+	if err != nil {
+		return false, fmt.Errorf("encode reviewed ownership receipt: %w", err)
+	}
+	br, err := json.Marshal(b.receipt)
+	if err != nil {
+		return false, fmt.Errorf("encode current ownership receipt: %w", err)
+	}
+	return a.selected.Root == b.selected.Root && a.checkoutIdentity == b.checkoutIdentity && a.selected.Checkout.Digest() == b.selected.Checkout.Digest() && a.result.Definitions == b.result.Definitions && bytes.Equal(ar, br) && bytes.Equal(a.source, b.source) && bytes.Equal(a.target, b.target) && os.SameFile(a.sourceInfo, b.sourceInfo) && os.SameFile(a.targetInfo, b.targetInfo) && a.sourceInfo.Mode() == b.sourceInfo.Mode() && a.targetInfo.Mode() == b.targetInfo.Mode(), nil
 }
 
 // Read identity inputs directly: reverse capture never runs Git commands.
@@ -209,7 +230,7 @@ func acceptanceCheckoutIdentity(root string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("checkout identity %s: %w", name, err)
 		}
-		fmt.Fprintf(h, "%s\x00%d\x00", name, len(data))
+		_, _ = fmt.Fprintf(h, "%s\x00%d\x00", name, len(data))
 		h.Write(data)
 		if name == ".git/HEAD" {
 			head = strings.TrimSpace(string(data))
@@ -241,7 +262,7 @@ func acceptParent(root, rel string) (*os.File, string, error) {
 	parts := strings.Split(rel, string(filepath.Separator))
 	for _, part := range parts[:len(parts)-1] {
 		next, e := syscall.Openat(fd, part, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
-		syscall.Close(fd)
+		_ = syscall.Close(fd)
 		if e != nil {
 			return nil, "", e
 		}
@@ -256,7 +277,7 @@ func readAcceptAt(parent *os.File, name string) ([]byte, os.FileInfo, error) {
 		return nil, nil, err
 	}
 	f := os.NewFile(uintptr(fd), name)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil {
 		return nil, nil, err
@@ -281,7 +302,7 @@ func readAcceptFile(root, rel string) ([]byte, os.FileInfo, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	defer parent.Close()
+	defer func() { _ = parent.Close() }()
 	return readAcceptAt(parent, name)
 }
 
@@ -290,7 +311,7 @@ func replaceAcceptedSource(in *acceptInput) error {
 	if err != nil {
 		return err
 	}
-	defer parent.Close()
+	defer func() { _ = parent.Close() }()
 	data, info, err := readAcceptAt(parent, name)
 	if err != nil {
 		return err
@@ -299,16 +320,14 @@ func replaceAcceptedSource(in *acceptInput) error {
 		return errors.New("source changed before replacement")
 	}
 	var nonce [16]byte
-	if _, err = rand.Read(nonce[:]); err != nil {
-		return err
-	}
+	rand.Read(nonce[:])
 	tmp := ".nimbus-accept-" + hex.EncodeToString(nonce[:])
 	fd, err := syscall.Openat(int(parent.Fd()), tmp, syscall.O_WRONLY|syscall.O_CREAT|syscall.O_EXCL|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0600)
 	if err != nil {
 		return err
 	}
 	f := os.NewFile(uintptr(fd), tmp)
-	defer syscall.Unlinkat(int(parent.Fd()), tmp)
+	defer func() { _ = syscall.Unlinkat(int(parent.Fd()), tmp) }()
 	if _, err = f.Write(in.target); err == nil {
 		err = f.Chmod(info.Mode().Perm())
 	}
@@ -337,7 +356,7 @@ func acceptanceDiff(path string, before, after []byte) string {
 		if len(side.data) == 0 {
 			continue
 		}
-		for _, line := range strings.Split(strings.TrimSuffix(string(side.data), "\n"), "\n") {
+		for line := range strings.SplitSeq(strings.TrimSuffix(string(side.data), "\n"), "\n") {
 			fmt.Fprintf(&b, "%s%s\n", side.prefix, line)
 		}
 		if side.data[len(side.data)-1] != '\n' {

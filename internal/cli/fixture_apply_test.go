@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,18 +13,6 @@ import (
 	"github.com/Furyfree/nimbus/internal/facts"
 	"github.com/Furyfree/nimbus/internal/plan"
 )
-
-// withoutTerra drops Terra's own repository file so the fixture host has no
-// foreign file and the plan can be complete.
-func withoutTerra(src *facts.FakeSource) {
-	var kept []string
-	for _, name := range src.Dirs[facts.RepoDir] {
-		if name != "terra.repo" {
-			kept = append(kept, name)
-		}
-	}
-	src.Dirs[facts.RepoDir] = kept
-}
 
 // withForeignTerra adds Terra's own repository file to the fixture host, which
 // Nimbus does not own, so the repository operation blocks and the plan stays
@@ -54,20 +43,20 @@ func readyRepositories(t *testing.T, src *facts.FakeSource, root string) {
 			continue
 		}
 		src.Commands[facts.Key("gpg", facts.KeyInspectArgs(plan.KeyPath(id))...)] = []byte("pub:::::::::\nfpr:::::::::" + definitions.NormalizeFingerprint(r.Key) + ":\n")
-		var b strings.Builder
+		b := []byte{}
 		if r.Kind == "dnf" && r.ReleasePackage == "" {
-			fmt.Fprintf(&b, "[nimbus-%s]\n", id)
+			b = fmt.Appendf(b, "[nimbus-%s]\n", id)
 			for _, o := range plan.OwnedRepoOptions(id, r) {
-				fmt.Fprintf(&b, "%s=%s\n", o.Key, o.Value)
+				b = fmt.Appendf(b, "%s=%s\n", o.Key, o.Value)
 			}
 		} else {
 			for _, host := range plan.DNFRepoIDs(id, r) {
-				fmt.Fprintf(&b, "[%s]\nenabled=1\ngpgcheck=1\npriority=%d\ngpgkey=file://%s\n", host, *r.Priority, plan.KeyPath(id))
+				b = fmt.Appendf(b, "[%s]\nenabled=1\ngpgcheck=1\npriority=%d\ngpgkey=file://%s\n", host, *r.Priority, plan.KeyPath(id))
 			}
 		}
 		name := "nimbus-" + id + ".repo"
 		src.Dirs[facts.RepoDir] = append(src.Dirs[facts.RepoDir], name)
-		src.Files[filepath.Join(facts.RepoDir, name)] = []byte(b.String())
+		src.Files[filepath.Join(facts.RepoDir, name)] = b
 	}
 	src.Commands[facts.Key("flatpak", "remotes", "--system", "--columns=name,url")] = []byte("flathub\thttps://dl.flathub.org/repo/\n")
 }
@@ -132,16 +121,12 @@ func answerLaptopInstall(t *testing.T, src *facts.FakeSource, root string) {
 		}
 	}
 	args := append([]string{"--assumeno", "--cacheonly", "install", "--allowerasing"}, names...)
-	var b strings.Builder
-	b.WriteString("Repositories loaded.\nPackage Arch Version Repository Size\nInstalling:\n")
+	b := []byte("Repositories loaded.\nPackage Arch Version Repository Size\nInstalling:\n")
 	for _, n := range names {
-		repo := repoOf[n]
-		if repo == "" {
-			repo = "fedora"
-		}
-		fmt.Fprintf(&b, " %s x86_64 0:1-1.fc44 %s 1.0 KiB\n", n, repo)
+		repo := cmp.Or(repoOf[n], "fedora")
+		b = fmt.Appendf(b, " %s x86_64 0:1-1.fc44 %s 1.0 KiB\n", n, repo)
 	}
-	b.WriteString("\nTransaction Summary:\n Installing: 1 package\n\nOperation aborted by the user.\n")
-	src.Commands[facts.Key("dnf5", args...)] = []byte(b.String())
+	b = append(b, "\nTransaction Summary:\n Installing: 1 package\n\nOperation aborted by the user.\n"...)
+	src.Commands[facts.Key("dnf5", args...)] = b
 	src.Failures[facts.Key("dnf5", args...)] = "exit status 1"
 }
