@@ -65,8 +65,38 @@ Plan: [Modern Go PR validation](ROADMAP.md#modern-go-pr-validation).
 - [x] Obtain owner authorization for commits, push, marking PR 18 ready,
   merging it after final checks, and closing superseded Voxtype PR 17.
 
-Native VM validation is planned, not completed. Existing Phase 6 desktop,
+Native apply and lifecycle validation remain incomplete. The read-only VM
+comparison below verifies the package-resolution fix; existing Phase 6 desktop,
 portal, and recovery gaps remain open.
+
+### Version 0.2.2 fresh-install blocker, 2026-09-09
+
+The public bootstrap downloaded the signed COPR engine, verified its signature,
+and installed `0.2.2-0.1.fc44.x86_64`. Repository preparation completed, but the
+workstation transaction stopped at `gcc-c++` provider resolution. DNF listed
+the explicitly requested package under `Installing dependencies`; Nimbus only
+matched `Installing` rows. Desktop packages and the dotfiles/tools stage did
+not complete.
+
+- [x] Match direct names and evidenced providers across all three installation
+  sections. Preserve exact provider identity checks and report a selected
+  dependency's unexpected repository.
+- [x] Reproduce the failure with the VM's reduced DNF preview and extend the
+  provider, multilib, receipt, and deselection tests to dependency sections.
+  The regressions fail before the fix and pass afterwards with Go 1.26.7.
+  `go test ./internal/plan ./internal/apply` and `just check` pass.
+- [x] Stage an isolated candidate and validate its definitions. Against the
+  same installed checkout and cached VM metadata, released 0.2.2 exits 1 with
+  an incomplete plan; the candidate exits 0 with a complete plan and all 118
+  package requests resolved, including `gcc-c++.x86_64`.
+- [ ] Retry installation with the corrected engine, then verify convergence
+  and complete the remaining desktop and recovery drills.
+
+Candidate base: `406f47a1e90a` plus the local package-resolution fix.
+Binary SHA-256:
+`1df16ed0109c6460a468affff4c334effc27c569a4d57e36a53b2237e5269f0e`.
+Staging and read-only validation did not replace the installed engine,
+checkout, or selector, or apply the workstation plan.
 
 ### Installer prompt polish carried from Phase 5
 
