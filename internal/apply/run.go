@@ -466,14 +466,17 @@ func (ex *executor) enableReleasePackage(id string, r definitions.Repository, op
 		return fmt.Errorf("extract keys: %w", err)
 	}
 	var key string
+	var keyErrors []error
 	for name, content := range keys {
 		if path, err := ex.verifiedKey("key-"+id+"-"+filepath.Base(name), content, r.Key); err == nil {
 			key = path
 			break
+		} else {
+			keyErrors = append(keyErrors, fmt.Errorf("key %s: %w", name, err))
 		}
 	}
 	if key == "" {
-		return fmt.Errorf("no key in %s has the declared fingerprint %s", r.ReleasePackage, definitions.NormalizeFingerprint(r.Key))
+		return errors.Join(fmt.Errorf("no key in %s has the declared fingerprint %s", r.ReleasePackage, definitions.NormalizeFingerprint(r.Key)), errors.Join(keyErrors...))
 	}
 	if err := ex.sudo("install", "-m", "0644", key, plan.KeyPath(id)); err != nil {
 		return err
