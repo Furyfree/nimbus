@@ -68,7 +68,14 @@ func user(src Source) (User, error) {
 		u.Name = strings.TrimSpace(string(name))
 	}
 	cargo := filepath.Join(home, ".cargo", "bin", "cargo")
-	if names, err := src.ReadDir(filepath.Dir(cargo)); err != nil || !slices.Contains(names, "cargo") {
+	names, err := src.ReadDir(filepath.Dir(cargo))
+	if errors.Is(err, os.ErrNotExist) {
+		return u, nil
+	}
+	if err != nil {
+		return u, fmt.Errorf("inspect Cargo directory %s: %w", filepath.Dir(cargo), err)
+	}
+	if !slices.Contains(names, "cargo") {
 		return u, nil
 	}
 	u.Cargo = true
@@ -86,9 +93,16 @@ var ChezmoiDataArgs = []string{"data", "--format", "json"}
 // ChezmoiInitialized reports whether the home holds a Chezmoi source
 // checkout. An empty source directory, which a failed clone leaves behind,
 // does not count.
-func ChezmoiInitialized(src Source, home string) bool {
-	names, err := src.ReadDir(filepath.Join(home, ".local", "share", "chezmoi"))
-	return err == nil && len(names) > 0
+func ChezmoiInitialized(src Source, home string) (bool, error) {
+	path := filepath.Join(home, ".local", "share", "chezmoi")
+	names, err := src.ReadDir(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspect Chezmoi source %s: %w", path, err)
+	}
+	return len(names) > 0, nil
 }
 
 // chezmoi reports whether Chezmoi is initialized in this home and what it
@@ -101,7 +115,11 @@ func chezmoi(src Source) (Chezmoi, error) {
 	if err != nil {
 		return Chezmoi{}, err
 	}
-	if !ChezmoiInitialized(src, home) {
+	initialized, err := ChezmoiInitialized(src, home)
+	if err != nil {
+		return Chezmoi{}, err
+	}
+	if !initialized {
 		return Chezmoi{}, nil
 	}
 	out, err := src.Run("chezmoi", ChezmoiDataArgs...)

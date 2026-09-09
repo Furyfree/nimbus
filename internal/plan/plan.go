@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"path"
 	"path/filepath"
@@ -1354,7 +1355,7 @@ func (b *builder) userTools() []Operation {
 	var runtimeOps []string
 	for _, in := range b.in.Resolved.Installers {
 		id := "user:" + in.Component
-		binary := b.userFile(u.Home, in.Installer.Binary)
+		binary, err := b.userFile(u.Home, in.Installer.Binary)
 		op := Operation{ID: id, Kind: KindUser, Risk: RiskLow, Paths: in.Paths}
 		if binary {
 			op.Action, op.Summary = ActionKeep, fmt.Sprintf("%s is installed at ~/%s", in.Component, in.Installer.Binary)
@@ -1366,6 +1367,9 @@ func (b *builder) userTools() []Operation {
 				{Description: "verify ~/" + in.Installer.Binary + " exists"},
 			}
 		}
+		if err != nil {
+			op.Blocked = err.Error()
+		}
 		ops = append(ops, op)
 		if len(in.Installer.Install) == 0 {
 			continue
@@ -1373,10 +1377,11 @@ func (b *builder) userTools() []Operation {
 		rt := Operation{ID: id + ":install", Kind: KindUser, Action: ActionInstall, Risk: RiskLow, Paths: in.Paths,
 			Summary: fmt.Sprintf("install the %s runtimes declared in ~/%s", in.Component, in.Installer.Config),
 			Steps:   []Step{{Description: "run as the user, repeatable", Argv: slices.Clone(in.Installer.Install)}}}
-		switch {
-		case !binary:
+		if !binary {
 			rt.After = id
-		case !b.userFile(u.Home, in.Installer.Config):
+		} else if config, err := b.userFile(u.Home, in.Installer.Config); err != nil {
+			rt.Blocked = err.Error()
+		} else if !config {
 			rt.After = AfterHandoff
 			rt.Notes = append(rt.Notes, fmt.Sprintf("~/%s does not exist yet; the Chezmoi handoff writes it", in.Installer.Config))
 		}
@@ -1419,8 +1424,14 @@ func (b *builder) hasPrefix(prefix string) bool {
 
 // userFile reports whether a file relative to the home directory exists,
 // read through the source so a test can say what the home holds.
-func (b *builder) userFile(home, rel string) bool {
+func (b *builder) userFile(home, rel string) (bool, error) {
 	path := filepath.Join(home, rel)
 	names, err := b.in.Source.ReadDir(filepath.Dir(path))
-	return err == nil && slices.Contains(names, filepath.Base(path))
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspect ~/%s: %w", rel, err)
+	}
+	return slices.Contains(names, filepath.Base(path)), nil
 }

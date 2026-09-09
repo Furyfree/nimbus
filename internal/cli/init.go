@@ -480,8 +480,12 @@ func chezmoiHandoff(src facts.Source, out io.Writer, machine string, profiles []
 	if err != nil {
 		return err
 	}
+	initialized, err := facts.ChezmoiInitialized(src, home)
+	if err != nil {
+		return fmt.Errorf("inspect Chezmoi source before handoff: %w", err)
+	}
 	flags := []string{"--promptString", "Machine=" + machine, "--promptBool", "ManagedByNimbus=true", "--promptMultichoice", "Profiles=" + strings.Join(profiles, "/")}
-	if !facts.ChezmoiInitialized(src, home) {
+	if !initialized {
 		flags = append(flags, "--promptBool", fmt.Sprintf("Enable 1Password SSH integration=%t", onePasswordSSH))
 		argv := append([]string{"init"}, append(flags, "--", dotfiles.Repo)...)
 		if _, err := fmt.Fprintf(out, "-> initialize Chezmoi from %s\n   $ chezmoi %s\n", dotfiles.Repo, strings.Join(argv, " ")); err != nil {

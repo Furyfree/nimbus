@@ -155,6 +155,36 @@ func TestChezmoiHandoffRequiresEveryDisclosureBeforeMutation(t *testing.T) {
 	}
 }
 
+type unreadableHandoffSource struct {
+	facts.Source
+	err error
+}
+
+func (s unreadableHandoffSource) ReadDir(path string) ([]string, error) {
+	return nil, &os.PathError{Op: "readdir", Path: path, Err: s.err}
+}
+
+func TestChezmoiHandoffStopsWhenSourceCannotBeInspected(t *testing.T) {
+	for _, readErr := range []error{os.ErrPermission, syscall.EIO} {
+		t.Run(readErr.Error(), func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			calls := 0
+			src := handoffOutputSource{
+				Source:      unreadableHandoffSource{Source: &facts.FakeSource{Paths: map[string]string{"chezmoi": "/usr/bin/chezmoi"}}, err: readErr},
+				afterStream: func(string, []string) { calls++ },
+			}
+			err := chezmoiHandoff(src, io.Discard, "vm", []string{"common"}, &definitions.Dotfiles{Repo: "https://example.invalid/dotfiles.git"}, false)
+			if !errors.Is(err, readErr) || calls != 0 {
+				t.Fatalf("source inspection error = %v, mutation attempts = %d", err, calls)
+			}
+			if !strings.Contains(err.Error(), filepath.Join(home, ".local", "share", "chezmoi")) {
+				t.Fatalf("source inspection error lacks its path: %v", err)
+			}
+		})
+	}
+}
+
 func TestInitDisclosesDotfilesBeforeSystemWork(t *testing.T) {
 	root, src := installerFixture(t)
 	withHardware(src.FakeSource)

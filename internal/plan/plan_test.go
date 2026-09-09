@@ -964,3 +964,72 @@ func TestMiseBootstrapLeavesConfiguredToolsToChezmoi(t *testing.T) {
 		t.Fatal("user tools planned without their facts")
 	}
 }
+
+type userDirectorySource struct {
+	*facts.FakeSource
+	readErrors map[string]error
+}
+
+func (s userDirectorySource) ReadDir(path string) ([]string, error) {
+	if err := s.readErrors[path]; err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	return s.FakeSource.ReadDir(path)
+}
+
+func TestInstallerPlanningDistinguishesMissingAndUnreadableFiles(t *testing.T) {
+	for _, tc := range []struct {
+		name                   string
+		binaryDir, configDir   []string
+		binaryErr, configErr   error
+		wantAction, wantAfter  string
+		blockedID, blockedPath string
+	}{
+		{name: "missing binary directory", wantAction: ActionInstall, wantAfter: "user:mise"},
+		{name: "missing binary", binaryDir: []string{}, wantAction: ActionInstall, wantAfter: "user:mise"},
+		{name: "unreadable binary directory", binaryErr: os.ErrPermission, wantAction: ActionInstall, wantAfter: "user:mise", blockedID: "user:mise", blockedPath: ".local/bin/mise"},
+		{name: "binary inspection failure", binaryErr: errors.New("filesystem unavailable"), wantAction: ActionInstall, wantAfter: "user:mise", blockedID: "user:mise", blockedPath: ".local/bin/mise"},
+		{name: "config waits for binary", configErr: os.ErrPermission, wantAction: ActionInstall, wantAfter: "user:mise"},
+		{name: "missing config directory", binaryDir: []string{"mise"}, wantAction: ActionKeep, wantAfter: AfterHandoff},
+		{name: "missing config", binaryDir: []string{"mise"}, configDir: []string{}, wantAction: ActionKeep, wantAfter: AfterHandoff},
+		{name: "unreadable config directory", binaryDir: []string{"mise"}, configErr: os.ErrPermission, wantAction: ActionKeep, blockedID: "user:mise:install", blockedPath: ".config/mise/config.toml"},
+		{name: "config inspection failure", binaryDir: []string{"mise"}, configErr: errors.New("filesystem unavailable"), wantAction: ActionKeep, blockedID: "user:mise:install", blockedPath: ".config/mise/config.toml"},
+		{name: "ready", binaryDir: []string{"mise"}, configDir: []string{"config.toml"}, wantAction: ActionKeep},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			binaryDir := filepath.Join(home, ".local/bin")
+			configDir := filepath.Join(home, ".config/mise")
+			src := userDirectorySource{FakeSource: &facts.FakeSource{Dirs: map[string][]string{}, Commands: map[string][]byte{
+				facts.Key("dnf5", "--cacheonly", "check-upgrade"): nil,
+			}}, readErrors: map[string]error{binaryDir: tc.binaryErr, configDir: tc.configErr}}
+			if tc.binaryDir != nil {
+				src.Dirs[binaryDir] = tc.binaryDir
+			}
+			if tc.configDir != nil {
+				src.Dirs[configDir] = tc.configDir
+			}
+			resolved := &definitions.Resolved{Machine: "vm", Installers: []definitions.ResolvedInstaller{{Component: "mise", Installer: definitions.Installer{
+				URL: "https://mise.run", Binary: ".local/bin/mise", Config: ".config/mise/config.toml", Install: []string{HomeDir + "/.local/bin/mise", "install"},
+			}}}}
+			p, err := Build(Inputs{Resolved: resolved, Facts: &facts.Facts{User: facts.Section[facts.User]{Value: facts.User{Home: home}}}, Source: src})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if p.Complete != (tc.blockedID == "") {
+				t.Fatalf("plan completeness does not reflect inspection failure: %+v", p)
+			}
+			binary, runtime := find(p, "user:mise"), find(p, "user:mise:install")
+			if binary == nil || runtime == nil || binary.Action != tc.wantAction || runtime.After != tc.wantAfter {
+				t.Fatalf("installer ordering changed: binary=%+v runtime=%+v", binary, runtime)
+			}
+			if tc.blockedID != "" {
+				op := find(p, tc.blockedID)
+				cause := cmp.Or(tc.binaryErr, tc.configErr)
+				if op == nil || !strings.Contains(op.Blocked, tc.blockedPath) || !strings.Contains(op.Blocked, cause.Error()) {
+					t.Fatalf("inspection failure lost path or cause: %+v", op)
+				}
+			}
+		})
+	}
+}

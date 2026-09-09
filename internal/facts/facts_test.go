@@ -1,10 +1,12 @@
 package facts
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -381,5 +383,61 @@ func TestChezmoiDataUsesExactProfileKey(t *testing.T) {
 	}
 	if _, err := ParseChezmoiData([]byte(`{"Profiles":"common"}`)); err == nil {
 		t.Fatal("invalid machine selection was accepted")
+	}
+}
+
+type directoryReadFailureSource struct {
+	Source
+	target string
+	cause  error
+}
+
+func (s directoryReadFailureSource) ReadDir(path string) ([]string, error) {
+	if path == s.target {
+		return nil, &os.PathError{Op: "readdir", Path: path, Err: s.cause}
+	}
+	return s.Source.ReadDir(path)
+}
+
+func TestOptionalUserDirectoryErrorsRemainUnknown(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, cause := range []error{os.ErrPermission, syscall.EIO} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			base := &FakeSource{Paths: map[string]string{"chezmoi": "/usr/bin/chezmoi"}}
+			src := directoryReadFailureSource{Source: base, target: filepath.Join(home, ".local", "share", "chezmoi"), cause: cause}
+			if initialized, err := ChezmoiInitialized(src, home); initialized || !errors.Is(err, cause) || !strings.Contains(err.Error(), src.target) {
+				t.Fatalf("Chezmoi source read failure = %v, %v", initialized, err)
+			}
+			if _, err := chezmoi(src); !errors.Is(err, cause) {
+				t.Fatalf("Chezmoi inspection lost the source read failure: %v", err)
+			}
+			if observed := Inspect(src, "").Chezmoi; observed.Known() || !strings.Contains(observed.Error, src.target) {
+				t.Fatalf("Chezmoi source read failure was treated as absence: %+v", observed)
+			}
+
+			src.target = filepath.Join(home, ".cargo", "bin")
+			if _, err := user(src); !errors.Is(err, cause) || !strings.Contains(err.Error(), src.target) {
+				t.Fatalf("Cargo inspection lost the directory read failure: %v", err)
+			}
+			if observed := Inspect(src, "").User; observed.Known() || !strings.Contains(observed.Error, src.target) {
+				t.Fatalf("Cargo directory read failure was treated as absence: %+v", observed)
+			}
+		})
+	}
+}
+
+func TestMissingAndEmptyCargoDirectoriesRemainKnown(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	src := &FakeSource{Dirs: map[string][]string{}}
+	for _, empty := range []bool{false, true} {
+		if empty {
+			src.Dirs[filepath.Join(home, ".cargo", "bin")] = []string{}
+		}
+		observed := Inspect(src, "").User
+		if !observed.Known() || observed.Value.Cargo || len(observed.Value.Crates) != 0 || observed.Value.Home != home {
+			t.Fatalf("Cargo absence (directory exists=%v) = %+v", empty, observed)
+		}
 	}
 }
