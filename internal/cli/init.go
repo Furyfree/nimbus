@@ -327,7 +327,7 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	stageStarted = time.Now()
 	active = 1
 	flags := machineFlags{checkout: root, machine: machine}
-	if err := runSyncWith(cmd, opts, flags, syncFlags{yes: true, deferUser: true}, lock); err != nil {
+	if err := runSyncWith(cmd, opts, flags, syncFlags{yes: true, deferUser: true, definitionsDigest: c.Digest()}, lock); err != nil {
 		for i := 2; i < len(steps); i++ {
 			steps[i].Detail = "system installation did not complete"
 		}

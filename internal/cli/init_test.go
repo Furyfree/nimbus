@@ -202,6 +202,75 @@ func TestInitDisclosesDotfilesBeforeSystemWork(t *testing.T) {
 	}
 }
 
+type initOutputWriter func([]byte) (int, error)
+
+func (w initOutputWriter) Write(p []byte) (int, error) { return w(p) }
+
+func TestInitChecksSelectedDefinitionsBeforeSystemSync(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		newMachine, drift bool
+	}{
+		{name: "tracked"},
+		{name: "tracked with drift", drift: true},
+		{name: "new", newMachine: true},
+		{name: "new with drift", newMachine: true, drift: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, src := installerFixture(t)
+			if err := os.WriteFile(filepath.Join(root, "profiles/common.toml"), []byte("schema=1\nid='common'\npackages=[]\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			machine := "vm"
+			args := []string{"init", "--checkout", root, "--machine", machine}
+			if tc.newMachine {
+				machine = "newbox"
+				args = []string{"init", "--checkout", root, "--new", machine, "--no-dotfiles"}
+				saved := pickerFn
+				t.Cleanup(func() { pickerFn = saved })
+				pickerFn = func(title string, _ []pickItem) ([]string, error) {
+					if strings.HasPrefix(title, "profiles") {
+						return []string{"common"}, nil
+					}
+					return nil, nil
+				}
+			}
+			var out, errOut strings.Builder
+			selected := false
+			writer := initOutputWriter(func(p []byte) (int, error) {
+				if !selected && strings.Contains(string(p), "selector written to") {
+					selected = true
+					if tc.drift {
+						path := manifestPath(root, machine)
+						data, err := os.ReadFile(path)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if err := os.WriteFile(path, append(data, "# changed after selection\n"...), 0644); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				return out.Write(p)
+			})
+			code := Execute(args, writer, &errOut)
+			if !selected {
+				t.Fatalf("selection boundary not reached: %d %s%s", code, &out, &errOut)
+			}
+			if tc.drift {
+				if code != ExitFailure || !strings.Contains(out.String(), "definitions changed during initialization") {
+					t.Fatalf("definition drift was not reported: %d %s%s", code, &out, &errOut)
+				}
+				if len(src.calls) != 0 || slices.Contains(src.reads, "dnf5 makecache") {
+					t.Fatalf("definition drift reached system work: calls=%v, reads=%v", src.calls, src.reads)
+				}
+			} else if code != ExitOK || !slices.Contains(src.calls, "sudo dnf5 -y upgrade") {
+				t.Fatalf("unchanged definitions did not reach system sync: %d %s%s; calls=%v", code, &out, &errOut, src.calls)
+			}
+		})
+	}
+}
+
 func TestInitReturnsSummaryFailureAndPreservesNativeFailure(t *testing.T) {
 	for _, failed := range []bool{false, true} {
 		t.Run(map[bool]string{false: "success", true: "native failure"}[failed], func(t *testing.T) {
