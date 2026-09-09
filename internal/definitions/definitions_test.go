@@ -315,6 +315,33 @@ func TestTwoDotsInsideANameAreAllowed(t *testing.T) {
 	}
 }
 
+func TestInstallerPathsNameFiles(t *testing.T) {
+	for _, tc := range []struct {
+		name, binary, config, want string
+	}{
+		{"home as binary", ".", "", "installer.binary"},
+		{"home as config", ".local/bin/example", ".", "installer.config"},
+		{"binary only", ".local/bin/example", "", ""},
+		{"binary and config", ".local/bin/example", ".config/example.toml", ""},
+		{"two dots inside names", ".local/bin/example..tool", ".config/example..toml", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tree := baseTree()
+			decl := "\n[installer]\nurl = \"https://example.invalid/install.sh\"\nbinary = \"" + tc.binary + "\"\n"
+			if tc.config != "" {
+				decl += "config = \"" + tc.config + "\"\ninstall = [\"example\", \"install\"]\n"
+			}
+			tree["components/hardware.toml"] += decl
+			errs := loadAndValidate(t, writeTree(t, tree))
+			if tc.want != "" {
+				requireError(t, errs, tc.want)
+			} else if len(errs) > 0 {
+				t.Fatal(errs)
+			}
+		})
+	}
+}
+
 func TestMinimumEngine(t *testing.T) {
 	root := writeTree(t, baseTree())
 	saved := version.Engine

@@ -236,10 +236,10 @@ func (c *Checkout) validateRefs(where string, raws []string, errs *ErrorList) {
 	}
 }
 
-// cleanRelativePath accepts a relative, already-clean path with no ".."
+// cleanRelativePath accepts an already-clean relative file path with no ".."
 // segment. Two dots inside a name are fine.
 func cleanRelativePath(p string) bool {
-	if p == "" || strings.HasPrefix(p, "/") || path.Clean(p) != p {
+	if p == "" || p == "." || strings.HasPrefix(p, "/") || path.Clean(p) != p {
 		return false
 	}
 	for seg := range strings.SplitSeq(p, "/") {
