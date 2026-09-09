@@ -243,7 +243,8 @@ func ParseOriginURL(data []byte) (string, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	section, subsection := "", ""
 	origin := ""
-	for scanner.Scan() {
+	foundOrigin := false
+	for lineNumber := 1; scanner.Scan(); lineNumber++ {
 		raw := scanner.Text()
 		line := strings.TrimSpace(raw)
 		if line == "" || line[0] == '#' || line[0] == ';' {
@@ -260,20 +261,24 @@ func ParseOriginURL(data []byte) (string, error) {
 			}
 			continue
 		}
-		if gitValueContinues(raw) {
-			return "", fmt.Errorf("Git configuration line continuations are not supported; write each value on one line")
+		key, rawValue, assigned := strings.Cut(raw, "=")
+		if !assigned {
+			rawValue = raw
 		}
-		if section != "remote" || subsection != "origin" {
+		value, err := parseGitValue(rawValue)
+		if err != nil {
+			return "", fmt.Errorf("Git configuration line %d: %w", lineNumber, err)
+		}
+		if section != "remote" || subsection != "origin" || !strings.EqualFold(strings.TrimSpace(key), "url") {
 			continue
 		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok || !strings.EqualFold(strings.TrimSpace(key), "url") {
-			continue
-		}
-		if origin != "" {
+		if foundOrigin {
 			return "", fmt.Errorf("remote.origin.url is set more than once")
 		}
-		origin = strings.TrimSpace(value)
+		if !assigned {
+			value = ""
+		}
+		origin, foundOrigin = value, true
 	}
 	if err := scanner.Err(); err != nil {
 		return "", fmt.Errorf("unreadable configuration: %w", err)
@@ -284,27 +289,59 @@ func ParseOriginURL(data []byte) (string, error) {
 	return origin, nil
 }
 
-// gitValueContinues distinguishes a continuation from an escaped backslash
-// or a backslash inside an inline comment. Only double quotes quote Git values.
-func gitValueContinues(line string) bool {
+// parseGitValue decodes Git's quoted segments, escapes, whitespace, and
+// comments while rejecting line continuations.
+func parseGitValue(raw string) (string, error) {
+	value := make([]byte, 0, len(raw))
+	end := 0
 	quoted, escaped := false, false
-	for _, char := range line {
+	for i := range len(raw) {
+		char := raw[i]
 		if escaped {
+			switch char {
+			case 'n':
+				char = '\n'
+			case 't':
+				char = '\t'
+			case 'b':
+				char = '\b'
+			case '\\', '"':
+			default:
+				return "", fmt.Errorf("invalid escape \\%c", char)
+			}
 			escaped = false
-			continue
-		}
-		switch char {
-		case '\\':
-			escaped = true
-		case '"':
-			quoted = !quoted
-		case '#', ';':
-			if !quoted {
-				return false
+		} else {
+			switch char {
+			case '\\':
+				escaped = true
+				continue
+			case '"':
+				quoted = !quoted
+				end = len(value)
+				continue
+			case '#', ';':
+				if !quoted {
+					return string(value[:end]), nil
+				}
+			case ' ', '\t', '\r', '\v', '\f':
+				if !quoted {
+					if len(value) > 0 {
+						value = append(value, char)
+					}
+					continue
+				}
 			}
 		}
+		value = append(value, char)
+		end = len(value)
 	}
-	return escaped
+	if escaped {
+		return "", fmt.Errorf("line continuations are not supported; write each value on one line")
+	}
+	if quoted {
+		return "", fmt.Errorf("unterminated quoted value")
+	}
+	return string(value[:end]), nil
 }
 
 var sectionHeaderRe = regexp.MustCompile(`^\[([A-Za-z0-9.-]+)(?:[ \t]+"((?:[^"\\]|\\.)*)")?\][ \t]*(?:[#;].*)?$`)

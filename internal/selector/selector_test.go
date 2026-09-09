@@ -400,3 +400,102 @@ func TestOriginValueContinuations(t *testing.T) {
 		})
 	}
 }
+
+func TestOriginURLValuesMatchGit(t *testing.T) {
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git unavailable:", err)
+	}
+	for _, locator := range []string{"https://github.com/Furyfree/nimbus.git", "git@github.com:Furyfree/nimbus.git"} {
+		for _, tc := range []struct{ name, value string }{
+			{"plain", locator},
+			{"quoted", `"` + locator + `"`},
+			{"quoted segment", strings.Replace(locator, "Furyfree", `"Furyfree"`, 1)},
+			{"hash comment", locator + " # origin comment"},
+			{"semicolon comment", locator + " ; origin comment"},
+			{"quoted with comment", `"` + locator + `" # origin comment`},
+		} {
+			t.Run(locator+"/"+tc.name, func(t *testing.T) {
+				root := gitCheckout(t, "[remote \"origin\"]\nurl="+tc.value+"\n")
+				out, err := exec.CommandContext(t.Context(), git, "config", "--file", filepath.Join(root, ".git", "config"), "--get", "remote.origin.url").CombinedOutput()
+				if err != nil || string(out) != locator+"\n" {
+					t.Fatalf("native Git origin = %q, %v", out, err)
+				}
+				if got, err := CheckoutOrigin(root); err != nil || got != locator {
+					t.Fatalf("checkout origin = %q, %v; want %q", got, err, locator)
+				}
+				if err := Verify(&Selector{Origin: "github.com/Furyfree/nimbus"}, root); err != nil {
+					t.Fatalf("equivalent origin was rejected: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestOriginValueEscapesAndWhitespaceMatchGit(t *testing.T) {
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git unavailable:", err)
+	}
+	for _, tc := range []struct{ name, value, want string }{
+		{"quoted escapes", `"first\n\t\b\\\"last"`, "first\n\t\b\\\"last"},
+		{"unquoted escapes", `first\n\t\b\\\"last`, "first\n\t\b\\\"last"},
+		{"quoted comment characters", `"first #; last" # comment`, "first #; last"},
+		{"quoted whitespace", `  " padded "  `, " padded "},
+		{"trailing empty segment", `first   ""`, "first   "},
+		{"leading empty segment", `""  last`, "last"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := gitCheckout(t, "[remote \"origin\"]\nurl="+tc.value+"\n")
+			out, err := exec.CommandContext(t.Context(), git, "config", "--file", filepath.Join(root, ".git", "config"), "--get", "remote.origin.url").CombinedOutput()
+			if err != nil || string(out) != tc.want+"\n" {
+				t.Fatalf("native Git value = %q, %v", out, err)
+			}
+			if got, err := CheckoutOrigin(root); err != nil || got != tc.want {
+				t.Fatalf("checkout value = %q, %v; want %q", got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestOriginRejectsInvalidValueEncoding(t *testing.T) {
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git unavailable:", err)
+	}
+	for _, value := range []string{`"unterminated`, `"bad\q"`, `bad\q`, `bad\r`, `bad\x20`, `bad\040`, `bad\#`} {
+		for _, prefix := range []string{"[remote \"origin\"]\nurl=", "[core]\ndescription="} {
+			t.Run(prefix+value, func(t *testing.T) {
+				root := gitCheckout(t, prefix+value+"\n"+originConfig)
+				config := filepath.Join(root, ".git", "config")
+				if out, err := exec.CommandContext(t.Context(), git, "config", "--file", config, "--get", "remote.origin.url").CombinedOutput(); err == nil {
+					t.Fatalf("native Git accepted invalid encoding: %q", out)
+				}
+				if _, err := CheckoutOrigin(root); err == nil || !strings.Contains(err.Error(), config) || !strings.Contains(err.Error(), "line 2") {
+					t.Fatalf("invalid encoding lacked file and line context: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestEmptyOriginDoesNotHideDuplicateURL(t *testing.T) {
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git unavailable:", err)
+	}
+	const locator = "https://github.com/Furyfree/nimbus.git"
+	for _, entry := range []string{"url", " \tURL \t", "url=", `url=""`, "url= # no value", "url= ; no value"} {
+		t.Run(entry, func(t *testing.T) {
+			config := "[remote \"origin\"]\n" + entry + "\nurl=" + locator + "\n"
+			root := gitCheckout(t, config)
+			out, err := exec.CommandContext(t.Context(), git, "config", "--file", filepath.Join(root, ".git", "config"), "--get-all", "remote.origin.url").CombinedOutput()
+			if err != nil || string(out) != "\n"+locator+"\n" {
+				t.Fatalf("native Git origins = %q, %v", out, err)
+			}
+			if err := Verify(&Selector{Origin: "github.com/Furyfree/nimbus"}, root); err == nil || !strings.Contains(err.Error(), "more than once") {
+				t.Fatalf("empty first URL %q hid a duplicate: %v", entry, err)
+			}
+		})
+	}
+}
