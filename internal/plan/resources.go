@@ -276,9 +276,15 @@ func (b *builder) serviceOperation(id string, want definitions.ServiceDecl, comp
 	have, err := facts.ObserveService(b.in.Source, want.Unit)
 	op.Resource = &ResourceChange{Name: want.Unit, Before: encodeResource(have), After: encodeResource(want), Previous: encodeResource(have), Enabled: want.Enabled, Running: want.Running}
 	receipt, managed := b.in.Applied.Receipts[id]
-	switch {
-	case err != nil:
+	if managed {
+		op.Resource.Previous = receipt.Previous
+	}
+	if err != nil {
 		op.Blocked = err.Error()
+		op.After = pending
+		return op
+	}
+	switch {
 	case have.Load == "not-found" && pending != "":
 		op.After = pending
 	case have.Load != "loaded":
@@ -287,9 +293,6 @@ func (b *builder) serviceOperation(id string, want definitions.ServiceDecl, comp
 		op.Blocked = "masked unit requires explicit manual migration"
 	case managed && !ownedResource(receipt, id, KindService, b.in.Resolved.Machine):
 		op.Blocked = "service receipt is invalid or foreign"
-	}
-	if managed {
-		op.Resource.Previous = receipt.Previous
 	}
 	if want.Enabled != nil {
 		enabled := have.Enabled == "enabled"
@@ -325,7 +328,9 @@ func (b *builder) serviceOperation(id string, want definitions.ServiceDecl, comp
 		} else {
 			if slices.Contains(names, "display-manager.service") {
 				out, e := b.in.Source.Run("readlink", "--", "/etc/systemd/system/display-manager.service")
-				if e != nil || !strings.HasSuffix(strings.TrimSpace(string(out)), "/greetd.service") {
+				if e != nil {
+					op.Blocked = "cannot inspect display-manager ownership: " + e.Error()
+				} else if !strings.HasSuffix(strings.TrimSpace(string(out)), "/greetd.service") {
 					op.Blocked = "another display manager owns display-manager.service; explicit migration is required"
 				}
 			}
@@ -442,11 +447,10 @@ func (b *builder) retireResource(id string, receipt state.Receipt) Operation {
 			break
 		}
 		out, err := b.in.Source.Run("systemctl", "get-default")
+		before := strings.TrimSpace(string(out))
 		if err != nil {
 			op.Blocked = err.Error()
-		}
-		before := strings.TrimSpace(string(out))
-		if before != receipt.Intended {
+		} else if before != receipt.Intended {
 			op.Blocked = "boot target changed since last receipt"
 		}
 		op.Resource = &ResourceChange{Name: id, Before: before, After: receipt.Previous, Previous: receipt.Previous}

@@ -152,6 +152,126 @@ func TestServiceEnablementDoesNotStartGreeterAndRejectsForeignManager(t *testing
 	}
 }
 
+func TestServicePlanningRetainsObservationFailures(t *testing.T) {
+	const cause = "systemctl inspection unavailable"
+	for _, tc := range []struct {
+		name    string
+		want    definitions.ServiceDecl
+		pending bool
+	}{
+		{"enable", definitions.ServiceDecl{Unit: "demo.service", Enabled: new(true)}, false},
+		{"disable", definitions.ServiceDecl{Unit: "demo.service", Enabled: new(false)}, false},
+		{"running only", definitions.ServiceDecl{Unit: "demo.service", Running: new(true)}, false},
+		{"greeter", definitions.ServiceDecl{Unit: "greetd.service", Enabled: new(true)}, false},
+		{"pending greeter", definitions.ServiceDecl{Unit: "greetd.service", Enabled: new(true)}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, src := resourceBuilder()
+			b.in.Resolved.Services = []definitions.ResolvedService{{ServiceDecl: tc.want}}
+			src.Failures[facts.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", tc.want.Unit)] = cause
+			// A later ownership failure must not replace the service failure.
+			src.Dirs["/etc/systemd/system"] = []string{"display-manager.service"}
+			src.Failures[facts.Key("readlink", "--", "/etc/systemd/system/display-manager.service")] = "ownership inspection unavailable"
+			if tc.pending {
+				b.in.Resolved.Packages = []definitions.ResolvedPackage{{Name: "greetd", Prefix: "dnf", Canonical: "dnf:greetd"}}
+				src.Commands[facts.Key("dnf5", "--assumeno", "--cacheonly", "install", "greetd")] = previewText([]TxPackage{{Name: "greetd", Arch: "x86_64", EVR: "1-1", Repository: "fedora", Section: "installing"}})
+			}
+			p, err := Build(b.in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			op := find(p, "service:"+tc.want.Unit)
+			if p.Complete || op == nil || op.Resource == nil || !strings.Contains(op.Blocked, cause) {
+				t.Fatalf("service observation failure lost: complete=%t operation=%+v", p.Complete, op)
+			}
+			if tc.pending && op.After != "packages:install" {
+				t.Fatalf("service lost its package dependency: %+v", op)
+			}
+		})
+	}
+}
+
+func TestServicePlanningUsesObservedEnablement(t *testing.T) {
+	for _, tc := range []struct {
+		enabled, blocked string
+	}{
+		{"disabled", ""},
+		{"static", "unsupported unit enablement state static"},
+	} {
+		t.Run(tc.enabled, func(t *testing.T) {
+			b, src := resourceBuilder()
+			b.in.Resolved.Services = []definitions.ResolvedService{{ServiceDecl: definitions.ServiceDecl{Unit: "demo.service", Enabled: new(true)}}}
+			answerUnit(src, "demo.service", tc.enabled, "inactive")
+			p, err := Build(b.in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			op := find(p, "service:demo.service")
+			if p.Complete != (tc.blocked == "") || op == nil || op.Blocked != tc.blocked || len(op.Steps) != 1 || op.Steps[0].Argv[1] != "enable" {
+				t.Fatalf("observed enablement planned incorrectly: complete=%t operation=%+v", p.Complete, op)
+			}
+		})
+	}
+}
+
+func TestGreeterPlanningDistinguishesFailedAndForeignOwnership(t *testing.T) {
+	for _, tc := range []struct {
+		name, target, failure, blocked string
+	}{
+		{"read failure", "", "readlink permission denied", "cannot inspect display-manager ownership: readlink permission denied"},
+		{"foreign manager", "/usr/lib/systemd/system/gdm.service\n", "", "another display manager owns display-manager.service; explicit migration is required"},
+		{"owned manager", "/usr/lib/systemd/system/greetd.service\n", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, src := resourceBuilder()
+			b.in.Resolved.Services = []definitions.ResolvedService{{ServiceDecl: definitions.ServiceDecl{Unit: "greetd.service", Enabled: new(true)}}}
+			answerUnit(src, "greetd.service", "disabled", "inactive")
+			src.Dirs["/etc/systemd/system"] = []string{"display-manager.service"}
+			key := facts.Key("readlink", "--", "/etc/systemd/system/display-manager.service")
+			src.Commands[key] = []byte(tc.target)
+			if tc.failure != "" {
+				src.Failures[key] = tc.failure
+			}
+			p, err := Build(b.in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			op := find(p, "service:greetd.service")
+			if p.Complete != (tc.blocked == "") || op == nil || op.Blocked != tc.blocked {
+				t.Fatalf("ownership observation planned incorrectly: complete=%t operation=%+v", p.Complete, op)
+			}
+		})
+	}
+}
+
+func TestTargetRetirementDistinguishesFailedObservationAndDrift(t *testing.T) {
+	for _, tc := range []struct {
+		name, target, failure, blocked string
+	}{
+		{"read failure", "", "get-default connection refused", "get-default connection refused"},
+		{"drift", "multi-user.target\n", "", "boot target changed since last receipt"},
+		{"unchanged", "graphical.target\n", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, src := resourceBuilder()
+			b.in.Applied.Receipts["default-target"] = state.Receipt{Resource: "default-target", Provider: KindTarget, Machine: "vm", Verified: true, Previous: "multi-user.target", Intended: "graphical.target"}
+			key := facts.Key("systemctl", "get-default")
+			src.Commands[key] = []byte(tc.target)
+			if tc.failure != "" {
+				src.Failures[key] = tc.failure
+			}
+			p, err := Build(b.in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			op := find(p, "default-target")
+			if p.Complete != (tc.blocked == "") || op == nil || op.Blocked != tc.blocked || op.Resource == nil || op.Resource.After != "multi-user.target" {
+				t.Fatalf("target observation planned incorrectly: complete=%t operation=%+v", p.Complete, op)
+			}
+		})
+	}
+}
+
 func TestMembershipRemovalPreservesPreexistingAndPrimaryGroups(t *testing.T) {
 	b, src := resourceBuilder()
 	src.Commands[facts.Key("id", "-nG", "--", "owner")] = []byte("owner docker")
