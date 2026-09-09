@@ -451,6 +451,9 @@ func (b *builder) retireResource(id string, receipt state.Receipt) Operation {
 				op.Blocked = "membership is now the primary group; removal is forbidden"
 			}
 			op.Steps = []Step{{Description: "remove Nimbus-added membership", Argv: []string{"gpasswd", "--delete", fields[2], fields[1]}, Privileged: true}}
+			if op.Blocked == "" {
+				op.Notes = []string{"Changed group membership requires logout and login."}
+			}
 		}
 	case KindTarget:
 		if receipt.Previous != "graphical.target" && receipt.Previous != "multi-user.target" {
@@ -467,6 +470,9 @@ func (b *builder) retireResource(id string, receipt state.Receipt) Operation {
 		op.Resource = &ResourceChange{Name: id, Before: before, After: receipt.Previous, Previous: receipt.Previous}
 		if before != receipt.Previous {
 			op.Steps = []Step{{Description: "restore prior default target", Argv: []string{"systemctl", "set-default", receipt.Previous}, Privileged: true}}
+			if op.Blocked == "" {
+				op.Notes = []string{"Takes effect on the next boot; the current graphical session is not stopped."}
+			}
 		}
 	}
 	return op

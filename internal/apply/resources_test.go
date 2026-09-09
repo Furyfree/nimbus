@@ -276,6 +276,80 @@ func TestPreexistingMembershipRetirementPreservesObservation(t *testing.T) {
 	}
 }
 
+func TestResourceRetirementReportsSessionRequirements(t *testing.T) {
+	for _, kind := range []string{plan.KindGroup, plan.KindTarget} {
+		for _, outcome := range []string{"changed", "unchanged", "native failure", "verification failure", "record failure", "pending"} {
+			t.Run(kind+"/"+outcome, func(t *testing.T) {
+				base := &facts.FakeSource{Commands: map[string][]byte{facts.Key("dnf5", facts.PackageQueryArgs...): nil}, Failures: map[string]string{}}
+				var source facts.Source
+				op := plan.Operation{Kind: kind, Action: plan.ActionRemove}
+				changed := outcome != "unchanged"
+				if kind == plan.KindGroup {
+					op.ID = "group:docker:owner"
+					before := "false"
+					observations := []string{"owner", "owner"}
+					if changed {
+						before = "true"
+						observations = []string{"owner docker", "owner"}
+						op.Steps = []plan.Step{{Argv: []string{"gpasswd", "--delete", "owner", "docker"}, Privileged: true}}
+					}
+					op.Resource = &plan.ResourceChange{Name: "docker", User: "owner", Before: before, After: "false", Previous: "false"}
+					source = &membershipSource{FakeSource: base, observations: observations}
+				} else {
+					op.ID = "default-target"
+					before := "graphical.target"
+					if changed {
+						before = "multi-user.target"
+						op.Steps = []plan.Step{{Argv: []string{"systemctl", "set-default", "graphical.target"}, Privileged: true}}
+					}
+					base.Commands[facts.Key("systemctl", "get-default")] = []byte(before + "\n")
+					op.Resource = &plan.ResourceChange{Name: op.ID, Before: before, After: "graphical.target", Previous: "graphical.target"}
+					source = &targetCommandSource{FakeSource: base}
+				}
+				if outcome == "verification failure" {
+					if kind == plan.KindGroup {
+						source = &membershipSource{FakeSource: base, observations: []string{"owner docker", "owner docker"}}
+					} else {
+						source = base
+					}
+				}
+				for _, step := range op.Steps {
+					command := facts.Key("sudo", step.Argv...)
+					base.Commands[command] = nil
+					if outcome == "native failure" {
+						base.Failures[command] = "native mutation failed"
+					}
+				}
+				if outcome == "pending" {
+					op.After = "packages:install"
+				}
+				recordCalled := false
+				result := Run(&plan.Plan{Complete: true, Digest: "approved", Operations: []plan.Operation{op}}, Options{Source: source, Record: func(_ string, stage *state.Stage) error {
+					recordCalled = true
+					if len(stage.Receipts) != 0 || !slices.Equal(stage.Remove, []string{op.ID}) {
+						t.Fatalf("retirement must only remove its receipt: %+v", stage)
+					}
+					if outcome == "record failure" {
+						return errors.New("record failed")
+					}
+					return nil
+				}})
+				verified := outcome != "native failure" && outcome != "verification failure" && outcome != "pending"
+				failed := outcome == "native failure" || outcome == "verification failure" || outcome == "record failure"
+				if recordCalled != verified || (result.Error != "") != failed {
+					t.Fatalf("retirement outcome: %+v, record called=%t", result, recordCalled)
+				}
+				if result.Logout != (verified && changed && kind == plan.KindGroup) || result.Reboot != (verified && changed && kind == plan.KindTarget) {
+					t.Fatalf("retirement requirements: %+v", result)
+				}
+				if (len(result.Executed) == 1) != (verified && !failed) {
+					t.Fatalf("retirement execution report: %+v", result)
+				}
+			})
+		}
+	}
+}
+
 type serviceCommandSource struct {
 	*facts.FakeSource
 	before, after facts.Service

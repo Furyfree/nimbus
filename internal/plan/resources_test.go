@@ -359,6 +359,42 @@ func TestMembershipRemovalPreservesPreexistingAndPrimaryGroups(t *testing.T) {
 	}
 }
 
+func TestRetirementPlansShowSessionRequirementsOnlyForChanges(t *testing.T) {
+	for _, kind := range []string{KindGroup, KindTarget} {
+		for _, outcome := range []string{"changed", "unchanged", "blocked"} {
+			t.Run(kind+"/"+outcome, func(t *testing.T) {
+				b, src := resourceBuilder()
+				receipt := state.Receipt{Provider: kind, Machine: "vm", Verified: true}
+				var note string
+				if kind == KindGroup {
+					receipt.Resource, receipt.Previous, receipt.Intended = "group:docker:owner", "false", "true"
+					src.Commands[facts.Key("id", "-nG", "--", "owner")] = []byte("owner docker")
+					src.Commands[facts.Key("id", "-gn", "--", "owner")] = []byte("owner")
+					if outcome == "unchanged" {
+						receipt.Previous = "true"
+					} else if outcome == "blocked" {
+						src.Commands[facts.Key("id", "-gn", "--", "owner")] = []byte("docker")
+					}
+					note = "logout and login"
+				} else {
+					receipt.Resource, receipt.Previous, receipt.Intended = "default-target", "graphical.target", "multi-user.target"
+					src.Commands[facts.Key("systemctl", "get-default")] = []byte("multi-user.target\n")
+					if outcome == "unchanged" {
+						receipt.Previous = "multi-user.target"
+					} else if outcome == "blocked" {
+						receipt.Intended = "graphical.target"
+					}
+					note = "next boot"
+				}
+				op := b.retireResource(receipt.Resource, receipt)
+				if (op.Blocked != "") != (outcome == "blocked") || strings.Contains(strings.Join(op.Notes, " "), note) != (outcome == "changed") {
+					t.Fatalf("retirement requirements: %+v", op)
+				}
+			})
+		}
+	}
+}
+
 func TestTriggerRetriesAfterFileReceiptAndDeduplicates(t *testing.T) {
 	b, src := resourceBuilder()
 	target := "/etc/nimbus.conf"

@@ -118,6 +118,10 @@ func Run(p *plan.Plan, opts Options) *Result {
 			}
 			return r
 		}
+		if op.Resource != nil && op.Resource.Before != op.Resource.After {
+			r.Reboot = r.Reboot || op.Kind == plan.KindTarget
+			r.Logout = r.Logout || op.Kind == plan.KindGroup
+		}
 		for _, receipt := range receipts {
 			r.Reboot = r.Reboot || receipt.Reboot
 			r.Logout = r.Logout || receipt.Logout
