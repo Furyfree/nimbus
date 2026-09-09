@@ -196,10 +196,8 @@ func TestInitAppliesDotfilesBeforeCargoAndRetriesAFailure(t *testing.T) {
 			t.Fatalf("missing stage diagnostic %s", detail)
 		}
 	}
-	for _, call := range src.calls {
-		if strings.Contains(call, "cargo install demo") {
-			t.Fatal("Cargo ran after failed apply")
-		}
+	if slices.ContainsFunc(src.calls, func(call string) bool { return strings.Contains(call, "cargo install demo") }) {
+		t.Fatal("Cargo ran after failed apply")
 	}
 	src.failApply = false
 	src.calls = nil

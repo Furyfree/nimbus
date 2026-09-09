@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 )
@@ -59,7 +58,7 @@ type Receipt struct {
 	Verification  string           `json:"verification"`
 	RecoveryPoint string           `json:"recovery_point,omitempty"`
 	Timestamp     time.Time        `json:"timestamp"`
-	ChangedAt     time.Time        `json:"changed_at,omitempty"`
+	ChangedAt     time.Time        `json:"changed_at,omitzero"`
 	Reboot        bool             `json:"reboot,omitzero"`
 	Logout        bool             `json:"logout,omitzero"`
 	Triggers      []string         `json:"triggers,omitempty"`
@@ -158,8 +157,8 @@ func (a *Applied) InBaseline(name string) bool {
 	if a == nil || a.Baseline == nil {
 		return false
 	}
-	i := sort.SearchStrings(a.Baseline.Packages, name)
-	return i < len(a.Baseline.Packages) && a.Baseline.Packages[i] == name
+	_, found := slices.BinarySearch(a.Baseline.Packages, name)
+	return found
 }
 
 // Stage is the data one record action writes. It is produced by the normal

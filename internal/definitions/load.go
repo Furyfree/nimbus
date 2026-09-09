@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -39,8 +38,8 @@ func (c *Checkout) Definitions() Root { return c.Root_ }
 
 // Entry returns the boundary entry at a checkout-relative path.
 func (c *Checkout) Entry(path string) (Entry, bool) {
-	i := sort.Search(len(c.Entries), func(i int) bool { return c.Entries[i].Path >= path })
-	if i < len(c.Entries) && c.Entries[i].Path == path {
+	i, found := slices.BinarySearchFunc(c.Entries, path, func(e Entry, p string) int { return cmp.Compare(e.Path, p) })
+	if found {
 		return c.Entries[i], true
 	}
 	return Entry{}, false

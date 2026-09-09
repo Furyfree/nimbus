@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"cmp"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -277,11 +279,8 @@ tee() { cat; return 23; }
 installer_run bash -c 'echo native-output; exit %d'
 `, native)
 			out, err := shellHelper(t, home, body)
-			exit, ok := err.(*exec.ExitError)
-			want := native
-			if want == 0 {
-				want = 1
-			}
+			exit, ok := errors.AsType[*exec.ExitError](err)
+			want := cmp.Or(native, 1)
 			if !ok || exit.ExitCode() != want || !strings.Contains(string(out), "installation log write failed (tee status=23)") {
 				t.Fatalf("lost command/log error: %v %s", err, out)
 			}

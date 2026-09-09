@@ -143,8 +143,8 @@ func (s *scripted) privileged(argv []string) ([]byte, error) {
 		s.repoIDs = append(s.repoIDs, strings.TrimPrefix(argv[3], "--id="))
 		file := "[nimbus-terra]\nenabled=1\n"
 		for _, a := range argv[4:] {
-			if strings.HasPrefix(a, "--set=") {
-				file += strings.TrimPrefix(a, "--set=") + "\n"
+			if value, ok := strings.CutPrefix(a, "--set="); ok {
+				file += value + "\n"
 			}
 		}
 		s.Dirs[facts.RepoDir] = []string{"nimbus-terra.repo"}
@@ -169,12 +169,7 @@ func (s *scripted) ReadFile(path string) ([]byte, error) {
 }
 
 func (s *scripted) ran(prefix string) bool {
-	for _, l := range s.log {
-		if strings.HasPrefix(l, prefix) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(s.log, func(l string) bool { return strings.HasPrefix(l, prefix) })
 }
 
 func terra() definitions.Repository {

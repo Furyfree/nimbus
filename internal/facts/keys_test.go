@@ -2,7 +2,7 @@ package facts
 
 import (
 	"path/filepath"
-	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -23,12 +23,12 @@ func TestKeyFingerprintsDistinguishPrimaryKeysFromSubkeys(t *testing.T) {
 	out := append(keyOutput(keyA), []byte("sub:::::::::\nfpr:::::::::"+keyB+":\n")...)
 	src := &FakeSource{Commands: map[string][]byte{Key("gpg", KeyInspectArgs(path)...): out}}
 	got, err := KeyFingerprints(src, path)
-	if err != nil || !reflect.DeepEqual(got, []string{keyA}) {
+	if err != nil || !slices.Equal(got, []string{keyA}) {
 		t.Fatalf("primary with subkey = %v, %v", got, err)
 	}
 	src.Commands[Key("gpg", KeyInspectArgs(path)...)] = keyOutput(keyA, keyB)
 	got, err = KeyFingerprints(src, path)
-	if err != nil || !reflect.DeepEqual(got, []string{keyA, keyB}) {
+	if err != nil || !slices.Equal(got, []string{keyA, keyB}) {
 		t.Fatalf("two primary keys = %v, %v", got, err)
 	}
 }
@@ -43,7 +43,7 @@ func TestRepositoryKeyObservationUsesTheEffectiveOverride(t *testing.T) {
 		Commands: map[string][]byte{Key("gpg", KeyInspectArgs("/etc/pki/rpm-gpg/pinned")...): keyOutput(keyA)},
 	}
 	repos, err := repositories(src)
-	if err != nil || len(repos) != 1 || repos[0].KeyError != "" || !reflect.DeepEqual(repos[0].KeyFingerprints, []string{keyA}) {
+	if err != nil || len(repos) != 1 || repos[0].KeyError != "" || !slices.Equal(repos[0].KeyFingerprints, []string{keyA}) {
 		t.Fatalf("effective key = %+v, %v", repos, err)
 	}
 	src.Dirs[RepoOverride] = nil

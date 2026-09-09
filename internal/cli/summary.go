@@ -51,7 +51,7 @@ func (w *setupNoteWriter) finishLine() {
 		line := strings.TrimSuffix(string(w.line), "\r")
 		if note, ok := strings.CutPrefix(line, "Setup note: "); ok {
 			note = strings.TrimSpace(note)
-			if note != "" && strings.IndexFunc(note, unicode.IsControl) < 0 && len(w.notes) < 32 && !slices.Contains(w.notes, note) {
+			if note != "" && !strings.ContainsFunc(note, unicode.IsControl) && len(w.notes) < 32 && !slices.Contains(w.notes, note) {
 				w.notes = append(w.notes, note)
 			}
 		}

@@ -109,10 +109,8 @@ func TestExclusionRemovesDirectlySelectedPackage(t *testing.T) {
 		t.Fatal(errs)
 	}
 	r, _ := Resolve(c, "one")
-	for _, p := range r.Packages {
-		if p.Canonical == "dnf:git" {
-			t.Fatal("excluded package still selected")
-		}
+	if slices.ContainsFunc(r.Packages, func(p ResolvedPackage) bool { return p.Canonical == "dnf:git" }) {
+		t.Fatal("excluded package still selected")
 	}
 }
 

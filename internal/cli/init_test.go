@@ -186,10 +186,8 @@ func TestInitOnePasswordSSHIsExplicitAndPreservesExistingSelection(t *testing.T)
 	if code != ExitOK || !strings.Contains(out, "Enable 1Password SSH integration=true") {
 		t.Fatalf("existing opt-in lost: %d %s%s", code, out, errOut)
 	}
-	for _, call := range src.calls {
-		if strings.HasPrefix(call, "chezmoi init") {
-			t.Fatal("existing source reinitialized")
-		}
+	if slices.ContainsFunc(src.calls, func(call string) bool { return strings.HasPrefix(call, "chezmoi init") }) {
+		t.Fatal("existing source reinitialized")
 	}
 }
 

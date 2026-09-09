@@ -293,9 +293,9 @@ func TestGreeterFileRetirementReloadsUnitsWithoutRecreatingStateDirectory(t *tes
 			if len(op.File.Triggers) != 0 {
 				t.Fatalf("creation trigger remains: %+v", op)
 			}
-			for _, note := range op.Notes {
-				retentionShown = retentionShown || strings.Contains(note, "Retain /var/lib/noctalia-greeter")
-			}
+			retentionShown = retentionShown || slices.ContainsFunc(op.Notes, func(note string) bool {
+				return strings.Contains(note, "Retain /var/lib/noctalia-greeter")
+			})
 		}
 	}
 	if reloads != 1 || !retentionShown {

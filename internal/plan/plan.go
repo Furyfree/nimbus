@@ -154,12 +154,11 @@ func Build(in Inputs) (*Plan, error) {
 		b.repos[r.ID] = append(b.repos[r.ID], r)
 	}
 	p := &Plan{Machine: in.Resolved.Machine, Definitions: in.Definitions, Checkout: in.Facts.Checkout.Value, Complete: true}
-	for _, id := range in.Resolved.Repositories {
+	if slices.ContainsFunc(in.Resolved.Repositories, func(id string) bool {
 		r := in.Root.Repositories[id]
-		if r.Kind == "dnf" && r.ReleasePackage == "" {
-			p.RepositoryReconciliation = "After package transactions, disable new duplicate providers of declared baseurls through DNF overrides; preserve vendor files and keys, and verify the declared sources."
-			break
-		}
+		return r.Kind == "dnf" && r.ReleasePackage == ""
+	}) {
+		p.RepositoryReconciliation = "After package transactions, disable new duplicate providers of declared baseurls through DNF overrides; preserve vendor files and keys, and verify the declared sources."
 	}
 	p.Operations = append(p.Operations, b.dnfConfig()...)
 	p.Operations = append(p.Operations, b.repositories()...)
@@ -186,10 +185,8 @@ func Build(in Inputs) (*Plan, error) {
 	}
 	deferPackageRemovalForResources(p.Operations)
 	p.Updates = b.updates()
-	for _, op := range p.Operations {
-		if op.Blocked != "" {
-			p.Complete = false
-		}
+	if slices.ContainsFunc(p.Operations, func(op Operation) bool { return op.Blocked != "" }) {
+		p.Complete = false
 	}
 	p.Digest = digest(p)
 	return p, nil
@@ -222,12 +219,9 @@ func (b *builder) installsPackage(name string) bool {
 	if _, installed := facts.FindPackage(b.in.Facts.Packages.Value, name); installed {
 		return false
 	}
-	for _, p := range b.in.Resolved.Packages {
-		if p.Prefix == definitions.PrefixDNF && p.Name == name {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(b.in.Resolved.Packages, func(p definitions.ResolvedPackage) bool {
+		return p.Prefix == definitions.PrefixDNF && p.Name == name
+	})
 }
 
 // DNFRepoIDs returns the repository IDs a declared repository creates on the
@@ -729,23 +723,23 @@ func (b *builder) flatpakRemote(id string, r definitions.Repository) (Operation,
 		b.blockedRepo[id] = op.Blocked
 		return op, true
 	}
-	for _, remote := range b.in.Facts.Flatpak.Value.Remotes {
-		if remote.Name != id {
-			continue
-		}
-		if remote.URL == r.URL || strings.TrimSuffix(remote.URL, "/") == strings.TrimSuffix(strings.TrimSuffix(r.URL, "flathub.flatpakrepo"), "/") {
-			if reason := FlatpakKeyDrift(r, remote); reason != "" {
-				op.Blocked = "system remote " + id + ": " + reason + "; inspect and correct its signing keys with the native Flatpak tools before retrying"
-				b.blockedRepo[id] = op.Blocked
-				return op, true
-			}
-			b.ready[id] = true
-			return Operation{}, false
-		}
-		op.Blocked = fmt.Sprintf("system remote %s points to %s, not the declared %s; remove or fix it first", id, remote.URL, r.URL)
-		b.blockedRepo[id] = op.Blocked
+	remotes := b.in.Facts.Flatpak.Value.Remotes
+	i := slices.IndexFunc(remotes, func(remote facts.FlatpakRemote) bool { return remote.Name == id })
+	if i < 0 {
 		return op, true
 	}
+	remote := remotes[i]
+	if remote.URL == r.URL || strings.TrimSuffix(remote.URL, "/") == strings.TrimSuffix(strings.TrimSuffix(r.URL, "flathub.flatpakrepo"), "/") {
+		if reason := FlatpakKeyDrift(r, remote); reason != "" {
+			op.Blocked = "system remote " + id + ": " + reason + "; inspect and correct its signing keys with the native Flatpak tools before retrying"
+			b.blockedRepo[id] = op.Blocked
+			return op, true
+		}
+		b.ready[id] = true
+		return Operation{}, false
+	}
+	op.Blocked = fmt.Sprintf("system remote %s points to %s, not the declared %s; remove or fix it first", id, remote.URL, r.URL)
+	b.blockedRepo[id] = op.Blocked
 	return op, true
 }
 
@@ -987,11 +981,8 @@ func (b *builder) removeTransaction(installTx *Transaction) (Operation, bool) {
 	}
 	var names []string
 	for _, name := range b.in.Resolved.Removes {
-		for _, inst := range b.in.Facts.Packages.Value {
-			if inst.Matches(name) && !erased[inst.ID()] {
-				names = append(names, name)
-				break
-			}
+		if slices.ContainsFunc(b.in.Facts.Packages.Value, func(inst facts.Package) bool { return inst.Matches(name) && !erased[inst.ID()] }) {
+			names = append(names, name)
 		}
 	}
 	if len(names) == 0 {
@@ -1190,10 +1181,7 @@ func (b *builder) ownedRemovals() []Operation {
 				ops = append(ops, Operation{ID: id, Kind: KindFlatpak, Action: ActionRemove, Risk: RiskMedium, Summary: "inspect Flatpak " + name + " before removal", Blocked: b.in.Facts.Flatpak.Error})
 				continue
 			}
-			present := false
-			for _, app := range b.in.Facts.Flatpak.Value.Apps {
-				present = present || app.ID == name
-			}
+			present := slices.ContainsFunc(b.in.Facts.Flatpak.Value.Apps, func(app facts.FlatpakApp) bool { return app.ID == name })
 			if !present {
 				ops = append(ops, Operation{ID: id, Kind: KindFlatpak, Action: ActionRetire, Risk: RiskLow, Summary: "retire the receipt of Flatpak " + name + ", which is absent", Paths: []string{"receipt"}})
 				continue
@@ -1227,17 +1215,10 @@ func (b *builder) previewRemoval(id string, names []string, summary string) Oper
 		return op
 	}
 	op.Transaction = tx
-	declared := map[string]bool{}
-	for _, n := range names {
-		declared[n] = true
-	}
 	var extra []string
 	for _, row := range tx.Packages {
-		matched := false
-		for name := range maps.Keys(declared) {
-			matched = matched || (facts.Package{Name: row.Name, Arch: row.Arch}).Matches(name)
-		}
-		if !matched {
+		pkg := facts.Package{Name: row.Name, Arch: row.Arch}
+		if !slices.ContainsFunc(names, pkg.Matches) {
 			extra = append(extra, row.Name)
 		}
 	}
@@ -1427,12 +1408,7 @@ func (b *builder) userTools() []Operation {
 
 // hasPrefix reports whether any desired package uses the prefix.
 func (b *builder) hasPrefix(prefix string) bool {
-	for _, p := range b.in.Resolved.Packages {
-		if p.Prefix == prefix {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(b.in.Resolved.Packages, func(p definitions.ResolvedPackage) bool { return p.Prefix == prefix })
 }
 
 // userFile reports whether a file relative to the home directory exists,

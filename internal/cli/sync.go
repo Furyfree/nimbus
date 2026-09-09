@@ -551,12 +551,7 @@ func sourceOperations(p *plan.Plan) []plan.Operation {
 // changedRepositories reports whether a pass enabled or repaired a DNF
 // repository, which is when the next plan needs fresh metadata.
 func changedRepositories(executed []string) bool {
-	for _, id := range executed {
-		if strings.HasPrefix(id, "repository:") {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(executed, func(id string) bool { return strings.HasPrefix(id, "repository:") })
 }
 
 // runnable counts the operations this run can execute now: not kept, not
@@ -578,12 +573,7 @@ func needsSudo(p *plan.Plan, noUpgrade, statePresent bool) bool {
 	if !noUpgrade || !statePresent {
 		return true
 	}
-	for _, op := range p.Operations {
-		if op.Action != plan.ActionKeep && op.Kind != plan.KindUser {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(p.Operations, func(op plan.Operation) bool { return op.Action != plan.ActionKeep && op.Kind != plan.KindUser })
 }
 
 // waitingLine names what the pending operations wait for, or "" when
@@ -607,12 +597,7 @@ func waitingLine(p *plan.Plan) string {
 }
 
 func nothingToRun(p *plan.Plan) bool {
-	for _, op := range p.Operations {
-		if op.Action != plan.ActionKeep {
-			return false
-		}
-	}
-	return true
+	return !slices.ContainsFunc(p.Operations, func(op plan.Operation) bool { return op.Action != plan.ActionKeep })
 }
 
 // planWithState builds the plan with the applied state read as the user.
@@ -634,14 +619,7 @@ func onlyUserFailures(r *apply.Result, p *plan.Plan) bool {
 		return false
 	}
 	for _, failure := range r.Failures {
-		user := false
-		for _, op := range p.Operations {
-			if op.ID == failure.ID && op.Kind == plan.KindUser {
-				user = true
-				break
-			}
-		}
-		if !user {
+		if !slices.ContainsFunc(p.Operations, func(op plan.Operation) bool { return op.ID == failure.ID && op.Kind == plan.KindUser }) {
 			return false
 		}
 	}

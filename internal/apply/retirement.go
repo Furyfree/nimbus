@@ -24,10 +24,9 @@ func (ex *executor) sourceRetirement(op plan.Operation) ([]state.Receipt, []stri
 		return nil, nil, fmt.Errorf("source retirement verification: %w", err)
 	}
 	for _, current := range plan.SourceSnapshot(op.Kind, plan.SourceIDs(op.Source), f) {
-		originallyEnabled := false
-		for _, previous := range op.Source.Original {
-			originallyEnabled = originallyEnabled || previous.ID == current.ID && previous.Enabled
-		}
+		originallyEnabled := slices.ContainsFunc(op.Source.Original, func(previous state.NativeSource) bool {
+			return previous.ID == current.ID && previous.Enabled
+		})
 		if !originallyEnabled && current.Enabled {
 			return nil, nil, fmt.Errorf("source retirement verification: %s remains enabled", current.ID)
 		}

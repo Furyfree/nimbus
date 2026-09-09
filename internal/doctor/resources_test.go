@@ -19,7 +19,7 @@ func TestResourceDoctorReportsGreeterReadinessAndUnknownState(t *testing.T) {
 	if len(checks) != 2 || checks[0].Status != Pass || checks[1].ID != "greeter-login" || checks[1].Status != Fail {
 		t.Fatalf("%+v", checks)
 	}
-	src.Commands = map[string][]byte{}
+	clear(src.Commands)
 	checks = SystemResources(src, r, applied, "test")
 	if len(checks) != 1 || checks[0].Status != Unknown {
 		t.Fatalf("%+v", checks)

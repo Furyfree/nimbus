@@ -236,13 +236,8 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	}
 	// Only explicit Nimbus declarations need a second pass. Chezmoi owns
 	// the tracked Mise tool installation within its apply stage.
-	deferredTools := false
-	for _, pkg := range r.Packages {
-		deferredTools = deferredTools || pkg.Prefix == definitions.PrefixCargo
-	}
-	for _, installer := range r.Installers {
-		deferredTools = deferredTools || len(installer.Installer.Install) > 0
-	}
+	deferredTools := slices.ContainsFunc(r.Packages, func(pkg definitions.ResolvedPackage) bool { return pkg.Prefix == definitions.PrefixCargo }) ||
+		slices.ContainsFunc(r.Installers, func(installer definitions.ResolvedInstaller) bool { return len(installer.Installer.Install) > 0 })
 	if deferredTools {
 		steps = append(steps, runStep{Name: "remaining Nimbus user tools", Status: "skipped"})
 	}

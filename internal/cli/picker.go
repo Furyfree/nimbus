@@ -77,9 +77,7 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.done = true
 		return m, tea.Quit
 	case "up", "ctrl+p":
-		if m.cursor > 0 {
-			m.cursor--
-		}
+		m.cursor = max(0, m.cursor-1)
 	case "down", "ctrl+n":
 		if m.cursor < len(vis)-1 {
 			m.cursor++

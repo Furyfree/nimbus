@@ -17,7 +17,7 @@ import (
 
 type FileChange struct {
 	ActivationChanged bool             `json:"activation_changed,omitzero"`
-	ChangedAt         time.Time        `json:"changed_at,omitempty"`
+	ChangedAt         time.Time        `json:"changed_at,omitzero"`
 	Target            string           `json:"target"`
 	Before            facts.SystemFile `json:"before"`
 	After             facts.SystemFile `json:"after"`
@@ -80,10 +80,8 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 				break
 			}
 			op.File.ActivationChanged = !SameFile(before, recorded)
-			for _, trigger := range file.Triggers {
-				if !slices.Contains(receipt.Triggers, trigger) {
-					op.File.ActivationChanged = true
-				}
+			if slices.ContainsFunc(file.Triggers, func(trigger string) bool { return !slices.Contains(receipt.Triggers, trigger) }) {
+				op.File.ActivationChanged = true
 			}
 			if SameFile(before, after) && receipt.Definitions.Digest == b.in.Definitions && slices.Equal(receipt.Triggers, file.Triggers) && !op.File.ActivationChanged {
 				op.Action = ActionKeep
@@ -211,30 +209,20 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 		receipt, ok := b.in.Applied.Receipts[triggerID]
 		changed := !ok || !ownedResource(receipt, triggerID, KindTrigger, b.in.Resolved.Machine)
 		for _, file := range b.in.Resolved.Files {
-			for _, requested := range file.Triggers {
-				if requested == id {
-					if recorded, ok := b.in.Applied.Receipts["file:"+file.Target]; ok && (recorded.ChangeTime().After(receipt.Timestamp) || !slices.Contains(recorded.Triggers, id)) {
-						changed = true
-					}
+			if slices.Contains(file.Triggers, id) {
+				if recorded, ok := b.in.Applied.Receipts["file:"+file.Target]; ok && (recorded.ChangeTime().After(receipt.Timestamp) || !slices.Contains(recorded.Triggers, id)) {
+					changed = true
 				}
 			}
 		}
 		for _, op := range ops {
 			if op.Kind == KindFile && op.Action != ActionKeep && (op.Action != ActionAdopt || (op.File != nil && op.File.ActivationChanged)) {
-				if op.File != nil {
-					for _, requested := range op.File.Triggers {
-						if requested == id {
-							changed = true
-						}
-					}
+				if op.File != nil && slices.Contains(op.File.Triggers, id) {
+					changed = true
 				}
 				for _, file := range b.in.Resolved.Files {
-					if op.ID == "file:"+file.Target {
-						for _, requested := range file.Triggers {
-							if requested == id {
-								changed = true
-							}
-						}
+					if op.ID == "file:"+file.Target && slices.Contains(file.Triggers, id) {
+						changed = true
 					}
 				}
 			}
@@ -339,12 +327,10 @@ func (b *builder) serviceOperation(id string, want definitions.ServiceDecl, comp
 		if e != nil {
 			op.Blocked = "cannot inspect display-manager ownership: " + e.Error()
 		} else {
-			for _, name := range names {
-				if name == "display-manager.service" {
-					out, e := b.in.Source.Run("readlink", "--", "/etc/systemd/system/display-manager.service")
-					if e != nil || !strings.HasSuffix(strings.TrimSpace(string(out)), "/greetd.service") {
-						op.Blocked = "another display manager owns display-manager.service; explicit migration is required"
-					}
+			if slices.Contains(names, "display-manager.service") {
+				out, e := b.in.Source.Run("readlink", "--", "/etc/systemd/system/display-manager.service")
+				if e != nil || !strings.HasSuffix(strings.TrimSpace(string(out)), "/greetd.service") {
+					op.Blocked = "another display manager owns display-manager.service; explicit migration is required"
 				}
 			}
 		}
@@ -474,16 +460,13 @@ func (b *builder) retireResource(id string, receipt state.Receipt) Operation {
 }
 
 func deferPackageRemovalForResources(ops []Operation) {
-	pending := ""
-	for _, op := range ops {
-		if op.After != "" && op.Action == ActionRemove && (op.Kind == KindFile || op.Kind == KindService || op.Kind == KindGroup || op.Kind == KindTarget) {
-			pending = op.ID
-			break
-		}
-	}
-	if pending == "" {
+	first := slices.IndexFunc(ops, func(op Operation) bool {
+		return op.After != "" && op.Action == ActionRemove && (op.Kind == KindFile || op.Kind == KindService || op.Kind == KindGroup || op.Kind == KindTarget)
+	})
+	if first < 0 {
 		return
 	}
+	pending := ops[first].ID
 	for i := range ops {
 		if ops[i].Kind == KindPackage && (ops[i].Action == ActionRemove || ops[i].Action == ActionPrune) {
 			ops[i].After = pending

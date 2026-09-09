@@ -216,6 +216,11 @@ func pruneInstallLogs(base string, keep int) error {
 	if err != nil {
 		return err
 	}
+	safe := func(dir string, children []os.DirEntry) bool {
+		return !slices.ContainsFunc(children, func(child os.DirEntry) bool {
+			return !slices.Contains([]string{".nimbus-install", ".finished", "bootstrap.log", "engine.log", "mise.log"}, child.Name()) || privateLogPath(filepath.Join(dir, child.Name()), false) != nil
+		})
+	}
 	var candidates []string
 	for _, entry := range entries {
 		if !strings.HasPrefix(entry.Name(), "run-") {
@@ -239,14 +244,7 @@ func pruneInstallLogs(base string, keep int) error {
 		if err != nil {
 			return err
 		}
-		safe := true
-		for _, child := range children {
-			if !slices.Contains([]string{".nimbus-install", ".finished", "bootstrap.log", "engine.log", "mise.log"}, child.Name()) || privateLogPath(filepath.Join(dir, child.Name()), false) != nil {
-				safe = false
-				break
-			}
-		}
-		if safe {
+		if safe(dir, children) {
 			candidates = append(candidates, dir)
 		}
 	}
@@ -256,14 +254,7 @@ func pruneInstallLogs(base string, keep int) error {
 		if err != nil {
 			return err
 		}
-		safe := true
-		for _, child := range children {
-			if !slices.Contains([]string{".nimbus-install", ".finished", "bootstrap.log", "engine.log", "mise.log"}, child.Name()) || privateLogPath(filepath.Join(dir, child.Name()), false) != nil {
-				safe = false
-				break
-			}
-		}
-		if !safe {
+		if !safe(dir, children) {
 			continue
 		}
 		for _, child := range children {

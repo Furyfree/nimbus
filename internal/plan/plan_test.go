@@ -100,21 +100,20 @@ func previewText(rows []TxPackage) []byte {
 // installArgs returns the exact preview argv the planner will run for the
 // packages it can install now, so the fixture can answer it.
 func installArgs(p *Plan) []string {
-	for _, op := range p.Operations {
-		if op.ID == "packages:install" {
-			args := []string{"--assumeno", "--cacheonly"}
-			argv := op.Steps[0].Argv[2:] // drop dnf5 -y
-			for i := 0; i < len(argv); i++ {
-				if argv[i] == "--store" {
-					i++ // the stage path is apply's, not the preview's
-					continue
-				}
-				args = append(args, argv[i])
-			}
-			return args
-		}
+	op := find(p, "packages:install")
+	if op == nil {
+		return nil
 	}
-	return nil
+	args := []string{"--assumeno", "--cacheonly"}
+	argv := op.Steps[0].Argv[2:] // drop dnf5 -y
+	for i := 0; i < len(argv); i++ {
+		if argv[i] == "--store" {
+			i++ // the stage path is apply's, not the preview's
+			continue
+		}
+		args = append(args, argv[i])
+	}
+	return args
 }
 
 func installNames(args []string) []string {
@@ -863,10 +862,8 @@ func TestReleasePackagesBelongToTheirRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, pr := range p.Prune {
-		if pr.Name == "rpmfusion-free-release" {
-			t.Fatal("the release package Nimbus installed is a prune candidate")
-		}
+	if slices.ContainsFunc(p.Prune, func(pr Prune) bool { return pr.Name == "rpmfusion-free-release" }) {
+		t.Fatal("the release package Nimbus installed is a prune candidate")
 	}
 	if !IsReleasePackage(c.Definitions(), "rpmfusion-free-release") || IsReleasePackage(c.Definitions(), "rpmfusion") {
 		t.Fatal("release package recognition is wrong")
@@ -962,12 +959,8 @@ func TestMiseBootstrapLeavesConfiguredToolsToChezmoi(t *testing.T) {
 		if strings.HasPrefix(op.ID, "package:cargo:") {
 			t.Fatalf("Mise-owned Cargo tool must not also be installed directly: %+v", op)
 		}
-		if op.Kind == KindUser {
-			for _, st := range op.Steps {
-				if st.Privileged {
-					t.Fatalf("user-scope step marked privileged: %+v", op)
-				}
-			}
+		if op.Kind == KindUser && slices.ContainsFunc(op.Steps, func(st Step) bool { return st.Privileged }) {
+			t.Fatalf("user-scope step marked privileged: %+v", op)
 		}
 	}
 	// Unknown user-scope state blocks instead of dropping the tools.

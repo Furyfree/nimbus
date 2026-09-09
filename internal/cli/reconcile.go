@@ -76,10 +76,8 @@ func duplicateRepositoryRepairs(p *plan.Plan) (*plan.Plan, error) {
 				allowed = false
 				continue
 			}
-			for _, option := range argv[3:] {
-				if !strings.HasSuffix(option, ".enabled=0") {
-					allowed = false
-				}
+			if slices.ContainsFunc(argv[3:], func(option string) bool { return !strings.HasSuffix(option, ".enabled=0") }) {
+				allowed = false
 			}
 		}
 		if !allowed {

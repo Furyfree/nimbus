@@ -225,7 +225,7 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 		}
 	}
 
-	r := &Resolved{Machine: m.ID, Profiles: append([]string(nil), m.Profiles...)}
+	r := &Resolved{Machine: m.ID, Profiles: slices.Clone(m.Profiles)}
 	for _, cid := range slices.Sorted(maps.Keys(compPaths)) {
 		paths := slices.Clone(compPaths[cid])
 		slices.Sort(paths)

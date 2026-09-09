@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 
@@ -53,9 +54,7 @@ func loadSelected(flags machineFlags) (*selected, error) {
 				return nil, err
 			}
 		}
-		if machine == "" {
-			machine = sel.Machine
-		}
+		machine = cmp.Or(machine, sel.Machine)
 	}
 	c, err := definitions.Load(root)
 	errs, ok := errors.AsType[definitions.ErrorList](err)

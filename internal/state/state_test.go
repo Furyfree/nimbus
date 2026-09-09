@@ -3,6 +3,7 @@ package state
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -45,10 +46,8 @@ func TestRecordWritesAtomicallyAndReadsBack(t *testing.T) {
 		t.Fatalf("receipt mode %o", info.Mode().Perm())
 	}
 	entries, _ := os.ReadDir(root)
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ".nimbus-") {
-			t.Fatal("temporary file left behind")
-		}
+	if slices.ContainsFunc(entries, func(e os.DirEntry) bool { return strings.HasPrefix(e.Name(), ".nimbus-") }) {
+		t.Fatal("temporary file left behind")
 	}
 
 	// A second record never replaces the baseline and removes a receipt.
