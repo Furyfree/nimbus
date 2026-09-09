@@ -225,7 +225,9 @@ non-mutating and writes nothing, so it needs no system or file recovery.
 ### Validation and exit criteria
 
 Use golden plans, changed-input digest tests, package adoption and removal
-fixtures, and a disposable Fedora VM comparison. Exit when the plan explains
+fixtures, and a disposable Fedora VM comparison. Check ownership views against
+native receipt identities and ambiguous legacy receipts, and count retained
+sources as unchanged. Exit when the plan explains
 every selected package without executing a mutating command.
 
 ## 4. Controlled DNF apply and receipts

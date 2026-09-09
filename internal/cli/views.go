@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -15,23 +16,6 @@ import (
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
-func flatpakRemote(root definitions.Root) string {
-	for id, r := range root.Repositories {
-		if r.Kind == "flatpak" {
-			return id
-		}
-	}
-	return ""
-}
-
-// Ownership views are provider-independent read-only lists over the same
-// resolver, facts, and applied state the plan uses. Every package is in one
-// state: managed (a receipt exists), adopt (desired and installed from an
-// acceptable source, no receipt yet), blocked (desired and installed from
-// another source, which plan refuses to adopt), desired (not installed),
-// pre-existing (in the baseline recorded when Nimbus took over), unmanaged
-// (installed by hand since), or dependency.
-
 type packageView struct {
 	Canonical  string   `json:"canonical"`
 	Name       string   `json:"name"`
@@ -39,18 +23,39 @@ type packageView struct {
 	Installed  string   `json:"installed,omitempty"`
 	Repository string   `json:"repository,omitempty"`
 	Reason     string   `json:"reason,omitempty"`
+	Blocked    string   `json:"blocked,omitempty"`
 	Paths      []string `json:"paths,omitempty"`
 }
 
 // packageViews joins desired packages with installed ones and receipts.
 func packageViews(s *selected, f *facts.Facts, applied *state.Applied) []packageView {
+	managedRPMs := map[string]bool{}
+	blockedRPMs := map[string]string{}
+	blockedReceipts := map[string]string{}
+	for _, id := range slices.Sorted(maps.Keys(applied.Receipts)) {
+		r := applied.Receipts[id]
+		if r.Provider != "dnf" || !r.Verified {
+			continue
+		}
+		r.Resource = id
+		native, err := plan.ReceiptPackage(r, f.Packages.Value)
+		if err == nil {
+			managedRPMs[native] = true
+			continue
+		}
+		blockedReceipts[id] = err.Error()
+		for _, p := range f.Packages.Value {
+			if p.Matches(plan.PackageName(id)) {
+				blockedRPMs[p.ID()] = err.Error()
+			}
+		}
+	}
 	desired := map[string]bool{}
 	var views []packageView
 	for _, p := range s.Resolved.Packages {
 		desired[p.Name] = true
 		v := packageView{Canonical: p.Canonical, Name: p.Name, State: "desired", Paths: p.Paths}
 		id := "package:" + p.Canonical
-		remote := flatpakRemote(s.Checkout.Definitions())
 		if p.Prefix == definitions.PrefixFlatpak {
 			id = "flatpak:" + p.Name
 			if f.Flatpak.Known() {
@@ -58,9 +63,6 @@ func packageViews(s *selected, f *facts.Facts, applied *state.Applied) []package
 					if app.ID == p.Name {
 						v.Installed, v.Repository = app.Version, app.Origin
 						v.State = "adopt"
-						if app.Origin != remote {
-							v.State = "blocked"
-						}
 					}
 				}
 			}
@@ -72,9 +74,17 @@ func packageViews(s *selected, f *facts.Facts, applied *state.Applied) []package
 			desired[inst.ID()] = true
 			v.Installed, v.Repository, v.Reason = inst.EVR(), inst.FromRepo, inst.Reason
 			v.State = "adopt"
+			if managedRPMs[inst.ID()] {
+				v.State = "managed"
+			}
+			if reason := blockedReceipts[id]; reason != "" {
+				v.State, v.Blocked = "blocked", reason
+			}
 		}
-		if _, ok := applied.Receipts[id]; ok && v.Installed != "" {
-			v.State = "managed"
+		if p.Prefix == definitions.PrefixFlatpak || p.Prefix == definitions.PrefixCargo {
+			if _, ok := applied.Receipts[id]; ok && v.Installed != "" {
+				v.State = "managed"
+			}
 		}
 		views = append(views, v)
 	}
@@ -83,7 +93,12 @@ func packageViews(s *selected, f *facts.Facts, applied *state.Applied) []package
 			continue
 		}
 		st := "dependency"
+		blocked := ""
 		switch {
+		case managedRPMs[p.ID()]:
+			st = "managed"
+		case blockedRPMs[p.ID()] != "":
+			st, blocked = "blocked", blockedRPMs[p.ID()]
 		case applied.InBaseline(p.ID()) || applied.InBaseline(p.Name):
 			st = "pre-existing"
 		case plan.IsReleasePackage(s.Checkout.Definitions(), p.Name):
@@ -92,7 +107,7 @@ func packageViews(s *selected, f *facts.Facts, applied *state.Applied) []package
 		default:
 			st = "unmanaged"
 		}
-		views = append(views, packageView{Canonical: "dnf:" + p.ID(), Name: p.ID(), State: st, Installed: p.EVR(), Repository: p.FromRepo, Reason: p.Reason})
+		views = append(views, packageView{Canonical: "dnf:" + p.ID(), Name: p.ID(), State: st, Installed: p.EVR(), Repository: p.FromRepo, Reason: p.Reason, Blocked: blocked})
 	}
 	if f.Flatpak.Known() {
 		for _, app := range f.Flatpak.Value.Apps {
@@ -122,6 +137,9 @@ func renderPackageViews(views []packageView) []byte {
 		}
 		if len(v.Paths) > 0 {
 			line += "  <- " + strings.Join(v.Paths, ", ")
+		}
+		if v.Blocked != "" {
+			line += "  " + v.Blocked
 		}
 		b.WriteString(line + "\n")
 	}

@@ -1667,10 +1667,9 @@ apply lifecycle:
   unknown removal lifecycles.
 - `packages installed [QUERY]` is read-only and browses explicitly installed
   supported packages. It labels each package as managed (a receipt exists),
-  adopt (desired and installed from an acceptable source), blocked (desired
-  but installed from a source the plan refuses), pre-existing (in the
-  baseline), unmanaged (installed by hand since), or dependency, and shows
-  its selection provenance.
+  adopt (desired and installed), blocked (receipt ownership cannot be
+  resolved safely), pre-existing (in the baseline), unmanaged (installed by
+  hand since), or dependency, and shows its selection provenance.
 
 Install and remove show the proposed manifest diff and complete system plan,
 then require approval before writing the manifest atomically and applying it.

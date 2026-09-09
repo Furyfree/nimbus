@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/facts"
 	"github.com/Furyfree/nimbus/internal/plan"
 )
@@ -86,6 +87,19 @@ func TestStatusSummarizesThePlan(t *testing.T) {
 	code, out, _ = run(t, "status", "--checkout", root, "--machine", "desktop", "--json")
 	if code != ExitOK || !strings.Contains(out, `"repositories_to_enable"`) {
 		t.Fatalf("json status: %d\n%s", code, out)
+	}
+}
+
+func TestStatusCountsRetainedSourcesAsManaged(t *testing.T) {
+	s := &selected{Resolved: &definitions.Resolved{Machine: "vm"}}
+	p := &plan.Plan{Machine: "vm", Complete: true, Operations: []plan.Operation{
+		{ID: "repository:retained", Kind: plan.KindRepository, Action: plan.ActionKeep, Summary: "retain source retained while installed software needs it"},
+		{ID: "flatpak-remote:retained", Kind: plan.KindFlatpakRemote, Action: plan.ActionKeep, Summary: "retain source retained while installed software needs it"},
+		{ID: "repository:new", Kind: plan.KindRepository, Action: plan.ActionEnable},
+	}}
+	st := summarize(s, p)
+	if st.Managed != 2 || st.Repositories != 1 || st.ToInstall != 0 || st.ToRemove != 0 {
+		t.Fatalf("retained sources are not pending preparation: %+v", st)
 	}
 }
 

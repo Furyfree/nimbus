@@ -774,7 +774,7 @@ func (b *builder) packages() []Operation {
 			}
 			if receipt, managed := b.in.Applied.Receipts[op.ID]; managed && receipt.Package == "" {
 				receipt.Resource = op.ID
-				if _, err := receiptPackage(receipt, b.in.Facts.Packages.Value); err != nil {
+				if _, err := ReceiptPackage(receipt, b.in.Facts.Packages.Value); err != nil {
 					op.Blocked = err.Error()
 				}
 			}
@@ -1093,7 +1093,9 @@ func InstalledPackage(request string, receipt state.Receipt, packages []facts.Pa
 	return facts.FindPackage(packages, request)
 }
 
-func receiptPackage(r state.Receipt, packages []facts.Package) (string, error) {
+// ReceiptPackage resolves recorded RPM ownership without guessing a legacy
+// receipt's architecture or the native package behind a provide.
+func ReceiptPackage(r state.Receipt, packages []facts.Package) (string, error) {
 	if r.Package != "" {
 		return r.Package, nil
 	}
@@ -1148,7 +1150,7 @@ func (b *builder) ownedRemovals() []Operation {
 		switch r.Provider {
 		case "dnf":
 			r.Resource = id
-			name, err := receiptPackage(r, b.in.Facts.Packages.Value)
+			name, err := ReceiptPackage(r, b.in.Facts.Packages.Value)
 			if err != nil {
 				// Explicit selections of every matching architecture transfer
 				// ownership without guessing which one the old receipt meant.

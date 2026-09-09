@@ -395,10 +395,10 @@ func summarize(s *selected, p *plan.Plan) statusResult {
 			st.Adopted++
 		case op.Action == plan.ActionRemove || op.Action == plan.ActionPrune || op.Action == plan.ActionRetire:
 			st.ToRemove++
-		case op.Kind == plan.KindRepository || op.Kind == plan.KindFlatpakRemote:
-			st.Repositories++
 		case op.Action == plan.ActionKeep:
 			st.Managed++
+		case op.Kind == plan.KindRepository || op.Kind == plan.KindFlatpakRemote:
+			st.Repositories++
 		case op.ID == "packages:install":
 			st.ToInstall += len(op.Items)
 		default:

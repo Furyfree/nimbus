@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/plan"
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
@@ -63,6 +66,180 @@ func TestOwnershipViews(t *testing.T) {
 		if v.State == "dependency" {
 			t.Fatal("installed view must not list dependencies")
 		}
+	}
+}
+
+func TestDesiredFlatpakIsAdoptableFromAnyRemote(t *testing.T) {
+	for _, remote := range []string{"flathub", "other-remote"} {
+		t.Run(remote, func(t *testing.T) {
+			root := repoRoot(t)
+			src := fixtureSource(t, root)
+			src.Commands[facts.Key("flatpak", "list", "--system", "--app", "--columns=application,version,origin")] = []byte("com.spotify.Client\t1.0\t" + remote + "\n")
+			withSource(t, src)
+			for _, command := range [][]string{{"managed"}, {"packages", "installed", "spotify"}} {
+				args := append(command, "--checkout", root, "--machine", "desktop")
+				code, out, errOut := run(t, args...)
+				if code != ExitOK || !strings.Contains(out, "adopt      flatpak:com.spotify.Client 1.0 ("+remote+")") {
+					t.Fatalf("%v: %d\n%s%s", command, code, out, errOut)
+				}
+			}
+		})
+	}
+}
+
+func TestRPMViewsResolveReceiptOwnershipByNativeIdentity(t *testing.T) {
+	multilib := []facts.Package{
+		{Name: "demo", Arch: "i686", Version: "1", Reason: "user"},
+		{Name: "demo", Arch: "x86_64", Version: "1", Reason: "user"},
+	}
+	legacy := state.Receipt{Schema: 1, Resource: "package:dnf:demo", Provider: "dnf", Verified: true}
+	native := state.Receipt{Schema: 2, Resource: "package:dnf:demo", Provider: "dnf", Verified: true, Package: "demo.i686"}
+	for _, tc := range []struct {
+		name     string
+		packages []facts.Package
+		receipts []state.Receipt
+		baseline []string
+		desired  []definitions.ResolvedPackage
+		want     map[string]string
+	}{
+		{
+			name: "unselected native receipt owns only i686", packages: multilib, receipts: []state.Receipt{native},
+			want: map[string]string{"dnf:demo.i686": "managed", "dnf:demo.x86_64": "unmanaged"},
+		},
+		{
+			name: "native receipt takes precedence over baseline", packages: multilib, receipts: []state.Receipt{native}, baseline: []string{"demo.i686", "demo.x86_64"},
+			want: map[string]string{"dnf:demo.i686": "managed", "dnf:demo.x86_64": "pre-existing"},
+		},
+		{
+			name: "provide receipt owns its recorded native package", packages: multilib,
+			receipts: []state.Receipt{{Schema: 2, Resource: "package:terra:virtual-tool", Provider: "dnf", Verified: true, Package: "demo.x86_64"}},
+			want:     map[string]string{"dnf:demo.i686": "unmanaged", "dnf:demo.x86_64": "managed"},
+		},
+		{
+			name: "legacy receipt with one architecture", packages: multilib[:1], receipts: []state.Receipt{legacy},
+			want: map[string]string{"dnf:demo.i686": "managed"},
+		},
+		{
+			name: "legacy receipt with explicit architecture", packages: multilib,
+			receipts: []state.Receipt{{Schema: 1, Resource: "package:dnf:demo.i686", Provider: "dnf", Verified: true}},
+			want:     map[string]string{"dnf:demo.i686": "managed", "dnf:demo.x86_64": "unmanaged"},
+		},
+		{
+			name: "legacy multilib ambiguity blocks both architectures", packages: multilib, receipts: []state.Receipt{legacy},
+			want: map[string]string{"dnf:demo.i686": "blocked", "dnf:demo.x86_64": "blocked"},
+		},
+		{
+			name: "desired RPM cannot hide legacy ambiguity", packages: multilib, receipts: []state.Receipt{legacy},
+			desired: []definitions.ResolvedPackage{{Name: "demo", Prefix: "dnf", Canonical: "dnf:demo"}},
+			want:    map[string]string{"dnf:demo.i686": "blocked", "dnf:demo": "blocked"},
+		},
+		{
+			name: "direct selected ambiguity survives another native receipt", packages: multilib,
+			receipts: []state.Receipt{legacy, {Schema: 2, Resource: "package:terra:demo", Provider: "dnf", Verified: true, Package: "demo.x86_64"}},
+			desired:  []definitions.ResolvedPackage{{Name: "demo", Prefix: "dnf", Canonical: "dnf:demo"}},
+			want:     map[string]string{"dnf:demo.i686": "blocked", "dnf:demo": "blocked"},
+		},
+		{
+			name: "native ownership survives an earlier ambiguous receipt", packages: multilib,
+			receipts: []state.Receipt{legacy, {Schema: 2, Resource: "package:terra:demo", Provider: "dnf", Verified: true, Package: "demo.x86_64"}},
+			want:     map[string]string{"dnf:demo.i686": "blocked", "dnf:demo.x86_64": "managed"},
+		},
+		{
+			name: "native ownership survives a later ambiguous receipt", packages: multilib,
+			receipts: []state.Receipt{native, {Schema: 1, Resource: "package:terra:demo", Provider: "dnf", Verified: true}},
+			want:     map[string]string{"dnf:demo.i686": "managed", "dnf:demo.x86_64": "blocked"},
+		},
+		{
+			name: "legacy provide prose does not prove native ownership", packages: multilib,
+			receipts: []state.Receipt{{Schema: 1, Resource: "package:dnf:virtual-tool", Provider: "dnf", Verified: true, Intended: "installed demo 1"}},
+			want:     map[string]string{"dnf:demo.i686": "unmanaged", "dnf:demo.x86_64": "unmanaged"},
+		},
+		{
+			name: "unverified receipt does not prove ownership", packages: multilib,
+			receipts: []state.Receipt{{Schema: 2, Resource: "package:dnf:demo", Provider: "dnf", Package: "demo.i686"}},
+			want:     map[string]string{"dnf:demo.i686": "unmanaged", "dnf:demo.x86_64": "unmanaged"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &selected{Checkout: &definitions.Checkout{}, Resolved: &definitions.Resolved{Packages: tc.desired}}
+			f := &facts.Facts{Packages: facts.Section[[]facts.Package]{Value: tc.packages}}
+			applied := &state.Applied{Receipts: map[string]state.Receipt{}, Baseline: &state.Baseline{Packages: tc.baseline}}
+			for _, receipt := range tc.receipts {
+				applied.Receipts[receipt.Resource] = receipt
+			}
+			views := packageViews(s, f, applied)
+			if len(views) != len(tc.want) {
+				t.Fatalf("views = %+v, want states %v", views, tc.want)
+			}
+			for _, view := range views {
+				if view.State != tc.want[view.Canonical] || view.Reason != "user" {
+					t.Fatalf("view = %+v, want state %q and preserved native reason", view, tc.want[view.Canonical])
+				}
+				if view.State == "blocked" {
+					if !strings.Contains(view.Blocked, "does not identify which installed architecture Nimbus owns") {
+						t.Fatalf("ambiguous ownership has no explanation: %+v", view)
+					}
+					if out := string(renderPackageViews([]packageView{view})); !strings.Contains(out, view.Blocked) {
+						t.Fatalf("human view omitted ownership explanation: %s", out)
+					}
+					data, err := json.Marshal(view)
+					if err != nil || !strings.Contains(string(data), `"blocked":"`+view.Blocked+`"`) {
+						t.Fatalf("JSON view omitted ownership explanation: %s, %v", data, err)
+					}
+				} else if view.Blocked != "" {
+					t.Fatalf("resolved ownership retains a blocked reason: %+v", view)
+				}
+			}
+		})
+	}
+}
+
+func TestRPMViewsAgreeWithPlanForExplicitArchitectureMigration(t *testing.T) {
+	for _, names := range [][]string{{"demo.i686", "demo.x86_64"}, {"demo.i686"}} {
+		t.Run(strings.Join(names, "+"), func(t *testing.T) {
+			s := &selected{Checkout: &definitions.Checkout{}, Resolved: &definitions.Resolved{Machine: "vm"}}
+			for _, name := range names {
+				s.Resolved.Packages = append(s.Resolved.Packages, definitions.ResolvedPackage{Name: name, Prefix: "dnf", Canonical: "dnf:" + name})
+			}
+			f := &facts.Facts{Packages: facts.Section[[]facts.Package]{Value: []facts.Package{
+				{Name: "demo", Arch: "i686", Version: "1", Release: "1", FromRepo: "fedora", Reason: "user"},
+				{Name: "demo", Arch: "x86_64", Version: "1", Release: "1", FromRepo: "fedora", Reason: "user"},
+			}}}
+			const legacyID = "package:dnf:demo"
+			applied := &state.Applied{Receipts: map[string]state.Receipt{
+				legacyID: {Schema: 1, Resource: legacyID, Provider: "dnf", Verified: true},
+			}}
+			src := &facts.FakeSource{Commands: map[string][]byte{"dnf5 --cacheonly check-upgrade": []byte("Repositories loaded.\n")}}
+			p, err := plan.Build(plan.Inputs{Resolved: s.Resolved, Root: s.Checkout.Definitions(), Facts: f, Applied: applied, Source: src})
+			if err != nil {
+				t.Fatal(err)
+			}
+			views := packageViews(s, f, applied)
+			for _, name := range names {
+				i := slices.IndexFunc(p.Operations, func(op plan.Operation) bool { return op.ID == "package:dnf:"+name })
+				if i < 0 || p.Operations[i].Action != plan.ActionAdopt || p.Operations[i].Blocked != "" {
+					t.Fatalf("explicit architecture is not adoptable in plan: %+v", p.Operations)
+				}
+				j := slices.IndexFunc(views, func(view packageView) bool { return view.Canonical == "dnf:"+name })
+				if j < 0 || views[j].State != "adopt" || views[j].Blocked != "" {
+					t.Fatalf("ownership view disagrees with adoption plan: %+v", views)
+				}
+			}
+			i := slices.IndexFunc(p.Operations, func(op plan.Operation) bool { return op.ID == legacyID })
+			if i < 0 {
+				t.Fatalf("plan omitted legacy receipt resolution: %+v", p.Operations)
+			}
+			if len(names) == 2 {
+				if !p.Complete || p.Operations[i].Action != plan.ActionRetire || p.Operations[i].Blocked != "" {
+					t.Fatalf("complete architecture selection did not retire the old receipt: %+v", p)
+				}
+			} else {
+				j := slices.IndexFunc(views, func(view packageView) bool { return view.Canonical == "dnf:demo.x86_64" })
+				if p.Complete || p.Operations[i].Blocked == "" || j < 0 || views[j].State != "blocked" || views[j].Blocked == "" {
+					t.Fatalf("partial selection lost unresolved ownership: plan=%+v views=%+v", p, views)
+				}
+			}
+		})
 	}
 }
 

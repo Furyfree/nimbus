@@ -29,6 +29,9 @@ Phase 5 is complete; its prompt improvements are included below.
   boot-target or display-manager change; preserve foreign configuration.
 - [x] Extend doctor for the new resources, including actionable explanations
   of missing activation, effective configuration, and owned drift.
+- [x] Align ownership views and retained-source counts with the planner.
+  Go 1.26.7 fixtures cover Flatpak adoption across origins, native RPM receipt
+  identities, multilib ambiguity, and legacy receipts.
 - [ ] Pass reboot to greeter, normal login, logout/relogin, file-picker and
   screen-sharing portals, and recovery with absent/broken user configuration.
 - [ ] Prove second-sync convergence, failed-activation recovery, and component
