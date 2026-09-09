@@ -289,6 +289,16 @@ func TestPlanNotesWhatGoesBeyondTheDefinitions(t *testing.T) {
 			rows[0].Repository = "terra"
 			return rows
 		}, "would come from repository terra"},
+		{"requested dependency from wrong repository", func(rows []TxPackage) []TxPackage {
+			rows[0].Repository = "terra"
+			rows[0].Section = "installing dependencies"
+			return rows
+		}, "would come from repository terra"},
+		{"requested weak dependency from wrong repository", func(rows []TxPackage) []TxPackage {
+			rows[0].Repository = "terra"
+			rows[0].Section = "installing weak dependencies"
+			return rows
+		}, "would come from repository terra"},
 		{"upgrade smuggled in", func(rows []TxPackage) []TxPackage {
 			return append(rows, TxPackage{Name: "bash", Arch: "x86_64", EVR: "0:6-1", Repository: "updates", Section: "downgrading"})
 		}, "would downgrade bash"},

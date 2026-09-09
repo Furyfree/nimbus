@@ -894,12 +894,12 @@ func (b *builder) installTransaction(pkgs []definitions.ResolvedPackage) Operati
 		op.Blocked = "dnf5 reports nothing to do although packages are missing"
 		return op
 	}
-	// Direct names bind to their installing rows. Provides need native
-	// evidence for the exact reviewed package, independent of row order.
+	// DNF can list requested packages as dependencies. Direct names bind
+	// to any installing row; provides still need exact native evidence.
 	op.Resolved = map[string]string{}
 	var installing []facts.Package
 	for _, row := range tx.Packages {
-		if row.Section == "installing" {
+		if strings.HasPrefix(row.Section, "installing") {
 			installing = append(installing, facts.Package{Name: row.Name, Arch: row.Arch})
 		}
 	}
@@ -925,7 +925,7 @@ func (b *builder) installTransaction(pkgs []definitions.ResolvedPackage) Operati
 	}
 	for _, row := range tx.Packages {
 		switch row.Section {
-		case "installing":
+		case "installing", "installing dependencies", "installing weak dependencies":
 			wanted := false
 			for _, n := range names {
 				if op.Resolved[n] != facts.PackageID(row.Name, row.Arch) {
@@ -937,10 +937,9 @@ func (b *builder) installTransaction(pkgs []definitions.ResolvedPackage) Operati
 					problems = append(problems, fmt.Sprintf("%s would come from repository %s, not %s", row.Name, row.Repository, strings.Join(b.expectedRepos(p.Prefix), " or ")))
 				}
 			}
-			if !wanted {
+			if !wanted && row.Section == "installing" {
 				problems = append(problems, "would install "+row.Name+", which nothing selects")
 			}
-		case "installing dependencies", "installing weak dependencies":
 		case "removing", "removing dependent packages", "removing unused dependencies":
 			if !removes[row.Name] {
 				problems = append(problems, "would remove "+row.Name+", which no component declares in removes")
@@ -988,7 +987,7 @@ func (b *builder) resolveProvide(request string, tx *Transaction) (TxPackage, er
 			return TxPackage{}, fmt.Errorf("resolve provider for %s: invalid provider row %q", request, line)
 		}
 		for _, row := range tx.Packages {
-			if row.Section == "installing" && row.Name == fields[0] && row.Arch == fields[1] &&
+			if strings.HasPrefix(row.Section, "installing") && row.Name == fields[0] && row.Arch == fields[1] &&
 				strings.TrimPrefix(row.EVR, "0:") == strings.TrimPrefix(fields[2], "0:") && row.Repository == fields[3] &&
 				!slices.Contains(matches, row) {
 				matches = append(matches, row)
