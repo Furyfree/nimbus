@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -256,6 +258,16 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	p, currentPlan = fresh, fresh
 	approvedCheckout := p.Checkout
 	s = freshSelection
+	// The foreground native tool also receives Ctrl-C. Wait for it to return,
+	// then stop further operations and finalize snapshots with the lock held.
+	parent := cmd.Context()
+	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
+	cmd.SetContext(ctx)
+	defer func() { cmd.SetContext(parent); stop() }()
+	defer func() { retErr = errors.Join(retErr, ctx.Err()) }()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	stage := filepath.Join(filepath.Dir(lockPath), "stage")
 	if err := os.MkdirAll(stage, 0o700); err != nil {
 		return err
@@ -269,6 +281,9 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			return err
 		}
 		defer stopSudo()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if snapshotWork && !p.Snapshots.Setup {
 		phase = "snapper"
@@ -303,6 +318,9 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 				}
 			}
 		}()
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err := p.Snapshots.Configure(src); err != nil {
 			return err
 		}
@@ -319,6 +337,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			}
 		}
 		return apply.Options{
+			Context:     ctx,
 			Constraints: s.Resolved.Constraints,
 			Source:      src, Fetch: newFetcher(), Record: newRecorder(src, stage), Keys: apply.ExtractKeysWithRPM2Archive(src),
 			Stage: stage, Checkout: s.Checkout, Root: s.Checkout.Definitions(), FirstApply: !applied.Present,
@@ -334,6 +353,9 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	// then whatever the plan holds, in passes until nothing waits.
 	phase = "apply"
 	for pass := 0; !sf.systemUpgrade && pass < 4; pass++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if pass > 0 {
 			if p, applied, err = replanUnchanged(s, flags, src, sf.prune, approvedCheckout); err != nil {
 				return err
@@ -363,6 +385,9 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			result.Failures = append(result.Failures, r.Failures...)
 			if r.Error != "" {
 				return fail(r.Failed, r.Error)
+			}
+			if err := ctx.Err(); err != nil {
+				return err
 			}
 			applied.Present = true
 			if changedRepositories(r.Executed) {
@@ -407,6 +432,9 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			}
 			break
 		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if p.RepositoryReconciliation != "" {
 			if err := reconcileRepositories(s, flags, src, approvedCheckout, options, execOut, &result); err != nil {
 				return err
@@ -428,6 +456,9 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 		if r.Error != "" {
 			return fail(r.Failed, r.Error)
 		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		result.Upgraded = true
 		if p.RepositoryReconciliation != "" {
 			if err := reconcileRepositories(s, flags, src, approvedCheckout, options, execOut, &result); err != nil {
@@ -437,6 +468,9 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	}
 	if result.Error != "" {
 		return reported{}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	for _, op := range p.Operations {
 		if op.After != "" && op.Action != plan.ActionKeep && !slices.Contains(result.Executed, op.ID) {

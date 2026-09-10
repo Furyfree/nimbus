@@ -326,11 +326,6 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 		_, err := fmt.Fprintf(out, "%s: the manifest already says that\n", edit.cmdName)
 		return err
 	}
-	after, err := renderManifest(before, &edited)
-	if err != nil {
-		return err
-	}
-
 	// Validate and plan the edited manifest in memory before touching it.
 	// The trial checkout also carries the edited bytes so its definition
 	// digest, and therefore the plan digest, is the one the written
@@ -338,6 +333,27 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 	trialCheckout := *s.Checkout
 	trialCheckout.Machines = maps.Clone(s.Checkout.Machines)
 	trialCheckout.Machines[s.Resolved.Machine] = &edited
+	if len(edited.PackageConstraints) > 0 {
+		// Resolve the edited selection before retaining its constraints. A
+		// removed package's constraint belongs in the same reviewed edit.
+		constraints := maps.Clone(edited.PackageConstraints)
+		edited.PackageConstraints = nil
+		if errs := definitions.Validate(&trialCheckout); len(errs) > 0 {
+			return fmt.Errorf("the edited manifest is invalid: %s", errs[0])
+		}
+		selection, errs := definitions.Resolve(&trialCheckout, s.Resolved.Machine)
+		if len(errs) > 0 {
+			return fmt.Errorf("the edited manifest does not resolve: %s", errs[0])
+		}
+		maps.DeleteFunc(constraints, func(key, _ string) bool {
+			return !slices.ContainsFunc(selection.Packages, func(p definitions.ResolvedPackage) bool { return p.Canonical == key })
+		})
+		edited.PackageConstraints = constraints
+	}
+	after, err := renderManifest(before, &edited)
+	if err != nil {
+		return err
+	}
 	trialCheckout.Entries = slices.Clone(s.Checkout.Entries)
 	rel := "machines/" + s.Resolved.Machine + ".toml"
 	for i := range trialCheckout.Entries {

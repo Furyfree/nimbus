@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/inspect"
 	"github.com/Furyfree/nimbus/internal/native/nativetest"
+	"github.com/Furyfree/nimbus/internal/plan"
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
@@ -678,7 +680,7 @@ func TestPackageSelectionRoundTrip(t *testing.T) {
 
 func TestPackagesRemoveRefusesRequiredComponentPackage(t *testing.T) {
 	root, src := installerFixture(t)
-	manifest := "schema=1\nid='vm'\nprofiles=['common']\ncomponents=['consumer']\npackages=['dnf:demo']\n"
+	manifest := "schema=1\nid='vm'\nprofiles=['common']\ncomponents=['consumer']\npackages=['dnf:demo']\n[package_constraints]\n'dnf:demo'='1.*'\n"
 	for path, data := range map[string]string{
 		"profiles/common.toml":     "schema=1\nid='common'\n",
 		"components/runtime.toml":  "schema=1\nid='runtime'\npackages=['demo']\n",
@@ -705,6 +707,99 @@ func TestPackagesRemoveRefusesRequiredComponentPackage(t *testing.T) {
 	after, err := os.ReadFile(manifestPath(root, "vm"))
 	if code != ExitFailure || !strings.Contains(errOut, "another selected component requires") || strings.Contains(out, "plan for") || err != nil || string(after) != manifest || len(src.calls) != 0 || len(src.reads) != 0 {
 		t.Fatalf("required package removal was not refused before review: %d %s%s; manifest=%q, error=%v, calls=%v, reads=%v", code, out, errOut, after, err, src.calls, src.reads)
+	}
+}
+
+func TestSelectionRemovesOnlyUnselectedPackageConstraints(t *testing.T) {
+	for _, mode := range []string{"profile", "component", "explicit package", "excluded package", "shared component", "last constraint"} {
+		t.Run(mode, func(t *testing.T) {
+			root, src := installerFixture(t)
+			for path, data := range map[string]string{
+				"profiles/common.toml": "schema=1\nid='common'\npackages=['bash']\n",
+				"profiles/extra.toml":  "schema=1\nid='extra'\ncomponents=['demo']\n",
+				"components/demo.toml": "schema=1\nid='demo'\npackages=['demo']\n",
+			} {
+				if err := os.WriteFile(filepath.Join(root, path), []byte(data), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			m := &definitions.Machine{Schema: 1, ID: "vm", Profiles: []string{"common"},
+				PackageConstraints: map[string]string{"dnf:demo": "1.*", "dnf:bash": "5.*"}}
+			args := []string{"packages", "remove", "demo"}
+			switch mode {
+			case "profile", "shared component", "last constraint":
+				m.Profiles = append(m.Profiles, "extra")
+				args = []string{"profiles", "remove", "extra"}
+				if mode == "shared component" {
+					m.Components = []string{"demo"}
+				}
+				if mode == "last constraint" {
+					delete(m.PackageConstraints, "dnf:bash")
+				}
+			case "component":
+				m.Components = []string{"demo"}
+				args = []string{"components", "remove", "demo"}
+			case "explicit package":
+				m.Packages = []string{"demo"}
+			case "excluded package":
+				m.Profiles = append(m.Profiles, "extra")
+			}
+			before, err := renderManifest(nil, m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := manifestPath(root, "vm")
+			if err := writeManifest(path, before); err != nil {
+				t.Fatal(err)
+			}
+			savedPick, savedApprover := pickerFn, approver
+			t.Cleanup(func() { pickerFn, approver = savedPick, savedApprover })
+			pickerFn = func(_ string, items []pickItem) ([]string, error) { return []string{items[0].ID}, nil }
+			approver = func(io.Reader, io.Writer, string) bool { return false }
+			args = append(args, "--checkout", root, "--machine", "vm")
+			code, out, errOut := run(t, append(slices.Clone(args), "--plan", "--json")...)
+			var result struct {
+				Data struct {
+					Diff string     `json:"diff"`
+					Plan *plan.Plan `json:"plan"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal([]byte(out), &result); err != nil || code != ExitOK {
+				t.Fatalf("selection preview: %d %s%s: %v", code, out, errOut, err)
+			}
+			retained := mode == "shared component"
+			if removed := strings.Contains(result.Data.Diff, "-'dnf:demo' = '1.*'"); removed == retained ||
+				mode != "last constraint" && !strings.Contains(result.Data.Diff, " 'dnf:bash' = '5.*'") {
+				t.Fatalf("incorrect constraint edit:\n%s", result.Data.Diff)
+			}
+			var versionlock string
+			for _, op := range result.Data.Plan.Operations {
+				if plan.IsConstraintOperation(op) {
+					versionlock = string(op.File.After.Content)
+				}
+			}
+			if strings.Contains(versionlock, `name = "bash"`) != (mode != "last constraint") || strings.Contains(versionlock, `name = "demo"`) != retained {
+				t.Fatalf("planned constraints do not match the selection: %s", versionlock)
+			}
+			code, out, errOut = run(t, args...)
+			if code != ExitFailure || !strings.Contains(errOut, "not applied") {
+				t.Fatalf("declined selection: %d %s%s", code, out, errOut)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil || string(after) != string(before)+"\n" || len(src.calls) != 0 {
+				t.Fatalf("preview or decline changed state: manifest=%q error=%v calls=%v", after, err, src.calls)
+			}
+			if mode == "last constraint" {
+				code, out, errOut = run(t, append(args, "--yes")...)
+				if code != ExitOK || !strings.Contains(out, "wrote ") {
+					t.Fatalf("approved selection: %d %s%s", code, out, errOut)
+				}
+				selected, err := loadSelected(machineFlags{checkout: root, machine: "vm"})
+				if err != nil || len(selected.Checkout.Machines["vm"].PackageConstraints) != 0 || !slices.Equal(selected.Resolved.Profiles, []string{"common"}) {
+					t.Fatalf("approved removal did not persist a valid selection: %+v, %v", selected, err)
+				}
+			}
+		})
 	}
 }
 

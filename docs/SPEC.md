@@ -142,6 +142,11 @@ uncommitted local work. Use the separate
 [TASKS.md](TASKS.md) before desktop installation; this simplified base still
 needs its clean-install trial.
 
+These definitions require Nimbus 0.3.0 or newer. On an existing installation,
+update the Nimbus RPM through DNF before updating this checkout or applying
+the matching Chezmoi Topgrade configuration. Bootstrap validates an installed
+engine but does not upgrade it automatically.
+
 Reboot when requested and select Hyprland through UWSM in Noctalia Greeter.
 The owner confirmed that the greeter remembers the selection. Run status,
 doctor and postinstall where supported by the installed engine. Use installed
@@ -340,6 +345,9 @@ this boundary. Previews and unchanged sync create no snapshots. The first
 setup run installs/configures Snapper without a before snapshot and says so.
 A failed before snapshot stops changes. Failure during a protected operation
 still attempts the after snapshot and cleanup, preserving the original error.
+On interruption, Nimbus waits for the current native command to return, stops
+further work and attempts the same finalization while holding the operation
+lock. Forced termination or power loss cannot run this cleanup.
 
 Retention targets six individual snapshots, roughly three pairs, with no
 minimum-age grace period or separate important-snapshot allowance. Timeline

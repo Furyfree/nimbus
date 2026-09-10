@@ -2,6 +2,7 @@ package apply
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 	"io"
 	"maps"
@@ -19,6 +20,7 @@ import (
 // Options are everything the executor needs beyond the plan. Every side
 // effect goes through one of these so tests replace them.
 type Options struct {
+	Context        context.Context
 	Constraints    []definitions.PackageConstraint
 	UpgradePreview *plan.Transaction
 
@@ -48,6 +50,13 @@ type Options struct {
 	Definitions state.Definitions
 	Out         io.Writer
 	Now         func() time.Time
+}
+
+func (o Options) canceled() error {
+	if o.Context != nil {
+		return o.Context.Err()
+	}
+	return nil
 }
 
 // Failure identifies one unsuccessful operation.
@@ -91,6 +100,10 @@ func Run(p *plan.Plan, opts Options) *Result {
 	}
 	var deferredFileRemovals []string
 	for _, op := range p.Operations {
+		if err := opts.canceled(); err != nil {
+			r.Failed, r.Error = op.ID, err.Error()
+			return r
+		}
 		if op.After != "" {
 			r.Pending = append(r.Pending, op.ID)
 			continue

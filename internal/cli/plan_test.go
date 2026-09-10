@@ -10,6 +10,7 @@ import (
 	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/native/nativetest"
 	"github.com/Furyfree/nimbus/internal/plan"
+	"github.com/Furyfree/nimbus/internal/snapper"
 )
 
 func repoRoot(t *testing.T) string {
@@ -109,6 +110,53 @@ func TestStatusCountsRetainedSourcesAsManaged(t *testing.T) {
 	st := summarize(s, p)
 	if st.Managed != 2 || st.Repositories != 1 || st.ToInstall != 0 || st.ToRemove != 0 {
 		t.Fatalf("retained sources are not pending preparation: %+v", st)
+	}
+}
+
+func TestStatusReportsSnapperDriftWithoutMutation(t *testing.T) {
+	for _, mode := range []string{"unchanged", "settings", "setup"} {
+		t.Run(mode, func(t *testing.T) {
+			root, src := snapshotFixture(t)
+			wantPending := 0
+			switch mode {
+			case "settings":
+				src.Files[snapper.Config] = []byte(strings.ReplaceAll(string(src.Files[snapper.Config]), `NUMBER_LIMIT="6"`, `NUMBER_LIMIT="50"`))
+				wantPending = 1
+			case "setup":
+				delete(src.Files, snapper.Config)
+				src.Dirs["/etc/snapper/configs"] = nil
+				delete(src.Files, "/etc/sysconfig/snapper")
+				wantPending = 1
+			}
+			args := []string{"status", "--checkout", root, "--machine", "vm"}
+			code, out, errOut := run(t, args...)
+			if code != ExitOK || !strings.Contains(out, fmt.Sprintf("pending %d, blocked 0", wantPending)) {
+				t.Fatalf("status: %d %s%s", code, out, errOut)
+			}
+			if mode == "settings" && !strings.Contains(out, "Snapper settings: NUMBER_LIMIT=6") ||
+				mode == "setup" && !strings.Contains(out, "Snapper: initialize root snapshots") ||
+				mode == "unchanged" && strings.Contains(out, "Snapper settings:") {
+				t.Fatalf("Snapper drift missing or incorrectly reported: %s", out)
+			}
+			code, out, errOut = run(t, append(args, "--json")...)
+			var result struct {
+				Data statusResult `json:"data"`
+			}
+			if err := json.Unmarshal([]byte(out), &result); err != nil || code != ExitOK {
+				t.Fatalf("JSON status: %d %s%s: %v", code, out, errOut, err)
+			}
+			st := result.Data
+			if st.Pending != wantPending || st.ToInstall != 0 || st.ToRemove != 0 || !st.Complete || st.Snapshots == nil || st.Snapshots.Setup != (mode == "setup") {
+				t.Fatalf("JSON Snapper status: %+v", st)
+			}
+			if mode == "settings" && strings.Join(st.Snapshots.Changes(), ",") != "NUMBER_LIMIT=6" ||
+				mode == "unchanged" && len(st.Snapshots.Changes()) != 0 {
+				t.Fatalf("JSON Snapper drift: %+v", st.Snapshots)
+			}
+			if len(src.mutations) != 0 || len(src.calls) != 0 {
+				t.Fatalf("status mutated native state: %v %v", src.mutations, src.calls)
+			}
+		})
 	}
 }
 

@@ -20,6 +20,10 @@ func Upgrade(opts Options, root definitions.Root) *Result {
 	r := &Result{}
 	ex := &executor{opts: opts}
 	ex.opts.Out = cmp.Or(ex.opts.Out, io.Discard)
+	if err := opts.canceled(); err != nil {
+		r.Failed, r.Error = "upgrade:dnf", err.Error()
+		return r
+	}
 	if err := ex.snapshotPackages(); err != nil {
 		r.Failed, r.Error = "upgrade:dnf", "verification before upgrade: "+err.Error()
 		r.Failures = append(r.Failures, Failure{ID: r.Failed, Error: r.Error})
@@ -49,6 +53,12 @@ func Upgrade(opts Options, root definitions.Root) *Result {
 		r.Failures = append(r.Failures, Failure{ID: r.Failed, Error: r.Error})
 	} else {
 		r.Executed = append(r.Executed, "upgrade:dnf")
+	}
+	if err := opts.canceled(); err != nil {
+		if r.Error == "" {
+			r.Failed, r.Error = "upgrade", err.Error()
+		}
+		return r
 	}
 	for repo := range maps.Values(root.Repositories) {
 		if repo.Kind != "flatpak" {

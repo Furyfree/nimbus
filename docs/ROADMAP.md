@@ -24,6 +24,9 @@ Keep Topgrade configuration in Chezmoi and prevent duplicate system updates or
 recursion. Topgrade calls `nimbus upgrade --system` for RPM and system Flatpak
 updates.
 Deploy the new engine before applying the matching dotfiles configuration.
+The next release is 0.3.0. Its signed COPR package can be tested in the VM
+before the remaining refactors and dashboard are finished; the desktop trial
+still follows the later gates below.
 
 Add missing managed-state previews and explicit approval independent of JSON.
 Use direct Chezmoi commands, retaining initial setup and profile handoff.

@@ -10,6 +10,7 @@ import (
 
 	"github.com/Furyfree/nimbus/internal/native"
 	"github.com/Furyfree/nimbus/internal/plan"
+	"github.com/Furyfree/nimbus/internal/snapper"
 )
 
 func buildPlan(s *selected, src native.Source) (*plan.Plan, error) {
@@ -352,6 +353,17 @@ func newStatus(opts *options) *cobra.Command {
 			fmt.Fprintf(&b, "machine %s: %d profiles, %d components, %d desired packages\n", st.Machine, st.Profiles, st.Components, st.Desired)
 			fmt.Fprintf(&b, "adopted %d, to install %d, to remove %d, repositories to enable %d, pending %d, blocked %d\n", st.Adopted, st.ToInstall, st.ToRemove, st.Repositories, st.Pending, st.Blocked)
 			fmt.Fprintf(&b, "prune candidates %d, updates available %d\n", st.Prune, st.Updates)
+			if st.Snapshots != nil {
+				switch {
+				case st.Snapshots.Blocked != "":
+					fmt.Fprintf(&b, "Snapper blocked: %s\n", st.Snapshots.Blocked)
+				case st.Snapshots.Setup:
+					fmt.Fprintln(&b, "Snapper: initialize root snapshots after the first sync")
+				}
+				if changes := st.Snapshots.Changes(); len(changes) > 0 {
+					fmt.Fprintf(&b, "Snapper settings: %s\n", strings.Join(changes, ", "))
+				}
+			}
 			if st.Complete {
 				fmt.Fprintln(&b, "plan complete; nimbus sync -p shows it")
 			} else {
@@ -366,26 +378,35 @@ func newStatus(opts *options) *cobra.Command {
 }
 
 type statusResult struct {
-	Machine      string `json:"machine"`
-	Profiles     int    `json:"profiles"`
-	Components   int    `json:"components"`
-	Desired      int    `json:"desired_packages"`
-	Adopted      int    `json:"adopted"`
-	Managed      int    `json:"managed"`
-	ToInstall    int    `json:"to_install"`
-	ToRemove     int    `json:"to_remove"`
-	Repositories int    `json:"repositories_to_enable"`
-	Pending      int    `json:"pending"`
-	Blocked      int    `json:"blocked"`
-	Prune        int    `json:"prune_candidates"`
-	Updates      int    `json:"updates_available"`
-	Complete     bool   `json:"complete"`
-	Digest       string `json:"digest"`
+	Machine      string        `json:"machine"`
+	Profiles     int           `json:"profiles"`
+	Components   int           `json:"components"`
+	Desired      int           `json:"desired_packages"`
+	Adopted      int           `json:"adopted"`
+	Managed      int           `json:"managed"`
+	ToInstall    int           `json:"to_install"`
+	ToRemove     int           `json:"to_remove"`
+	Repositories int           `json:"repositories_to_enable"`
+	Pending      int           `json:"pending"`
+	Blocked      int           `json:"blocked"`
+	Prune        int           `json:"prune_candidates"`
+	Updates      int           `json:"updates_available"`
+	Complete     bool          `json:"complete"`
+	Digest       string        `json:"digest"`
+	Snapshots    *snapper.Plan `json:"snapshots,omitempty"`
 }
 
 func summarize(s *selected, p *plan.Plan) statusResult {
 	st := statusResult{Machine: p.Machine, Profiles: len(s.Resolved.Profiles), Components: len(s.Resolved.Components), Desired: len(s.Resolved.Packages),
-		Prune: len(p.Prune), Updates: len(p.Updates.Available), Complete: p.Complete, Digest: p.Digest}
+		Prune: len(p.Prune), Updates: len(p.Updates.Available), Complete: p.Complete, Digest: p.Digest, Snapshots: p.Snapshots}
+	if p.Snapshots != nil {
+		switch {
+		case p.Snapshots.Blocked != "":
+			st.Blocked++
+		case p.Snapshots.Setup || len(p.Snapshots.Changes()) > 0:
+			st.Pending++
+		}
+	}
 	for _, op := range p.Operations {
 		switch {
 		case op.Blocked != "":

@@ -2,6 +2,7 @@ package apply
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -247,6 +248,29 @@ func TestRunExecutesVerifiesAndRecords(t *testing.T) {
 	}
 	if a.Baseline == nil || !a.InBaseline("coreutils.x86_64") || a.InBaseline("ripgrep.x86_64") {
 		t.Fatalf("baseline = %+v", a.Baseline)
+	}
+}
+
+func TestRunCancellationKeepsCompletedReceiptsAndStopsFurtherOperations(t *testing.T) {
+	src := newScripted()
+	root := t.TempDir()
+	opts := options(t, src, root)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	opts.Context = ctx
+	record := opts.Record
+	opts.Record = func(digest string, st *state.Stage) error {
+		err := record(digest, st)
+		cancel()
+		return err
+	}
+	r := Run(samplePlan(t), opts)
+	if r.Error != context.Canceled.Error() || !slices.Equal(r.Executed, []string{"repository:terra"}) || src.ran("sudo flatpak") {
+		t.Fatalf("canceled run continued: %+v; commands %v", r, src.log)
+	}
+	a, err := state.Read(root)
+	if err != nil || len(a.Receipts) != 1 || !a.Receipts["repository:terra"].Verified {
+		t.Fatalf("completed receipt lost: %+v, %v", a, err)
 	}
 }
 

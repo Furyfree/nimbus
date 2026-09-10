@@ -1,13 +1,19 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/spf13/cobra"
 
 	"github.com/Furyfree/nimbus/internal/inspect"
 	"github.com/Furyfree/nimbus/internal/native/nativetest"
@@ -198,5 +204,83 @@ func TestSnapshotConfigurationChangesInvalidateApproval(t *testing.T) {
 	code, out, errOut := run(t, "upgrade", "--system", "--checkout", root, "--machine", "vm")
 	if code != ExitFailure || len(src.mutations) != 0 || !strings.Contains(out, "changed while the question was open") {
 		t.Fatalf("%d %s%s %v", code, out, errOut, src.mutations)
+	}
+}
+
+type interruptedSnapshotSource struct {
+	*snapshotSource
+	command *cobra.Command
+}
+
+func (s *interruptedSnapshotSource) Stream(out, errOut io.Writer, name string, args ...string) error {
+	key := nativetest.Key(name, args...)
+	if key != "sudo dnf5 -y upgrade" && key != "sudo systemctl set-default graphical.target" {
+		return s.snapshotSource.Stream(out, errOut, name, args...)
+	}
+	s.mutations = append(s.mutations, key)
+	self, err := os.FindProcess(os.Getpid())
+	if err != nil {
+		return err
+	}
+	if err := self.Signal(os.Interrupt); err != nil {
+		return err
+	}
+	<-s.command.Context().Done()
+	s.mutations = append(s.mutations, "native command stopped")
+	return errors.New("native command interrupted")
+}
+
+func TestSnapshotInterrupt(t *testing.T) {
+	if mode := os.Getenv("NIMBUS_TEST_SNAPSHOT_INTERRUPT"); mode != "" {
+		root, src := snapshotFixture(t)
+		args := []string{"upgrade", "--system", "--checkout", root, "--machine", "vm", "--yes"}
+		nativeCommand := "sudo dnf5 -y upgrade"
+		if mode == "sync" {
+			path := filepath.Join(root, "components/snapper.toml")
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			data = []byte(strings.Replace(string(data), "[[files]]", "default_target='graphical.target'\n[[files]]", 1))
+			if err := os.WriteFile(path, data, 0644); err != nil {
+				t.Fatal(err)
+			}
+			args = append([]string{"sync"}, args[2:]...)
+			nativeCommand = "sudo systemctl set-default graphical.target"
+		}
+		if mode == "post failure" {
+			src.Failures[afterSnapshot] = "post snapshot failed"
+		}
+		rootCmd, _ := newRoot()
+		command, _, err := rootCmd.Find(args[:1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		withSource(t, &interruptedSnapshotSource{snapshotSource: src, command: command})
+		var output strings.Builder
+		rootCmd.SetOut(&output)
+		rootCmd.SetErr(&output)
+		rootCmd.SetArgs(args)
+		err = rootCmd.Execute()
+		want := []string{beforeSnapshot, nativeCommand, "native command stopped", afterSnapshot, cleanupSnapshots}
+		if err == nil || !slices.Equal(src.mutations, want) || !strings.Contains(output.String(), "native command interrupted") {
+			t.Fatalf("error %v; mutations %v; output %s", err, src.mutations, &output)
+		}
+		if mode == "post failure" && !strings.Contains(output.String(), "post snapshot failed") {
+			t.Fatal(output.String())
+		}
+		return
+	}
+	for _, mode := range []string{"sync", "upgrade", "post failure"} {
+		t.Run(mode, func(t *testing.T) {
+			// A regression must interrupt only this test's subprocess.
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSnapshotInterrupt$")
+			child.Env = append(os.Environ(), "NIMBUS_TEST_SNAPSHOT_INTERRUPT="+mode)
+			if out, err := child.CombinedOutput(); err != nil {
+				t.Fatalf("interrupted %s: %v\n%s", mode, err, out)
+			}
+		})
 	}
 }

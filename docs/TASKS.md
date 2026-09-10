@@ -29,6 +29,9 @@ validate this candidate.
 - [x] Separate `native` execution and test support from `inspect`; use focused
   verification queries in `apply`. Include new integration tests in candidate
   staging.
+- [x] Fix interrupt finalization, remove orphaned package constraints within
+  selection previews, and report Snapper setup/settings drift in status.
+- [x] Require engine 0.3.0 for the new definitions and document upgrade order.
 
 ## Next code cleanup
 
@@ -110,6 +113,12 @@ Snapper tests cover native setup/settings calls, ownership and registration,
 read-only previews, unchanged sync, approval rechecks, and before/after/cleanup
 failures without losing an update error. Actual Btrfs retention and restoration
 remain untested; no live snapshots were created or removed.
+
+Release preparation includes subprocess interrupt regressions, preservation of
+completed receipts on cancellation, and selection/status regressions. The
+local review's three findings are fixed. CodeRabbit could not review the full
+change because it exceeded its file limit; the local Codex review supplied the
+full review, followed by focused verification of the fixes.
 
 Dotfiles `just check` passes: 130 Python tests, three skips, plus Bash and diff
 checks. Its Topgrade tests run the real parser with fake updaters. The skips
