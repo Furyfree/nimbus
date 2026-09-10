@@ -1,8 +1,9 @@
 # Current work
 
 Contract: [SPEC.md](SPEC.md). Order: [ROADMAP.md](ROADMAP.md).
-The cleanup is local and unreleased. Existing installation evidence does not
-validate this candidate.
+The cleanup is merged and released as
+[v0.3.0](https://github.com/Furyfree/nimbus/releases/tag/v0.3.0).
+Existing installation evidence does not validate this candidate.
 
 ## Completed locally
 
@@ -127,5 +128,18 @@ GUI checks. Isolated Chezmoi previews passed; verify reports expected drift
 against an empty temporary home. No live configuration was applied.
 
 The terminal handoff's nine Python tests pass, including cancellation and job
-control. Native DNF solver, VM, hardware, COPR and release checks were not run.
-Previous 0.2.3 VM login/repeat-sync observations do not close these gates.
+control. Native DNF solver, VM and hardware checks were not run. Previous
+0.2.3 VM login/repeat-sync observations do not close these gates.
+
+[PR #20](https://github.com/Furyfree/nimbus/pull/20) merged with passing CI.
+The v0.3.0 release workflow passed its checks and offline vendored build/tests.
+Archive checksums passed; all 246 tagged files and executable bits match the
+merged commit. Module versions and license notices are unchanged from 0.2.3.
+
+[COPR packaging PR #10](https://github.com/Furyfree/copr/pull/10) merged after
+the complete offline Fedora gate and CI passed. Source-RPM preparation passed
+and retained the exact release archive. Local CodeRabbit review of the recipe
+and release notes completed without findings. The
+[publication run](https://github.com/Furyfree/copr/actions/runs/34504051972)
+tracks the signed Fedora 44 build; installed-package testing is still pending.
+The matching Chezmoi/Topgrade changes remain local in the dotfiles repository.
