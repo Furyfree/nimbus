@@ -3,7 +3,7 @@ package cli
 import (
 	"io"
 	"path/filepath"
-	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -34,9 +34,18 @@ func TestLaunchUsesOnlyBrowserDiscoveryAndExactArgv(t *testing.T) {
 	newSource = func() native.Source { return src }
 	t.Cleanup(func() { newSource = old })
 	target := "https://example.org/?q=$(touch%20bad)&x=1"
-	code, _, errOut := run(t, "launch", "webapp", target)
-	if code != 0 || !reflect.DeepEqual(src.argv, []string{"/fake/brave-browser", "--app=" + target}) {
-		t.Fatalf("%d %q %s", code, src.argv, errOut)
+	for _, tc := range []struct {
+		args, want []string
+	}{
+		{[]string{"launch", "browser", target}, []string{"/fake/brave-browser", target}},
+		{[]string{"launch", "browser", target, "--private"}, []string{"/fake/brave-browser", "--incognito", target}},
+		{[]string{"launch", "webapp", target}, []string{"/fake/brave-browser", "--app=" + target}},
+		{[]string{"launch", "webapp", target, "--private"}, []string{"/fake/brave-browser", "--incognito", "--app=" + target}},
+	} {
+		code, _, errOut := run(t, tc.args...)
+		if code != 0 || !slices.Equal(src.argv, tc.want) {
+			t.Fatalf("%d %q %s", code, src.argv, errOut)
+		}
 	}
 	src.argv = nil
 	for _, kind := range []string{"webapp", "browser"} {
@@ -46,7 +55,7 @@ func TestLaunchUsesOnlyBrowserDiscoveryAndExactArgv(t *testing.T) {
 		}
 	}
 	for _, args := range [][]string{{"launch", "webapp"}, {"launch", "browser", "one", "two"}, {"launch", "browser", "file:///tmp/x"}} {
-		code, _, _ = run(t, args...)
+		code, _, _ := run(t, args...)
 		if code == 0 || src.argv != nil {
 			t.Fatalf("invalid invocation launched: %q", args)
 		}

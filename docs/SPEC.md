@@ -313,7 +313,16 @@ applicable. These overrides do not rewrite the selector. Validate accepts only
 | Command | Purpose |
 | --- | --- |
 | `nimbus launch browser [URL] [--private]` | Open the selected browser |
-| `nimbus launch webapp URL` | Open a site in supported browser app mode |
+| `nimbus launch webapp URL [--private]` | Open a site in browser app mode |
+
+All browser launch commands prefer the default browser from `xdg-settings`.
+If it is unset, missing or cannot handle the requested mode, try installed
+browsers in this order: Brave (including Brave Origin), Chromium, Chrome,
+Edge, Opera, Vivaldi, Helium, then Firefox/LibreWolf. Firefox and LibreWolf
+support regular and private windows, not webapp mode. An unrecognized default
+browser can still open regular windows. Private requests always pass the
+selected browser's private flag; they never fall back to a regular launch.
+Invalid or unreadable desktop entries and discovery errors are reported.
 
 Launchers accept HTTP(S) URLs, preserve arguments without shell evaluation,
 and do not install browsers or write their configuration. They need no plan

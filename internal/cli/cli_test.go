@@ -20,7 +20,10 @@ func TestRootHelpListsOnlyDeliveredCommands(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("exit %d", code)
 	}
-	for _, want := range []string{"doctor", "init", "postinstall", "status", "sync", "upgrade", "validate", "version"} {
+	if code, flagHelp, errOut := run(t, "--help"); code != ExitOK || flagHelp != out {
+		t.Fatalf("--help differs from bare help: exit %d\n%s%s", code, flagHelp, errOut)
+	}
+	for _, want := range []string{"doctor", "init", "launch", "postinstall", "status", "sync", "upgrade", "validate", "version"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help lacks %s:\n%s", want, out)
 		}

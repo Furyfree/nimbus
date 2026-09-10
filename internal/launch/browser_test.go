@@ -3,7 +3,7 @@ package launch
 import (
 	"errors"
 	"io/fs"
-	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -42,12 +42,91 @@ func TestBrowserArguments(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := Browser(source(tc.exec), []string{"/missing", "relative", "/data"}, tc.url, tc.private, tc.webapp)
-			if err != nil || !reflect.DeepEqual(got, tc.want) {
+			if err != nil || !slices.Equal(got, tc.want) {
 				t.Fatalf("got %q, %v; want %q", got, err, tc.want)
 			}
 		})
 	}
 }
+func TestChromiumBrowserModes(t *testing.T) {
+	for _, browser := range []struct {
+		name, privateFlag string
+	}{
+		{"brave-origin", "--incognito"},
+		{"brave-origin-stable", "--incognito"},
+		{"brave-browser-stable", "--incognito"},
+		{"chromium-browser", "--incognito"},
+		{"google-chrome-stable", "--incognito"},
+		{"microsoft-edge-stable", "--inprivate"},
+		{"opera", "--private"},
+		{"opera-stable", "--private"},
+		{"vivaldi", "--incognito"},
+		{"vivaldi-stable", "--incognito"},
+		{"helium", "--incognito"},
+	} {
+		name := browser.name
+		bin := "/usr/bin/" + name
+		for _, tc := range []struct {
+			mode            string
+			private, webapp bool
+			fallback        bool
+			want            []string
+		}{
+			{"browser", false, false, false, []string{bin, "--profile-directory=Default", "https://example.org/"}},
+			{"private", true, false, false, []string{bin, browser.privateFlag, "--profile-directory=Default", "https://example.org/"}},
+			{"webapp", false, true, false, []string{bin, "--app=https://example.org/", "--profile-directory=Default"}},
+			{"private webapp", true, true, false, []string{bin, browser.privateFlag, "--app=https://example.org/", "--profile-directory=Default"}},
+			{"fallback", false, true, true, []string{bin, "--app=https://example.org/"}},
+			{"private fallback", true, true, true, []string{bin, browser.privateFlag, "--app=https://example.org/"}},
+		} {
+			t.Run(name+"/"+tc.mode, func(t *testing.T) {
+				src := source(bin + " --profile-directory=Default %U")
+				if tc.fallback {
+					src = source("firefox %U")
+				}
+				src.Paths = map[string]string{name: bin, bin: bin, "firefox": "/usr/bin/firefox"}
+				got, err := Browser(src, []string{"/data"}, "https://example.org/", tc.private, tc.webapp)
+				if err != nil || !slices.Equal(got, tc.want) {
+					t.Fatalf("got %q, %v; want %q", got, err, tc.want)
+				}
+			})
+		}
+	}
+}
+
+func TestBrowserFallbacks(t *testing.T) {
+	for _, condition := range []string{"unset default", "missing entry", "missing executable", "unsupported private"} {
+		for _, private := range []bool{false, true} {
+			name := condition + "/regular"
+			if private {
+				name = condition + "/private"
+			}
+			t.Run(name, func(t *testing.T) {
+				src := source("unknown --profile=other %U")
+				src.Paths = map[string]string{"firefox": "/usr/bin/firefox"}
+				switch condition {
+				case "unset default":
+					src.Commands[nativetest.Key("xdg-settings", "get", "default-web-browser")] = nil
+				case "missing entry":
+					clear(src.Files)
+				case "unsupported private":
+					src.Paths["unknown"] = "/usr/bin/unknown"
+				}
+				want := []string{"/usr/bin/firefox", "https://example.org"}
+				if private {
+					want = []string{"/usr/bin/firefox", "--private-window", "https://example.org"}
+				} else if condition == "unsupported private" {
+					want = []string{"/usr/bin/unknown", "--profile=other", "https://example.org"}
+				}
+				got, err := Browser(src, []string{"/data"}, "https://example.org", private, false)
+				if err != nil || !slices.Equal(got, want) {
+					t.Fatalf("got %q, %v; want %q", got, err, want)
+				}
+			})
+		}
+	}
+}
+
 func TestBrowserRefusals(t *testing.T) {
 	for _, url := range []string{"file:///tmp/test", "javascript:alert(1)", "--incognito", "https:///missing", "https://example.org\nfoo"} {
 		if _, err := Browser(source("firefox %u"), []string{"/data"}, url, false, false); err == nil {
@@ -74,11 +153,12 @@ func TestBrowserRefusals(t *testing.T) {
 		}
 	}
 	s := source("firefox %u")
-	delete(s.Paths, "brave-browser")
+	s.Paths = map[string]string{"firefox": "/usr/bin/firefox"}
 	if _, err := Browser(s, []string{"/data"}, "https://example.org", false, true); err == nil {
 		t.Error("missing fallback accepted")
 	}
 	s = source("unknown %u")
+	s.Paths = map[string]string{"unknown": "/usr/bin/unknown"}
 	if _, err := Browser(s, []string{"/data"}, "", true, false); err == nil {
 		t.Error("unknown private mode accepted")
 	}
@@ -89,7 +169,7 @@ func TestDesktopEscapes(t *testing.T) {
 		t.Fatal(err)
 	}
 	words, err := execWords(e["Exec"])
-	if err != nil || !reflect.DeepEqual(words, []string{"firefox", "a$b", "%U"}) {
+	if err != nil || !slices.Equal(words, []string{"firefox", "a$b", "%U"}) {
 		t.Fatalf("%q %v", words, err)
 	}
 }

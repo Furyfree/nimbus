@@ -55,9 +55,7 @@ func newLaunch(opts *options) *cobra.Command {
 				return src.Stream(cmd.OutOrStdout(), cmd.ErrOrStderr(), argv[0], argv[1:]...)
 			},
 		}
-		if !webapp {
-			cmd.Flags().BoolVar(&private, "private", false, "open a private browser window")
-		}
+		cmd.Flags().BoolVar(&private, "private", false, "open a private browser window")
 		group.AddCommand(cmd)
 	}
 	return group

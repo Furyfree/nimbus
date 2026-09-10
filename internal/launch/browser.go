@@ -14,7 +14,7 @@ import (
 	"github.com/Furyfree/nimbus/internal/native"
 )
 
-// Browser resolves the XDG browser, or a Chromium fallback for webapp mode.
+// Browser resolves the XDG browser, or an installed fallback for the requested mode.
 // DataDirs are explicit XDG data roots; callers and tests supply them.
 func Browser(src native.Source, dataDirs []string, target string, private, webapp bool) ([]string, error) {
 	if target != "" {
@@ -25,12 +25,93 @@ func Browser(src native.Source, dataDirs []string, target string, private, webap
 	} else if webapp {
 		return nil, errors.New("webapp requires a URL")
 	}
+	desktopURL := target
+	if webapp {
+		desktopURL = ""
+	}
+	args, err := defaultBrowser(src, dataDirs, desktopURL)
+	if err != nil {
+		return nil, err
+	}
+	privateFlag := ""
+	if len(args) > 0 {
+		var app bool
+		privateFlag, app = browserModes(args[0])
+		bin, err := src.LookPath(args[0])
+		if err != nil || (webapp && !app) || (private && privateFlag == "") {
+			args = nil
+		} else {
+			args[0] = bin
+		}
+	}
+	if len(args) == 0 {
+		for _, family := range browsers {
+			if (webapp && !family.webapp) || (private && family.privateFlag == "") {
+				continue
+			}
+			for _, name := range family.commands {
+				if bin, err := src.LookPath(name); err == nil {
+					args = []string{bin}
+					if desktopURL != "" {
+						args = append(args, desktopURL)
+					}
+					privateFlag = family.privateFlag
+					break
+				}
+			}
+			if len(args) > 0 {
+				break
+			}
+		}
+	}
+	if len(args) == 0 {
+		return nil, errors.New("no installed browser supports the requested mode; install a supported browser or change the default browser")
+	}
+	argv := []string{args[0]}
+	if private {
+		argv = append(argv, privateFlag)
+	}
+	if webapp {
+		argv = append(argv, "--app="+target)
+	}
+	return append(argv, args[1:]...), nil
+}
+
+// The same ordered list controls mode support and fallback discovery.
+var browsers = []struct {
+	commands    []string
+	privateFlag string
+	webapp      bool
+}{
+	{[]string{"brave-browser", "brave-browser-stable", "brave", "brave-origin", "brave-origin-stable"}, "--incognito", true},
+	{[]string{"chromium", "chromium-browser"}, "--incognito", true},
+	{[]string{"google-chrome", "google-chrome-stable", "google-chrome-beta", "google-chrome-unstable"}, "--incognito", true},
+	{[]string{"microsoft-edge", "microsoft-edge-stable", "microsoft-edge-beta", "microsoft-edge-dev"}, "--inprivate", true},
+	{[]string{"opera", "opera-stable", "opera-beta", "opera-developer"}, "--private", true},
+	{[]string{"vivaldi", "vivaldi-stable", "vivaldi-snapshot"}, "--incognito", true},
+	{[]string{"helium"}, "--incognito", true},
+	{[]string{"firefox", "firefox-esr", "librewolf"}, "--private-window", false},
+}
+
+func browserModes(bin string) (privateFlag string, webapp bool) {
+	for _, family := range browsers {
+		if slices.Contains(family.commands, filepath.Base(bin)) {
+			return family.privateFlag, family.webapp
+		}
+	}
+	return "", false
+}
+
+func defaultBrowser(src native.Source, dataDirs []string, target string) ([]string, error) {
 	raw, err := src.Run("xdg-settings", "get", "default-web-browser")
 	if err != nil {
 		return nil, fmt.Errorf("read default browser: %w", err)
 	}
 	id := strings.TrimSpace(string(raw))
-	if id == "" || filepath.Base(id) != id || !strings.HasSuffix(id, ".desktop") || strings.ContainsAny(id, "\\\x00\r\n") {
+	if id == "" {
+		return nil, nil
+	}
+	if filepath.Base(id) != id || !strings.HasSuffix(id, ".desktop") || strings.ContainsAny(id, "\\\x00\r\n") {
 		return nil, errors.New("default browser must name one desktop entry")
 	}
 	var entry map[string]string
@@ -54,7 +135,7 @@ func Browser(src native.Source, dataDirs []string, target string, private, webap
 		break
 	}
 	if entry == nil {
-		return nil, fmt.Errorf("default browser entry %s was not found", id)
+		return nil, nil
 	}
 	if entry["Type"] != "Application" || entry["Hidden"] == "true" || entry["Terminal"] == "true" {
 		return nil, errors.New("default browser must be an enabled graphical application")
@@ -66,29 +147,7 @@ func Browser(src native.Source, dataDirs []string, target string, private, webap
 	if len(words) == 0 || strings.ContainsAny(words[0], "=%") {
 		return nil, errors.New("invalid browser executable")
 	}
-	chromium := chromiumBrowser(words[0])
-
-	mode := ""
-	if webapp {
-		mode = "--app=" + target
-		target = ""
-	}
-	if private {
-		switch {
-		case strings.HasPrefix(filepath.Base(words[0]), "microsoft-edge"):
-			mode = "--inprivate"
-		case chromium:
-			mode = "--incognito"
-		case slices.Contains([]string{"firefox", "firefox-esr", "librewolf"}, filepath.Base(words[0])):
-			mode = "--private-window"
-		default:
-			return nil, errors.New("private mode is unsupported for the selected browser")
-		}
-	}
 	args := []string{words[0]}
-	if mode != "" {
-		args = append(args, mode)
-	}
 	usedURL := false
 	for _, word := range words[1:] {
 		switch word {
@@ -121,25 +180,7 @@ func Browser(src native.Source, dataDirs []string, target string, private, webap
 	if !usedURL && target != "" {
 		args = append(args, target)
 	}
-	if webapp && !chromium {
-		// The supported fallback order is explicit; no shell or desktop config edits.
-		for _, name := range []string{"brave-browser", "brave", "chromium", "chromium-browser", "google-chrome"} {
-			if bin, e := src.LookPath(name); e == nil {
-				return []string{bin, mode}, nil
-			}
-		}
-		return nil, errors.New("webapp needs a Chromium-family browser (Brave, Chromium, or Chrome)")
-	}
-	bin, err := src.LookPath(args[0])
-	if err != nil {
-		return nil, fmt.Errorf("find browser: %w", err)
-	}
-	args[0] = bin
 	return args, nil
-}
-
-func chromiumBrowser(bin string) bool {
-	return slices.Contains([]string{"brave-browser", "brave-browser-stable", "brave", "chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "microsoft-edge", "microsoft-edge-stable"}, filepath.Base(bin))
 }
 
 func desktopEntry(data string) (map[string]string, error) {

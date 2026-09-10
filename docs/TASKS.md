@@ -78,6 +78,10 @@ are local and have not been installed.
 - [x] Fix interrupt finalization, remove orphaned package constraints within
   selection previews, and report Snapper setup/settings drift in status.
 - [x] Require engine 0.3.0 for the new definitions and document upgrade order.
+- [x] Share default-browser selection, installed fallbacks and private flags
+  across browser and webapp launchers, including Brave Origin.
+- [ ] Check regular, private and webapp windows in an installed session,
+  including private webapps. Local tests verify arguments, not browser UI.
 
 ## Next code cleanup
 
@@ -145,6 +149,10 @@ custom boot archives and automatic restoration, TPM/UKI automation, hibernation,
 Windows VM commands, Home Assistant, optional desktops and measured performance
 work. They are not desktop release gates. AI Usage needs no separate Nimbus
 implementation.
+
+- [ ] Revisit browser/webapp launching through UWSM; check terminal independence,
+  session environment, logout cleanup and operation outside UWSM. See the
+  deferred roadmap entry.
 
 ## Evidence and limits
 

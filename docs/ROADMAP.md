@@ -133,6 +133,11 @@ Install on desktop hardware only after the dashboard and delivery are ready.
 | Home Assistant integration | Owner wants to understand it first |
 | Additional desktop profiles | Add only for a maintained, demonstrated need |
 | Performance changes | Measure an actual problem before adding machinery |
+| Browser app launching through UWSM | Check session lifecycle separately |
+
+Revisit [UWSM app launching](https://github.com/Vladimir-csp/uwsm) for browser
+and webapp commands: terminal independence, session environment, logout cleanup
+and behavior outside UWSM. This is separate from choosing the UWSM login session.
 
 If Windows VM work is reopened, retain the owner's preferences: official
 Microsoft media, capacity shown before setup, editable defaults of Windows 11
