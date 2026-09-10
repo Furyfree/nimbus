@@ -1,0 +1,7 @@
+# Bootstrap the official editor as the user; Chezmoi owns its configuration.
+schema = 1
+id = "zed"
+
+[installer]
+url = "https://zed.dev/install.sh"
+binary = ".local/bin/zed"

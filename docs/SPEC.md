@@ -21,6 +21,9 @@ is Fedora 44 on x86_64, using Hyprland and Noctalia.
 
 Nimbus bootstraps required tools, performs the first Chezmoi handoff and
 coordinates later repository updates and Chezmoi apply during sync.
+Mise and the development profile's Zed use their official user installers
+when missing. Chezmoi owns their configuration; Zed owns its application
+updates and removal through `zed --uninstall`.
 It does not keep a second list of Mise tools or manage ordinary user files.
 Chezmoi works independently of Nimbus and does not install system packages or
 escalate privileges. COPR installer helpers own application-specific download,
@@ -570,7 +573,7 @@ cover repository updates, Chezmoi apply and the fresh-engine upgrade handoff.
 WoWUp's helper still needs standalone install/update commands and a published
 package source. Copilot helper publication and native app behavior also need
 verification. Nimbus no longer has custom app providers or Cargo/user-tool
-installation lists; the Mise binary bootstrap remains.
+installation lists; the Mise and Zed binary bootstraps remain.
 
 Bare `nimbus` prints help until the dashboard is built. GRUB assets are present
 but inactive. Installed TTY repair, legacy session retirement, clean install,

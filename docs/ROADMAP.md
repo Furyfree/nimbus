@@ -40,8 +40,6 @@ Keep direct Chezmoi commands available alongside sync's approved apply stage,
 retaining initial setup and profile handoff.
 Remove unused Cargo and installer follow-up declarations; Chezmoi and Mise
 own those tools. Keep the required Mise binary bootstrap and prerequisites.
-Zed is not currently selected in Nimbus; its configuration alone does not
-install the application. Revisit package selection separately if wanted.
 
 Keep only helper RPM declarations and small post-install calls in Nimbus.
 COPR helpers own downloads, verification, installation, status and removal;

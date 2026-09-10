@@ -123,8 +123,7 @@ See [integration](ROADMAP.md#3-finish-workstation-integration) and
 
 Additional root settings are optional: research Fedora/upstream first, then
 compare Omarchy or CachyOS-Settings. Adopt only justified system changes;
-Chezmoi owns user files. Zed is not currently selected in Nimbus; configuration
-alone does not install it.
+Chezmoi owns user files.
 
 ## Hardware-only checks
 
