@@ -1,6 +1,6 @@
 # Nimbus specification
 
-This is the accepted product scope. The local implementation is unreleased;
+This is the accepted product scope.
 [Remaining delivery work](#remaining-delivery-work) lists the gaps.
 Implementation order belongs in [ROADMAP.md](ROADMAP.md).
 

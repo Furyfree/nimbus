@@ -3,7 +3,8 @@
 Contract: [SPEC.md](SPEC.md). Order: [ROADMAP.md](ROADMAP.md).
 The cleanup is merged and released as
 [v0.3.0](https://github.com/Furyfree/nimbus/releases/tag/v0.3.0).
-Version 0.3.1 adds the installation fixes below; publication is in progress.
+[Version 0.3.1](https://github.com/Furyfree/nimbus/releases/tag/v0.3.1) adds
+the installation fixes below and is available in COPR.
 Existing installation evidence does not validate this candidate.
 
 ## Installer follow-up
@@ -13,11 +14,11 @@ Existing installation evidence does not validate this candidate.
   engine 0.3.0 rejects; the VM followed that earlier layout.
 - [x] Add reviewed reuse of empty, root-owned snapshot storage, with approval
   rechecks, native verification and retry after interrupted registration.
-- [ ] Publish the storage-reuse fix, then test the existing VM layout and a
-  fresh root/home installation. Local tests do not prove Btrfs/SELinux behavior.
-- [ ] Deliver the first-install machine prompt and the minimal README command.
-  Keep explicit machine arguments, selector reuse and separate plan approval.
-  The prompt is not in the published 0.3.0 engine.
+- [x] Publish the storage-reuse fix and machine prompt as Nimbus 0.3.1.
+  Explicit machine arguments, selector reuse and separate approval remain.
+- [ ] Test the existing VM layout and a fresh root/home installation.
+  Local tests do not prove Btrfs/SELinux behavior. Upgrade the installed Nimbus
+  RPM before retrying the installer; updating the checkout is not enough.
 
 ## Completed locally
 
@@ -165,3 +166,14 @@ and release notes completed without findings. The
 [publication run](https://github.com/Furyfree/copr/actions/runs/34504051972)
 tracks the signed Fedora 44 build; installed-package testing is still pending.
 The matching Chezmoi/Topgrade changes remain local in the dotfiles repository.
+
+Release 0.3.1: [source preparation](https://github.com/Furyfree/nimbus/actions/runs/34511660409)
+and [COPR publication](https://github.com/Furyfree/copr/actions/runs/34512058767)
+passed. [Build 10972507](https://copr.fedorainfracloud.org/coprs/furyfree/nimbus/build/10972507/)
+succeeded for `nimbus-0.3.1-0.1.fc44.x86_64`. All 249 tagged files match the
+reviewed source archive, and the prepared SRPM preserves that archive exactly.
+The signed binary RPM passed native signature/digest verification against only
+the pinned project key. Its extracted engine reports 0.3.1 and validates all
+three machines in a network-disabled Fedora container. It has no scriptlets.
+Nimbus `just check`/`just validate` and COPR's full offline `just check` passed.
+The VM was not changed; installation and native Snapper behavior remain open.

@@ -26,9 +26,9 @@ Keep Topgrade configuration in Chezmoi and prevent duplicate system updates or
 recursion. Topgrade calls `nimbus upgrade --system` for RPM and system Flatpak
 updates.
 Deploy the new engine before applying the matching dotfiles configuration.
-The minimal `curl ... | bash` installer will ask for a machine on first use;
-publish the engine with that prompt before relying on the argument-free form.
-Release 0.3.0 is available in COPR for VM testing. The remaining refactors and
+Nimbus 0.3.1 asks for a machine on first use through the minimal
+`curl ... | bash` installer and supports the earlier empty snapshot mount.
+It is available in COPR for VM testing. The remaining refactors and
 dashboard can follow; the desktop trial still follows the later gates below.
 
 Add missing managed-state previews and explicit approval independent of JSON.
@@ -84,8 +84,8 @@ Snapper remains selected by `hyprland-noctalia`. Native setup, bounded number
 retention and sync/system-upgrade hooks are implemented locally. Test initial
 setup on both a fresh root/home layout and the earlier pre-mounted empty
 `/.snapshots` layout, failure handling, cleanup and a root restore on installed
-Fedora. Deliver the storage-reuse fix before retrying the old layout through
-the public installer.
+Fedora. Update the installed engine to 0.3.1 or newer before retrying the old
+layout through the public installer.
 Keep separate boot/EFI coverage explicit; do not claim automatic rollback.
 
 Activate the dark GRUB theme through a small, reversible native integration.
