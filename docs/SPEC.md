@@ -114,6 +114,9 @@ See [Security](#security) for the download exceptions.
 
 ## Installation workflow
 
+See [the Fedora installation guide](INSTALLATION.md) for installer choices
+and existing disk layouts.
+
 1. Install a minimal Fedora 44 base from official media: networking, standard
    utilities and a normal password-protected user in `wheel`; disable direct
    root login. Add guest agents only for the test VM. Nimbus installs the
@@ -137,8 +140,8 @@ curl -fsSL https://raw.githubusercontent.com/Furyfree/nimbus/main/install.sh | b
 
 On first installation, enter `desktop`, `laptop` or `vm` when asked. Reruns
 reuse the saved machine. An explicit choice uses `bash -s -- --machine vm`
-instead of `bash`. The prompt needs the next engine release; until it ships,
-use the explicit choice with the published installer.
+instead of `bash`. The prompt requires Nimbus 0.3.1 or newer; use the explicit
+choice with 0.3.0.
 
 Bootstrap obtains prerequisites, verifies the Nimbus RPM, obtains the checkout,
 refreshes the user package cache and invokes init. It does not include
@@ -343,8 +346,20 @@ against disk loss. Keep independent copies of irreplaceable data.
 `hyprland-noctalia` selects the `snapper` component. Nimbus manages the root
 template at `/etc/snapper/config-templates/nimbus` and uses native Snapper to
 create the `nimbus` configuration and reconcile its settings. Setup requires
-a Btrfs root. Existing foreign root configurations or snapshot directories
-require explicit migration; Nimbus does not delete them to make setup pass.
+a Btrfs root. On a fresh base, native Snapper creates its storage. An existing
+empty `/.snapshots` mount can be reused after approval if it is a Btrfs
+subvolume on the root filesystem, owned by root and not writable by other
+users. Nimbus rechecks its identity and emptiness, writes the marked
+configuration, preserves other Snapper registrations and verifies the result
+through native Snapper. It does not unmount, delete or recreate storage or
+edit `/etc/fstab`.
+
+Adoption interrupted during configuration, registration or verification can be
+retried only with the exact marked configuration and still-empty mounted
+storage. Foreign root configurations, populated directories and unproven
+storage need explicit migration. Nimbus does not delete them to make setup
+pass. Native Snapper calls use `--no-dbus` so configuration changes are read
+directly.
 
 After approval, mutating sync takes a before/after root snapshot pair.
 `upgrade --system` does the same, including when called by Topgrade. Combined

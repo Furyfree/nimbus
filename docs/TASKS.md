@@ -3,10 +3,18 @@
 Contract: [SPEC.md](SPEC.md). Order: [ROADMAP.md](ROADMAP.md).
 The cleanup is merged and released as
 [v0.3.0](https://github.com/Furyfree/nimbus/releases/tag/v0.3.0).
+Version 0.3.1 adds the installation fixes below; publication is in progress.
 Existing installation evidence does not validate this candidate.
 
 ## Installer follow-up
 
+- [x] Recover the Fedora installation guide and replace obsolete storage and
+  recovery instructions. The old guide required the snapshot mount that
+  engine 0.3.0 rejects; the VM followed that earlier layout.
+- [x] Add reviewed reuse of empty, root-owned snapshot storage, with approval
+  rechecks, native verification and retry after interrupted registration.
+- [ ] Publish the storage-reuse fix, then test the existing VM layout and a
+  fresh root/home installation. Local tests do not prove Btrfs/SELinux behavior.
 - [ ] Deliver the first-install machine prompt and the minimal README command.
   Keep explicit machine arguments, selector reuse and separate plan approval.
   The prompt is not in the published 0.3.0 engine.
@@ -109,6 +117,14 @@ work. They are not desktop release gates. AI Usage needs no separate Nimbus
 implementation.
 
 ## Evidence and limits
+
+2026-09-10 storage fix: focused Snapper/CLI tests, `just check` and
+`just validate` pass. Tests cover empty-mount reuse, unsafe or populated
+storage, changed approval, interrupted writes/verification and convergence.
+Native Btrfs and SELinux checks still require the installation trial.
+Local CodeRabbit review covered all 14 changed files and returned no findings
+on its second run. The first run's request to show the actual snapshot
+subvolume and filesystem in the approval plan is addressed.
 
 2026-09-10: Nimbus `just check` and `just validate` pass. The gate includes
 formatting, vet, Go tests, generated GRUB assets, Markdownlint, ShellCheck and

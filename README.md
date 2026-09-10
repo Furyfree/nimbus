@@ -11,7 +11,7 @@ runs the configured update workflow. Nimbus connects these tools where needed.
 ## Start here
 
 - [What Nimbus does and its commands](docs/SPEC.md)
-- [Install Fedora and run Nimbus](docs/SPEC.md#installation-workflow)
+- [Install Fedora and run Nimbus](docs/INSTALLATION.md)
 - [Next work and deferred scope](docs/ROADMAP.md)
 - [Current implementation gaps and checks](docs/TASKS.md)
 
@@ -33,8 +33,8 @@ Nimbus shows the installation plan and asks before applying it. Reruns reuse
 the saved machine. To choose explicitly, replace `bash` with
 `bash -s -- --machine vm` (or `desktop` or `laptop`).
 
-The machine prompt is local and needs an engine release. Until then, use the
-explicit argument with the published installer.
+The machine prompt requires Nimbus 0.3.1 or newer. With 0.3.0, use the
+explicit argument.
 
 The installer obtains Nimbus and starts setup. See the
 [installation workflow](docs/SPEC.md#installation-workflow) for the Fedora base

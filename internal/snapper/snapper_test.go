@@ -139,7 +139,7 @@ func TestConfigure(t *testing.T) {
 				tc.change(src.FakeSource)
 			}
 			if tc.command != "" {
-				key := "sudo -- snapper --config nimbus " + tc.command
+				key := "sudo -- snapper --no-dbus --config nimbus " + tc.command
 				src.Commands[key] = nil
 				if tc.want != "" {
 					src.Failures[key] = tc.want
@@ -151,7 +151,7 @@ func TestConfigure(t *testing.T) {
 			}
 			var wantCommands []string
 			if tc.command != "" {
-				wantCommands = []string{"sudo -- snapper --config nimbus " + tc.command}
+				wantCommands = []string{"sudo -- snapper --no-dbus --config nimbus " + tc.command}
 			}
 			if !slices.Equal(src.mutations, wantCommands) {
 				t.Fatalf("mutations: %v, want %v", src.mutations, wantCommands)
@@ -168,14 +168,14 @@ func TestConfigure(t *testing.T) {
 		if !slices.Equal(p.Changes(), []string{"NUMBER_LIMIT=6"}) {
 			t.Fatalf("retention drift: %v", p.Changes())
 		}
-		src.Commands["sudo -- snapper --config nimbus set-config NUMBER_LIMIT=6"] = nil
+		src.Commands["sudo -- snapper --no-dbus --config nimbus set-config NUMBER_LIMIT=6"] = nil
 		if err := p.Configure(src); err != nil {
 			t.Fatal(err)
 		}
-		if !slices.Equal(src.mutations, []string{"sudo -- snapper --config nimbus set-config NUMBER_LIMIT=6"}) {
+		if !slices.Equal(src.mutations, []string{"sudo -- snapper --no-dbus --config nimbus set-config NUMBER_LIMIT=6"}) {
 			t.Fatalf("retention update commands: %v", src.mutations)
 		}
-		src.Failures["sudo -- snapper --config nimbus set-config NUMBER_LIMIT=6"] = "set-config failed"
+		src.Failures["sudo -- snapper --no-dbus --config nimbus set-config NUMBER_LIMIT=6"] = "set-config failed"
 		if err := p.Configure(src); err == nil || !strings.Contains(err.Error(), "set-config failed") {
 			t.Fatalf("lost native configuration failure: %v", err)
 		}
@@ -193,7 +193,7 @@ func TestSnapshotCommands(t *testing.T) {
 		{"native failure", "pre", "", "7", "snapshot failed", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			key := "sudo -- snapper --config nimbus create --type " + tc.phase + " --print-number --cleanup-algorithm number --description Nimbus system changes"
+			key := "sudo -- snapper --no-dbus --config nimbus create --type " + tc.phase + " --print-number --cleanup-algorithm number --description Nimbus system changes"
 			if tc.pre != "" {
 				key += " --pre-number " + tc.pre
 			}
@@ -210,7 +210,7 @@ func TestSnapshotCommands(t *testing.T) {
 			}
 		})
 	}
-	const cleanup = "sudo -- snapper --config nimbus cleanup number"
+	const cleanup = "sudo -- snapper --no-dbus --config nimbus cleanup number"
 	src := &nativetest.FakeSource{Commands: map[string][]byte{cleanup: nil}, Failures: map[string]string{}}
 	if err := Cleanup(src); err != nil {
 		t.Fatal(err)

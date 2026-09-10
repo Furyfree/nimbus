@@ -9,8 +9,10 @@ Existing local code is a candidate, not proof that the new contract is shipped.
 
 ## 1. Simplify the documentation
 
-Keep only SPEC, TASKS and ROADMAP in `docs/`. SPEC includes installation,
-security, root-system-file ownership and a short architecture/test policy.
+Keep SPEC, TASKS and ROADMAP as the product documents. INSTALLATION is the
+Fedora operator guide, recovered from history and corrected. SPEC includes
+installation, security, root-system-file ownership and a short architecture
+and test policy.
 Remove stale research narratives and completed task logs. Keep deferred work
 explicit without making it a release requirement.
 
@@ -80,7 +82,10 @@ when the installed Nimbus version supports them.
 
 Snapper remains selected by `hyprland-noctalia`. Native setup, bounded number
 retention and sync/system-upgrade hooks are implemented locally. Test initial
-setup, failure handling, cleanup and a root restore on installed Fedora.
+setup on both a fresh root/home layout and the earlier pre-mounted empty
+`/.snapshots` layout, failure handling, cleanup and a root restore on installed
+Fedora. Deliver the storage-reuse fix before retrying the old layout through
+the public installer.
 Keep separate boot/EFI coverage explicit; do not claim automatic rollback.
 
 Activate the dark GRUB theme through a small, reversible native integration.

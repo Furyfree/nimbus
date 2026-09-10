@@ -247,3 +247,13 @@ func TestWaitingRunsNeedNoSudo(t *testing.T) {
 		t.Fatal("upgrade and first run need sudo")
 	}
 }
+
+func TestPlanShowsSnapshotStorageReuse(t *testing.T) {
+	p := &plan.Plan{Machine: "vm", Snapshots: &snapper.Plan{Setup: true, Reuse: &snapper.Storage{Identity: "identity", Filesystem: "uuid", Subvolume: "/snapshots"}}}
+	out := string(renderPlan(p, false, false))
+	for _, want := range []string{"reuse the empty mounted /.snapshots", "Storage: /snapshots on Btrfs filesystem uuid", "/etc/snapper/configs/nimbus", "/etc/sysconfig/snapper", "no before snapshot"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("adoption plan omits %q: %s", want, out)
+		}
+	}
+}

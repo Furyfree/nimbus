@@ -19,10 +19,13 @@ const (
 	Template = "/etc/snapper/config-templates/nimbus"
 	Config   = "/etc/snapper/configs/nimbus"
 	marker   = "# Managed by Nimbus: root snapshots.\n"
+	pending  = "# Nimbus snapshot storage adoption is incomplete.\n"
+	registry = "/etc/sysconfig/snapper"
 )
 
 // Plan includes configuration facts so approval detects changes to them.
 type Plan struct {
+	Reuse    *Storage          `json:"reuse,omitempty"`
 	Setup    bool              `json:"setup,omitzero"`
 	Settings []string          `json:"settings"`
 	Current  map[string]string `json:"current,omitempty"`
@@ -78,7 +81,7 @@ func Inspect(src native.Source, template []byte) (*Plan, error) {
 			return nil, errors.New("Snapper nimbus configuration no longer covers the Btrfs root; repair it explicitly")
 		}
 	}
-	data, err := src.ReadFile("/etc/sysconfig/snapper")
+	data, err := src.ReadFile(registry)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
@@ -87,11 +90,29 @@ func Inspect(src native.Source, template []byte) (*Plan, error) {
 		return nil, err
 	}
 	names := strings.Fields(registered["SNAPPER_CONFIGS"])
-	if slices.Contains(names, "nimbus") == p.Setup {
+	// A stopped adoption may have written its config or registration before
+	// native verification finished. Only the exact marked file can resume.
+	resuming := file.Exists && string(file.Content) == string(template)+pending
+	if file.Exists && strings.Contains(string(file.Content), pending) && !resuming {
+		return nil, errors.New("unfinished Snapper adoption differs from the template; resolve it explicitly before retrying")
+	}
+	if resuming {
+		p.Setup = true
+	}
+	if !resuming && slices.Contains(names, "nimbus") == p.Setup {
 		return nil, errors.New("Snapper nimbus registration and configuration disagree; repair them with native Snapper tools")
 	}
 	if p.Setup {
-		for _, name := range names {
+		entries, err := src.ReadDir("/etc/snapper/configs")
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		configs := append(slices.Clone(names), entries...)
+		slices.Sort(configs)
+		for _, name := range slices.Compact(configs) {
+			if name == "nimbus" && file.Exists {
+				continue
+			}
 			if name == "." || name == ".." || strings.ContainsAny(name, "/\\") {
 				return nil, errors.New("unsupported Snapper configuration name")
 			}
@@ -112,7 +133,12 @@ func Inspect(src native.Source, template []byte) (*Plan, error) {
 			return nil, err
 		}
 		if dir.Exists {
-			return nil, errors.New("/.snapshots already exists; preserve it and resolve the existing Snapper setup before initialization")
+			p.Reuse, err = inspectStorage(src, dir)
+			if err != nil {
+				return nil, fmt.Errorf("/.snapshots already exists: %w", err)
+			}
+		} else if file.Exists {
+			return nil, errors.New("unfinished Snapper adoption lost its snapshot mount; restore it before retrying")
 		}
 		out, err := src.Run("findmnt", "--noheadings", "--output", "FSTYPE", "--target", "/")
 		if err != nil {
@@ -125,8 +151,8 @@ func Inspect(src native.Source, template []byte) (*Plan, error) {
 	return p, nil
 }
 
-// Configure runs after approval. Native create-config handles registration,
-// the snapshot subvolume and its SELinux label; existing snapshots are retained.
+// Configure runs after approval. Fresh storage uses native create-config;
+// existing empty storage uses the fixed registration helper.
 func (p *Plan) Configure(src native.Source) error {
 	if p.Setup {
 		template, err := src.ReadFile(Template)
@@ -137,8 +163,16 @@ func (p *Plan) Configure(src native.Source) error {
 		if err != nil {
 			return err
 		}
-		if !fresh.Setup || !slices.Equal(fresh.Settings, p.Settings) {
+		if !fresh.Setup || !sameStorage(fresh.Reuse, p.Reuse) || !slices.Equal(fresh.Settings, p.Settings) {
 			return errors.New("Snapper setup changed since approval; run sync again")
+		}
+		if p.Reuse != nil {
+			exe, err := os.Executable()
+			if err != nil {
+				return err
+			}
+			_, err = src.Run("sudo", "--", exe, "internal", "snapper-adopt", "--expected", p.adoptionDigest())
+			return err
 		}
 		if _, err := run(src, "create-config", "--fstype", "btrfs", "--template", "nimbus", "/"); err != nil {
 			return err
@@ -174,7 +208,7 @@ func Cleanup(src native.Source) error {
 }
 
 func run(src native.Source, args ...string) ([]byte, error) {
-	return src.Run("sudo", append([]string{"--", "snapper", "--config", "nimbus"}, args...)...)
+	return src.Run("sudo", append([]string{"--", "snapper", "--no-dbus", "--config", "nimbus"}, args...)...)
 }
 
 // Snapper sysconfig files contain quoted or bare assignments, not shell code.

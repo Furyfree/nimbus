@@ -22,7 +22,7 @@ import (
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
-const snapshotCommand = "sudo -- snapper --config nimbus "
+const snapshotCommand = "sudo -- snapper --no-dbus --config nimbus "
 const beforeSnapshot = snapshotCommand + "create --type pre --print-number --cleanup-algorithm number --description Nimbus system changes"
 const afterSnapshot = snapshotCommand + "create --type post --print-number --cleanup-algorithm number --description Nimbus system changes --pre-number 11"
 const cleanupSnapshots = snapshotCommand + "cleanup number"

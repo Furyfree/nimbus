@@ -11,6 +11,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Furyfree/nimbus/internal/apply"
+	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/native"
+	"github.com/Furyfree/nimbus/internal/plan"
+	"github.com/Furyfree/nimbus/internal/snapper"
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
@@ -52,6 +56,17 @@ func newInternal() *cobra.Command {
 	record.Flags().StringVar(&stagePath, "stage", "", "staged receipts file written by the normal user")
 	group.AddCommand(record)
 	group.AddCommand(newInternalSystemFile())
+	var expected string
+	adopt := &cobra.Command{Use: "snapper-adopt", Hidden: true, Args: noArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		if os.Geteuid() != 0 {
+			return errors.New("internal snapper-adopt must run as root through sudo")
+		}
+		return snapper.Adopt(native.ExecSource{}, expected, func(target string, before, after inspect.SystemFile) error {
+			return apply.ApplySystemFile("/", plan.FileChange{Target: target, Before: before, After: after})
+		})
+	}}
+	adopt.Flags().StringVar(&expected, "expected", "", "approved snapshot storage identity")
+	group.AddCommand(adopt)
 	return group
 }
 

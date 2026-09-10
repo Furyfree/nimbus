@@ -46,6 +46,12 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 		default:
 			fmt.Fprintln(&b, "Snapper: before/after root snapshots for system changes, then native number cleanup; no snapshots for previews or unchanged sync.")
 		}
+		if storage := p.Snapshots.Reuse; storage != nil {
+			fmt.Fprintln(&b, "Snapper: reuse the empty mounted /.snapshots subvolume.")
+			fmt.Fprintf(&b, "  Storage: %s on Btrfs filesystem %s.\n", storage.Subvolume, storage.Filesystem)
+			fmt.Fprintln(&b, "  Write /etc/snapper/configs/nimbus and register it in /etc/sysconfig/snapper.")
+			fmt.Fprintln(&b, "  Preserve mounts and contents; apply native SELinux labels.")
+		}
 		if changes := p.Snapshots.Changes(); len(changes) > 0 {
 			fmt.Fprintf(&b, "Snapper settings: %s\n", strings.Join(changes, ", "))
 		}
