@@ -5,6 +5,12 @@ The cleanup is merged and released as
 [v0.3.0](https://github.com/Furyfree/nimbus/releases/tag/v0.3.0).
 Existing installation evidence does not validate this candidate.
 
+## Installer follow-up
+
+- [ ] Deliver the first-install machine prompt and the minimal README command.
+  Keep explicit machine arguments, selector reuse and separate plan approval.
+  The prompt is not in the published 0.3.0 engine.
+
 ## Completed locally
 
 - [x] Consolidate product docs into SPEC, TASKS and ROADMAP.

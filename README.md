@@ -15,6 +15,31 @@ runs the configured update workflow. Nimbus connects these tools where needed.
 - [Next work and deferred scope](docs/ROADMAP.md)
 - [Current implementation gaps and checks](docs/TASKS.md)
 
+## Install
+
+On Fedora 44 x86_64, run as your normal user:
+
+~~~sh
+curl -fsSL https://raw.githubusercontent.com/Furyfree/nimbus/main/install.sh | bash
+~~~
+
+On first installation, enter the machine name when asked:
+
+- `desktop`: the MSI Z690 desktop with NVIDIA RTX 3080.
+- `laptop`: the HP EliteBook with AMD graphics and laptop power settings.
+- `vm`: the disposable test VM, without physical-machine hardware settings.
+
+Nimbus shows the installation plan and asks before applying it. Reruns reuse
+the saved machine. To choose explicitly, replace `bash` with
+`bash -s -- --machine vm` (or `desktop` or `laptop`).
+
+The machine prompt is local and needs an engine release. Until then, use the
+explicit argument with the published installer.
+
+The installer obtains Nimbus and starts setup. See the
+[installation workflow](docs/SPEC.md#installation-workflow) for the Fedora base
+requirements.
+
 ## Workflow
 
 The local candidate supports:

@@ -129,11 +129,16 @@ See [Security](#security) for the download exceptions.
 4. Sign in, check networking and sudo access, and inspect `lsblk -f` and
    `findmnt -t btrfs,ext4,vfat`. Then bootstrap the chosen machine.
 
-For the published channel, replace `desktop` with `laptop` or `vm` as needed:
+Run the installer as the normal user:
 
 ~~~sh
-curl -fsSL https://raw.githubusercontent.com/Furyfree/nimbus/main/install.sh | bash -s -- --machine desktop
+curl -fsSL https://raw.githubusercontent.com/Furyfree/nimbus/main/install.sh | bash
 ~~~
+
+On first installation, enter `desktop`, `laptop` or `vm` when asked. Reruns
+reuse the saved machine. An explicit choice uses `bash -s -- --machine vm`
+instead of `bash`. The prompt needs the next engine release; until it ships,
+use the explicit choice with the published installer.
 
 Bootstrap obtains prerequisites, verifies the Nimbus RPM, obtains the checkout,
 refreshes the user package cache and invokes init. It does not include
@@ -169,7 +174,10 @@ refreshes metadata.
 | `nimbus postinstall TASK` | Show instructions or offer one native action |
 | `nimbus doctor` | Report health problems and possible fixes; never repair |
 
-Init accepts an existing `--machine ID` or explicit `--new ID`. New-machine
+Init reuses the trusted selector or asks for a tracked machine on first use.
+There is no default machine. `--machine ID` skips the choice; `--yes` requires
+an existing selector, `--machine ID` or explicit `--new ID`. Selecting a machine
+does not approve installation; the plan and approval still follow. New-machine
 setup can select a dotfiles repository with `--dotfiles URL` or omit the
 handoff with `--no-dotfiles`. The normal flow is system prerequisites, system
 setup, then Chezmoi initialization and apply. Retry preserves completed work.

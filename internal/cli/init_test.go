@@ -418,6 +418,60 @@ func TestInitRequiresExplicitSelectionBeforeMutation(t *testing.T) {
 	}
 }
 
+func TestInitAsksForMachineBeforeApproval(t *testing.T) {
+	for _, tc := range []struct {
+		name, input, wantErr string
+		plan, applied        bool
+	}{
+		{"approved", "vm\ny\n", "", false, true},
+		{"preview", "vm\n", "", true, false},
+		{"declined", "vm\nn\n", "not applied", false, false},
+		{"approval EOF", "vm\n", "not applied", false, false},
+		{"selection EOF", "", "choose machine: EOF", false, false},
+		{"blank selection", "\n", "no machine selected", false, false},
+		{"unknown machine", "unknown\n", "machine unknown is not tracked", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, src := installerFixture(t)
+			manifest, err := os.ReadFile(manifestPath(root, "vm"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, id := range []string{"laptop", "desktop"} {
+				if err := os.WriteFile(manifestPath(root, id), []byte(strings.Replace(string(manifest), `id = "vm"`, `id = "`+id+`"`, 1)), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var out strings.Builder
+			cmd := New()
+			args := []string{"init", "--checkout", root}
+			if tc.plan {
+				args = append(args, "--plan")
+			}
+			cmd.SetArgs(args)
+			cmd.SetIn(strings.NewReader(tc.input))
+			cmd.SetOut(&out)
+			cmd.SetErr(io.Discard)
+			err = cmd.Execute()
+			if tc.wantErr == "" && err != nil || tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)) {
+				t.Fatalf("init: %v\n%s", err, out.String())
+			}
+			if !strings.Contains(out.String(), "Choose machine (desktop, laptop, vm):") {
+				t.Fatalf("machine choices missing:\n%s", out.String())
+			}
+			path, _ := selector.DefaultPath()
+			sel, err := selector.Load(path)
+			if tc.applied {
+				if err != nil || sel.Machine != "vm" || !slices.Contains(src.calls, "chezmoi apply") {
+					t.Fatalf("selection = %+v, %v; calls = %v", sel, err, src.calls)
+				}
+			} else if !errors.Is(err, os.ErrNotExist) || len(src.calls) != 0 {
+				t.Fatalf("unapproved selection changed state: %+v, %v; calls = %v", sel, err, src.calls)
+			}
+		})
+	}
+}
+
 func TestInitDescribesANewMachineFromTheHardware(t *testing.T) {
 	applyEnv(t)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())

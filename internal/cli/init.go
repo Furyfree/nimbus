@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"cmp"
 	"errors"
@@ -35,6 +36,8 @@ func newInit(opts *options) *cobra.Command {
 		Use:   "init [--checkout DIR] [--machine ID | --new ID] [--plan] [-y]",
 		Short: "Select the machine, write the selector, sync, apply dotfiles, and install user tools",
 		Long: `Init installs the machine selected by --machine or an existing selector.
+On first installation, it asks which tracked machine to use. With --yes,
+pass --machine or --new explicitly if no selector exists.
 It validates the checkout, previews the selector and system changes, and asks
 before applying them. When the manifest names a dotfiles repository, init
 initializes Chezmoi and applies its configuration and selected user tools.
@@ -42,7 +45,7 @@ Sudo authentication and Chezmoi may still ask for input. Explicit --new opens
 the new-machine dialogue. Existing checkout or origin trust cannot change in init.
 
   --checkout DIR   the Nimbus checkout (default ` + DefaultCheckout + `)
-  --machine ID     a tracked machine; otherwise reuse the existing selector
+  --machine ID     a tracked machine; otherwise reuse the selector or ask
   --new ID         describe a new machine and write its manifest
   --dotfiles URL   the dotfiles repository for a new machine
   --no-dotfiles    a new machine without a Chezmoi handoff
@@ -171,7 +174,18 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 		}
 	}
 	if machine == "" {
-		return usageError{fmt.Errorf("no machine selected; pass --machine ID (available: %s), or explicitly create one with --new ID", strings.Join(slices.Sorted(maps.Keys(c.Machines)), ", "))}
+		choices := strings.Join(slices.Sorted(maps.Keys(c.Machines)), ", ")
+		if f.yes {
+			return usageError{fmt.Errorf("no machine selected; pass --machine ID (available: %s), or explicitly create one with --new ID", choices)}
+		}
+		in = bufio.NewReader(in)
+		machine, err = promptLineFn(in, out, "Choose machine ("+choices+")", "")
+		if err != nil {
+			return fmt.Errorf("choose machine: %w", err)
+		}
+		if machine == "" {
+			return usageError{errors.New("no machine selected; enter a listed machine name or pass --machine ID")}
+		}
 	}
 	if f.onePasswordSSH && c.Machines[machine] != nil && c.Machines[machine].Dotfiles == nil {
 		return usageError{errors.New("--onepassword-ssh requires a machine with dotfiles")}
