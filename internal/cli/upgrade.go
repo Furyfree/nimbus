@@ -17,7 +17,9 @@ const upgradeActive = "NIMBUS_UPGRADE_ACTIVE"
 // nativeExit preserves the delegated updater's status at the command boundary.
 type nativeExit struct{ code int }
 
-func (e nativeExit) Error() string { return fmt.Sprintf("Topgrade exited with status %d", e.code) }
+func (e nativeExit) Error() string {
+	return fmt.Sprintf("update command exited with status %d", e.code)
+}
 
 func newUpgrade(opts *options) *cobra.Command {
 	var flags machineFlags
@@ -69,6 +71,10 @@ func runTopgrade(cmd *cobra.Command, args []string, preview bool, flags machineF
 	child := exec.CommandContext(cmd.Context(), "topgrade", args...)
 	child.Env = append(os.Environ(), upgradeActive+"=1", "NIMBUS_UPGRADE_CHECKOUT="+flags.checkout, "NIMBUS_UPGRADE_MACHINE="+flags.machine)
 	child.Stdin, child.Stdout, child.Stderr = cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr()
+	return runChild(child)
+}
+
+func runChild(child *exec.Cmd) error {
 	if err := child.Run(); err != nil {
 		if exited, ok := errors.AsType[*exec.ExitError](err); ok {
 			code := exited.ExitCode()
@@ -77,7 +83,7 @@ func runTopgrade(cmd *cobra.Command, args []string, preview bool, flags machineF
 			}
 			return nativeExit{code: code}
 		}
-		return fmt.Errorf("start Topgrade (install it and check PATH): %w", err)
+		return fmt.Errorf("start %s (install it and check PATH): %w", child.Path, err)
 	}
 	return nil
 }

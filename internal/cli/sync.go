@@ -28,6 +28,7 @@ type syncFlags struct {
 	approvedDigest                  string
 	approvedCheckout                *inspect.Checkout
 	definitionsDigest               string
+	result                          *syncResult
 }
 
 func newSync(opts *options) *cobra.Command {
@@ -36,7 +37,7 @@ func newSync(opts *options) *cobra.Command {
 	var upgrade, noUpgrade bool
 	cmd := &cobra.Command{
 		Use: "sync", Short: "Make the system match the definitions",
-		Long: "Show and apply system changes from the selected definitions. Use --upgrade to run Topgrade after reconciliation succeeds. --json controls output only; mutation still requires --yes.",
+		Long: "Update the Nimbus and Chezmoi repositories, reconcile system changes, then apply user configuration. Use --upgrade to upgrade software first and start the updated engine for sync. --plan uses local definitions without updating repositories. --json controls output only; mutation still requires --yes.",
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if upgrade && noUpgrade {
@@ -48,19 +49,13 @@ func newSync(opts *options) *cobra.Command {
 			if upgrade && os.Getenv(upgradeActive) != "" {
 				return errors.New("recursive upgrade refused; Topgrade must call nimbus upgrade --system")
 			}
-			if err := runSync(cmd, opts, flags, sf); err != nil {
-				return err
-			}
-			if upgrade {
-				return runTopgrade(cmd, nil, sf.plan, flags)
-			}
-			return nil
+			return runMaintenance(cmd, opts, flags, sf, upgrade)
 		},
 	}
 	addMachineFlags(&flags, cmd.Flags())
 	cmd.Flags().BoolVarP(&sf.plan, "plan", "p", false, "show the plan and change nothing")
 	cmd.Flags().BoolVarP(&sf.yes, "yes", "y", false, "approve the displayed changes")
-	cmd.Flags().BoolVar(&upgrade, "upgrade", false, "run Topgrade after a successful sync")
+	cmd.Flags().BoolVar(&upgrade, "upgrade", false, "run Topgrade first, then sync with the updated engine")
 	cmd.Flags().BoolVarP(&noUpgrade, "no-upgrade", "n", false, "compatibility alias; sync already omits general updates")
 	_ = cmd.Flags().MarkHidden("no-upgrade")
 	cmd.Flags().BoolVarP(&sf.prune, "prune", "r", false, "also remove the unmanaged packages the plan lists")
@@ -86,6 +81,10 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	if !sf.plan {
 		defer func() {
 			result.finish(phase, retErr, currentPlan)
+			if sf.result != nil {
+				*sf.result = result
+				return
+			}
 			var reportErr error
 			if opts.json {
 				reportErr = writeJSON(out, result, nil)

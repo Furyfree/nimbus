@@ -64,8 +64,15 @@ func TestUpgradePreservesNativeFailuresAndSignals(t *testing.T) {
 
 func TestUpgradeRefusesRecursionAndJSONBeforeLaunching(t *testing.T) {
 	fakeTopgrade(t, "printf 'unexpected launch'")
-	if code, out, _ := run(t, "upgrade", "--json"); code != ExitUsage || out != "" {
-		t.Fatalf("JSON: exit %d, %q", code, out)
+	for _, args := range [][]string{
+		{"upgrade", "--json"},
+		{"sync", "--upgrade", "--json"},
+		{"sync", "--upgrade", "--json", "--yes"},
+		{"sync", "--upgrade", "--json", "--plan"},
+	} {
+		if code, out, errOut := run(t, args...); code != ExitUsage || out != "" || !strings.Contains(errOut, "does not support --json") {
+			t.Fatalf("JSON %v: exit %d, %q, %q", args, code, out, errOut)
+		}
 	}
 	t.Setenv(upgradeActive, "1")
 	if code, out, errOut := run(t, "upgrade"); code != ExitFailure || out != "" || !strings.Contains(errOut, "recursive") {
@@ -82,7 +89,7 @@ func TestUpgradeMissingTopgrade(t *testing.T) {
 }
 
 func TestSyncUpgradeComposition(t *testing.T) {
-	for _, mode := range []string{"sync", "combined", "preview", "failed-sync", "recursive"} {
+	for _, mode := range []string{"sync", "combined", "preview", "dirty-repo", "recursive"} {
 		t.Run(mode, func(t *testing.T) {
 			root, src := installerFixture(t)
 			bin := t.TempDir()
@@ -98,8 +105,8 @@ func TestSyncUpgradeComposition(t *testing.T) {
 			if mode == "preview" {
 				args = append(args, "--plan")
 			}
-			if mode == "failed-sync" {
-				src.Failures[nativetest.Key("dnf5", inspect.PackageQueryArgs...)] = "inspection failed"
+			if mode == "dirty-repo" {
+				src.Commands[nativetest.Key("git", inspect.GitArgs(root, "status", "--porcelain=v1", "--untracked-files=all")...)] = []byte(" M profiles/common.toml")
 			}
 			if mode == "recursive" {
 				t.Setenv(upgradeActive, "1")
@@ -109,7 +116,7 @@ func TestSyncUpgradeComposition(t *testing.T) {
 			switch mode {
 			case "combined":
 				want = 23
-			case "failed-sync", "recursive":
+			case "dirty-repo", "recursive":
 				want = ExitFailure
 			}
 			if code != want {
@@ -124,8 +131,12 @@ func TestSyncUpgradeComposition(t *testing.T) {
 			if mode == "preview" && (!strings.Contains(out, "Run Topgrade") || slices.Contains(src.reads, "dnf5 makecache")) {
 				t.Fatalf("preview: %s; %v", out, src.reads)
 			}
-			if len(src.calls) != 0 {
-				t.Fatalf("reconciliation of an unchanged fixture mutated: %v", src.calls)
+			var wantCalls []string
+			if mode == "sync" {
+				wantCalls = []string{"chezmoi apply"}
+			}
+			if !slices.Equal(src.calls, wantCalls) {
+				t.Fatalf("unexpected sync calls: %v", src.calls)
 			}
 		})
 	}

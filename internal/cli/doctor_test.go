@@ -54,12 +54,28 @@ func fixtureSource(t *testing.T, root string) *nativetest.FakeSource {
 	}
 	src.Files[filepath.Join(inspect.RepoDir, "fedora.repo")] = read(filepath.Join("yum.repos.d", "fedora.repo"))
 	if root != "" {
+		answerMaintenanceRepository(src, root, "https://github.com/Furyfree/nimbus.git")
 		src.Dirs[filepath.Join(root, ".git")] = []string{"config"}
 		src.Files[filepath.Join(root, ".git", "config")] = []byte("[remote \"origin\"]\n\turl = https://github.com/Furyfree/nimbus.git\n")
 		// The DNF drop-in is already as declared, so plans start at the
 		// repositories the tests reason about.
 		if c, err := definitions.Load(root); err == nil {
 			src.Files[inspect.DNFDropInPath] = []byte(plan.DNFDropIn(c.Definitions()))
+			machine := "laptop"
+			if _, ok := c.Machines[machine]; !ok {
+				machine = "vm"
+			}
+			if resolved, errs := definitions.Resolve(c, machine); len(errs) == 0 && c.Machines[machine].Dotfiles != nil {
+				dotfiles := filepath.Join(t.TempDir(), "dotfiles")
+				answerMaintenanceRepository(src, dotfiles, c.Machines[machine].Dotfiles.Repo)
+				src.Commands["chezmoi source-path"] = []byte(dotfiles)
+				data, err := json.Marshal(map[string]any{"Machine": machine, "ManagedByNimbus": true, "Profiles": resolved.Profiles})
+				if err != nil {
+					t.Fatal(err)
+				}
+				src.Commands[nativetest.Key("chezmoi", inspect.ChezmoiDataArgs...)] = data
+				src.Commands["chezmoi apply"] = nil
+			}
 		}
 	}
 	for _, name := range inspect.RequiredCommands {

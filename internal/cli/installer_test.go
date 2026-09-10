@@ -157,6 +157,7 @@ func installerFixture(t *testing.T) (string, *installerSource) {
 	src.Commands["chezmoi init --promptString Machine=vm --promptBool ManagedByNimbus=true --promptMultichoice Profiles=common --promptBool Enable 1Password SSH integration=false -- https://github.com/Furyfree/dotfiles.git"] = nil
 	src.Commands["chezmoi apply"] = nil
 	src.Commands["chezmoi source-path"] = []byte(home)
+	answerMaintenanceRepository(src, home, "https://github.com/Furyfree/dotfiles.git")
 	src.Commands[nativetest.Key("git", inspect.GitArgs(home, "config", "--get", "remote.origin.url")...)] = []byte("https://github.com/Furyfree/dotfiles.git")
 	src.Commands[nativetest.Key("chezmoi", inspect.ChezmoiDataArgs...)] = []byte(`{"Machine":"vm","ManagedByNimbus":true,"Profiles":["common"]}`)
 	wrapper := &installerSource{FakeSource: src, t: t}
@@ -304,11 +305,11 @@ func TestInitDelegatesMiseToolsToChezmoiAndRetriesFailure(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("Chezmoi ran %d times: %v", count, src.calls)
 	}
-	// Ordinary sync never applies dotfiles or installs their declared tools.
+	// Public sync applies dotfiles; their scripts still own tool installation.
 	src.calls = nil
 	code, out, errOut = run(t, "sync", "--checkout", root, "--machine", "vm", "-y", "-n")
-	if code != ExitOK || len(src.calls) != 0 {
-		t.Fatalf("sync crossed the dotfiles lifecycle: %d %v %s%s", code, src.calls, out, errOut)
+	if code != ExitOK || !slices.Equal(src.calls, []string{"chezmoi apply"}) {
+		t.Fatalf("sync did not delegate dotfiles: %d %v %s%s", code, src.calls, out, errOut)
 	}
 }
 

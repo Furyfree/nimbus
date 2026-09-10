@@ -75,6 +75,9 @@ func TestSyncResourceRetirementReportsSessionRequirements(t *testing.T) {
 					src.Commands[tc.command] = nil
 				}
 				withSource(t, handoffOutputSource{Source: src, afterStream: func(name string, args []string) {
+					if name == "chezmoi" && slices.Equal(args, []string{"apply"}) {
+						return
+					}
 					if nativetest.Key(name, args...) != tc.command {
 						t.Fatalf("unexpected mutation: %s %v", name, args)
 					}
@@ -124,6 +127,7 @@ func TestSyncResourceRetirementReportsSessionRequirements(t *testing.T) {
 				if tc.command != "" {
 					wantCalls = []string{tc.command}
 				}
+				wantCalls = append(wantCalls, "chezmoi apply")
 				if !slices.Equal(src.calls, wantCalls) {
 					t.Errorf("retirement commands = %v, want %v", src.calls, wantCalls)
 				}

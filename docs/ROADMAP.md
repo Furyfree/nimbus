@@ -21,10 +21,13 @@ across the docs, links work, and the local checks pass.
 
 ## 2. Align commands and ownership
 
-Implement separate sync and upgrade, with `sync --upgrade` composing them.
+Sync updates clean Nimbus and Chezmoi repositories, reconciles the system,
+then offers Chezmoi apply. Keep previews local and read-only, and make dirty
+or divergent repository errors actionable. `sync --upgrade` preflights the
+repositories, runs Topgrade first, then starts the updated engine for sync.
 Keep Topgrade configuration in Chezmoi and prevent duplicate system updates or
-recursion. Topgrade calls `nimbus upgrade --system` for RPM and system Flatpak
-updates.
+recursion. Its callback remains `nimbus upgrade --system` for RPMs and system
+Flatpaks. This repository-update workflow needs a new release and COPR build.
 Deploy the new engine before applying the matching dotfiles configuration.
 Nimbus 0.3.1 asks for a machine on first use through the minimal
 `curl ... | bash` installer and supports the earlier empty snapshot mount.
@@ -33,7 +36,8 @@ refactors and dashboard can follow; the desktop trial still follows the later
 gates below.
 
 Add missing managed-state previews and explicit approval independent of JSON.
-Use direct Chezmoi commands, retaining initial setup and profile handoff.
+Keep direct Chezmoi commands available alongside sync's approved apply stage,
+retaining initial setup and profile handoff.
 Remove unused Cargo and installer follow-up declarations; Chezmoi and Mise
 own those tools. Keep the required Mise binary bootstrap and prerequisites.
 Zed is not currently selected in Nimbus; its configuration alone does not

@@ -160,6 +160,10 @@ type transactionReconcileSource struct {
 
 func (s *transactionReconcileSource) Stream(out, errOut io.Writer, name string, args ...string) error {
 	call := nativetest.Key(name, args...)
+	if call == "chezmoi apply" {
+		s.calls = append(s.calls, call)
+		return nil
+	}
 	if call != "sudo dnf5 -y install demo" && call != "sudo dnf5 -y upgrade" {
 		return s.reconcileSource.Stream(out, errOut, name, args...)
 	}
@@ -213,6 +217,7 @@ func TestSyncReconcilesInstallAndUpgradeCreatedRepositories(t *testing.T) {
 	want := []string{
 		"sudo dnf5 -y install demo",
 		"sudo dnf5 config-manager setopt vendor-install.enabled=0",
+		"chezmoi apply",
 		"sudo dnf5 -y upgrade",
 		"sudo dnf5 config-manager setopt vendor-upgrade.enabled=0",
 	}

@@ -148,6 +148,7 @@ func TestSelectionReportsWrittenManifestAndRefreshOutputFailures(t *testing.T) {
 				if code, out, errOut := run(t, "sync", "--checkout", root, "--machine", "vm", "--no-upgrade", "--yes"); code != ExitOK {
 					t.Fatalf("prepare already-managed fixture: %d %s%s", code, out, errOut)
 				}
+				src.calls = nil
 				if tc.initialized {
 					src.Dirs[filepath.Join(os.Getenv("HOME"), ".local/share/chezmoi")] = []string{".git"}
 				}

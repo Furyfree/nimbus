@@ -19,7 +19,8 @@ is Fedora 44 on x86_64, using Hyprland and Noctalia.
 | Topgrade | Coordinating the configured update steps |
 | Native tools | Package transactions, services, application lifecycles |
 
-Nimbus may bootstrap required tools and perform the first Chezmoi handoff.
+Nimbus bootstraps required tools, performs the first Chezmoi handoff and
+coordinates later repository updates and Chezmoi apply during sync.
 It does not keep a second list of Mise tools or manage ordinary user files.
 Chezmoi works independently of Nimbus and does not install system packages or
 escalate privileges. COPR installer helpers own application-specific download,
@@ -88,9 +89,12 @@ and applied state from verified operations. Unknown inspection results are
 not evidence of absence. Repeating sync after success should converge without
 reapplying unchanged resources.
 
-Each machine may select different hardware and software. Nimbus does not pull,
-commit or push definitions automatically. Updating a checkout is an explicit
-Git operation; sync uses the selected local files, including reviewed edits.
+Each machine may select different hardware and software. Ordinary sync updates
+the selected checkout before loading its new definitions. Profile, component
+and system-file changes do not require a new engine build unless they need
+new engine functionality. The executable updates through DNF/COPR. Nimbus
+never commits or pushes definitions. Local edits can be previewed with
+`sync --plan`; commit and publish them before ordinary sync.
 
 Selecting an already installed package can adopt it. Deselection may remove
 it once no remaining selection requires it. Unmanaged software is preserved
@@ -170,9 +174,9 @@ refreshes metadata.
 | `nimbus` | Interactive dashboard when available; otherwise help |
 | `nimbus init` | Select or create a machine and perform initial setup |
 | `nimbus status` | Summarize drift and pending work |
-| `nimbus sync` | Reconcile system setup without a general upgrade |
+| `nimbus sync` | Update repositories, reconcile the system, apply Chezmoi |
 | `nimbus upgrade` | Update installed software through Topgrade |
-| `nimbus sync --upgrade` | Reconcile successfully, then run the full upgrade |
+| `nimbus sync --upgrade` | Upgrade software first, then perform the full sync |
 | `nimbus postinstall` | List pending, blocked or unconfirmed manual tasks |
 | `nimbus postinstall TASK` | Show instructions or offer one native action |
 | `nimbus doctor` | Report health problems and possible fixes; never repair |
@@ -186,10 +190,34 @@ handoff with `--no-dotfiles`. The normal flow is system prerequisites, system
 setup, then Chezmoi initialization and apply. Retry preserves completed work.
 Optional 1Password SSH integration is an explicit opt-in.
 
-Sync may install dependencies and perform the upgrades those installs require.
-It does not refresh Chezmoi configuration or generally upgrade unrelated
-software. `sync --prune` adds eligible unmanaged removals to the visible plan;
-it never means deleting everything absent from the definitions.
+Ordinary sync follows this order:
+
+1. Check the Nimbus checkout and the machine's configured Chezmoi source
+   repository before system or user-configuration changes. Both must be clean,
+   on an attached branch tracking their approved `origin`, with no local-only
+   commits. Missing Chezmoi initialization requires `nimbus init`.
+2. Fetch both repositories and require fast-forward history. Update to the
+   checked commits without stashing, resetting or overwriting local files,
+   including ignored files. Reload and validate the updated definitions.
+3. Inspect the system, show its plan and apply after approval.
+4. Ask separately before running `chezmoi apply`, including its configured
+   scripts and tools. Refresh changed shared profile IDs while preserving
+   the existing 1Password SSH choice. `--yes` approves both apply stages.
+
+The Chezmoi stage uses the source already fetched; it does not run
+`chezmoi update` and fetch a second revision. A machine without a dotfiles
+selection skips that stage. Chezmoi retains ownership of user files.
+
+A blocked repository check names the repository, path, changed files where
+applicable and the required Git repair. It states that no system or user
+configuration changes were applied. Later failures report completed stages;
+a failed Chezmoi apply may leave partial user-configuration changes. Correct
+the reported problem and retry; Nimbus does not promise rollback.
+
+Sync may install dependencies and perform upgrades those installs require,
+but does not generally upgrade unrelated software. `sync --prune` adds
+eligible unmanaged removals to the visible plan; it never means deleting
+everything absent from the definitions.
 
 Reboot and logout notes in a plan describe actual planned system changes.
 Unchanged or merely adopted resources do not repeat them. `postinstall` reports
@@ -201,10 +229,15 @@ arguments follow `--`. System and application updates run once, and failure
 or cancellation of the system phase stops dependent work. Independent user
 steps may continue after a failure, but the final result remains unsuccessful.
 
-The combined sync/upgrade command stops if reconciliation fails. Its `--yes`
-approves reconciliation; Topgrade and native helpers retain their own prompts.
-Topgrade must
-not call the combined command or recursively invoke `nimbus upgrade`. The
+`sync --upgrade` checks both repositories and their fetched history first,
+then runs Topgrade using the current local definitions and configuration.
+If upgrading succeeds, it starts a fresh Nimbus process at the original
+executable path for ordinary sync. This uses the updated engine if DNF
+replaced it. A failed upgrade stops before sync. `--yes` approves the later
+system and Chezmoi stages; Topgrade and native helpers retain their prompts.
+Standalone `upgrade` does not update either repository itself.
+
+Topgrade must not call sync or recursively invoke `nimbus upgrade`. The
 callback is `nimbus upgrade --system`. It updates RPMs and system Flatpaks and
 handles repository duplicates created by package transactions. It requires
 ready sources, version constraints and selected Snapper configuration;
@@ -235,12 +268,15 @@ apply leaves the approved definition in place and reports remaining drift.
 A component required by a profile must be removed through that selection.
 Required dependencies and protected packages cannot be excluded arbitrarily.
 
-Profile changes report the direct Chezmoi refresh needed to update its shared
-profile IDs. They do not silently rewrite user configuration.
+Selection commands and init keep their existing system reconciliation and
+explicit handoff behavior; they do not automatically pull repositories.
+Selection commands leave local Git changes for review and report Chezmoi
+refresh advice. Commit and publish the changed selection before ordinary sync,
+which refreshes shared profile IDs during its approved Chezmoi stage.
 
 ## Configuration and inspection
 
-Use Chezmoi directly for user configuration:
+Chezmoi also works directly, independently of the sync workflow:
 
 ~~~sh
 chezmoi diff
@@ -295,14 +331,19 @@ support `--plan`. Read-only commands and launchers do not need it.
 A preview performs no writes, downloads, privilege escalation or mutating
 hooks. Interactive choices stay in memory. Missing cache data or unavailable
 helper information is reported as unknown. It must not be filled in by doing
-part of the installation during planning.
+part of the installation during planning. `sync --plan` identifies the local
+checkout revision and describes repository and Chezmoi stages without running
+them; fetched definitions may produce a different plan during ordinary sync.
 
 Normal managed-state changes show their plan and ask before applying it.
 `--yes` explicitly skips that question where supported. Output format alone
-must not approve a mutation. Sync and selection JSON mutation require
-`--yes`; their `--plan --json` forms remain read-only. A fresh execution checks
-its inputs again; an
-earlier preview does not approve a later changed plan.
+must not approve a mutation. Ordinary sync includes the announced repository
+updates before the system approval; declining later does not undo those pulls.
+Sync and selection JSON mutation require `--yes`; their `--plan --json` forms
+remain read-only. Public sync emits one aggregate JSON result, while
+`sync --upgrade` rejects JSON because Topgrade owns its terminal output.
+A fresh execution checks its inputs again; an earlier preview does not approve
+a later changed plan.
 
 Native tools may resolve a different transaction after metadata changes.
 Nimbus shows available versions and effects, reports unresolved details, and
@@ -451,6 +492,10 @@ The CLI follows this flow; the future TUI must reuse the same operations:
 load definitions -> inspect -> plan -> approve -> recheck -> apply -> report
 ~~~
 
+Public sync first checks and updates repositories through `checkout`, then
+uses this system flow and offers Chezmoi apply. The upgrade wrapper runs
+Topgrade before starting sync in a fresh executable.
+
 `internal/definitions` resolves desired state, `inspect` reads native state,
 `plan` compares them, `apply` executes native operations, and `state` records
 verified results. `cli` connects the steps; `postinstall`, `launch` and
@@ -512,10 +557,11 @@ Do not replace them merely to reduce the number of files or languages.
 
 ## Remaining delivery work
 
-The local command and ownership cleanup is implemented. The matching Nimbus
-engine and Chezmoi Topgrade configuration must be delivered together. The
-hidden `sync --no-upgrade` alias remains compatible; ordinary sync already
-omits general updates.
+The repository-update workflow is implemented locally and needs a new engine
+release and COPR RPM before installed commands change. Existing definitions
+still require only engine 0.3.0. The hidden `sync --no-upgrade` alias remains
+compatible; ordinary sync omits general software updates. Installed tests must
+cover repository updates, Chezmoi apply and the fresh-engine upgrade handoff.
 
 WoWUp's helper still needs standalone install/update commands and a published
 package source. Copilot helper publication and native app behavior also need

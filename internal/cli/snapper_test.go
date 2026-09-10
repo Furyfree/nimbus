@@ -171,6 +171,7 @@ func TestSnapshotBoundaries(t *testing.T) {
 			}
 			if slices.Contains([]string{"sync", "unchanged", "settings drift", "setup"}, mode) {
 				args = append([]string{"sync"}, args[2:]...)
+				want = append(want, "chezmoi apply")
 			}
 			if mode == "declined" {
 				args = slices.DeleteFunc(args, func(arg string) bool { return arg == "--yes" || arg == "--json" })

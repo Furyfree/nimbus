@@ -26,6 +26,27 @@ are local and have not been installed.
 - [x] Record the owner's VM-only `mcelog` disablement; no Nimbus workaround.
 - [ ] Deliver these local reporting/config changes and verify the next login.
 
+## Repository updates in sync
+
+- [x] Add clean-repository checks and fast-forward updates for Nimbus and the
+  configured Chezmoi source; report paths and repair advice without discarding
+  local work.
+- [x] Run system reconciliation from updated definitions, then offer Chezmoi
+  apply and shared-profile refresh while preserving the 1Password SSH choice.
+- [x] Run Topgrade before combined sync and start a fresh engine afterwards.
+  Keep standalone upgrades and internal system reconciliation separate.
+- [x] Keep previews local and read-only; document approvals, failure stages
+  and the distinction between checkout updates and engine updates.
+- [x] Pass `go test ./internal/cli ./internal/checkout`, `just check` and
+  `just validate`. Temporary repositories exercise fast-forward updates and
+  local-work protection; CLI tests cover failure stages, read-only previews,
+  profile refresh and starting the replacement executable. No VM test yet.
+- [x] Complete local CodeRabbit review. Its JSON restriction finding was
+  already enforced by the command entry point; extend the existing regression
+  test to cover combined sync, including `--yes` and `--plan`.
+- [ ] Release and publish the new engine, then test repository updates,
+  Chezmoi apply, dirty-tree errors and the upgraded-engine handoff in the VM.
+
 ## Completed locally
 
 - [x] Consolidate product docs into SPEC, TASKS and ROADMAP.

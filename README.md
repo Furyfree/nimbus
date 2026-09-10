@@ -49,9 +49,9 @@ The local candidate supports:
 | Set up a machine | `nimbus init --machine desktop` |
 | See what needs attention | `nimbus status` |
 | Preview system changes | `nimbus sync --plan` |
-| Apply the declared setup | `nimbus sync` |
+| Update definitions, system setup and user configuration | `nimbus sync` |
 | Update installed software | `nimbus upgrade` |
-| Apply setup, then update software | `nimbus sync --upgrade` |
+| Upgrade software, then sync everything | `nimbus sync --upgrade` |
 | Finish manual setup | `nimbus postinstall` |
 | Diagnose a problem | `nimbus doctor` |
 | Preview user configuration | `chezmoi diff` |
@@ -60,14 +60,22 @@ The local candidate supports:
 
 ## Current checkout
 
-The command cleanup is local and unreleased. Sync reconciles the definitions;
-upgrade runs Topgrade; `sync --upgrade` does both in order. Topgrade's managed
-system callback is `nimbus upgrade --system` and requires this engine version.
-Deploy the matching engine before applying the new dotfiles configuration.
+The repository-update workflow is local and unreleased. `nimbus sync` updates
+the Nimbus and configured Chezmoi repositories, shows the system plan, applies
+approved changes, then asks to apply Chezmoi configuration and its scripts.
+`sync --upgrade` runs Topgrade first, then starts the updated Nimbus executable
+for sync. Topgrade's system callback remains `nimbus upgrade --system`.
 
-`--plan` covers init, sync, upgrade, selection edits, files accept and selected
-post-install actions. JSON mutation requires `--yes`. Use Chezmoi directly for
-user configuration. Bare `nimbus` still prints help; the dashboard comes next.
+Both repositories must be clean and track an approved origin. Local edits,
+local-only commits or diverged history stop the run with the repository path
+and repair advice. Nimbus never stashes, resets or commits for you.
+Profile and system-file changes need only a checkout update; Go command
+changes, including this new workflow, need a new Nimbus RPM.
+
+`--plan` uses local definitions without pulling or applying anything. Status,
+doctor and lists also stay read-only. JSON mutation requires `--yes`; the
+combined upgrade does not support JSON. Chezmoi commands still work directly.
+Bare `nimbus` prints help; the dashboard comes next.
 
 COPR helpers own application downloads and removal. Copilot initial setup is
 available through `nimbus postinstall copilot`. WoWUp still needs standalone
@@ -95,8 +103,9 @@ tools/            development, packaging and installation tools
 install.sh        bootstrap entry point
 ~~~
 
-Nimbus reads a selected checkout; it does not automatically pull, commit, or
-push it. Each machine matches its own selections while sharing definitions.
+Nimbus reads a selected checkout and updates it during ordinary sync. Each
+machine matches its own selections while sharing definitions. Nimbus does not
+commit or push changes.
 
 `internal/` is Go's convention for packages other projects cannot import.
 Each directory is one package; files inside it group related code by topic.
@@ -112,11 +121,13 @@ Each directory is one package; files inside it group related code by topic.
 | `apply` | Execute planned changes through native tools |
 | `state` | Store receipts for verified changes |
 | `selector` | Locate the chosen checkout and machine; check its origin |
+| `checkout` | Check repository state and fast-forward approved sources |
 | `doctor` | Diagnose setup problems |
 | `postinstall`, `launch`, `snapper` | Small helpers for their named features |
 | `rpm`, `version` | Shared package-name parsing and engine version data |
 
-Start with `cli/sync.go` for the main flow. Planner and executor files use
+Start with `cli/maintenance.go` for repository updates and coordination, and
+`cli/sync.go` for system reconciliation. Planner and executor files use
 topics such as packages, repositories and Flatpak. Their unit tests stay beside
 them; tests of repository scripts live in `tests/integration/`.
 
