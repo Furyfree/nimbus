@@ -1,135 +1,115 @@
 # Nimbus
 
-Nimbus is a personal, opinionated Fedora workstation installer and system
-manager written in Go.
+Nimbus sets up and maintains the owner's Fedora workstation. It installs the
+selected software, stores and manages root-owned system files, shows drift,
+and applies changes after a preview. The target is Fedora 44 on x86_64, with
+Hyprland and Noctalia.
 
-It turns an installed Fedora system into the workstation defined by this
-repository, detects drift in the resources it owns, shows a complete plan, and
-applies only reviewed operations. Chezmoi remains the separate owner of user
-configuration below the home directory.
+Chezmoi owns user configuration and Mise tools. COPR owns packaging. Topgrade
+runs the configured update workflow. Nimbus connects these tools where needed.
 
-The first target is Fedora 44 on x86_64. Nimbus does not initially install the
-operating system, repartition disks, or configure full-disk encryption.
+## Start here
 
-Nimbus 0.2.0 delivers Phase 6: owned system resources, Noctalia login, and
-a separate recovery session. The candidate installation, reboot, and normal
-login passed. Recovery/portal validation and the signed package trial remain
-in [TASKS.md](docs/TASKS.md).
+- [What Nimbus does and its commands](docs/SPEC.md)
+- [Install Fedora and run Nimbus](docs/SPEC.md#installation-workflow)
+- [Next work and deferred scope](docs/ROADMAP.md)
+- [Current implementation gaps and checks](docs/TASKS.md)
 
-## Repository model
+## Workflow
 
-This repository owns both the Go engine and the personal system definitions:
+The local candidate supports:
+
+| Task | Command |
+| --- | --- |
+| Set up a machine | `nimbus init --machine desktop` |
+| See what needs attention | `nimbus status` |
+| Preview system changes | `nimbus sync --plan` |
+| Apply the declared setup | `nimbus sync` |
+| Update installed software | `nimbus upgrade` |
+| Apply setup, then update software | `nimbus sync --upgrade` |
+| Finish manual setup | `nimbus postinstall` |
+| Diagnose a problem | `nimbus doctor` |
+| Preview user configuration | `chezmoi diff` |
+| Apply user configuration | `chezmoi apply` |
+| Fetch and apply dotfiles updates | `chezmoi update` |
+
+## Current checkout
+
+The command cleanup is local and unreleased. Sync reconciles the definitions;
+upgrade runs Topgrade; `sync --upgrade` does both in order. Topgrade's managed
+system callback is `nimbus upgrade --system` and requires this engine version.
+Deploy the matching engine before applying the new dotfiles configuration.
+
+`--plan` covers init, sync, upgrade, selection edits, files accept and selected
+post-install actions. JSON mutation requires `--yes`. Use Chezmoi directly for
+user configuration. Bare `nimbus` still prints help; the dashboard comes next.
+
+COPR helpers own application downloads and removal. Copilot initial setup is
+available through `nimbus postinstall copilot`. WoWUp still needs standalone
+install/update commands in its COPR helper before integration can finish.
+Repair uses TTY; old owned graphical recovery files retire on sync. The
+Hyprland/Noctalia profile uses Snapper around system changes with six-snapshot
+retention. See [snapshot behavior and limits](docs/SPEC.md#snapper).
+
+Use the installed command's `--help` to check its available options. Local
+candidate features are not proof of a published COPR release. See
+[TASKS.md](docs/TASKS.md) for delivery gaps.
+
+## How the repository fits together
 
 ~~~text
-nimbus.toml     definition schema, engine compatibility, and repositories
-machines/       selected workstation compositions
-profiles/       user-facing system bundles
-components/     reusable system capabilities
-system/         Nimbus-owned system files and migrations
-cmd/, internal/ Go implementation
-install.sh      remote entry point; bootstrap is the checkout-owned handoff
+nimbus.toml       supported release, repositories, package-manager settings
+machines/         each machine's selections
+profiles/         workstation bundles
+components/       system capabilities and their resources
+system/           owned system-file sources and assets
+cmd/nimbus/       executable entry point
+internal/         Go packages private to Nimbus (see below)
+tests/integration/ tests for bootstrap, release and staging tools
+tools/            development, packaging and installation tools
+install.sh        bootstrap entry point
 ~~~
 
-An installed Nimbus engine reads definitions from an explicitly selected
-checkout of this repository. Receipts identify both the engine version and the
-exact definition commit and tree digest.
+Nimbus reads a selected checkout; it does not automatically pull, commit, or
+push it. Each machine matches its own selections while sharing definitions.
 
-The separate dotfiles repository contains Chezmoi source state only and works
-without Nimbus on every platform. Nimbus may perform the explicit first Chezmoi
-initialization, passing the machine ID, a managed-by-Nimbus flag, and the
-selected profiles. On Linux and macOS, a full Chezmoi apply writes user
-configuration and invokes Mise to install its declared runtimes and tools.
-Standalone use requires Mise already installed; normal diff, apply, edit, and
-update operations remain direct Chezmoi commands.
+`internal/` is Go's convention for packages other projects cannot import.
+Each directory is one package; files inside it group related code by topic.
 
-Fresh installation asks for sudo and shows the complete workstation plan
-before applying it without a confirmation. Pass `--machine ID` (`desktop`,
-`laptop`, or `vm`) on first installation; reruns can reuse the existing selector.
-`--new ID` explicitly opens the new-machine dialogue. Chezmoi may ask for
-input. Optional 1Password SSH integration is off for fresh init. For a VM with
-that integration explicitly enabled:
+| Package | Job |
+| --- | --- |
+| `cli` | Commands, prompts, orchestration and output |
+| `definitions` | Load and resolve the TOML selections |
+| `inspect` | Read installed state together or by package/source family |
+| `native` | Execute commands and access files; callers decide what is allowed |
+| `native/nativetest` | Replay commands and files in tests without host access |
+| `plan` | Compare desired and installed state; describe changes |
+| `apply` | Execute planned changes through native tools |
+| `state` | Store receipts for verified changes |
+| `selector` | Locate the chosen checkout and machine; check its origin |
+| `doctor` | Diagnose setup problems |
+| `postinstall`, `launch`, `snapper` | Small helpers for their named features |
+| `rpm`, `version` | Shared package-name parsing and engine version data |
 
-~~~sh
-curl -fsSL https://raw.githubusercontent.com/Furyfree/nimbus/main/install.sh | bash -s -- --machine vm --onepassword-ssh
-~~~
-
-The installer prints its private log directory and elapsed time. Logs live
-below `~/.local/state/nimbus/install` (or `XDG_STATE_HOME`) and retain the latest
-20 completed runs. Native package and Mise output is saved; keyboard input,
-Chezmoi template output, and secret-capable commands are excluded.
-
-## Project documents
-
-- [SPEC.md](docs/SPEC.md) defines the complete accepted system contract.
-- [ARCHITECTURE.md](docs/ARCHITECTURE.md) explains how the code is
-  organized and how a command flows through it.
-- [DECISIONS.md](docs/DECISIONS.md) records decision rationale and unresolved
-  questions.
-- [SECURITY.md](docs/SECURITY.md) is the workstation security policy.
-- [PACKAGES.md](docs/PACKAGES.md) lists what Nimbus installs, by application.
-- [ROADMAP.md](docs/ROADMAP.md) defines implementation phases and their order.
-- [TASKS.md](docs/TASKS.md) tracks the current phase and its evidence.
-- [AGENTS.md](AGENTS.md) defines durable repository working rules.
-- [INSTALLATION.md](docs/INSTALLATION.md) is the concise Fedora 44 base-install
-  operator guide.
-
-Superseded designs and research records were removed from the active tree. Their
-last complete snapshot is commit
-`c0bb8a4660732e6e9556297da2c15ba0f286ee98`; they are not active contracts.
+Start with `cli/sync.go` for the main flow. Planner and executor files use
+topics such as packages, repositories and Flatpak. Their unit tests stay beside
+them; tests of repository scripts live in `tests/integration/`.
 
 ## Development
 
-Building requires Go 1.26.7 or newer, matching Fedora 44's native toolchain.
-CI reads that minimum from `go.mod`.
-
-The local gate is:
+Use the Go version in `go.mod` and run:
 
 ~~~sh
 just check
+just validate
 ~~~
 
-It runs `gofmt`, `go vet`, `go test`, `git diff --check`, markdownlint, and
-ShellCheck for the installation and release scripts.
-`just validate` runs `nimbus validate` against this checkout, `just build`
-produces a static `nimbus` binary that runs on any x86_64 Linux, and
-`just vm-stage` builds and stages an isolated unpublished candidate on the
-drill VM without replacing its installed Nimbus. See the
-[candidate testing guide](tools/vm/README.md).
+`just check` runs formatting, vet, tests, asset checks, diff checks, and the
+available Markdown and shell linters. `just validate` checks the definitions.
+Tests must not modify the workstation. Native system trials use a disposable
+VM; see the [candidate guide](tools/vm/README.md).
 
-The engine is distributed through the signed
-[`furyfree/nimbus` COPR](https://copr.fedorainfracloud.org/coprs/furyfree/nimbus/).
-Bootstrap verifies its RPM against the checked-in public key and fingerprint
-before asking DNF to install it. Phase 6 requires engine 0.2.0 or a local
-development candidate. The signed 0.2.0 build is published in COPR.
-
-The delivered commands are `init`, `sync`, `validate`, `doctor`, `status`,
-`managed`, `unmanaged`, `why`, the `profiles`, `components`, and `packages`
-groups, `files accept`, and `version`. `sync` changes the managed system: it
-shows what it will do, asks once, prepares the declared sources, installs and
-removes what the definitions say, upgrades the system, verifies, records
-receipts under `/var/lib/nimbus`, and reports what differed from the plan.
-`init` is the first run: it picks or describes the machine, writes the selector,
-syncs, then initializes and applies Chezmoi, including its user-tool installs.
-`install.sh` gets a fresh Fedora there using public HTTPS clones.
-`sync -p` shows the plan and changes nothing, `-y` skips the question, `-n`
-leaves out the system upgrade, and `-r` also removes unmanaged packages. The
-`packages`, `profiles`, and `components` edit commands change the machine
-manifest and then run the same sync for it. `nimbus dotfiles diff`, `apply`,
-and `update` delegate to Chezmoi; apply includes its user-tool installs, and
-update explicitly pulls and applies the source. Ordinary sync leaves those
-installs to Chezmoi.
-Failures end with a summary of completed, failed, and skipped work.
-The remaining commands are read-only:
-`validate` checks the definitions, `doctor` inspects the host, and the views
-list what Nimbus manages. The first VM drills are recorded in TASKS.md.
-
-## Releases
-
-Releases are manual. After merging reviewed changes, run `just tag v0.2.0`
-from clean, up-to-date main, then `just release v0.2.0`. The workflow tests
-and packages vendored source, then creates a draft release for you to inspect
-and publish. Pushes to main or tags never start it. The COPR build is a separate
-manual action after publication.
-
-See the [release guide](tools/release/README.md) for exact steps, artifacts,
-retry behavior, and the first COPR/VM handoff.
+[SPEC.md](docs/SPEC.md) includes security and a short architecture/test policy.
+The product docs are SPEC, TASKS and ROADMAP; TOML files own the package list.
+Releases and COPR publication are separate manual actions, described in the
+[release guide](tools/release/README.md).

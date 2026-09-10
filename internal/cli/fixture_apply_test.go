@@ -10,27 +10,28 @@ import (
 	"testing"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/native/nativetest"
 	"github.com/Furyfree/nimbus/internal/plan"
 )
 
 // withForeignTerra adds Terra's own repository file to the fixture host, which
 // Nimbus does not own, so the repository operation blocks and the plan stays
 // incomplete.
-func withForeignTerra(t *testing.T, src *facts.FakeSource) {
+func withForeignTerra(t *testing.T, src *nativetest.FakeSource) {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "facts", "testdata", "fedora44", "yum.repos.d", "terra.repo"))
+	data, err := os.ReadFile(filepath.Join("..", "inspect", "testdata", "fedora44", "yum.repos.d", "terra.repo"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	src.Dirs[facts.RepoDir] = append(src.Dirs[facts.RepoDir], "terra.repo")
-	src.Files[filepath.Join(facts.RepoDir, "terra.repo")] = data
+	src.Dirs[inspect.RepoDir] = append(src.Dirs[inspect.RepoDir], "terra.repo")
+	src.Files[filepath.Join(inspect.RepoDir, "terra.repo")] = data
 }
 
 // readyRepositories writes every declared DNF and COPR repository to the
 // fixture host as an apply round would leave it, so the next plan previews
 // its transaction instead of waiting for repository changes.
-func readyRepositories(t *testing.T, src *facts.FakeSource, root string) {
+func readyRepositories(t *testing.T, src *nativetest.FakeSource, root string) {
 	t.Helper()
 	c, err := definitions.Load(root)
 	if err != nil {
@@ -38,11 +39,11 @@ func readyRepositories(t *testing.T, src *facts.FakeSource, root string) {
 	}
 	for id, r := range c.Definitions().Repositories {
 		if r.Kind == "flatpak" {
-			src.Files[filepath.Join(facts.FlatpakRepoPath, "config")] = []byte("[remote \"" + id + "\"]\ngpg-verify=true\n")
-			src.Commands[facts.Key("gpg", facts.KeyInspectArgs(filepath.Join(facts.FlatpakRepoPath, id+".trustedkeys.gpg"))...)] = []byte("pub:::::::::\nfpr:::::::::" + definitions.NormalizeFingerprint(r.Key) + ":\n")
+			src.Files[filepath.Join(inspect.FlatpakRepoPath, "config")] = []byte("[remote \"" + id + "\"]\ngpg-verify=true\n")
+			src.Commands[nativetest.Key("gpg", inspect.KeyInspectArgs(filepath.Join(inspect.FlatpakRepoPath, id+".trustedkeys.gpg"))...)] = []byte("pub:::::::::\nfpr:::::::::" + definitions.NormalizeFingerprint(r.Key) + ":\n")
 			continue
 		}
-		src.Commands[facts.Key("gpg", facts.KeyInspectArgs(plan.KeyPath(id))...)] = []byte("pub:::::::::\nfpr:::::::::" + definitions.NormalizeFingerprint(r.Key) + ":\n")
+		src.Commands[nativetest.Key("gpg", inspect.KeyInspectArgs(plan.KeyPath(id))...)] = []byte("pub:::::::::\nfpr:::::::::" + definitions.NormalizeFingerprint(r.Key) + ":\n")
 		b := []byte{}
 		if r.Kind == "dnf" && r.ReleasePackage == "" {
 			b = fmt.Appendf(b, "[nimbus-%s]\n", id)
@@ -55,15 +56,15 @@ func readyRepositories(t *testing.T, src *facts.FakeSource, root string) {
 			}
 		}
 		name := "nimbus-" + id + ".repo"
-		src.Dirs[facts.RepoDir] = append(src.Dirs[facts.RepoDir], name)
-		src.Files[filepath.Join(facts.RepoDir, name)] = b
+		src.Dirs[inspect.RepoDir] = append(src.Dirs[inspect.RepoDir], name)
+		src.Files[filepath.Join(inspect.RepoDir, name)] = b
 	}
-	src.Commands[facts.Key("flatpak", "remotes", "--system", "--columns=name,url")] = []byte("flathub\thttps://dl.flathub.org/repo/\n")
+	src.Commands[nativetest.Key("flatpak", "remotes", "--system", "--columns=name,url")] = []byte("flathub\thttps://dl.flathub.org/repo/\n")
 }
 
 // answerLaptopInstall records a preview answer for the laptop's install
 // transaction by asking the planner once which argv it will run.
-func answerLaptopInstall(t *testing.T, src *facts.FakeSource, root string) {
+func answerLaptopInstall(t *testing.T, src *nativetest.FakeSource, root string) {
 	t.Helper()
 	withSource(t, src)
 	_, out, _ := run(t, "sync", "--plan", "--checkout", root, "--machine", "laptop", "--json")
@@ -116,7 +117,7 @@ func answerLaptopInstall(t *testing.T, src *facts.FakeSource, root string) {
 	}
 	repoOf := map[string]string{}
 	for _, p := range resolved.Packages {
-		if p.Prefix != definitions.PrefixDNF && p.Prefix != definitions.PrefixFlatpak && p.Prefix != definitions.PrefixCargo {
+		if p.Prefix != definitions.PrefixDNF && p.Prefix != definitions.PrefixFlatpak {
 			repoOf[p.Name] = plan.DNFRepoIDs(p.Prefix, c.Definitions().Repositories[p.Prefix])[0]
 		}
 	}
@@ -127,6 +128,6 @@ func answerLaptopInstall(t *testing.T, src *facts.FakeSource, root string) {
 		b = fmt.Appendf(b, " %s x86_64 0:1-1.fc44 %s 1.0 KiB\n", n, repo)
 	}
 	b = append(b, "\nTransaction Summary:\n Installing: 1 package\n\nOperation aborted by the user.\n"...)
-	src.Commands[facts.Key("dnf5", args...)] = b
-	src.Failures[facts.Key("dnf5", args...)] = "exit status 1"
+	src.Commands[nativetest.Key("dnf5", args...)] = b
+	src.Failures[nativetest.Key("dnf5", args...)] = "exit status 1"
 }

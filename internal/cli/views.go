@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
 	"github.com/Furyfree/nimbus/internal/plan"
 	"github.com/Furyfree/nimbus/internal/state"
 )
@@ -28,7 +28,7 @@ type packageView struct {
 }
 
 // packageViews joins desired packages with installed ones and receipts.
-func packageViews(s *selected, f *facts.Facts, applied *state.Applied) []packageView {
+func packageViews(s *selected, f *inspect.Facts, applied *state.Applied) []packageView {
 	managedRPMs := map[string]bool{}
 	blockedRPMs := map[string]string{}
 	blockedReceipts := map[string]string{}
@@ -66,10 +66,6 @@ func packageViews(s *selected, f *facts.Facts, applied *state.Applied) []package
 					}
 				}
 			}
-		} else if p.Prefix == definitions.PrefixCargo {
-			if f.User.Known() && slices.Contains(f.User.Value.Crates, p.Name) {
-				v.Installed, v.Repository, v.State = "installed", "cargo", "adopt"
-			}
 		} else if inst, ok := plan.InstalledPackage(p.Name, applied.Receipts[id], f.Packages.Value); ok {
 			desired[inst.ID()] = true
 			v.Installed, v.Repository, v.Reason = inst.EVR(), inst.FromRepo, inst.Reason
@@ -81,7 +77,7 @@ func packageViews(s *selected, f *facts.Facts, applied *state.Applied) []package
 				v.State, v.Blocked = "blocked", reason
 			}
 		}
-		if p.Prefix == definitions.PrefixFlatpak || p.Prefix == definitions.PrefixCargo {
+		if p.Prefix == definitions.PrefixFlatpak {
 			if _, ok := applied.Receipts[id]; ok && v.State == "adopt" {
 				v.State = "managed"
 			}
@@ -176,7 +172,8 @@ func newListCommand(opts *options, use, short string, keep func(query string, al
 			if err != nil {
 				return err
 			}
-			f := facts.Inspect(newSource(), s.Root)
+			src := newSource()
+			f := inspect.Inspect(src, s.Root)
 			if !f.Packages.Known() {
 				return fmt.Errorf("installed packages are unknown: %s", f.Packages.Error)
 			}
@@ -188,7 +185,9 @@ func newListCommand(opts *options, use, short string, keep func(query string, al
 			if len(args) > 0 {
 				query = args[0]
 			}
-			views := filterViews(packageViews(s, f, applied), func(v packageView) bool { return keep(query, all, v) })
+			views := packageViews(s, f, applied)
+
+			views = filterViews(views, func(v packageView) bool { return keep(query, all, v) })
 			if opts.json {
 				return writeJSON(cmd.OutOrStdout(), views, nil)
 			}
@@ -205,7 +204,9 @@ func newListCommand(opts *options, use, short string, keep func(query string, al
 
 func newManaged(opts *options) *cobra.Command {
 	return newListCommand(opts, "managed", "List packages Nimbus owns through a receipt or would adopt",
-		func(_ string, _ bool, v packageView) bool { return v.State == "managed" || v.State == "adopt" }, 0, "")
+		func(_ string, _ bool, v packageView) bool {
+			return slices.Contains([]string{"managed", "adopt", "repair", "remove", "retire"}, v.State)
+		}, 0, "")
 }
 
 func newUnmanaged(opts *options) *cobra.Command {

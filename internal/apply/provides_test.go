@@ -8,10 +8,29 @@ import (
 	"testing"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/native/nativetest"
 	"github.com/Furyfree/nimbus/internal/plan"
 	"github.com/Furyfree/nimbus/internal/state"
 )
+
+func TestAResolvedProvideIsVerifiedByItsRealName(t *testing.T) {
+	src := newScripted()
+	src.installs = []string{"pipewire-pulseaudio"}
+	root := t.TempDir()
+	tx := &plan.Transaction{Packages: []plan.TxPackage{{Name: "pipewire-pulseaudio", Arch: "x86_64", EVR: "0:1.6.8-1.fc44", Repository: "updates", Section: "installing"}}}
+	p := &plan.Plan{Machine: "desktop", Complete: true, Digest: "sha256:provide", Operations: []plan.Operation{
+		{ID: "packages:install", Kind: plan.KindPackage, Action: plan.ActionInstall, Summary: "install 1", Items: []string{"dnf:pipewire-pulse"}, Resolved: map[string]string{"pipewire-pulse": "pipewire-pulseaudio"}, Transaction: tx,
+			Steps: []plan.Step{{Argv: []string{"dnf5", "-y", "install", "pipewire-pulse"}, Privileged: true}}},
+	}}
+	if r := Run(p, options(t, src, root)); r.Error != "" {
+		t.Fatalf("resolved provide failed verification: %+v", r)
+	}
+	a, _ := state.Read(root)
+	if rc, ok := a.Receipts["package:dnf:pipewire-pulse"]; !ok || !strings.Contains(rc.Intended, "pipewire-pulseaudio") {
+		t.Fatalf("receipt = %+v", rc)
+	}
+}
 
 func TestProvideReceiptsAndDeselectionUseNativeEvidence(t *testing.T) {
 	for _, section := range []string{"Installing", "Installing dependencies", "Installing weak dependencies"} {
@@ -32,17 +51,17 @@ func TestProvideReceiptsAndDeselectionUseNativeEvidence(t *testing.T) {
 						fmt.Fprintf(&preview, " %s x86_64 1-1 fedora 1 KiB\n", name)
 					}
 					preview.WriteString("Transaction Summary:\n")
-					src := &facts.FakeSource{Commands: map[string][]byte{
-						facts.Key("dnf5", "--assumeno", "--cacheonly", "install", "virtual-alpha", "virtual-zulu"):                                                              []byte(preview.String()),
-						facts.Key("dnf5", "--cacheonly", "check-upgrade"):                                                                                                       nil,
-						facts.Key("dnf5", "--cacheonly", "repoquery", "--available", "--whatprovides", "virtual-alpha", "--queryformat", "%{name}|%{arch}|%{evr}|%{repoid}\\n"): []byte("native-z|x86_64|1-1|fedora\n"),
-						facts.Key("dnf5", "--cacheonly", "repoquery", "--available", "--whatprovides", "virtual-zulu", "--queryformat", "%{name}|%{arch}|%{evr}|%{repoid}\\n"):  []byte("native-a|x86_64|1-1|fedora\n"),
+					src := &nativetest.FakeSource{Commands: map[string][]byte{
+						nativetest.Key("dnf5", "--assumeno", "--cacheonly", "install", "virtual-alpha", "virtual-zulu"):                                                              []byte(preview.String()),
+						nativetest.Key("dnf5", "--cacheonly", "check-upgrade"):                                                                                                       nil,
+						nativetest.Key("dnf5", "--cacheonly", "repoquery", "--available", "--whatprovides", "virtual-alpha", "--queryformat", "%{name}|%{arch}|%{evr}|%{repoid}\\n"): []byte("native-z|x86_64|1-1|fedora\n"),
+						nativetest.Key("dnf5", "--cacheonly", "repoquery", "--available", "--whatprovides", "virtual-zulu", "--queryformat", "%{name}|%{arch}|%{evr}|%{repoid}\\n"):  []byte("native-a|x86_64|1-1|fedora\n"),
 					}}
-					p, err := plan.Build(plan.Inputs{Resolved: desired, Facts: &facts.Facts{}, Source: src})
+					p, err := plan.Build(plan.Inputs{Resolved: desired, Facts: &inspect.Facts{}, Source: src})
 					if err != nil || !p.Complete {
 						t.Fatalf("install plan=%+v error=%v", p, err)
 					}
-					native := &packageSource{scripted: newScripted(), after: []facts.Package{rpm("native-a", "x86_64", "1"), rpm("native-z", "x86_64", "1")}}
+					native := &packageSource{scripted: newScripted(), after: []inspect.Package{rpm("native-a", "x86_64", "1"), rpm("native-z", "x86_64", "1")}}
 					root := t.TempDir()
 					opts := options(t, native.scripted, root)
 					opts.Source, opts.FirstApply, opts.Out = native, false, io.Discard
@@ -59,8 +78,8 @@ func TestProvideReceiptsAndDeselectionUseNativeEvidence(t *testing.T) {
 						}
 					}
 					desired.Packages = desired.Packages[:1]
-					src.Commands[facts.Key("dnf5", "--assumeno", "--cacheonly", "remove", "--no-autoremove", "native-a.x86_64")] = []byte("Package Arch Version Repository Size\nRemoving:\n native-a x86_64 1-1 @System 1 KiB\nTransaction Summary:\n")
-					next, err := plan.Build(plan.Inputs{Resolved: desired, Facts: facts.Inspect(native, ""), Source: src, Applied: applied})
+					src.Commands[nativetest.Key("dnf5", "--assumeno", "--cacheonly", "remove", "--no-autoremove", "native-a.x86_64")] = []byte("Package Arch Version Repository Size\nRemoving:\n native-a x86_64 1-1 @System 1 KiB\nTransaction Summary:\n")
+					next, err := plan.Build(plan.Inputs{Resolved: desired, Facts: inspect.Inspect(native, ""), Source: src, Applied: applied})
 					if err != nil || !next.Complete {
 						t.Fatalf("deselection plan=%+v error=%v", next, err)
 					}
@@ -68,7 +87,7 @@ func TestProvideReceiptsAndDeselectionUseNativeEvidence(t *testing.T) {
 					if removal < 0 || !slices.Equal(next.Operations[removal].Steps[0].Argv, []string{"dnf5", "-y", "remove", "--no-autoremove", "native-a.x86_64"}) {
 						t.Fatalf("wrong native removal: %+v", next)
 					}
-					native.after = []facts.Package{rpm("native-z", "x86_64", "1")}
+					native.after = []inspect.Package{rpm("native-z", "x86_64", "1")}
 					if r := Run(next, opts); r.Error != "" || len(r.Differences) != 0 {
 						t.Fatalf("removal result: %+v", r)
 					}
@@ -87,11 +106,11 @@ func TestProvideReceiptsAndDeselectionUseNativeEvidence(t *testing.T) {
 
 func TestMissingProvideEvidencePreventsApply(t *testing.T) {
 	desired := &definitions.Resolved{Machine: "vm", Packages: []definitions.ResolvedPackage{{Canonical: "dnf:virtual-tool", Prefix: "dnf", Name: "virtual-tool"}}}
-	src := &facts.FakeSource{Commands: map[string][]byte{
-		facts.Key("dnf5", "--assumeno", "--cacheonly", "install", "virtual-tool"): []byte("Package Arch Version Repository Size\nInstalling:\n native-tool x86_64 1-1 fedora 1 KiB\nTransaction Summary:\n"),
-		facts.Key("dnf5", "--cacheonly", "check-upgrade"):                         nil,
+	src := &nativetest.FakeSource{Commands: map[string][]byte{
+		nativetest.Key("dnf5", "--assumeno", "--cacheonly", "install", "virtual-tool"): []byte("Package Arch Version Repository Size\nInstalling:\n native-tool x86_64 1-1 fedora 1 KiB\nTransaction Summary:\n"),
+		nativetest.Key("dnf5", "--cacheonly", "check-upgrade"):                         nil,
 	}}
-	p, err := plan.Build(plan.Inputs{Resolved: desired, Facts: &facts.Facts{}, Source: src})
+	p, err := plan.Build(plan.Inputs{Resolved: desired, Facts: &inspect.Facts{}, Source: src})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,7 +2,9 @@
 // supports.
 package version
 
-import "github.com/Furyfree/nimbus/internal/state"
+import (
+	"github.com/Furyfree/nimbus/internal/state"
+)
 
 // Engine is the build version. Release builds override it with -ldflags.
 var Engine = "0.0.0-dev"

@@ -8,11 +8,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
 	"github.com/Furyfree/nimbus/internal/plan"
 )
 
-func localFile(t *testing.T, content string) facts.SystemFile {
+func localFile(t *testing.T, content string) inspect.SystemFile {
 	t.Helper()
 	u, err := user.Current()
 	if err != nil {
@@ -22,7 +22,7 @@ func localFile(t *testing.T, content string) facts.SystemFile {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return facts.SystemFile{Exists: true, Content: []byte(content), Owner: u.Username, Group: g.Name, Mode: "0644"}
+	return inspect.SystemFile{Exists: true, Content: []byte(content), Owner: u.Username, Group: g.Name, Mode: "0644"}
 }
 func TestAtomicSystemFileInstallRepairRemove(t *testing.T) {
 	root := t.TempDir()
@@ -44,7 +44,7 @@ func TestAtomicSystemFileInstallRepairRemove(t *testing.T) {
 		t.Fatal("stale approved input accepted")
 	}
 	c.Before = c.After
-	c.After = facts.SystemFile{}
+	c.After = inspect.SystemFile{}
 	if err := ApplySystemFile(root, c); err != nil {
 		t.Fatal(err)
 	}
@@ -91,10 +91,40 @@ func TestSystemFileRejectsSymlinksHardlinksAndForeignParents(t *testing.T) {
 		})
 	}
 }
-func TestSystemFileRestrictsRecoveryTargets(t *testing.T) {
+func TestSystemFileRestrictsLegacyRecoveryTargets(t *testing.T) {
 	for _, target := range []string{"/home/user/config", "/usr/bin/nimbus", "/etc/../usr/bin/nimbus"} {
 		if err := ApplySystemFile(t.TempDir(), plan.FileChange{Target: target, Recovery: true, After: localFile(t, "bad")}); err == nil {
 			t.Fatalf("accepted %s", target)
 		}
+	}
+}
+
+func TestSystemFileRemovesLegacyRecoveryFiles(t *testing.T) {
+	for _, target := range []string{
+		"/usr/local/lib/nimbus/recovery/hyprland.lua",
+		"/usr/share/wayland-sessions/nimbus-recovery.desktop",
+	} {
+		t.Run(target, func(t *testing.T) {
+			root := t.TempDir()
+			file := filepath.Join(root, target)
+			if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
+				t.Fatal(err)
+			}
+			before := localFile(t, "legacy session")
+			if err := os.WriteFile(file, before.Content, 0644); err != nil {
+				t.Fatal(err)
+			}
+			change := plan.FileChange{Target: target, Before: before, Recovery: true}
+			if err := ApplySystemFile(root, change); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(file); !errors.Is(err, fs.ErrNotExist) {
+				t.Fatalf("legacy file remains: %v", err)
+			}
+			change.Before = inspect.SystemFile{}
+			if err := ApplySystemFile(root, change); err != nil {
+				t.Fatalf("retry: %v", err)
+			}
+		})
 	}
 }

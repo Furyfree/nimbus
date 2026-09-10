@@ -11,19 +11,20 @@ import (
 	"time"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
 type FileChange struct {
-	ActivationChanged bool             `json:"activation_changed,omitzero"`
-	ChangedAt         time.Time        `json:"changed_at,omitzero"`
-	Target            string           `json:"target"`
-	Before            facts.SystemFile `json:"before"`
-	After             facts.SystemFile `json:"after"`
-	Previous          string           `json:"previous"`
-	Recovery          bool             `json:"recovery,omitzero"`
-	Triggers          []string         `json:"triggers,omitempty"`
+	ActivationChanged bool               `json:"activation_changed,omitzero"`
+	ChangedAt         time.Time          `json:"changed_at,omitzero"`
+	Target            string             `json:"target"`
+	Before            inspect.SystemFile `json:"before"`
+	After             inspect.SystemFile `json:"after"`
+	Previous          string             `json:"previous"`
+	// Recovery retains the wire field for retiring legacy session files.
+	Recovery bool     `json:"recovery,omitzero"`
+	Triggers []string `json:"triggers,omitempty"`
 }
 
 type ResourceChange struct {
@@ -40,7 +41,7 @@ func encodeResource(v any) string { data, _ := json.Marshal(v); return string(da
 func ownedResource(r state.Receipt, id, provider, machine string) bool {
 	return r.Verified && r.Resource == id && r.Provider == provider && r.Machine == machine
 }
-func SameFile(a, b facts.SystemFile) bool {
+func SameFile(a, b inspect.SystemFile) bool {
 	return a.Exists == b.Exists && bytes.Equal(a.Content, b.Content) && a.Owner == b.Owner && a.Group == b.Group && a.Mode == b.Mode
 }
 
@@ -54,13 +55,16 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 		}
 	}
 	for _, file := range b.in.Resolved.Files {
+		if file.Target == definitions.VersionlockPath {
+			continue
+		}
 		id := "file:" + file.Target
 		selected[id] = true
 		op := Operation{ID: id, Kind: KindFile, Action: ActionInstall, Risk: RiskLow, Summary: "install " + file.Target, Paths: []string{"component:" + file.Component}}
-		before, err := facts.ObserveFile(b.in.Source, file.Target)
-		after := facts.SystemFile{Exists: true, Content: file.Content, Owner: file.Owner, Group: file.Group, Mode: file.Mode}
+		before, err := inspect.ObserveFile(b.in.Source, file.Target)
+		after := inspect.SystemFile{Exists: true, Content: file.Content, Owner: file.Owner, Group: file.Group, Mode: file.Mode}
 		receipt, managed := b.in.Applied.Receipts[id]
-		op.File = &FileChange{Target: file.Target, Before: before, After: after, Previous: encodeResource(before), Recovery: file.Recovery, Triggers: file.Triggers}
+		op.File = &FileChange{Target: file.Target, Before: before, After: after, Previous: encodeResource(before), Triggers: file.Triggers}
 		if !before.Exists {
 			op.Notes = append(op.Notes, "Create missing root-owned parent directories with mode 0755; retain directories on removal.")
 		}
@@ -74,7 +78,7 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 		case managed:
 			op.File.Previous = receipt.Previous
 			op.File.ChangedAt = receipt.ChangeTime()
-			var recorded facts.SystemFile
+			var recorded inspect.SystemFile
 			if err := json.Unmarshal([]byte(receipt.Intended), &recorded); err != nil {
 				op.Blocked = "file receipt lacks valid intended state"
 				break
@@ -116,7 +120,7 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 		id := "group:" + group.Name + ":" + user
 		selected[id] = true
 		op := Operation{ID: id, Kind: KindGroup, Action: ActionInstall, Risk: RiskMedium, Summary: "add " + user + " to " + group.Name, Paths: []string{"component:" + group.Component}, Notes: []string{"New group membership requires logout and login."}}
-		present, err := facts.ObserveMembership(b.in.Source, user, group.Name)
+		present, err := inspect.ObserveMembership(b.in.Source, user, group.Name)
 		before := fmt.Sprint(present)
 		op.Resource = &ResourceChange{Name: group.Name, User: user, Before: before, After: "true", Previous: before}
 		receipt, managed := b.in.Applied.Receipts[id]
@@ -183,6 +187,9 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 		if selected[id] {
 			continue
 		}
+		if id == "file:"+definitions.VersionlockPath {
+			continue
+		}
 		if receipt.Provider != KindFile && receipt.Provider != KindService && receipt.Provider != KindGroup && receipt.Provider != KindTarget {
 			continue
 		}
@@ -229,8 +236,8 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 		if changed {
 			op := Operation{ID: triggerID, Kind: KindTrigger, Action: ActionRepair, Risk: RiskMedium, Summary: "run trigger " + id, After: pendingPackages, Steps: []Step{{Description: "run fixed trigger", Argv: definitions.TriggerArgs(id), Privileged: true}}}
 			if id == "noctalia-state-directory" {
-				before, err := facts.ObserveDirectory(b.in.Source, "/var/lib/noctalia-greeter")
-				desired := facts.Directory{Exists: true, Owner: "greetd", Group: "greetd", Mode: "0750"}
+				before, err := inspect.ObserveDirectory(b.in.Source, "/var/lib/noctalia-greeter")
+				desired := inspect.Directory{Exists: true, Owner: "greetd", Group: "greetd", Mode: "0750"}
 				op.Resource = &ResourceChange{Name: "/var/lib/noctalia-greeter", Before: encodeResource(before), After: encodeResource(desired), Previous: encodeResource(before)}
 				if err != nil {
 					op.Blocked = err.Error()
@@ -276,7 +283,7 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 
 func (b *builder) serviceOperation(id string, want definitions.ServiceDecl, component, pending string) Operation {
 	op := Operation{ID: id, Kind: KindService, Action: ActionRepair, Risk: RiskMedium, Summary: "configure " + want.Unit, Paths: []string{"component:" + component}}
-	have, err := facts.ObserveService(b.in.Source, want.Unit)
+	have, err := inspect.ObserveService(b.in.Source, want.Unit)
 	op.Resource = &ResourceChange{Name: want.Unit, Before: encodeResource(have), After: encodeResource(want), Previous: encodeResource(have), Enabled: want.Enabled, Running: want.Running}
 	receipt, managed := b.in.Applied.Receipts[id]
 	if managed {
@@ -358,8 +365,8 @@ func (b *builder) retireResource(id string, receipt state.Receipt) Operation {
 	switch receipt.Provider {
 	case KindFile:
 		target := strings.TrimPrefix(id, "file:")
-		before, err := facts.ObserveFile(b.in.Source, target)
-		var intended, previous facts.SystemFile
+		before, err := inspect.ObserveFile(b.in.Source, target)
+		var intended, previous inspect.SystemFile
 		if err != nil {
 			op.Blocked = err.Error()
 		} else if json.Unmarshal([]byte(receipt.Intended), &intended) != nil || json.Unmarshal([]byte(receipt.Previous), &previous) != nil {
@@ -367,7 +374,7 @@ func (b *builder) retireResource(id string, receipt state.Receipt) Operation {
 		} else if !SameFile(before, intended) && (before.Exists || previous.Exists) {
 			op.Blocked = "managed file changed since the last receipt; accept or restore it before removal"
 		}
-		op.File = &FileChange{Target: target, Before: before, After: previous, Previous: receipt.Previous, Recovery: definitions.RecoveryTarget(target), Triggers: receipt.Triggers}
+		op.File = &FileChange{Target: target, Before: before, After: previous, Previous: receipt.Previous, Recovery: definitions.LegacyRecoveryTarget(target), Triggers: receipt.Triggers}
 		if op.File.Triggers != nil {
 			kept := []string{}
 			for _, trigger := range op.File.Triggers {
@@ -382,7 +389,7 @@ func (b *builder) retireResource(id string, receipt state.Receipt) Operation {
 		op.Steps = []Step{{Description: "atomically restore the reviewed prior file state", Argv: []string{"nimbus", "internal", "system-file", "--plan", "<plan-digest>", "--payload", "<approved-file-change>"}, Privileged: true}}
 	case KindService:
 		unit := strings.TrimPrefix(id, "service:")
-		current, inspectErr := facts.ObserveService(b.in.Source, unit)
+		current, inspectErr := inspect.ObserveService(b.in.Source, unit)
 		if inspectErr != nil {
 			op.Blocked = inspectErr.Error()
 			break
@@ -397,7 +404,7 @@ func (b *builder) retireResource(id string, receipt state.Receipt) Operation {
 			op.Resource = &ResourceChange{Name: unit, Before: encodeResource(current), After: encodeResource(current), Previous: receipt.Previous}
 			break
 		}
-		var previous facts.Service
+		var previous inspect.Service
 		if json.Unmarshal([]byte(receipt.Previous), &previous) != nil || previous.Unit != unit || previous.Load != "loaded" {
 			op.Blocked = "service receipt lacks supported recovery state"
 			break
@@ -422,7 +429,7 @@ func (b *builder) retireResource(id string, receipt state.Receipt) Operation {
 		op.Action = ActionRemove
 		op.Summary = "restore prior service state of " + unit
 		if unit == "greetd.service" {
-			var current facts.Service
+			var current inspect.Service
 			_ = json.Unmarshal([]byte(op.Resource.Before), &current)
 			if current.Active == "active" {
 				op.Blocked = "greetd is active; move to a console and stop it explicitly before removing desktop integration"
@@ -434,7 +441,7 @@ func (b *builder) retireResource(id string, receipt state.Receipt) Operation {
 			op.Blocked = "invalid membership recovery state"
 			break
 		}
-		present, err := facts.ObserveMembership(b.in.Source, fields[2], fields[1])
+		present, err := inspect.ObserveMembership(b.in.Source, fields[2], fields[1])
 		if err != nil {
 			op.Blocked = err.Error()
 		}

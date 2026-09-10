@@ -1,0 +1,7 @@
+# Install the CPU-capable package; hardware trials choose model and activation.
+schema = 1
+id = "voxtype"
+requires = []
+conflicts = []
+packages = ["voxtype:voxtype", "wtype", "wl-clipboard", "libnotify", "pipewire-alsa"]
+removes = []

@@ -1,4 +1,4 @@
-# Printing and scanning. The Epson ESC/P-R drivers wait for a package source.
+# Native network printing and scanning, including the Epson ET-5800.
 schema = 1
 id = "printing"
 

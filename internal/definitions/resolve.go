@@ -14,6 +14,7 @@ type Resolved struct {
 	Profiles      []string            `json:"profiles"`
 	Components    []ResolvedComponent `json:"components"`
 	Packages      []ResolvedPackage   `json:"packages"`
+	Constraints   []PackageConstraint `json:"constraints,omitempty"`
 	Removes       []string            `json:"removes"`
 	Files         []ResolvedFile      `json:"files"`
 	Services      []ResolvedService   `json:"services,omitempty"`
@@ -55,7 +56,6 @@ type ResolvedFile struct {
 	Component string   `json:"component"`
 	Content   []byte   `json:"content"`
 	Triggers  []string `json:"triggers,omitempty"`
-	Recovery  bool     `json:"recovery,omitzero"`
 }
 
 // Resolve computes the desired graph of one machine from configuration only.
@@ -212,7 +212,7 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 	var selectedRPM []*ResolvedPackage
 	for _, key := range slices.Sorted(maps.Keys(pkgs)) {
 		rp := pkgs[key]
-		if rp.Prefix != PrefixFlatpak && rp.Prefix != PrefixCargo {
+		if rp.Prefix != PrefixFlatpak {
 			selectedRPM = append(selectedRPM, rp)
 		}
 	}
@@ -256,7 +256,7 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 		slices.Sort(rp.Paths)
 		r.Packages = append(r.Packages, *rp)
 		switch rp.Prefix {
-		case PrefixDNF, PrefixCargo:
+		case PrefixDNF:
 		case PrefixFlatpak:
 			if id := c.FlatpakRepository(); id != "" {
 				repos[id] = true
@@ -271,6 +271,7 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 	}
 	r.Repositories = slices.Sorted(maps.Keys(repos))
 	resolveResources(c, r, &errs)
+	resolveConstraints(c, m, r, &errs)
 	for _, rc := range r.Components {
 		if comp := c.Components[rc.ID]; comp != nil && comp.Installer != nil {
 			r.Installers = append(r.Installers, ResolvedInstaller{Component: rc.ID, Installer: *comp.Installer, Paths: rc.Paths})

@@ -15,7 +15,7 @@ import (
 	"github.com/Furyfree/nimbus/internal/apply"
 	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/doctor"
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
 	"github.com/Furyfree/nimbus/internal/plan"
 )
 
@@ -277,7 +277,7 @@ func prefixForRepo(root definitions.Root, repoID string) string {
 // newEditCommand wraps one manifest edit in the shared flow.
 func newEditCommand(opts *options, use, short string, build func(*selected, []string) (*selectionEdit, error)) *cobra.Command {
 	var flags machineFlags
-	var yes bool
+	var yes, preview bool
 	cmd := &cobra.Command{
 		Use:   use,
 		Short: short,
@@ -290,17 +290,21 @@ func newEditCommand(opts *options, use, short string, build func(*selected, []st
 			if err != nil {
 				return err
 			}
-			return runEdit(cmd, opts, flags, s, edit, yes)
+			return runEdit(cmd, opts, flags, s, edit, yes, preview)
 		},
 	}
 	addMachineFlags(&flags, cmd.Flags())
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "write the manifest and apply without asking")
+	cmd.Flags().BoolVarP(&preview, "plan", "p", false, "show the manifest diff and system plan without writing")
 	return cmd
 }
 
 // runEdit shows the manifest diff and the plan for the edited manifest,
 // asks for approval, writes the manifest, and applies.
-func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected, edit *selectionEdit, yes bool) error {
+func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected, edit *selectionEdit, yes, preview bool) error {
+	if opts.json && !preview && !yes {
+		return usageError{errors.New("mutation with --json requires --yes; use --plan to inspect changes")}
+	}
 	out := cmd.OutOrStdout()
 	path := manifestPath(s.Root, s.Resolved.Machine)
 	before, err := os.ReadFile(path)
@@ -322,11 +326,6 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 		_, err := fmt.Fprintf(out, "%s: the manifest already says that\n", edit.cmdName)
 		return err
 	}
-	after, err := renderManifest(before, &edited)
-	if err != nil {
-		return err
-	}
-
 	// Validate and plan the edited manifest in memory before touching it.
 	// The trial checkout also carries the edited bytes so its definition
 	// digest, and therefore the plan digest, is the one the written
@@ -334,6 +333,27 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 	trialCheckout := *s.Checkout
 	trialCheckout.Machines = maps.Clone(s.Checkout.Machines)
 	trialCheckout.Machines[s.Resolved.Machine] = &edited
+	if len(edited.PackageConstraints) > 0 {
+		// Resolve the edited selection before retaining its constraints. A
+		// removed package's constraint belongs in the same reviewed edit.
+		constraints := maps.Clone(edited.PackageConstraints)
+		edited.PackageConstraints = nil
+		if errs := definitions.Validate(&trialCheckout); len(errs) > 0 {
+			return fmt.Errorf("the edited manifest is invalid: %s", errs[0])
+		}
+		selection, errs := definitions.Resolve(&trialCheckout, s.Resolved.Machine)
+		if len(errs) > 0 {
+			return fmt.Errorf("the edited manifest does not resolve: %s", errs[0])
+		}
+		maps.DeleteFunc(constraints, func(key, _ string) bool {
+			return !slices.ContainsFunc(selection.Packages, func(p definitions.ResolvedPackage) bool { return p.Canonical == key })
+		})
+		edited.PackageConstraints = constraints
+	}
+	after, err := renderManifest(before, &edited)
+	if err != nil {
+		return err
+	}
 	trialCheckout.Entries = slices.Clone(s.Checkout.Entries)
 	rel := "machines/" + s.Resolved.Machine + ".toml"
 	for i := range trialCheckout.Entries {
@@ -350,12 +370,14 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 	}
 	trial := &selected{Root: s.Root, Checkout: &trialCheckout, Resolved: r}
 	src := newSource()
-	if err := facts.CheckPlatform(src, s.Checkout.Definitions().Compatibility.Fedora); err != nil {
-		return err
-	}
-	if _, err := src.Run("dnf5", "makecache"); err != nil {
-		if _, writeErr := fmt.Fprintf(cmd.ErrOrStderr(), "metadata not refreshed: %v; using cached metadata\n", err); writeErr != nil {
-			return errors.Join(err, writeErr)
+	if !preview {
+		if err := inspect.CheckPlatform(src, s.Checkout.Definitions().Compatibility.Fedora); err != nil {
+			return err
+		}
+		if _, err := src.Run("dnf5", "makecache"); err != nil {
+			if _, writeErr := fmt.Fprintf(cmd.ErrOrStderr(), "metadata not refreshed: %v; using cached metadata\n", err); writeErr != nil {
+				return errors.Join(err, writeErr)
+			}
 		}
 	}
 	p, _, err := planWithState(trial, src, false)
@@ -366,10 +388,10 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 		return errors.New("checkout origin and commit could not be inspected; selection changes require an inspectable Git clone")
 	}
 	// In JSON mode the review text goes to stderr and the envelope from the
-	// sync that follows is the only thing on stdout; JSON asks nothing.
+	// sync that follows is the only thing on stdout.
 	review := out
 	if opts.json {
-		review, yes = cmd.ErrOrStderr(), true
+		review = cmd.ErrOrStderr()
 	}
 	if _, err := fmt.Fprintf(review, "%s: %s\n\n%s\n", edit.cmdName, edit.summary, unifiedDiff(path, before, append(after, '\n'))); err != nil {
 		return fmt.Errorf("write selection diff: %w", err)
@@ -377,8 +399,24 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 	if _, err := review.Write(renderPlan(p, false, false)); err != nil {
 		return fmt.Errorf("write selection plan: %w", err)
 	}
+	if preview && opts.json {
+		if err := writeJSON(out, struct {
+			Diff string     `json:"diff"`
+			Plan *plan.Plan `json:"plan"`
+		}{unifiedDiff(path, before, append(after, '\n')), p}, nil); err != nil {
+			return err
+		}
+		if !p.Complete {
+			return reported{}
+		}
+		return nil
+	}
+
 	if !p.Complete {
 		return errors.New("the plan for the edited manifest is incomplete; resolve the blocked operations first")
+	}
+	if preview {
+		return nil
 	}
 	if !yes {
 		if _, err := fmt.Fprintln(review, "proceeding writes the manifest change shown and then applies the plan"); err != nil {
@@ -427,7 +465,7 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 		return err
 	}
 	if strings.HasPrefix(edit.cmdName, "profiles ") && edited.Dotfiles != nil {
-		selection := facts.Inspect(src, "").Chezmoi
+		selection := inspect.Inspect(src, "").Chezmoi
 		if selection.Known() && selection.Value.Initialized {
 			_, err = fmt.Fprintf(review, "Chezmoi keeps its own copy of the profiles; refresh it with:\n  %s\n", doctor.ChezmoiRefresh(edited.ID, r.Profiles, selection.Value.OnePasswordSSH))
 		} else {
@@ -445,8 +483,8 @@ func runEdit(cmd *cobra.Command, opts *options, flags machineFlags, s *selected,
 	}
 	flags.machine = s.Resolved.Machine
 	// The edit is the request; it runs without system updates, which are
-	// a plain sync's job.
-	return runSyncWith(cmd, opts, flags, syncFlags{yes: true, noUpgrade: true, approvedDigest: p.Digest, approvedCheckout: &p.Checkout}, lock)
+	// Topgrade's job.
+	return runSyncWith(cmd, opts, flags, syncFlags{yes: true, approvedDigest: p.Digest, approvedCheckout: &p.Checkout}, lock)
 }
 
 func listProfiles(s *selected) []selectionView {

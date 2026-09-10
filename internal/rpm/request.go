@@ -1,7 +1,9 @@
 // Package rpm describes native RPM request syntax.
 package rpm
 
-import "strings"
+import (
+	"strings"
+)
 
 // SplitRequest recognizes architecture qualifiers supported by the
 // Fedora target without splitting dots that belong to a package's name.

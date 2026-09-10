@@ -6,20 +6,21 @@ import (
 	"testing"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/native/nativetest"
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
-func retirementFixture(kind string) (*builder, *facts.FakeSource, state.Receipt) {
-	f := &facts.Facts{}
+func retirementFixture(kind string) (*builder, *nativetest.FakeSource, state.Receipt) {
+	f := &inspect.Facts{}
 	id, native := "repository:old", "nimbus-old"
 	if kind == KindFlatpakRemote {
 		id, native = "flatpak-remote:old", "old"
-		f.Flatpak.Value.Remotes = []facts.FlatpakRemote{{Name: native, URL: "https://example.invalid/repo", GPGVerify: true, KeyFingerprints: []string{"key"}}}
+		f.Flatpak.Value.Remotes = []inspect.FlatpakRemote{{Name: native, URL: "https://example.invalid/repo", GPGVerify: true, KeyFingerprints: []string{"key"}}}
 	} else {
-		f.Repositories.Value = []facts.Repository{{ID: native, File: "/etc/yum.repos.d/nimbus-old.repo", BaseURL: "https://example.invalid/repo", Enabled: true, GPGCheck: "1"}}
+		f.Repositories.Value = []inspect.Repository{{ID: native, File: "/etc/yum.repos.d/nimbus-old.repo", BaseURL: "https://example.invalid/repo", Enabled: true, GPGCheck: "1"}}
 	}
-	src := &facts.FakeSource{Commands: map[string][]byte{"flatpak list --system --all --app --runtime --columns=ref,origin,options": nil}}
+	src := &nativetest.FakeSource{Commands: map[string][]byte{"flatpak list --system --all --app --runtime --columns=ref,origin,options": nil}}
 	r := state.Receipt{Resource: id, Provider: kind, Machine: "vm", Verified: true,
 		Source: &state.SourceOwnership{Applied: SourceSnapshot(kind, []string{native}, f)}}
 	b := &builder{in: Inputs{Facts: f, Source: src, Resolved: &definitions.Resolved{Machine: "vm"},
@@ -66,7 +67,7 @@ func TestSourceRetirementRejectsLegacyForeignChangedAndUnknownState(t *testing.T
 			case "unknown packages":
 				b.in.Facts.Packages.Error = "unreadable"
 			case "unknown provenance":
-				b.in.Facts.Packages.Value = []facts.Package{{Name: "adopted", FromRepo: "@commandline"}}
+				b.in.Facts.Packages.Value = []inspect.Package{{Name: "adopted", FromRepo: "@commandline"}}
 			case "unsafe native ID":
 				receipt.Source.Applied[0].ID = "*"
 			}
@@ -81,7 +82,7 @@ func TestSourceRetirementRejectsLegacyForeignChangedAndUnknownState(t *testing.T
 
 func TestRetirementRetainsSourcesUsedByAdoptedPackagesAndRuntimes(t *testing.T) {
 	b, _, _ := retirementFixture(KindRepository)
-	b.in.Facts.Packages.Value = []facts.Package{{Name: "adopted", FromRepo: "nimbus-old"}}
+	b.in.Facts.Packages.Value = []inspect.Package{{Name: "adopted", FromRepo: "nimbus-old"}}
 	op := b.sourceRetirements()[0]
 	if op.Action != ActionKeep || len(op.Steps) != 0 || len(op.Notes) == 0 {
 		t.Fatalf("installed package lost its source: %+v", op)
@@ -137,14 +138,14 @@ func TestSourceOwnershipSurvivesRepairAndSelection(t *testing.T) {
 
 func TestSourceRetirementWaitsForEveryReviewedConsumerRemoval(t *testing.T) {
 	b, _, _ := retirementFixture(KindRepository)
-	b.in.Facts.Packages.Value = []facts.Package{{Name: "owned", Arch: "x86_64", FromRepo: "nimbus-old"}}
+	b.in.Facts.Packages.Value = []inspect.Package{{Name: "owned", Arch: "x86_64", FromRepo: "nimbus-old"}}
 	removal := Operation{ID: "packages:remove-owned", Kind: KindPackage, Action: ActionRemove,
 		Transaction: &Transaction{Packages: []TxPackage{{Name: "owned", Arch: "x86_64", Section: "removing"}}}}
 	op := b.sourceRetirements([]Operation{removal})[0]
 	if op.After != removal.ID || op.Blocked != "" || op.Action != ActionRemove {
 		t.Fatalf("source did not wait for removal: %+v", op)
 	}
-	b.in.Facts.Packages.Value = append(b.in.Facts.Packages.Value, facts.Package{Name: "adopted", Arch: "x86_64", FromRepo: "nimbus-old"})
+	b.in.Facts.Packages.Value = append(b.in.Facts.Packages.Value, inspect.Package{Name: "adopted", Arch: "x86_64", FromRepo: "nimbus-old"})
 	op = b.sourceRetirements([]Operation{removal})[0]
 	if op.Action != ActionKeep || op.After != "" {
 		t.Fatalf("retained package would lose its source: %+v", op)
@@ -165,10 +166,10 @@ func TestSourceRetirementWaitsForEveryReviewedConsumerRemoval(t *testing.T) {
 
 func TestSourceRetirementRetainsReconciledVendorConsumersAndSelectedAliases(t *testing.T) {
 	b, _, _ := retirementFixture(KindRepository)
-	b.in.Facts.Repositories.Value = append(b.in.Facts.Repositories.Value, facts.Repository{
+	b.in.Facts.Repositories.Value = append(b.in.Facts.Repositories.Value, inspect.Repository{
 		ID: "vendor-old", File: "vendor.repo", BaseURL: "https://example.invalid/repo", Enabled: false,
 	})
-	b.in.Facts.Packages.Value = []facts.Package{{Name: "adopted", FromRepo: "vendor-old"}}
+	b.in.Facts.Packages.Value = []inspect.Package{{Name: "adopted", FromRepo: "vendor-old"}}
 	if op := b.sourceRetirements()[0]; op.Action != ActionKeep || len(op.Steps) != 0 {
 		t.Fatalf("reconciled source lost its adopted consumer: %+v", op)
 	}
@@ -187,12 +188,12 @@ func TestReselectedDisabledRepositoryPlansVerifiedEnablement(t *testing.T) {
 	src, f := host(t)
 	const id = "brave"
 	r := c.Definitions().Repositories[id]
-	f.Repositories.Value = append(f.Repositories.Value, facts.Repository{
+	f.Repositories.Value = append(f.Repositories.Value, inspect.Repository{
 		ID: "nimbus-" + id, File: "nimbus-" + id + ".repo", BaseURL: r.BaseURL,
 		Enabled: false, GPGCheck: "1", GPGKey: "file://" + KeyPath(id),
 	})
 	b := &builder{in: Inputs{Root: c.Definitions(), Resolved: resolved, Facts: f, Source: src,
-		Applied: &state.Applied{Receipts: map[string]state.Receipt{}}}, repos: map[string][]facts.Repository{},
+		Applied: &state.Applied{Receipts: map[string]state.Receipt{}}}, repos: map[string][]inspect.Repository{},
 		ready: map[string]bool{}, blockedRepo: map[string]string{}, pendingRepo: map[string]bool{}, duplicates: map[string][]string{}}
 	for _, repo := range f.Repositories.Value {
 		b.repos[repo.ID] = append(b.repos[repo.ID], repo)

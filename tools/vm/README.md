@@ -1,6 +1,6 @@
 # Testing an unpublished candidate
 
-Use a local candidate for Phase 6 development. It tests uncommitted code and
+Use a local candidate for development. It tests uncommitted code and
 definitions without a release, a Git push, or changes to stable COPR. A separate
 beta COPR project can later test RPM installation and upgrade behavior with
 published source; it is unnecessary for the first engine/resource drills.
@@ -32,7 +32,7 @@ own newly created directory. Earlier candidates remain available for comparison.
 To build without contacting the VM, use a destination that does not exist:
 
 ~~~sh
-python3 -I -B tools/vm/stage.py --output /tmp/nimbus-phase6-candidate
+python3 -I -B tools/vm/stage.py --output /tmp/nimbus-candidate
 ~~~
 
 ## VM drill
@@ -65,16 +65,18 @@ older engines refuse. Failures before that write still require snapshot
 restoration; never reset the marker manually to make an older engine accept
 the state.
 
-Verify reboot to the greeter, normal login/logout, portal file selection and
-screen sharing, and recovery with missing or broken user configuration. Repeat
-sync must show no unexpected changes. Exercise failed activation and safe
-removal while preserving console access. Record the candidate checksum,
-definition digest, native service state, logs, and observed results.
+Verify reboot to the greeter, normal login and TTY repair with broken user
+configuration. Repeat sync must show no unexpected changes. Exercise the
+changed activation and removal paths while preserving console access. Record
+the candidate checksum and observed results. Physical-device and portal/session
+trials remain in [TASKS.md](../../docs/TASKS.md); a VM cannot close those gates.
 
 For the first-install flow, use the candidate binary's
-`init --checkout "$candidate/checkout" --machine vm` in a clean VM. Init shows
-and applies its plan without confirmation. It writes a selector and refuses
-an existing selector with a different checkout or origin without changing it.
+`init --checkout "$candidate/checkout" --machine vm` in a clean VM. Init
+previews the selector, system changes and Chezmoi handoff before asking for
+approval. `--plan` writes nothing; `--yes` approves the displayed setup.
+If the package cache is empty, run `dnf5 makecache` first. Init refuses an
+existing selector with a different checkout or origin without changing it.
 Testing the public shell/RPM bootstrap is
 a separate packaging drill; a direct binary candidate does not prove COPR
 publication or signed RPM installation.

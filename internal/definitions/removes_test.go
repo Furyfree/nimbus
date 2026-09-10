@@ -1,6 +1,8 @@
 package definitions
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestRPMRemovalConflictsUseNativeRequests(t *testing.T) {
 	for _, tc := range []struct {
@@ -17,7 +19,6 @@ func TestRPMRemovalConflictsUseNativeRequests(t *testing.T) {
 		{"dotted selection", "python3.14", "python3", false},
 		{"dotted removal", "python3", "python3.14", false},
 		{"qualified dotted name", "python3.14.i686", "python3.14", true},
-		{"Cargo is independent", "cargo:demo", "demo", false},
 		{"Flatpak is independent", "flatpak:org.example.App", "org.example.App", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

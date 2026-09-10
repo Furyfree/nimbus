@@ -55,7 +55,10 @@ packages = [
 ]
 
 components = [
+  "snapper",
   "hyprland-session",
   "media-codecs",
   "printing",
+  "voxtype",
+  "github-copilot",
 ]

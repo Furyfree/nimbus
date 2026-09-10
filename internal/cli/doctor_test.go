@@ -8,21 +8,23 @@ import (
 	"testing"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/native"
+	"github.com/Furyfree/nimbus/internal/native/nativetest"
 	"github.com/Furyfree/nimbus/internal/plan"
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
 // fixtureSource replays a healthy Fedora 44 host whose checkout is the
 // repository itself.
-func fixtureSource(t *testing.T, root string) *facts.FakeSource {
+func fixtureSource(t *testing.T, root string) *nativetest.FakeSource {
 	t.Helper()
 	if stateRoot == state.Root {
 		saved := stateRoot
 		stateRoot = filepath.Join(t.TempDir(), "state")
 		t.Cleanup(func() { stateRoot = saved })
 	}
-	repoDir := filepath.Join("..", "facts", "testdata", "fedora44")
+	repoDir := filepath.Join("..", "inspect", "testdata", "fedora44")
 	read := func(name string) []byte {
 		data, err := os.ReadFile(filepath.Join(repoDir, name))
 		if err != nil {
@@ -30,36 +32,37 @@ func fixtureSource(t *testing.T, root string) *facts.FakeSource {
 		}
 		return data
 	}
-	src := &facts.FakeSource{
+	src := &nativetest.FakeSource{
 		Commands: map[string][]byte{
-			facts.Key("uname", "-m"):                                                                  []byte("x86_64\n"),
-			facts.Key("dnf5", facts.PackageQueryArgs...):                                              read("repoquery-installed.txt"),
-			facts.Key("flatpak", "remotes", "--system", "--columns=name,url"):                         []byte(""),
-			facts.Key("flatpak", "list", "--system", "--app", "--columns=application,version,origin"): []byte(""),
-			facts.Key("systemctl", "is-active", "firewalld"):                                          []byte("active\n"),
-			facts.Key("git", facts.GitArgs(root, "rev-parse", "HEAD")...):                             []byte("abc123\n"),
-			facts.Key("git", facts.GitArgs(root, "status", "--porcelain")...):                         []byte(""),
+			"findmnt --noheadings --output FSTYPE --target /":                                              []byte("btrfs\n"),
+			nativetest.Key("uname", "-m"):                                                                  []byte("x86_64\n"),
+			nativetest.Key("dnf5", inspect.PackageQueryArgs...):                                            read("repoquery-installed.txt"),
+			nativetest.Key("flatpak", "remotes", "--system", "--columns=name,url"):                         []byte(""),
+			nativetest.Key("flatpak", "list", "--system", "--app", "--columns=application,version,origin"): []byte(""),
+			nativetest.Key("systemctl", "is-active", "firewalld"):                                          []byte("active\n"),
+			nativetest.Key("git", inspect.GitArgs(root, "rev-parse", "HEAD")...):                           []byte("abc123\n"),
+			nativetest.Key("git", inspect.GitArgs(root, "status", "--porcelain")...):                       []byte(""),
 		},
 		Failures: map[string]string{},
 		Files: map[string][]byte{
-			facts.OSReleasePath:  read("os-release"),
-			facts.SecureBootPath: {6, 0, 0, 0, 1},
-			facts.SELinuxPath:    []byte("1\n"),
+			inspect.OSReleasePath:  read("os-release"),
+			inspect.SecureBootPath: {6, 0, 0, 0, 1},
+			inspect.SELinuxPath:    []byte("1\n"),
 		},
-		Dirs:  map[string][]string{facts.RepoDir: {"fedora.repo"}},
+		Dirs:  map[string][]string{inspect.RepoDir: {"fedora.repo"}},
 		Paths: map[string]string{},
 	}
-	src.Files[filepath.Join(facts.RepoDir, "fedora.repo")] = read(filepath.Join("yum.repos.d", "fedora.repo"))
+	src.Files[filepath.Join(inspect.RepoDir, "fedora.repo")] = read(filepath.Join("yum.repos.d", "fedora.repo"))
 	if root != "" {
 		src.Dirs[filepath.Join(root, ".git")] = []string{"config"}
 		src.Files[filepath.Join(root, ".git", "config")] = []byte("[remote \"origin\"]\n\turl = https://github.com/Furyfree/nimbus.git\n")
 		// The DNF drop-in is already as declared, so plans start at the
 		// repositories the tests reason about.
 		if c, err := definitions.Load(root); err == nil {
-			src.Files[facts.DNFDropInPath] = []byte(plan.DNFDropIn(c.Definitions()))
+			src.Files[inspect.DNFDropInPath] = []byte(plan.DNFDropIn(c.Definitions()))
 		}
 	}
-	for _, name := range facts.RequiredCommands {
+	for _, name := range inspect.RequiredCommands {
 		src.Paths[name] = "/usr/bin/" + name
 	}
 	// This baseline predates system-resource ownership. Record native facts
@@ -72,21 +75,21 @@ func fixtureSource(t *testing.T, root string) *facts.FakeSource {
 	src.Dirs["/var"] = []string{"lib"}
 	src.Dirs["/var/lib"] = []string{}
 	for _, path := range []string{"/etc", "/etc/systemd", "/etc/systemd/system", "/usr", "/var", "/var/lib"} {
-		src.Commands[facts.Key("stat", "--format=%F|%U|%G|%a|%h", "--", path)] = []byte("directory|root|root|755|1\n")
+		src.Commands[nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", path)] = []byte("directory|root|root|755|1\n")
 	}
-	src.Commands[facts.Key("id", "-un")] = []byte("test\n")
-	src.Commands[facts.Key("id", "-nG", "--", "test")] = []byte("test wheel\n")
-	src.Commands[facts.Key("systemctl", "get-default")] = []byte("multi-user.target\n")
-	for _, unit := range []string{"greetd.service", "bluetooth.service", "avahi-daemon.service", "cups.socket", "cups.path", "docker.service", "containerd.service", "tailscaled.service", "power-profiles-daemon.service"} {
-		src.Commands[facts.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", unit)] = []byte("LoadState=loaded\nUnitFileState=disabled\nActiveState=inactive\n")
+	src.Commands[nativetest.Key("id", "-un")] = []byte("test\n")
+	src.Commands[nativetest.Key("id", "-nG", "--", "test")] = []byte("test wheel\n")
+	src.Commands[nativetest.Key("systemctl", "get-default")] = []byte("multi-user.target\n")
+	for _, unit := range []string{"snapper-cleanup.timer", "greetd.service", "bluetooth.service", "avahi-daemon.service", "cups.socket", "cups.path", "docker.service", "containerd.service", "tailscaled.service", "power-profiles-daemon.service"} {
+		src.Commands[nativetest.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", unit)] = []byte("LoadState=loaded\nUnitFileState=disabled\nActiveState=inactive\n")
 	}
 	return src
 }
 
-func withSource(t *testing.T, src facts.Source) {
+func withSource(t *testing.T, src native.Source) {
 	t.Helper()
 	saved := newSource
-	newSource = func() facts.Source { return src }
+	newSource = func() native.Source { return src }
 	t.Cleanup(func() { newSource = saved })
 }
 
@@ -132,7 +135,7 @@ func TestDoctorFailsWithExitOneAndExplains(t *testing.T) {
 	root, _ := filepath.Abs(filepath.Join("..", ".."))
 	root, _ = filepath.EvalSymlinks(root)
 	src := fixtureSource(t, root)
-	src.Files[facts.SELinuxPath] = []byte("0\n")
+	src.Files[inspect.SELinuxPath] = []byte("0\n")
 	withSource(t, src)
 	code, out, _ := run(t, "doctor", "--checkout", root)
 	if code != ExitFailure {

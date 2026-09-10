@@ -8,12 +8,13 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/native"
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
 // SourceSnapshot records only stable native source identity and enablement.
-func SourceSnapshot(kind string, ids []string, f *facts.Facts) []state.NativeSource {
+func SourceSnapshot(kind string, ids []string, f *inspect.Facts) []state.NativeSource {
 	var result []state.NativeSource
 	if kind == KindFlatpakRemote {
 		for _, r := range f.Flatpak.Value.Remotes {
@@ -164,7 +165,7 @@ func sourceRemovalDependency(inUse sourceInUse, ops []Operation) string {
 		}
 		if op.Kind == KindPackage && op.Transaction != nil {
 			for _, row := range op.Transaction.Packages {
-				id := (facts.Package{Name: row.Name, Arch: row.Arch}).ID()
+				id := (inspect.Package{Name: row.Name, Arch: row.Arch}).ID()
 				if row.Section == "removing" && pending[id] {
 					delete(pending, id)
 					last = op.ID
@@ -190,7 +191,7 @@ func sourceRemovalDependency(inUse sourceInUse, ops []Operation) string {
 
 // CheckSourceRetirement rechecks identity and all installed consumers without
 // refreshing metadata or running a privileged/native mutation.
-func CheckSourceRetirement(op Operation, f *facts.Facts, src facts.Source) error {
+func CheckSourceRetirement(op Operation, f *inspect.Facts, src native.Source) error {
 	if op.Source == nil || len(op.Source.Applied) == 0 {
 		return fmt.Errorf("source ownership identity is missing")
 	}

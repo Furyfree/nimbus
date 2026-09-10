@@ -14,7 +14,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/native"
 	"github.com/Furyfree/nimbus/internal/version"
 )
 
@@ -289,7 +290,7 @@ func unlogged(w io.Writer) io.Writer {
 }
 
 type installSource struct {
-	facts.Source
+	native.Source
 	log      *installLog
 	terminal io.Writer
 }
@@ -326,7 +327,7 @@ func (s installSource) Run(name string, args ...string) ([]byte, error) {
 	s.log.event("command start %s (inspection)", label)
 	var output []byte
 	var err error
-	if exec, ok := s.Source.(facts.ExecSource); ok && publicInstallCommand(name, args) {
+	if exec, ok := s.Source.(native.ExecSource); ok && publicInstallCommand(name, args) {
 		output, err = exec.RunLogged(s.log, name, args...)
 	} else {
 		output, err = s.Source.Run(name, args...)
@@ -367,8 +368,8 @@ func (l *installLog) commandEnd(label string, start time.Time, err error) {
 	l.event("command end %s exit=%s elapsed=%s", label, status, time.Since(start).Round(time.Millisecond))
 }
 
-func (l *installLog) checkoutIdentity(src facts.Source, name, root, origin string) {
-	output, err := src.Run("git", facts.GitArgs(root, "rev-parse", "HEAD")...)
+func (l *installLog) checkoutIdentity(src native.Source, name, root, origin string) {
+	output, err := src.Run("git", inspect.GitArgs(root, "rev-parse", "HEAD")...)
 	commit := strings.TrimSpace(string(output))
 	_, invalid := hex.DecodeString(commit)
 	if err != nil || invalid != nil || (len(commit) != 40 && len(commit) != 64) {

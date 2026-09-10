@@ -13,7 +13,8 @@ import (
 	"testing"
 
 	"github.com/Furyfree/nimbus/internal/apply"
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/native/nativetest"
 	"github.com/Furyfree/nimbus/internal/selector"
 )
 
@@ -88,7 +89,7 @@ func TestSelectionRejectsChangedDefinitionsBeforeWriting(t *testing.T) {
 }
 
 type installerSource struct {
-	*facts.FakeSource
+	*nativetest.FakeSource
 	t         *testing.T
 	calls     []string
 	reads     []string
@@ -96,12 +97,12 @@ type installerSource struct {
 }
 
 func (s *installerSource) Run(name string, args ...string) ([]byte, error) {
-	s.reads = append(s.reads, facts.Key(name, args...))
+	s.reads = append(s.reads, nativetest.Key(name, args...))
 	return s.FakeSource.Run(name, args...)
 }
 
 func (s *installerSource) Stream(out, errOut io.Writer, name string, args ...string) error {
-	key := facts.Key(name, args...)
+	key := nativetest.Key(name, args...)
 	s.calls = append(s.calls, key)
 	path, err := apply.LockPath()
 	if err != nil {
@@ -112,18 +113,11 @@ func (s *installerSource) Stream(out, errOut io.Writer, name string, args ...str
 		_ = lock.Release() // Cleanup cannot change the failed lock assertion.
 		s.t.Fatal("installer released its lock between stages")
 	}
-	home := os.Getenv("HOME")
 	if key == "chezmoi apply" && s.failApply {
 		if _, err := fmt.Fprintln(out, "FAKE-RENDERED-SECRET"); err != nil {
 			return err
 		}
 		return errors.New("required secret unavailable")
-	}
-	if name == filepath.Join(home, ".cargo/bin/cargo") {
-		if !slices.Contains(s.calls, "chezmoi apply") {
-			s.t.Fatal("Cargo ran before user configuration was applied")
-		}
-		s.Commands[facts.Key(name, facts.CargoListArgs...)] = []byte("demo v1.0.0:\n    demo\n")
 	}
 	data, err := s.FakeSource.Run(name, args...)
 	if _, writeErr := out.Write(data); writeErr != nil {
@@ -147,7 +141,7 @@ func installerFixture(t *testing.T) (string, *installerSource) {
 		"nimbus.toml":          "schema = 1\n[compatibility]\nfedora = [\"44\"]\nmin_engine = \"0.0.0\"\n",
 		".git/config":          "[remote \"origin\"]\nurl = https://github.com/Furyfree/nimbus.git\n",
 		"machines/vm.toml":     "schema = 1\nid = \"vm\"\nprofiles = [\"common\"]\n[dotfiles]\nrepo = \"https://github.com/Furyfree/dotfiles.git\"\n",
-		"profiles/common.toml": "schema = 1\nid = \"common\"\npackages = [\"cargo:demo\"]\ncomponents = []\n",
+		"profiles/common.toml": "schema = 1\nid = \"common\"\npackages = []\ncomponents = []\n",
 	}
 	for path, data := range files {
 		if err := os.WriteFile(filepath.Join(root, path), []byte(data), 0644); err != nil {
@@ -156,9 +150,6 @@ func installerFixture(t *testing.T) (string, *installerSource) {
 	}
 	src := fixtureSource(t, root)
 	home := os.Getenv("HOME")
-	src.Dirs[filepath.Join(home, ".cargo/bin")] = []string{"cargo"}
-	src.Commands[facts.Key(filepath.Join(home, ".cargo/bin/cargo"), facts.CargoListArgs...)] = nil
-	src.Commands[facts.Key(filepath.Join(home, ".cargo/bin/cargo"), "install", "demo")] = nil
 	src.Paths["chezmoi"] = "/usr/bin/chezmoi"
 	src.Commands["dnf5 makecache"] = nil
 	src.Commands["dnf5 --cacheonly check-upgrade"] = []byte("Repositories loaded.\n")
@@ -166,18 +157,18 @@ func installerFixture(t *testing.T) (string, *installerSource) {
 	src.Commands["chezmoi init --promptString Machine=vm --promptBool ManagedByNimbus=true --promptMultichoice Profiles=common --promptBool Enable 1Password SSH integration=false -- https://github.com/Furyfree/dotfiles.git"] = nil
 	src.Commands["chezmoi apply"] = nil
 	src.Commands["chezmoi source-path"] = []byte(home)
-	src.Commands[facts.Key("git", facts.GitArgs(home, "config", "--get", "remote.origin.url")...)] = []byte("https://github.com/Furyfree/dotfiles.git")
-	src.Commands[facts.Key("chezmoi", facts.ChezmoiDataArgs...)] = []byte(`{"Machine":"vm","ManagedByNimbus":true,"Profiles":["common"]}`)
+	src.Commands[nativetest.Key("git", inspect.GitArgs(home, "config", "--get", "remote.origin.url")...)] = []byte("https://github.com/Furyfree/dotfiles.git")
+	src.Commands[nativetest.Key("chezmoi", inspect.ChezmoiDataArgs...)] = []byte(`{"Machine":"vm","ManagedByNimbus":true,"Profiles":["common"]}`)
 	wrapper := &installerSource{FakeSource: src, t: t}
 	withSource(t, wrapper)
 	return root, wrapper
 }
 
-func TestInitAppliesDotfilesBeforeCargoAndRetriesAFailure(t *testing.T) {
+func TestInitKeepsHandoffErrorsPrivateAndRetriesFailure(t *testing.T) {
 	root, src := installerFixture(t)
 	src.failApply = true
 	code, out, errOut := run(t, "init", "--checkout", root, "--machine", "vm", "-y")
-	if code != ExitFailure || !strings.Contains(out, "skipped    remaining Nimbus user tools: dotfiles or tool installation failed") || !strings.Contains(errOut, "required secret unavailable") {
+	if code != ExitFailure || !strings.Contains(out, "failed     dotfiles and tools") || !strings.Contains(errOut, "required secret unavailable") {
 		t.Fatalf("%d %s%s", code, out, errOut)
 	}
 	logs, err := filepath.Glob(filepath.Join(os.Getenv("XDG_STATE_HOME"), "nimbus", "install", "run-*", "engine.log"))
@@ -198,17 +189,14 @@ func TestInitAppliesDotfilesBeforeCargoAndRetriesAFailure(t *testing.T) {
 			t.Fatalf("missing stage diagnostic %s", detail)
 		}
 	}
-	if slices.ContainsFunc(src.calls, func(call string) bool { return strings.Contains(call, "cargo install demo") }) {
-		t.Fatal("Cargo ran after failed apply")
-	}
 	src.failApply = false
 	src.calls = nil
 	code, out, errOut = run(t, "init", "--checkout", root, "--machine", "vm", "-y")
-	if code != ExitOK || !strings.Contains(out, "succeeded  remaining Nimbus user tools") {
+	if code != ExitOK || !strings.Contains(out, "succeeded  dotfiles and tools") {
 		t.Fatalf("%d %s%s", code, out, errOut)
 	}
-	if !slices.Contains(src.calls, facts.Key(filepath.Join(os.Getenv("HOME"), ".cargo/bin/cargo"), "install", "demo")) {
-		t.Fatal("Cargo was not installed")
+	if !slices.Contains(src.calls, "chezmoi apply") {
+		t.Fatal("Chezmoi was not retried")
 	}
 }
 
@@ -244,7 +232,7 @@ func TestUnsupportedPlatformDoesNotRefreshMetadataOrWriteSelector(t *testing.T) 
 	for _, command := range []string{"init", "sync"} {
 		t.Run(command, func(t *testing.T) {
 			root, src := installerFixture(t)
-			src.Files[facts.OSReleasePath] = []byte("ID=fedora\nVERSION_ID=43\n")
+			src.Files[inspect.OSReleasePath] = []byte("ID=fedora\nVERSION_ID=43\n")
 			code, out, errOut := run(t, command, "--checkout", root, "--machine", "vm", "-y")
 			if code != ExitFailure || !strings.Contains(out+errOut, "unsupported platform") {
 				t.Fatalf("%d %s%s", code, out, errOut)
@@ -273,14 +261,13 @@ func TestInitDelegatesMiseToolsToChezmoiAndRetriesFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	home := os.Getenv("HOME")
-	delete(src.Dirs, filepath.Join(home, ".cargo/bin"))
 	src.Dirs[filepath.Join(home, ".local/bin")] = []string{"mise"}
 	// System build prerequisites are already present in this lifecycle fixture.
 	checkout, err := loadCheckout(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	query := facts.Key("dnf5", facts.PackageQueryArgs...)
+	query := nativetest.Key("dnf5", inspect.PackageQueryArgs...)
 	for _, pkg := range checkout.Components["mise"].Packages {
 		src.Commands[query] = append(src.Commands[query], []byte(pkg+"|0|1|1.fc44|x86_64|fedora|User\n")...)
 	}
@@ -363,10 +350,10 @@ func TestInitRefusesUnrelatedChezmoiStateBeforeApplying(t *testing.T) {
 			src.Dirs[filepath.Join(home, ".local/share/chezmoi")] = []string{".git"}
 			want := "source does not match"
 			if which == "origin" {
-				src.Commands[facts.Key("git", facts.GitArgs(home, "config", "--get", "remote.origin.url")...)] = []byte("https://github.com/example/other.git")
+				src.Commands[nativetest.Key("git", inspect.GitArgs(home, "config", "--get", "remote.origin.url")...)] = []byte("https://github.com/example/other.git")
 			} else {
 				want = "stored selection differs"
-				src.Commands[facts.Key("chezmoi", facts.ChezmoiDataArgs...)] = []byte(`{"Machine":"other","ManagedByNimbus":true,"Profiles":["common"]}`)
+				src.Commands[nativetest.Key("chezmoi", inspect.ChezmoiDataArgs...)] = []byte(`{"Machine":"other","ManagedByNimbus":true,"Profiles":["common"]}`)
 			}
 			code, out, errOut := run(t, "init", "--checkout", root, "--machine", "vm", "-y")
 			if code != ExitFailure || !strings.Contains(out+errOut, want) {
@@ -444,6 +431,9 @@ func TestInitTrustChangeRefusesWithoutPrompt(t *testing.T) {
 
 func TestSyncStillRequiresConfirmation(t *testing.T) {
 	root, src := installerFixture(t)
+	if err := os.WriteFile(filepath.Join(root, "profiles/common.toml"), []byte("schema=1\nid='common'\npackages=['dnf5-plugins']\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	saved := approver
 	t.Cleanup(func() { approver = saved })
 	var asked bool
@@ -456,7 +446,7 @@ func TestSyncStillRequiresConfirmation(t *testing.T) {
 
 func TestSyncRefusesMissingCheckoutIdentity(t *testing.T) {
 	root, src := installerFixture(t)
-	src.Failures[facts.Key("git", facts.GitArgs(root, "rev-parse", "HEAD")...)] = "unreadable Git identity"
+	src.Failures[nativetest.Key("git", inspect.GitArgs(root, "rev-parse", "HEAD")...)] = "unreadable Git identity"
 	code, out, _ := run(t, "sync", "--checkout", root, "--machine", "vm", "-y")
 	if code != ExitFailure || len(src.calls) != 0 || !strings.Contains(out, "inspectable Git clone") {
 		t.Fatalf("unidentified sync: %d %v %s", code, src.calls, out)
@@ -468,7 +458,7 @@ func TestSyncRefusesMissingCheckoutIdentity(t *testing.T) {
 
 func TestInitRefreshPreservesEnabledSSH(t *testing.T) {
 	root, src := installerFixture(t)
-	src.Commands[facts.Key("chezmoi", facts.ChezmoiDataArgs...)] = []byte(`{"Machine":"other","ManagedByNimbus":true,"Profiles":["common"],"onePasswordSsh":true}`)
+	src.Commands[nativetest.Key("chezmoi", inspect.ChezmoiDataArgs...)] = []byte(`{"Machine":"other","ManagedByNimbus":true,"Profiles":["common"],"onePasswordSsh":true}`)
 	code, out, errOut := run(t, "init", "--checkout", root, "--machine", "vm", "-y")
 	if code != ExitFailure || !strings.Contains(out+errOut, "'Enable 1Password SSH integration=true'") || slices.Contains(src.calls, "chezmoi apply") {
 		t.Fatalf("refresh lost SSH: %d %s%s", code, out, errOut)
@@ -490,7 +480,7 @@ func TestSelectionRejectsChangedCheckoutIdentityBeforeWriting(t *testing.T) {
 			t.Cleanup(func() { approver = saved })
 			approver = func(io.Reader, io.Writer, string) bool {
 				if field == "commit" {
-					src.Commands[facts.Key("git", facts.GitArgs(root, "rev-parse", "HEAD")...)] = []byte("changed\n")
+					src.Commands[nativetest.Key("git", inspect.GitArgs(root, "rev-parse", "HEAD")...)] = []byte("changed\n")
 				} else {
 					src.Files[filepath.Join(root, ".git/config")] = []byte("[remote \"origin\"]\nurl=https://example.invalid/other\n")
 				}

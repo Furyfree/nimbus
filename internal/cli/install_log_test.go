@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/native/nativetest"
 )
 
 func testInstallLog(t *testing.T) *installLog {
@@ -215,7 +215,7 @@ func TestInstallLogCompletionRefusesSymlink(t *testing.T) {
 	}
 }
 
-type transcriptSource struct{ *facts.FakeSource }
+type transcriptSource struct{ *nativetest.FakeSource }
 
 func (s transcriptSource) Stream(out, errOut io.Writer, name string, args ...string) error {
 	if _, err := io.WriteString(out, "NATIVE-STDOUT\n"); err != nil {
@@ -228,7 +228,7 @@ func (s transcriptSource) Stream(out, errOut io.Writer, name string, args ...str
 func TestInstallLogExcludesSecretsAndPreservesNativeDiagnostics(t *testing.T) {
 	l := testInstallLog(t)
 	var terminal strings.Builder
-	src := installSource{transcriptSource{&facts.FakeSource{Commands: map[string][]byte{
+	src := installSource{transcriptSource{&nativetest.FakeSource{Commands: map[string][]byte{
 		"chezmoi data": []byte("FAKE-TOKEN"), "dnf5 makecache": []byte("repository metadata refreshed\n"),
 	}, Failures: map[string]string{"chezmoi data": "FAKE-SECRET-ERROR"}}}, l, &terminal}
 	if _, err := src.Run("dnf5", "makecache"); err != nil {
@@ -269,7 +269,7 @@ func TestInstallLogWriteFailureIsReported(t *testing.T) {
 	if err := l.file.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s := installSource{&facts.FakeSource{Commands: map[string][]byte{"dnf5 makecache": []byte("output")}}, l, io.Discard}
+	s := installSource{&nativetest.FakeSource{Commands: map[string][]byte{"dnf5 makecache": []byte("output")}}, l, io.Discard}
 	if _, err := s.Run("dnf5", "makecache"); err == nil {
 		t.Fatal("log failure hidden")
 	}
@@ -292,7 +292,7 @@ func TestInstallLogPrivateDiagnosticsPreserveOutputFailure(t *testing.T) {
 			case "failed":
 				diagnostic = resultErrorWriter{match: nativeSecret, err: writeErr}
 			}
-			src := installSource{&facts.FakeSource{Failures: map[string]string{"chezmoi data": nativeSecret}}, l, diagnostic}
+			src := installSource{&nativetest.FakeSource{Failures: map[string]string{"chezmoi data": nativeSecret}}, l, diagnostic}
 			_, err := src.Run("chezmoi", "data")
 			if err == nil {
 				t.Fatal("private native command failure disappeared")
@@ -347,7 +347,7 @@ func TestReadOnlyCommandsDoNotCreateInstallationLogs(t *testing.T) {
 func TestInstallLogDoesNotPrintExpectedInspectionFailures(t *testing.T) {
 	l := testInstallLog(t)
 	var terminal strings.Builder
-	src := installSource{&facts.FakeSource{Commands: map[string][]byte{"systemctl is-active firewalld": []byte("inactive")}, Failures: map[string]string{"systemctl is-active firewalld": "exit status 3", "sudo -n -v": "password required"}}, l, &terminal}
+	src := installSource{&nativetest.FakeSource{Commands: map[string][]byte{"systemctl is-active firewalld": []byte("inactive")}, Failures: map[string]string{"systemctl is-active firewalld": "exit status 3", "sudo -n -v": "password required"}}, l, &terminal}
 	if _, err := src.Run("systemctl", "is-active", "firewalld"); err == nil {
 		t.Fatal("probe failure lost")
 	}
@@ -364,7 +364,7 @@ func TestInstallLogKeepsRecorderAndKeyExtractionFailuresVisible(t *testing.T) {
 		t.Run(command[0], func(t *testing.T) {
 			l := testInstallLog(t)
 			var terminal strings.Builder
-			src := installSource{&facts.FakeSource{Failures: map[string]string{facts.Key(command[0], command[1:]...): "native validation failed: FIXTURE-DETAIL"}}, l, &terminal}
+			src := installSource{&nativetest.FakeSource{Failures: map[string]string{nativetest.Key(command[0], command[1:]...): "native validation failed: FIXTURE-DETAIL"}}, l, &terminal}
 			_, err := src.Run(command[0], command[1:]...)
 			if err == nil {
 				t.Fatal("native failure disappeared")

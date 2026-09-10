@@ -8,7 +8,8 @@ import (
 	"strings"
 
 	"github.com/Furyfree/nimbus/internal/apply"
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/native"
 	"github.com/Furyfree/nimbus/internal/plan"
 )
 
@@ -17,7 +18,7 @@ import (
 // caller holds the sync lock and has shown this policy with the approved plan.
 // Only duplicate-disable overrides are covered; new canonical source or key
 // drift needs a new sync and its own reviewed plan.
-func reconcileRepositories(s *selected, flags machineFlags, src facts.Source, approvedCheckout facts.Checkout, options func(*plan.Plan) apply.Options, out io.Writer, result *syncResult) error {
+func reconcileRepositories(s *selected, flags machineFlags, src native.Source, approvedCheckout inspect.Checkout, options func(*plan.Plan) apply.Options, out io.Writer, result *syncResult) error {
 	p, _, err := replanUnchanged(s, flags, src, false, approvedCheckout)
 	if err != nil {
 		return fmt.Errorf("inspect repositories after package transaction: %w", err)

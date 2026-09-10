@@ -49,7 +49,7 @@ def snapshot(source, target):
     paths += subprocess.check_output(
         ["git", "ls-files", "-z", "--others", "--exclude-standard", "--",
          "nimbus.toml", "machines", "profiles", "components", "system",
-         "cmd", "internal", "tools", "docs"], cwd=source
+         "cmd", "internal", "tests", "tools", "docs"], cwd=source
     ).split(b"\0")
     for raw in sorted(set(paths) - {b""}):
         rel = Path(os.fsdecode(raw))

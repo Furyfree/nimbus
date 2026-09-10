@@ -7,6 +7,7 @@ requires = []
 conflicts = []
 packages = [
   "hyprland-copr:hyprland",
+  "hyprland-copr:hyprland-uwsm",
   "hyprland-copr:hyprland-guiutils",
   "hyprland-copr:xdg-desktop-portal-hyprland",
   "noctalia",
@@ -34,9 +35,6 @@ packages = [
 ]
 removes = ["foot", "kitty", "nwg-panel"]
 default_target = "graphical.target"
-
-[recovery]
-enabled = true
 
 # Enable for the next boot; do not interrupt an active graphical session.
 [[services]]

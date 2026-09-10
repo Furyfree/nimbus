@@ -83,7 +83,7 @@ func newRoot() (*cobra.Command, *options) {
 	}
 	root.PersistentFlags().BoolVarP(&opts.json, "json", "j", false, "render the result as versioned JSON")
 	// Nimbus runs as the user and escalates per command; only the hidden
-	// record action is meant for root.
+	// internal actions may run as root.
 	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		if os.Geteuid() == 0 && !strings.HasPrefix(cmd.CommandPath(), "nimbus internal") {
 			return usageError{errors.New("nimbus runs as the normal user and uses sudo per command; do not run it as root")}
@@ -99,7 +99,7 @@ func newRoot() (*cobra.Command, *options) {
 		return cmd.Root().Help()
 	}})
 	root.SetUsageTemplate(strings.Replace(root.UsageTemplate(), `(or .IsAvailableCommand (eq .Name "help"))`, `.IsAvailableCommand`, 1))
-	root.AddCommand(newInternal(), newComponents(opts), newDoctor(opts), newDotfiles(opts), newFiles(opts), newInit(opts), newManaged(opts), newPackages(opts), newProfiles(opts), newStatus(opts), newSync(opts), newUnmanaged(opts), newValidate(opts), newVersion(opts), newWhy(opts))
+	root.AddCommand(newInternal(), newComponents(opts), newDoctor(opts), newFiles(opts), newInit(opts), newLaunch(opts), newManaged(opts), newPackages(opts), newPostinstall(opts), newProfiles(opts), newStatus(opts), newSync(opts), newUnmanaged(opts), newUpgrade(opts), newValidate(opts), newVersion(opts), newWhy(opts))
 	return root, opts
 }
 
@@ -110,8 +110,8 @@ func New() *cobra.Command {
 }
 
 // Execute runs the tree and returns the process exit code. Usage errors exit
-// 2; every other failure exits 1 and, with --json, is rendered in the
-// envelope.
+// 2; other Nimbus failures exit 1 and use the envelope with --json.
+// Delegated Topgrade failures retain their native exit status.
 func Execute(args []string, stdout, stderr io.Writer) int {
 	root, opts := newRoot()
 	root.SetArgs(args)
@@ -120,6 +120,9 @@ func Execute(args []string, stdout, stderr io.Writer) int {
 	err := root.Execute()
 	if err == nil {
 		return ExitOK
+	}
+	if exited, ok := errors.AsType[nativeExit](err); ok {
+		return exited.code
 	}
 	if _, ok := errors.AsType[usageError](err); ok {
 		_, _ = fmt.Fprintln(stderr, "error:", err)

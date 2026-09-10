@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
 )
 
 // Status of one check.
@@ -33,7 +33,7 @@ type Report struct {
 	Unknown int     `json:"unknown"`
 }
 
-// Config is what doctor knows beyond the facts.
+// Config is what doctor knows beyond the inspect.
 type Config struct {
 	// SupportedReleases comes from the checkout's nimbus.toml; nil when the
 	// checkout could not be loaded.
@@ -55,8 +55,8 @@ type Config struct {
 	Dotfiles bool
 }
 
-// Run evaluates every check against the facts.
-func Run(f *facts.Facts, cfg Config) Report {
+// Run evaluates every check against the inspect.
+func Run(f *inspect.Facts, cfg Config) Report {
 	var r Report
 	add := func(c Check) {
 		r.Checks = append(r.Checks, c)
@@ -80,11 +80,11 @@ func Run(f *facts.Facts, cfg Config) Report {
 	return r
 }
 
-func platform(f *facts.Facts, cfg Config) Check {
+func platform(f *inspect.Facts, cfg Config) Check {
 	c := Check{ID: "platform"}
 	if !f.Platform.Known() {
 		c.Status, c.Observation = Unknown, f.Platform.Error
-		c.Remediation = "make " + facts.OSReleasePath + " and uname readable"
+		c.Remediation = "make " + inspect.OSReleasePath + " and uname readable"
 		return c
 	}
 	p := f.Platform.Value
@@ -110,7 +110,7 @@ func platform(f *facts.Facts, cfg Config) Check {
 	return c
 }
 
-func selector(f *facts.Facts, cfg Config) Check {
+func selector(f *inspect.Facts, cfg Config) Check {
 	c := Check{ID: "selector"}
 	switch {
 	case cfg.CheckoutOverride && !f.Checkout.Known() && f.Commands["git"] == "":
@@ -144,7 +144,7 @@ func selector(f *facts.Facts, cfg Config) Check {
 	return c
 }
 
-func describeCheckout(co facts.Checkout) string {
+func describeCheckout(co inspect.Checkout) string {
 	state := "clean"
 	if co.Dirty {
 		state = "dirty"
@@ -165,10 +165,10 @@ func definitions(cfg Config) Check {
 	return c
 }
 
-func commands(f *facts.Facts) Check {
+func commands(f *inspect.Facts) Check {
 	c := Check{ID: "commands"}
 	var missing []string
-	for _, name := range facts.RequiredCommands {
+	for _, name := range inspect.RequiredCommands {
 		if f.Commands[name] == "" {
 			missing = append(missing, name)
 		}
@@ -185,7 +185,7 @@ func commands(f *facts.Facts) Check {
 	return c
 }
 
-func packages(f *facts.Facts) Check {
+func packages(f *inspect.Facts) Check {
 	c := Check{ID: "packages"}
 	if !f.Packages.Known() {
 		c.Status, c.Observation = Fail, f.Packages.Error
@@ -198,11 +198,11 @@ func packages(f *facts.Facts) Check {
 	return c
 }
 
-func repositorySignatures(f *facts.Facts) Check {
+func repositorySignatures(f *inspect.Facts) Check {
 	c := Check{ID: "repository-signatures"}
 	if !f.Repositories.Known() {
 		c.Status, c.Observation = Unknown, f.Repositories.Error
-		c.Remediation = "make " + facts.RepoDir + " readable"
+		c.Remediation = "make " + inspect.RepoDir + " readable"
 		return c
 	}
 	var unchecked, unset []string
@@ -240,14 +240,14 @@ func repositorySignatures(f *facts.Facts) Check {
 	return c
 }
 
-func secureBoot(f *facts.Facts) Check {
+func secureBoot(f *inspect.Facts) Check {
 	c := Check{ID: "secure-boot"}
 	switch {
 	case !f.SecureBoot.Known():
 		c.Status, c.Observation = Unknown, f.SecureBoot.Error
-	case f.SecureBoot.Value == facts.SecureBootEnabled:
+	case f.SecureBoot.Value == inspect.SecureBootEnabled:
 		c.Status, c.Observation = Pass, "Secure Boot is enabled"
-	case f.SecureBoot.Value == facts.SecureBootUnavailable:
+	case f.SecureBoot.Value == inspect.SecureBootUnavailable:
 		c.Status, c.Observation = Unknown, "no EFI variables: legacy boot or a container"
 		c.Remediation = "boot in UEFI mode with Secure Boot enabled"
 	default:
@@ -258,12 +258,12 @@ func secureBoot(f *facts.Facts) Check {
 	return c
 }
 
-func selinux(f *facts.Facts) Check {
+func selinux(f *inspect.Facts) Check {
 	c := Check{ID: "selinux"}
 	switch {
 	case !f.SELinux.Known():
 		c.Status, c.Observation = Unknown, f.SELinux.Error
-	case f.SELinux.Value == facts.SELinuxEnforcing:
+	case f.SELinux.Value == inspect.SELinuxEnforcing:
 		c.Status, c.Observation = Pass, "SELinux is enforcing"
 	default:
 		c.Status, c.Observation = Fail, "SELinux is "+f.SELinux.Value
@@ -273,7 +273,7 @@ func selinux(f *facts.Facts) Check {
 	return c
 }
 
-func firewalld(f *facts.Facts) Check {
+func firewalld(f *inspect.Facts) Check {
 	c := Check{ID: "firewalld"}
 	switch {
 	case !f.Firewalld.Known():
@@ -291,7 +291,7 @@ func firewalld(f *facts.Facts) Check {
 // chezmoiSelection compares what Chezmoi stored at its initialization with
 // the selected machine and its profiles; a profile change after the handoff
 // is refreshed by hand with the command profiles add prints.
-func chezmoiSelection(f *facts.Facts, cfg Config) Check {
+func chezmoiSelection(f *inspect.Facts, cfg Config) Check {
 	c := Check{ID: "chezmoi"}
 	switch {
 	case cfg.Machine == "" || !cfg.Dotfiles:

@@ -13,21 +13,23 @@ import (
 	"time"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/native"
+	"github.com/Furyfree/nimbus/internal/native/nativetest"
 	"github.com/Furyfree/nimbus/internal/plan"
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
 func encodeTest(v any) string { data, _ := json.Marshal(v); return string(data) }
-func resourceExecutor(src facts.Source) *executor {
+func resourceExecutor(src native.Source) *executor {
 	return &executor{p: &plan.Plan{Machine: "vm", Digest: "approved"}, opts: Options{Source: src, Now: func() time.Time { return time.Unix(20, 0) }, Out: io.Discard}}
 }
 
 func TestServiceNoopMutationNeverGetsSuccessReceipt(t *testing.T) {
-	before := facts.Service{Unit: "demo.service", Load: "loaded", Enabled: "disabled", Active: "inactive"}
-	src := &facts.FakeSource{Commands: map[string][]byte{
-		facts.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", "demo.service"): []byte("LoadState=loaded\nUnitFileState=disabled\nActiveState=inactive\n"),
-		facts.Key("sudo", "systemctl", "enable", "--", "demo.service"):                                         nil,
+	before := inspect.Service{Unit: "demo.service", Load: "loaded", Enabled: "disabled", Active: "inactive"}
+	src := &nativetest.FakeSource{Commands: map[string][]byte{
+		nativetest.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", "demo.service"): []byte("LoadState=loaded\nUnitFileState=disabled\nActiveState=inactive\n"),
+		nativetest.Key("sudo", "systemctl", "enable", "--", "demo.service"):                                         nil,
 	}}
 	op := plan.Operation{ID: "service:demo.service", Kind: plan.KindService, Action: plan.ActionRepair, Resource: &plan.ResourceChange{Name: before.Unit, Before: encodeTest(before), After: encodeTest(definitions.ServiceDecl{Unit: before.Unit, Enabled: new(true)}), Previous: encodeTest(before), Enabled: new(true)}, Steps: []plan.Step{{Argv: []string{"systemctl", "enable", "--", before.Unit}}}}
 	receipts, _, err := resourceExecutor(src).systemResource(op)
@@ -37,8 +39,8 @@ func TestServiceNoopMutationNeverGetsSuccessReceipt(t *testing.T) {
 }
 
 func TestServiceAdoptionRecordsOriginalState(t *testing.T) {
-	before := facts.Service{Unit: "demo.service", Load: "loaded", Enabled: "enabled", Active: "inactive"}
-	src := &facts.FakeSource{Commands: map[string][]byte{facts.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", before.Unit): []byte("LoadState=loaded\nUnitFileState=enabled\nActiveState=inactive\n")}}
+	before := inspect.Service{Unit: "demo.service", Load: "loaded", Enabled: "enabled", Active: "inactive"}
+	src := &nativetest.FakeSource{Commands: map[string][]byte{nativetest.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", before.Unit): []byte("LoadState=loaded\nUnitFileState=enabled\nActiveState=inactive\n")}}
 	op := plan.Operation{ID: "service:demo.service", Kind: plan.KindService, Action: plan.ActionAdopt, Resource: &plan.ResourceChange{Name: before.Unit, Before: encodeTest(before), After: encodeTest(definitions.ServiceDecl{Unit: before.Unit, Enabled: new(true)}), Previous: encodeTest(before), Enabled: new(true)}}
 	receipts, _, err := resourceExecutor(src).systemResource(op)
 	if err != nil || len(receipts) != 1 || receipts[0].Previous != encodeTest(before) || !receipts[0].Verified {
@@ -50,8 +52,8 @@ func TestServiceIntentAdoptionUpdatesRetirementWithoutNativeMutation(t *testing.
 	for _, dropRunning := range []bool{false, true} {
 		t.Run(map[bool]string{false: "add running", true: "drop running"}[dropRunning], func(t *testing.T) {
 			const id = "service:demo.service"
-			original := facts.Service{Unit: "demo.service", Load: "loaded", Enabled: "disabled", Active: "inactive"}
-			have := facts.Service{Unit: original.Unit, Load: "loaded", Enabled: "enabled", Active: "active"}
+			original := inspect.Service{Unit: "demo.service", Load: "loaded", Enabled: "disabled", Active: "inactive"}
+			have := inspect.Service{Unit: original.Unit, Load: "loaded", Enabled: "enabled", Active: "active"}
 			old := definitions.ServiceDecl{Unit: have.Unit, Enabled: new(true)}
 			want := definitions.ServiceDecl{Unit: have.Unit, Enabled: new(true), Running: new(true)}
 			if dropRunning {
@@ -63,9 +65,9 @@ func TestServiceIntentAdoptionUpdatesRetirementWithoutNativeMutation(t *testing.
 			if err := state.Record(root, receipt.PlanDigest, &state.Stage{Schema: state.Schema, PlanDigest: receipt.PlanDigest, Receipts: []state.Receipt{receipt}}); err != nil {
 				t.Fatal(err)
 			}
-			src := &serviceCommandSource{before: have, after: have, FakeSource: &facts.FakeSource{Commands: map[string][]byte{
-				facts.Key("dnf5", facts.PackageQueryArgs...):      nil,
-				facts.Key("dnf5", "--cacheonly", "check-upgrade"): nil,
+			src := &serviceCommandSource{before: have, after: have, FakeSource: &nativetest.FakeSource{Commands: map[string][]byte{
+				nativetest.Key("dnf5", inspect.PackageQueryArgs...):    nil,
+				nativetest.Key("dnf5", "--cacheonly", "check-upgrade"): nil,
 			}}}
 			resolved := &definitions.Resolved{Machine: "vm", Services: []definitions.ResolvedService{{ServiceDecl: want}}}
 			build := func() *plan.Plan {
@@ -74,7 +76,7 @@ func TestServiceIntentAdoptionUpdatesRetirementWithoutNativeMutation(t *testing.
 				if err != nil {
 					t.Fatal(err)
 				}
-				p, err := plan.Build(plan.Inputs{Resolved: resolved, Facts: &facts.Facts{}, Source: src, Applied: applied})
+				p, err := plan.Build(plan.Inputs{Resolved: resolved, Facts: &inspect.Facts{}, Source: src, Applied: applied})
 				if err != nil || !p.Complete || len(p.Operations) != 1 {
 					t.Fatalf("service plan: %+v %v", p, err)
 				}
@@ -108,7 +110,7 @@ func TestServiceIntentAdoptionUpdatesRetirementWithoutNativeMutation(t *testing.
 			}
 			var planned []string
 			for _, step := range p.Operations[0].Steps {
-				planned = append(planned, facts.Key(step.Argv[0], step.Argv[1:]...))
+				planned = append(planned, nativetest.Key(step.Argv[0], step.Argv[1:]...))
 			}
 			if !slices.Equal(planned, commands) {
 				t.Fatalf("retirement uses stale intent: %v, want %v", planned, commands)
@@ -128,16 +130,16 @@ func TestServiceIntentAdoptionUpdatesRetirementWithoutNativeMutation(t *testing.
 }
 
 type targetCommandSource struct {
-	*facts.FakeSource
+	*nativetest.FakeSource
 	mutations []string
 }
 
 func (s *targetCommandSource) Stream(out, errOut io.Writer, name string, args ...string) error {
-	s.mutations = append(s.mutations, facts.Key(name, args...))
+	s.mutations = append(s.mutations, nativetest.Key(name, args...))
 	if err := s.FakeSource.Stream(out, errOut, name, args...); err != nil {
 		return err
 	}
-	s.Commands[facts.Key("systemctl", "get-default")] = []byte(args[len(args)-1] + "\n")
+	s.Commands[nativetest.Key("systemctl", "get-default")] = []byte(args[len(args)-1] + "\n")
 	return nil
 }
 
@@ -152,10 +154,10 @@ func TestTargetIntentAdoptionPreservesRecoveryAndConverges(t *testing.T) {
 			if err := state.Record(root, receipt.PlanDigest, &state.Stage{Schema: state.Schema, PlanDigest: receipt.PlanDigest, Receipts: []state.Receipt{receipt}}); err != nil {
 				t.Fatal(err)
 			}
-			src := &targetCommandSource{FakeSource: &facts.FakeSource{Commands: map[string][]byte{
-				facts.Key("systemctl", "get-default"):             []byte(target + "\n"),
-				facts.Key("dnf5", facts.PackageQueryArgs...):      nil,
-				facts.Key("dnf5", "--cacheonly", "check-upgrade"): nil,
+			src := &targetCommandSource{FakeSource: &nativetest.FakeSource{Commands: map[string][]byte{
+				nativetest.Key("systemctl", "get-default"):             []byte(target + "\n"),
+				nativetest.Key("dnf5", inspect.PackageQueryArgs...):    nil,
+				nativetest.Key("dnf5", "--cacheonly", "check-upgrade"): nil,
 			}}}
 			resolved := &definitions.Resolved{Machine: "vm", DefaultTarget: target}
 			build := func() *plan.Plan {
@@ -164,7 +166,7 @@ func TestTargetIntentAdoptionPreservesRecoveryAndConverges(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				p, err := plan.Build(plan.Inputs{Resolved: resolved, Facts: &facts.Facts{}, Source: src, Applied: applied})
+				p, err := plan.Build(plan.Inputs{Resolved: resolved, Facts: &inspect.Facts{}, Source: src, Applied: applied})
 				if err != nil || !p.Complete || len(p.Operations) != 1 {
 					t.Fatalf("target plan: %+v %v", p, err)
 				}
@@ -197,7 +199,7 @@ func TestTargetIntentAdoptionPreservesRecoveryAndConverges(t *testing.T) {
 			}
 			var planned []string
 			for _, step := range p.Operations[0].Steps {
-				planned = append(planned, facts.Key("sudo", step.Argv...))
+				planned = append(planned, nativetest.Key("sudo", step.Argv...))
 			}
 			if p.Operations[0].Resource.After != original || !slices.Equal(planned, commands) {
 				t.Fatalf("retirement lost original target or requires unnecessary commands: %+v", p.Operations[0])
@@ -214,12 +216,12 @@ func TestTargetIntentAdoptionPreservesRecoveryAndConverges(t *testing.T) {
 }
 
 type membershipSource struct {
-	*facts.FakeSource
+	*nativetest.FakeSource
 	observations []string
 }
 
 func (s *membershipSource) Run(name string, args ...string) ([]byte, error) {
-	if facts.Key(name, args...) == "id -nG -- owner" {
+	if nativetest.Key(name, args...) == "id -nG -- owner" {
 		if len(s.observations) == 0 {
 			return nil, errors.New("unexpected membership inspection")
 		}
@@ -249,15 +251,15 @@ func TestPreexistingMembershipRetirementPreservesObservation(t *testing.T) {
 			if err := state.Record(root, receipt.PlanDigest, &state.Stage{Schema: state.Schema, PlanDigest: receipt.PlanDigest, Receipts: []state.Receipt{receipt}}); err != nil {
 				t.Fatal(err)
 			}
-			src := &membershipSource{observations: tc.observations, FakeSource: &facts.FakeSource{Commands: map[string][]byte{
-				facts.Key("dnf5", facts.PackageQueryArgs...):      nil,
-				facts.Key("dnf5", "--cacheonly", "check-upgrade"): nil,
+			src := &membershipSource{observations: tc.observations, FakeSource: &nativetest.FakeSource{Commands: map[string][]byte{
+				nativetest.Key("dnf5", inspect.PackageQueryArgs...):    nil,
+				nativetest.Key("dnf5", "--cacheonly", "check-upgrade"): nil,
 			}}}
 			applied, err := state.Read(root)
 			if err != nil {
 				t.Fatal(err)
 			}
-			p, err := plan.Build(plan.Inputs{Resolved: &definitions.Resolved{Machine: "vm"}, Facts: &facts.Facts{}, Source: src, Applied: applied})
+			p, err := plan.Build(plan.Inputs{Resolved: &definitions.Resolved{Machine: "vm"}, Facts: &inspect.Facts{}, Source: src, Applied: applied})
 			if err != nil || !p.Complete || len(p.Operations) != 1 || len(p.Operations[0].Steps) != 0 {
 				t.Fatalf("membership retirement plan: %+v %v", p, err)
 			}
@@ -280,8 +282,8 @@ func TestResourceRetirementReportsSessionRequirements(t *testing.T) {
 	for _, kind := range []string{plan.KindGroup, plan.KindTarget} {
 		for _, outcome := range []string{"changed", "unchanged", "native failure", "verification failure", "record failure", "pending"} {
 			t.Run(kind+"/"+outcome, func(t *testing.T) {
-				base := &facts.FakeSource{Commands: map[string][]byte{facts.Key("dnf5", facts.PackageQueryArgs...): nil}, Failures: map[string]string{}}
-				var source facts.Source
+				base := &nativetest.FakeSource{Commands: map[string][]byte{nativetest.Key("dnf5", inspect.PackageQueryArgs...): nil}, Failures: map[string]string{}}
+				var source native.Source
 				op := plan.Operation{Kind: kind, Action: plan.ActionRemove}
 				changed := outcome != "unchanged"
 				if kind == plan.KindGroup {
@@ -302,7 +304,7 @@ func TestResourceRetirementReportsSessionRequirements(t *testing.T) {
 						before = "multi-user.target"
 						op.Steps = []plan.Step{{Argv: []string{"systemctl", "set-default", "graphical.target"}, Privileged: true}}
 					}
-					base.Commands[facts.Key("systemctl", "get-default")] = []byte(before + "\n")
+					base.Commands[nativetest.Key("systemctl", "get-default")] = []byte(before + "\n")
 					op.Resource = &plan.ResourceChange{Name: op.ID, Before: before, After: "graphical.target", Previous: "graphical.target"}
 					source = &targetCommandSource{FakeSource: base}
 				}
@@ -314,7 +316,7 @@ func TestResourceRetirementReportsSessionRequirements(t *testing.T) {
 					}
 				}
 				for _, step := range op.Steps {
-					command := facts.Key("sudo", step.Argv...)
+					command := nativetest.Key("sudo", step.Argv...)
 					base.Commands[command] = nil
 					if outcome == "native failure" {
 						base.Failures[command] = "native mutation failed"
@@ -351,13 +353,13 @@ func TestResourceRetirementReportsSessionRequirements(t *testing.T) {
 }
 
 type serviceCommandSource struct {
-	*facts.FakeSource
-	before, after facts.Service
+	*nativetest.FakeSource
+	before, after inspect.Service
 	mutated       bool
 }
 
 func (s *serviceCommandSource) Run(name string, args ...string) ([]byte, error) {
-	if facts.Key(name, args...) == facts.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", s.before.Unit) {
+	if nativetest.Key(name, args...) == nativetest.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", s.before.Unit) {
 		have := s.before
 		if s.mutated {
 			have = s.after
@@ -395,7 +397,7 @@ func TestServiceVerificationRequiresSupportedNativeEnablement(t *testing.T) {
 		{"unmanaged runtime masked", nil, "masked-runtime", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			before := facts.Service{Unit: "demo.service", Load: "loaded", Enabled: "enabled", Active: "inactive"}
+			before := inspect.Service{Unit: "demo.service", Load: "loaded", Enabled: "enabled", Active: "inactive"}
 			want := definitions.ServiceDecl{Unit: before.Unit, Enabled: tc.enabled}
 			verb := "disable"
 			if tc.enabled == nil {
@@ -412,7 +414,7 @@ func TestServiceVerificationRequiresSupportedNativeEnablement(t *testing.T) {
 				after.Active = "active"
 			}
 			argv := []string{"systemctl", verb, "--", before.Unit}
-			src := &serviceCommandSource{before: before, after: after, FakeSource: &facts.FakeSource{Commands: map[string][]byte{facts.Key("sudo", argv...): nil}}}
+			src := &serviceCommandSource{before: before, after: after, FakeSource: &nativetest.FakeSource{Commands: map[string][]byte{nativetest.Key("sudo", argv...): nil}}}
 			op := plan.Operation{ID: "service:" + before.Unit, Kind: plan.KindService, Action: plan.ActionRepair,
 				Resource: &plan.ResourceChange{Name: before.Unit, Before: encodeTest(before), After: encodeTest(want), Previous: encodeTest(before), Enabled: want.Enabled, Running: want.Running},
 				Steps:    []plan.Step{{Argv: argv, Privileged: true}}}
@@ -427,15 +429,15 @@ func TestServiceVerificationRequiresSupportedNativeEnablement(t *testing.T) {
 func TestGreeterDirectoryTriggerVerifiesTypeAndOwnership(t *testing.T) {
 	for _, observation := range []string{"symbolic link|greetd|greetd|750|1", "directory|root|root|750|2", "directory|greetd|greetd|755|2", "directory|greetd|greetd|750|2"} {
 		t.Run(observation, func(t *testing.T) {
-			src := &facts.FakeSource{Commands: map[string][]byte{
-				facts.Key("sudo", "systemd-tmpfiles", "--create", "/etc/tmpfiles.d/nimbus-noctalia-greeter.conf"): nil,
-				facts.Key("stat", "--format=%F|%U|%G|%a|%h", "--", "/var/lib/noctalia-greeter"):                   []byte(observation),
+			src := &nativetest.FakeSource{Commands: map[string][]byte{
+				nativetest.Key("sudo", "systemd-tmpfiles", "--create", "/etc/tmpfiles.d/nimbus-noctalia-greeter.conf"): nil,
+				nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", "/var/lib/noctalia-greeter"):                   []byte(observation),
 			}}
 			src.Dirs = map[string][]string{"/": {"var"}, "/var": {"lib"}, "/var/lib": {"noctalia-greeter"}}
 			for _, dir := range []string{"/var", "/var/lib"} {
-				src.Commands[facts.Key("stat", "--format=%F|%U|%G|%a|%h", "--", dir)] = []byte("directory|root|root|755|2")
+				src.Commands[nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", dir)] = []byte("directory|root|root|755|2")
 			}
-			desired := encodeTest(facts.Directory{Exists: true, Owner: "greetd", Group: "greetd", Mode: "0750"})
+			desired := encodeTest(inspect.Directory{Exists: true, Owner: "greetd", Group: "greetd", Mode: "0750"})
 			receipts, _, err := resourceExecutor(src).systemResource(plan.Operation{ID: "trigger:noctalia-state-directory", Kind: plan.KindTrigger, Action: plan.ActionRepair, Resource: &plan.ResourceChange{Name: "/var/lib/noctalia-greeter", Before: desired, After: desired}})
 			valid := observation == "directory|greetd|greetd|750|2"
 			if (err == nil) != valid || (len(receipts) == 1) != valid {
@@ -446,18 +448,18 @@ func TestGreeterDirectoryTriggerVerifiesTypeAndOwnership(t *testing.T) {
 }
 
 func TestDaemonReloadVerificationPreservesInspectionFailure(t *testing.T) {
-	src := &facts.FakeSource{Commands: map[string][]byte{facts.Key("sudo", "systemctl", "daemon-reload"): nil}}
+	src := &nativetest.FakeSource{Commands: map[string][]byte{nativetest.Key("sudo", "systemctl", "daemon-reload"): nil}}
 	ex := resourceExecutor(src)
 	ex.p.Operations = []plan.Operation{{Kind: plan.KindService, Resource: &plan.ResourceChange{Name: "demo.service"}}}
 	receipts, removed, err := ex.systemResource(plan.Operation{ID: "trigger:systemd-daemon-reload", Kind: plan.KindTrigger, Action: plan.ActionRepair})
-	if !errors.Is(err, facts.ErrNotRecorded) || len(receipts) != 0 || len(removed) != 0 {
+	if !errors.Is(err, nativetest.ErrNotRecorded) || len(receipts) != 0 || len(removed) != 0 {
 		t.Fatalf("reload verification cause lost: receipts=%v removed=%v err=%v", receipts, removed, err)
 	}
 }
 
 type fileCommandSource struct {
-	*facts.FakeSource
-	after          facts.SystemFile
+	*nativetest.FakeSource
+	after          inspect.SystemFile
 	mutated        bool
 	restoreFailure bool
 	inspectFailure bool
@@ -508,7 +510,7 @@ func (s *fileCommandSource) Stream(_, _ io.Writer, name string, args ...string) 
 	if s.after.Exists {
 		s.Dirs["/etc"] = []string{"nimbus.conf"}
 		s.Files["/etc/nimbus.conf"] = s.after.Content
-		s.Commands[facts.Key("stat", "--format=%F|%U|%G|%a|%h", "--", "/etc/nimbus.conf")] = []byte("regular file|root|root|644|1")
+		s.Commands[nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", "/etc/nimbus.conf")] = []byte("regular file|root|root|644|1")
 	} else {
 		s.Dirs["/etc"] = nil
 		delete(s.Files, "/etc/nimbus.conf")
@@ -516,9 +518,9 @@ func (s *fileCommandSource) Stream(_, _ io.Writer, name string, args ...string) 
 	return nil
 }
 func fileCommands() *fileCommandSource {
-	return &fileCommandSource{FakeSource: &facts.FakeSource{Dirs: map[string][]string{"/": {"etc"}, "/etc": {}}, Files: map[string][]byte{}, Commands: map[string][]byte{
-		facts.Key("stat", "--format=%F|%U|%G|%a|%h", "--", "/etc"): []byte("directory|root|root|755|1"),
-		facts.Key("dnf5", facts.PackageQueryArgs...):               nil,
+	return &fileCommandSource{FakeSource: &nativetest.FakeSource{Dirs: map[string][]string{"/": {"etc"}, "/etc": {}}, Files: map[string][]byte{}, Commands: map[string][]byte{
+		nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", "/etc"): []byte("directory|root|root|755|1"),
+		nativetest.Key("dnf5", inspect.PackageQueryArgs...):             nil,
 	}}}
 }
 func TestPostWriteFailureReportsAppliedUnrecordedFile(t *testing.T) {
@@ -530,7 +532,7 @@ func TestPostWriteFailureReportsAppliedUnrecordedFile(t *testing.T) {
 			src.cleanupFailure = strings.HasSuffix(kind, "and cleanup")
 			ex := resourceExecutor(src)
 			ex.opts.Stage = t.TempDir()
-			op := plan.Operation{ID: "file:/etc/nimbus.conf", Kind: plan.KindFile, Action: plan.ActionInstall, File: &plan.FileChange{Target: "/etc/nimbus.conf", After: facts.SystemFile{Exists: true, Content: []byte("new"), Owner: "root", Group: "root", Mode: "0644"}}}
+			op := plan.Operation{ID: "file:/etc/nimbus.conf", Kind: plan.KindFile, Action: plan.ActionInstall, File: &plan.FileChange{Target: "/etc/nimbus.conf", After: inspect.SystemFile{Exists: true, Content: []byte("new"), Owner: "root", Group: "root", Mode: "0644"}}}
 			receipts, _, err := ex.systemFile(op)
 			if err == nil || !strings.Contains(err.Error(), "applied but not recorded") || !strings.Contains(err.Error(), "restore the reviewed previous state") || len(receipts) != 0 || !src.mutated {
 				t.Fatalf("postwrite result: %v %v", receipts, err)
@@ -549,7 +551,7 @@ func TestPayloadCleanupFailurePreservesVerifiedFileLifecycle(t *testing.T) {
 	resolved := &definitions.Resolved{Machine: "vm", Files: []definitions.ResolvedFile{{
 		Target: "/etc/nimbus.conf", Content: []byte("new"), Owner: "root", Group: "root", Mode: "0644",
 	}}}
-	in := plan.Inputs{Resolved: resolved, Facts: &facts.Facts{}, Source: src, Definitions: "definitions"}
+	in := plan.Inputs{Resolved: resolved, Facts: &inspect.Facts{}, Source: src, Definitions: "definitions"}
 	build := func() *plan.Plan {
 		t.Helper()
 		var err error
@@ -596,7 +598,7 @@ func TestDeferredRetirementRecordFailureIdentifiesEveryFile(t *testing.T) {
 	for _, count := range []int{1, 2} {
 		t.Run(fmt.Sprint(count), func(t *testing.T) {
 			src := &greeterRetirementSource{FakeSource: fileCommands().FakeSource}
-			before := facts.SystemFile{Exists: true, Content: []byte("old"), Owner: "root", Group: "root", Mode: "0644"}
+			before := inspect.SystemFile{Exists: true, Content: []byte("old"), Owner: "root", Group: "root", Mode: "0644"}
 			p := &plan.Plan{Machine: "vm", Digest: "approved", Complete: true}
 			var ids []string
 			for i := range count {
@@ -606,7 +608,7 @@ func TestDeferredRetirementRecordFailureIdentifiesEveryFile(t *testing.T) {
 				ids = append(ids, id)
 				src.Dirs["/etc"] = append(src.Dirs["/etc"], name)
 				src.Files[target] = before.Content
-				src.Commands[facts.Key("stat", "--format=%F|%U|%G|%a|%h", "--", target)] = []byte("regular file|root|root|644|1")
+				src.Commands[nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", target)] = []byte("regular file|root|root|644|1")
 				p.Operations = append(p.Operations, plan.Operation{ID: id, Kind: plan.KindFile, Action: plan.ActionRemove, File: &plan.FileChange{Target: target, Before: before, Triggers: []string{"systemd-daemon-reload"}}})
 			}
 			trigger := "trigger:systemd-daemon-reload"
@@ -634,10 +636,10 @@ func TestDeferredRetirementRecordFailureIdentifiesEveryFile(t *testing.T) {
 
 func TestMatchingFileAdoptionPreservesMutationTime(t *testing.T) {
 	src := fileCommands()
-	have := facts.SystemFile{Exists: true, Content: []byte("same"), Owner: "root", Group: "root", Mode: "0644"}
+	have := inspect.SystemFile{Exists: true, Content: []byte("same"), Owner: "root", Group: "root", Mode: "0644"}
 	src.Dirs["/etc"] = []string{"nimbus.conf"}
 	src.Files["/etc/nimbus.conf"] = have.Content
-	src.Commands[facts.Key("stat", "--format=%F|%U|%G|%a|%h", "--", "/etc/nimbus.conf")] = []byte("regular file|root|root|644|1")
+	src.Commands[nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", "/etc/nimbus.conf")] = []byte("regular file|root|root|644|1")
 	changed := time.Unix(5, 0)
 	op := plan.Operation{ID: "file:/etc/nimbus.conf", Kind: plan.KindFile, Action: plan.ActionAdopt, File: &plan.FileChange{Target: "/etc/nimbus.conf", Before: have, After: have, ChangedAt: changed}}
 	receipts, _, err := resourceExecutor(src).systemFile(op)
@@ -647,8 +649,8 @@ func TestMatchingFileAdoptionPreservesMutationTime(t *testing.T) {
 }
 
 func TestMissingUnitRetirementOnlyRemovesVerifiedReceipt(t *testing.T) {
-	have := facts.Service{Unit: "demo.service", Load: "not-found", Active: "inactive"}
-	src := &facts.FakeSource{Commands: map[string][]byte{facts.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", have.Unit): []byte("LoadState=not-found\nUnitFileState=\nActiveState=inactive\n")}}
+	have := inspect.Service{Unit: "demo.service", Load: "not-found", Active: "inactive"}
+	src := &nativetest.FakeSource{Commands: map[string][]byte{nativetest.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", have.Unit): []byte("LoadState=not-found\nUnitFileState=\nActiveState=inactive\n")}}
 	op := plan.Operation{ID: "service:demo.service", Kind: plan.KindService, Action: plan.ActionRetire, Resource: &plan.ResourceChange{Name: have.Unit, Before: encodeTest(have), After: encodeTest(have)}}
 	receipts, remove, err := resourceExecutor(src).systemResource(op)
 	if err != nil || len(receipts) != 0 || len(remove) != 1 || remove[0] != op.ID {
@@ -658,10 +660,10 @@ func TestMissingUnitRetirementOnlyRemovesVerifiedReceipt(t *testing.T) {
 
 func TestAdoptionWithActivationChangeAdvancesChangeTimeWithoutWritingFile(t *testing.T) {
 	src := fileCommands()
-	have := facts.SystemFile{Exists: true, Content: []byte("same"), Owner: "root", Group: "root", Mode: "0644"}
+	have := inspect.SystemFile{Exists: true, Content: []byte("same"), Owner: "root", Group: "root", Mode: "0644"}
 	src.Dirs["/etc"] = []string{"nimbus.conf"}
 	src.Files["/etc/nimbus.conf"] = have.Content
-	src.Commands[facts.Key("stat", "--format=%F|%U|%G|%a|%h", "--", "/etc/nimbus.conf")] = []byte("regular file|root|root|644|1")
+	src.Commands[nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", "/etc/nimbus.conf")] = []byte("regular file|root|root|644|1")
 	op := plan.Operation{ID: "file:/etc/nimbus.conf", Kind: plan.KindFile, Action: plan.ActionAdopt, File: &plan.FileChange{Target: "/etc/nimbus.conf", Before: have, After: have, ChangedAt: time.Unix(5, 0), ActivationChanged: true}}
 	receipts, _, err := resourceExecutor(src).systemFile(op)
 	if err != nil || len(receipts) != 1 || !receipts[0].ChangedAt.Equal(receipts[0].Timestamp) || src.mutated {
@@ -670,12 +672,12 @@ func TestAdoptionWithActivationChangeAdvancesChangeTimeWithoutWritingFile(t *tes
 }
 
 type greeterRetirementSource struct {
-	*facts.FakeSource
+	*nativetest.FakeSource
 	commands []string
 }
 
 func (s *greeterRetirementSource) Stream(_, _ io.Writer, name string, args ...string) error {
-	s.commands = append(s.commands, facts.Key(name, args...))
+	s.commands = append(s.commands, nativetest.Key(name, args...))
 	if name != "sudo" {
 		return fmt.Errorf("unexpected command %s", name)
 	}
@@ -708,12 +710,12 @@ func TestGreeterFileRetirementReloadsUnitsWithoutRecreatingStateDirectory(t *tes
 	tmpfiles := "/etc/tmpfiles.d/nimbus-noctalia-greeter.conf"
 	dropin := "/etc/systemd/system/greetd.service.d/nimbus.conf"
 	retained := "/var/lib/noctalia-greeter/retained-state"
-	src := &greeterRetirementSource{FakeSource: &facts.FakeSource{Files: map[string][]byte{retained: []byte("keep")}, Dirs: map[string][]string{}, Commands: map[string][]byte{facts.Key("dnf5", facts.PackageQueryArgs...): nil}}}
+	src := &greeterRetirementSource{FakeSource: &nativetest.FakeSource{Files: map[string][]byte{retained: []byte("keep")}, Dirs: map[string][]string{}, Commands: map[string][]byte{nativetest.Key("dnf5", inspect.PackageQueryArgs...): nil}}}
 	applied := &state.Applied{Receipts: map[string]state.Receipt{}}
 	for _, target := range []string{tmpfiles, dropin} {
-		desired := facts.SystemFile{Exists: true, Content: []byte("owned configuration"), Owner: "root", Group: "root", Mode: "0644"}
+		desired := inspect.SystemFile{Exists: true, Content: []byte("owned configuration"), Owner: "root", Group: "root", Mode: "0644"}
 		src.Files[target] = desired.Content
-		src.Commands[facts.Key("stat", "--format=%F|%U|%G|%a|%h", "--", target)] = []byte("regular file|root|root|644|1")
+		src.Commands[nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", target)] = []byte("regular file|root|root|644|1")
 		current := target
 		for current != "/" {
 			parent := filepath.Dir(current)
@@ -723,7 +725,7 @@ func TestGreeterFileRetirementReloadsUnitsWithoutRecreatingStateDirectory(t *tes
 			}
 			current = parent
 			if current != "/" {
-				src.Commands[facts.Key("stat", "--format=%F|%U|%G|%a|%h", "--", current)] = []byte("directory|root|root|755|2")
+				src.Commands[nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", current)] = []byte("directory|root|root|755|2")
 			}
 		}
 		trigger := "systemd-daemon-reload"
@@ -731,9 +733,9 @@ func TestGreeterFileRetirementReloadsUnitsWithoutRecreatingStateDirectory(t *tes
 			trigger = "noctalia-state-directory"
 		}
 		id := "file:" + target
-		applied.Receipts[id] = state.Receipt{Resource: id, Provider: plan.KindFile, Machine: "vm", Verified: true, Previous: encodeTest(facts.SystemFile{}), Intended: encodeTest(desired), Triggers: []string{trigger}}
+		applied.Receipts[id] = state.Receipt{Resource: id, Provider: plan.KindFile, Machine: "vm", Verified: true, Previous: encodeTest(inspect.SystemFile{}), Intended: encodeTest(desired), Triggers: []string{trigger}}
 	}
-	p, err := plan.Build(plan.Inputs{Resolved: &definitions.Resolved{Machine: "vm"}, Facts: &facts.Facts{}, Applied: applied, Source: src})
+	p, err := plan.Build(plan.Inputs{Resolved: &definitions.Resolved{Machine: "vm"}, Facts: &inspect.Facts{}, Applied: applied, Source: src})
 	if err != nil || !p.Complete {
 		t.Fatalf("retirement plan: %+v %v", p, err)
 	}

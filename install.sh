@@ -32,7 +32,7 @@ installer_arguments() {
       -y|--yes) ;;
       -h|--help)
         printf '%s\n' 'Usage: install.sh [--machine ID | --new ID] [--dotfiles URL | --no-dotfiles] [--onepassword-ssh] [-y]'
-        printf '%s\n' 'First installation requires --machine ID or --new ID; reruns reuse the trusted selector.' 'Init shows and applies its plan without confirmation; --new opens a dialogue.' 'Sudo and Chezmoi may ask for input. --yes is accepted for compatibility.'
+        printf '%s\n' 'First installation requires --machine ID or --new ID; reruns reuse the trusted selector.' 'Init shows its plan and asks before applying; --new opens a dialogue.' '--yes approves the Nimbus plan. Sudo and Chezmoi may still ask for input.'
         exit 0;;
       *) fail "unsupported installer argument: ${arg}";;
     esac

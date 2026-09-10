@@ -2,8 +2,8 @@
 vt = 1
 
 [general]
-# Skip shell profiles for all sessions so a broken ~/.profile cannot block
-# recovery. Interactive shells in the normal session load their own config.
+# Skip shell profiles so a broken ~/.profile cannot block graphical login.
+# Interactive shells load their own configuration.
 source_profile = false
 
 [default_session]

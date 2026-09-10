@@ -8,7 +8,22 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/Furyfree/nimbus/internal/native"
 )
+
+// ExtractKeysWithRPM2Archive is the real key extractor. rpm2archive writes
+// the gzip tar to standard output when that is a pipe, which Source.Run
+// captures; the key files live below ./etc/pki/rpm-gpg/ inside it.
+func ExtractKeysWithRPM2Archive(src native.Source) func(string) (map[string][]byte, error) {
+	return func(rpmPath string) (map[string][]byte, error) {
+		archive, err := src.Run("rpm2archive", rpmPath)
+		if err != nil {
+			return nil, err
+		}
+		return readKeysFromArchive(archive)
+	}
+}
 
 // readKeysFromArchive returns the key files below etc/pki/rpm-gpg/ inside a
 // gzip tar written by rpm2archive.

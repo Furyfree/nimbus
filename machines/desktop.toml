@@ -26,3 +26,7 @@ package_exclusions = []
 
 [dotfiles]
 repo = "https://github.com/Furyfree/dotfiles.git"
+
+[package_constraints]
+"hyprland-copr:hyprland" = "0.56.*"
+"dnf:noctalia" = "5.*"

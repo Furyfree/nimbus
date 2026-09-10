@@ -3,7 +3,7 @@ schema = 1
 
 [compatibility]
 fedora = ["44"]
-min_engine = "0.2.0"
+min_engine = "0.3.0"
 
 # Repositories other than Fedora. The table key is the prefix a package
 # reference uses. `key` is the fingerprint the signing key must have, and
@@ -79,6 +79,18 @@ kind = "copr"
 project = "lionheartp/Hyprland"
 key = "97E2 3476 C896 3513 5407 C7D5 E9BA 4134 2C4B 2995"
 priority = 130
+
+[repositories.voxtype]
+kind = "copr"
+project = "furyfree/voxtype"
+key = "B4DE D69E 7793 D5DF 2FC3 2BC1 C69E 6449 2CA2 E833"
+priority = 131
+
+[repositories.copilot-installer]
+kind = "copr"
+project = "furyfree/github-copilot-installer"
+key = "D092 00FC 4828 0155 1973 B03F 4A86 8CE1 F2B0 A28A"
+priority = 132
 
 [repositories.flathub]
 kind = "flatpak"

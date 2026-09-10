@@ -113,7 +113,7 @@ func validateRoot(c *Checkout, errs *ErrorList) {
 				priorities[*repo.Priority] = id
 			}
 		}
-		if id == PrefixDNF || id == PrefixFlatpak || id == PrefixCargo {
+		if id == PrefixDNF || id == PrefixFlatpak {
 			errs.Add(RootFile, "%s: %q is a reserved prefix", where, id)
 		} else if !prefixRe.MatchString(id) {
 			errs.Add(RootFile, "%s: invalid repository ID", where)
@@ -213,7 +213,7 @@ func (c *Checkout) validateRefs(where string, raws []string, errs *ErrorList) {
 			continue
 		}
 		switch ref.Prefix {
-		case PrefixDNF, PrefixCargo:
+		case PrefixDNF:
 		case PrefixFlatpak:
 			if c.FlatpakRepository() == "" {
 				errs.Add(where, "%q needs a flatpak repository in %s", raw, RootFile)
@@ -336,12 +336,6 @@ func validateComponent(c *Checkout, comp *Component, errs *ErrorList) {
 		}
 		if in.Binary == "" || !cleanRelativePath(in.Binary) {
 			errs.Add(where, "installer.binary must be a clean path relative to the home directory")
-		}
-		if in.Config != "" && !cleanRelativePath(in.Config) {
-			errs.Add(where, "installer.config must be a clean path relative to the home directory")
-		}
-		if (in.Config == "") != (len(in.Install) == 0) {
-			errs.Add(where, "installer.config and installer.install go together")
 		}
 	}
 	seen := map[string]bool{}
