@@ -361,6 +361,39 @@ func TestMembershipRemovalPreservesPreexistingAndPrimaryGroups(t *testing.T) {
 	}
 }
 
+func TestSelectedResourcesShowSessionRequirementsOnlyForChanges(t *testing.T) {
+	for _, outcome := range []string{"changed", "adopted", "unchanged", "blocked"} {
+		t.Run(outcome, func(t *testing.T) {
+			b, src := resourceBuilder()
+			b.in.Resolved.DefaultTarget = "graphical.target"
+			b.in.Resolved.Groups = []definitions.ResolvedGroup{{GroupDecl: definitions.GroupDecl{Name: "docker", User: "owner"}}}
+			groupKey := nativetest.Key("id", "-nG", "--", "owner")
+			targetKey := nativetest.Key("systemctl", "get-default")
+			src.Commands[groupKey] = []byte("owner docker")
+			src.Commands[targetKey] = []byte("graphical.target\n")
+			switch outcome {
+			case "changed":
+				src.Commands[groupKey] = []byte("owner")
+				src.Commands[targetKey] = []byte("multi-user.target\n")
+			case "unchanged":
+				b.in.Applied.Receipts["group:docker:owner"] = state.Receipt{Resource: "group:docker:owner", Provider: KindGroup, Machine: "vm", Verified: true, Previous: "false", Intended: "true"}
+				b.in.Applied.Receipts["default-target"] = state.Receipt{Resource: "default-target", Provider: KindTarget, Machine: "vm", Verified: true, Previous: "multi-user.target", Intended: "graphical.target"}
+			case "blocked":
+				src.Failures[groupKey], src.Failures[targetKey] = "unavailable", "unavailable"
+			}
+			ops := b.systemResources(nil)
+			if len(ops) != 2 {
+				t.Fatalf("operations = %+v", ops)
+			}
+			for _, op := range ops {
+				if (len(op.Notes) > 0) != (outcome == "changed") || (op.Blocked != "") != (outcome == "blocked") {
+					t.Fatalf("session requirement for %s: %+v", outcome, op)
+				}
+			}
+		})
+	}
+}
+
 func TestRetirementPlansShowSessionRequirementsOnlyForChanges(t *testing.T) {
 	for _, kind := range []string{KindGroup, KindTarget} {
 		for _, outcome := range []string{"changed", "unchanged", "blocked"} {

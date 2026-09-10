@@ -73,7 +73,7 @@ func Run(f *inspect.Facts, cfg Config) Report {
 	add(commands(f))
 	add(packages(f))
 	add(repositorySignatures(f))
-	add(secureBoot(f))
+	add(secureBoot(f, cfg))
 	add(selinux(f))
 	add(firewalld(f))
 	add(chezmoiSelection(f, cfg))
@@ -240,7 +240,7 @@ func repositorySignatures(f *inspect.Facts) Check {
 	return c
 }
 
-func secureBoot(f *inspect.Facts) Check {
+func secureBoot(f *inspect.Facts, cfg Config) Check {
 	c := Check{ID: "secure-boot"}
 	switch {
 	case !f.SecureBoot.Known():
@@ -250,9 +250,14 @@ func secureBoot(f *inspect.Facts) Check {
 	case f.SecureBoot.Value == inspect.SecureBootUnavailable:
 		c.Status, c.Observation = Unknown, "no EFI variables: legacy boot or a container"
 		c.Remediation = "boot in UEFI mode with Secure Boot enabled"
+	case f.SecureBoot.Value == inspect.SecureBootDisabled && cfg.Machine == "vm" && !f.VirtualMachine.Known():
+		c.Status, c.Observation = Unknown, "Secure Boot is disabled; cannot confirm the test VM exception: "+f.VirtualMachine.Error
+		c.Remediation = "check systemd-detect-virt --vm; Secure Boot remains required on hardware"
+	case f.SecureBoot.Value == inspect.SecureBootDisabled && cfg.Machine == "vm" && f.VirtualMachine.Value:
+		c.Status, c.Observation = Pass, "Secure Boot is disabled; allowed for the selected test VM, not hardware acceptance"
 	default:
 		c.Status, c.Observation = Fail, "Secure Boot is disabled"
-		c.Impact = "the policy requires Secure Boot; TPM2 unlock bound to PCR 7 protects nothing without it"
+		c.Impact = "Secure Boot is required on hardware"
 		c.Remediation = "enable Secure Boot in firmware; Nimbus never changes it"
 	}
 	return c

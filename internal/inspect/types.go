@@ -12,14 +12,15 @@ func (s Section[T]) Known() bool { return s.Error == "" }
 
 // Facts is the structured observation of one system.
 type Facts struct {
-	Platform     Section[Platform]     `json:"platform"`
-	Packages     Section[[]Package]    `json:"packages"`
-	Repositories Section[[]Repository] `json:"repositories"`
-	Flatpak      Section[Flatpak]      `json:"flatpak"`
-	SecureBoot   Section[string]       `json:"secure_boot"`
-	SELinux      Section[string]       `json:"selinux"`
-	Firewalld    Section[string]       `json:"firewalld"`
-	Checkout     Section[Checkout]     `json:"checkout"`
+	Platform       Section[Platform]     `json:"platform"`
+	Packages       Section[[]Package]    `json:"packages"`
+	Repositories   Section[[]Repository] `json:"repositories"`
+	Flatpak        Section[Flatpak]      `json:"flatpak"`
+	SecureBoot     Section[string]       `json:"secure_boot"`
+	VirtualMachine Section[bool]         `json:"virtual_machine"`
+	SELinux        Section[string]       `json:"selinux"`
+	Firewalld      Section[string]       `json:"firewalld"`
+	Checkout       Section[Checkout]     `json:"checkout"`
 	// DNFDropIn is the content of Nimbus's libdnf5 drop-in, empty when the
 	// file is absent.
 	DNFDropIn Section[string]   `json:"dnf_drop_in"`

@@ -28,8 +28,9 @@ updates.
 Deploy the new engine before applying the matching dotfiles configuration.
 Nimbus 0.3.1 asks for a machine on first use through the minimal
 `curl ... | bash` installer and supports the earlier empty snapshot mount.
-It is available in COPR for VM testing. The remaining refactors and
-dashboard can follow; the desktop trial still follows the later gates below.
+Its existing-layout VM installation and UWSM login passed. The remaining
+refactors and dashboard can follow; the desktop trial still follows the later
+gates below.
 
 Add missing managed-state previews and explicit approval independent of JSON.
 Use direct Chezmoi commands, retaining initial setup and profile handoff.
@@ -86,6 +87,8 @@ setup on both a fresh root/home layout and the earlier pre-mounted empty
 `/.snapshots` layout, failure handling, cleanup and a root restore on installed
 Fedora. Update the installed engine to 0.3.1 or newer before retrying the old
 layout through the public installer.
+The existing-mount setup and native config listing passed on the test VM;
+fresh-layout setup, snapshot pairs, retention and restoration remain open.
 Keep separate boot/EFI coverage explicit; do not claim automatic rollback.
 
 Activate the dark GRUB theme through a small, reversible native integration.

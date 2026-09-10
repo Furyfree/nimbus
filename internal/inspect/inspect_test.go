@@ -140,6 +140,32 @@ func TestSecureBootDisabledAndDirtyCheckout(t *testing.T) {
 	}
 }
 
+func TestVirtualMachineDetection(t *testing.T) {
+	for _, tc := range []struct {
+		name, output, failure string
+		vm, known             bool
+	}{
+		{"guest", "kvm\n", "", true, true},
+		{"no guest", "none\n", "exit status 1", false, true},
+		{"unavailable", "", "executable not found", false, false},
+		{"failed with output", "kvm\n", "inspection failed", false, false},
+		{"empty output", "", "", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := fedora44(t)
+			key := nativetest.Key("systemd-detect-virt", "--vm")
+			src.Commands[key] = []byte(tc.output)
+			if tc.failure != "" {
+				src.Failures[key] = tc.failure
+			}
+			got := Inspect(src, "").VirtualMachine
+			if got.Known() != tc.known || got.Value != tc.vm {
+				t.Fatalf("virtual machine = %+v", got)
+			}
+		})
+	}
+}
+
 func TestParsersRejectMalformedOutput(t *testing.T) {
 	if _, err := parsePackages([]byte("bash|0|5.3.9\n")); err == nil || !strings.Contains(err.Error(), "expected 7 fields") {
 		t.Fatalf("short package line accepted: %v", err)

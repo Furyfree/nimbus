@@ -102,6 +102,38 @@ func TestUnknownIsNeverAFailure(t *testing.T) {
 	}
 }
 
+func TestSecureBootExceptionRequiresSelectedConfirmedVM(t *testing.T) {
+	for _, tc := range []struct {
+		name, machine, boot, bootError string
+		vm                             inspect.Section[bool]
+		want                           string
+	}{
+		{"test VM", "vm", inspect.SecureBootDisabled, "", inspect.Section[bool]{Value: true}, Pass},
+		{"hardware", "desktop", inspect.SecureBootDisabled, "", inspect.Section[bool]{}, Fail},
+		{"hardware with VM selection", "vm", inspect.SecureBootDisabled, "", inspect.Section[bool]{}, Fail},
+		{"guest with desktop selection", "desktop", inspect.SecureBootDisabled, "", inspect.Section[bool]{Value: true}, Fail},
+		{"guest without selection", "", inspect.SecureBootDisabled, "", inspect.Section[bool]{Value: true}, Fail},
+		{"unknown virtualization", "vm", inspect.SecureBootDisabled, "", inspect.Section[bool]{Error: "unavailable"}, Unknown},
+		{"unreadable boot state", "vm", "", "permission denied", inspect.Section[bool]{Value: true}, Unknown},
+		{"no EFI state", "vm", inspect.SecureBootUnavailable, "", inspect.Section[bool]{Value: true}, Unknown},
+		{"enabled without virtualization tool", "vm", inspect.SecureBootEnabled, "", inspect.Section[bool]{Error: "unavailable"}, Pass},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, cfg := healthy(), healthyConfig()
+			cfg.Machine = tc.machine
+			f.SecureBoot = inspect.Section[string]{Value: tc.boot, Error: tc.bootError}
+			f.VirtualMachine = tc.vm
+			got := status(Run(f, cfg), "secure-boot")
+			if got.Status != tc.want {
+				t.Fatalf("secure boot = %+v, want %s", got, tc.want)
+			}
+			if tc.boot == inspect.SecureBootDisabled && got.Status == Pass && !strings.Contains(got.Observation, "not hardware acceptance") {
+				t.Fatalf("VM exception must remain visible: %+v", got)
+			}
+		})
+	}
+}
+
 func TestCheckoutOverrideSkipsSelector(t *testing.T) {
 	f, cfg := healthy(), Config{SupportedReleases: []string{"44"}, CheckoutOverride: true}
 	f.Checkout.Value.Dirty = true

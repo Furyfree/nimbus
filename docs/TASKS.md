@@ -5,7 +5,8 @@ The cleanup is merged and released as
 [v0.3.0](https://github.com/Furyfree/nimbus/releases/tag/v0.3.0).
 [Version 0.3.1](https://github.com/Furyfree/nimbus/releases/tag/v0.3.1) adds
 the installation fixes below and is available in COPR.
-Existing installation evidence does not validate this candidate.
+The 0.3.1 existing-layout VM install and login passed; the reporting fixes below
+are local and have not been installed.
 
 ## Installer follow-up
 
@@ -16,9 +17,14 @@ Existing installation evidence does not validate this candidate.
   rechecks, native verification and retry after interrupted registration.
 - [x] Publish the storage-reuse fix and machine prompt as Nimbus 0.3.1.
   Explicit machine arguments, selector reuse and separate approval remain.
-- [ ] Test the existing VM layout and a fresh root/home installation.
-  Local tests do not prove Btrfs/SELinux behavior. Upgrade the installed Nimbus
-  RPM before retrying the installer; updating the checkout is not enough.
+- [x] Install 0.3.1 on the existing VM layout, reuse the empty snapshot mount,
+  reboot into UWSM and inspect the result.
+- [ ] Test a fresh root/home installation and native snapshot pairs, cleanup,
+  retention and restoration. Updating the checkout is not an engine upgrade.
+- [x] Correct the Secure Boot test-VM exception and stale sync session notes.
+- [x] Guard LibrePods autostart on Bluetooth adapter presence in Chezmoi.
+- [x] Record the owner's VM-only `mcelog` disablement; no Nimbus workaround.
+- [ ] Deliver these local reporting/config changes and verify the next login.
 
 ## Completed locally
 
@@ -70,8 +76,8 @@ See [integration](ROADMAP.md#3-finish-workstation-integration) and
 - [ ] Confirm published helper interfaces and package sources. Enable WoWUp's
   gaming selection after its helper and repository key are available. Native
   signatures stay enabled; no separate audit of the owner's package contents.
-- [ ] Deliver the matching Nimbus engine before applying the new Chezmoi
-  Topgrade configuration. The old engine lacks `upgrade --system`.
+- [x] Confirm matching Nimbus/Topgrade delivery in the installed VM: engine
+  0.3.1 and a custom `nimbus upgrade --system` step are present.
 - [ ] Verify installed update/constraint behavior: allowed family updates,
   compatible dependencies and rejected conflicts.
 - [ ] Test TTY repair with absent/broken dotfiles and legacy session retirement.
@@ -122,7 +128,7 @@ implementation.
 2026-09-10 storage fix: focused Snapper/CLI tests, `just check` and
 `just validate` pass. Tests cover empty-mount reuse, unsafe or populated
 storage, changed approval, interrupted writes/verification and convergence.
-Native Btrfs and SELinux checks still require the installation trial.
+The later VM trial below covers existing-storage setup, not restoration.
 Local CodeRabbit review covered all 14 changed files and returned no findings
 on its second run. The first run's request to show the actual snapshot
 subvolume and filesystem in the approval plan is addressed.
@@ -164,8 +170,8 @@ the complete offline Fedora gate and CI passed. Source-RPM preparation passed
 and retained the exact release archive. Local CodeRabbit review of the recipe
 and release notes completed without findings. The
 [publication run](https://github.com/Furyfree/copr/actions/runs/34504051972)
-tracks the signed Fedora 44 build; installed-package testing is still pending.
-The matching Chezmoi/Topgrade changes remain local in the dotfiles repository.
+tracks the signed Fedora 44 build. The later 0.3.1 VM trial below supersedes
+this release's pending installation evidence.
 
 Release 0.3.1: [source preparation](https://github.com/Furyfree/nimbus/actions/runs/34511660409)
 and [COPR publication](https://github.com/Furyfree/copr/actions/runs/34512058767)
@@ -176,4 +182,33 @@ The signed binary RPM passed native signature/digest verification against only
 the pinned project key. Its extracted engine reports 0.3.1 and validates all
 three machines in a network-disabled Fedora container. It has no scriptlets.
 Nimbus `just check`/`just validate` and COPR's full offline `just check` passed.
-The VM was not changed; installation and native Snapper behavior remain open.
+The release verification did not change the VM; the owner then installed it.
+
+2026-09-10 VM trial: installer exit 0 in 394 seconds with engine 0.3.1 and
+checkout `9783b59c69ca`. All 167 managed items are unchanged, with no pending
+or blocked operations. Chezmoi applied successfully and all 28 Mise tools
+installed; offline inspection reported none missing. Topgrade's system step
+calls `nimbus upgrade --system`; the upgrade itself has not been tested.
+
+After reboot, greetd, UWSM-managed Hyprland, Noctalia and the Hyprland/GTK
+portals are running. Hyprland reports no config errors; the keyring unlocked.
+PipeWire sees audio input/output, but playback and screen sharing remain
+untested. Native Snapper reads the reused mount and registered config, with
+six-snapshot retention and no timeline/boot snapshots. Its list contains only
+`0 / current`; creation and cleanup have not yet been exercised.
+
+The owner disabled the preexisting, unsupported `mcelog` service on this VM
+and cleared its failure; there are no failed system units. The Bluetooth-less
+VM exposed LibrePods' unconditional startup. Doctor's Secure Boot wording and
+unchanged sync's reboot/logout notes are corrected locally, together with the
+Chezmoi startup guard. These changes are not installed in the VM.
+
+Local follow-up validation: Nimbus `just check` and `just validate` pass;
+CodeRabbit reviewed all ten changed Nimbus files with no findings. Existing
+test files cover VM detection/exception boundaries and session notes for
+changed, adopted, unchanged and blocked resources. Dotfiles' isolated
+`just check` passes all 130 tests with three skips: unavailable native Hyprland,
+opt-in Neovim downloads and opt-in Zathura GUI checks. Isolated Chezmoi
+managed/status/diff pass; verify reports expected drift against an empty home.
+No apply was run. The startup guard is exercised with zero, one and multiple
+Bluetooth adapters; the next real login remains untested.

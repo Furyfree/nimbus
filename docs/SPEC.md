@@ -191,6 +191,10 @@ It does not refresh Chezmoi configuration or generally upgrade unrelated
 software. `sync --prune` adds eligible unmanaged removals to the visible plan;
 it never means deleting everything absent from the definitions.
 
+Reboot and logout notes in a plan describe actual planned system changes.
+Unchanged or merely adopted resources do not repeat them. `postinstall` reports
+requirements still outstanding from earlier changes.
+
 Upgrade uses Chezmoi-owned Topgrade configuration. Updating that configuration
 changes the chosen native update steps without editing Go. Extra Topgrade
 arguments follow `--`. System and application updates run once, and failure
@@ -427,7 +431,10 @@ verification and partial-failure rules above during simplification.
 Keep Secure Boot enabled on hardware, SELinux enforcing and firewalld active.
 Open only needed services and ports. Do not weaken these settings to fix an
 application. NVIDIA signing-key enrollment stays an explicit native procedure;
-non-Secure-Boot test VMs are not hardware acceptance. Nimbus does not partition,
+doctor permits disabled Secure Boot only for the selected `vm` machine when
+native inspection confirms a virtual machine. An unreadable boot or required
+virtualization check stays unknown. This exception is not hardware acceptance.
+Nimbus does not partition,
 encrypt or re-enroll disks. Boot partitions remain outside encrypted root.
 Docker group membership is root-equivalent and remains an explicit selection.
 

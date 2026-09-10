@@ -119,7 +119,7 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 		}
 		id := "group:" + group.Name + ":" + user
 		selected[id] = true
-		op := Operation{ID: id, Kind: KindGroup, Action: ActionInstall, Risk: RiskMedium, Summary: "add " + user + " to " + group.Name, Paths: []string{"component:" + group.Component}, Notes: []string{"New group membership requires logout and login."}}
+		op := Operation{ID: id, Kind: KindGroup, Action: ActionInstall, Risk: RiskMedium, Summary: "add " + user + " to " + group.Name, Paths: []string{"component:" + group.Component}}
 		present, err := inspect.ObserveMembership(b.in.Source, user, group.Name)
 		before := fmt.Sprint(present)
 		op.Resource = &ResourceChange{Name: group.Name, User: user, Before: before, After: "true", Previous: before}
@@ -141,6 +141,9 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 		}
 		if !present {
 			op.Steps = []Step{{Description: "add supplementary membership", Argv: []string{"usermod", "--append", "--groups", group.Name, "--", user}, Privileged: true}}
+			if op.Blocked == "" {
+				op.Notes = []string{"New group membership requires logout and login."}
+			}
 		}
 		if pendingPackages != "" {
 			op.After = pendingPackages
@@ -150,7 +153,7 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 	if target := b.in.Resolved.DefaultTarget; target != "" {
 		id := "default-target"
 		selected[id] = true
-		op := Operation{ID: id, Kind: KindTarget, Action: ActionRepair, Risk: RiskMedium, Summary: "set default boot target to " + target, Notes: []string{"Takes effect on the next boot; the current graphical session is not stopped."}}
+		op := Operation{ID: id, Kind: KindTarget, Action: ActionRepair, Risk: RiskMedium, Summary: "set default boot target to " + target}
 		out, err := b.in.Source.Run("systemctl", "get-default")
 		before := strings.TrimSpace(string(out))
 		op.Resource = &ResourceChange{Name: id, Before: before, After: target, Previous: before}
@@ -175,6 +178,9 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 		}
 		if before != target {
 			op.Steps = []Step{{Description: "set next boot target", Argv: []string{"systemctl", "set-default", target}, Privileged: true}}
+			if op.Blocked == "" {
+				op.Notes = []string{"Takes effect on the next boot; the current graphical session is not stopped."}
+			}
 		}
 		if pendingPackages != "" {
 			op.After = pendingPackages

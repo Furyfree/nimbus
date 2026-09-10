@@ -46,6 +46,7 @@ func Inspect(src native.Source, checkoutRoot string) *Facts {
 	f.Repositories = Repositories(src)
 	f.Flatpak = SystemFlatpak(src)
 	f.SecureBoot = collect(func() (string, error) { return secureBoot(src) })
+	f.VirtualMachine = collect(func() (bool, error) { return virtualMachine(src) })
 	f.SELinux = collect(func() (string, error) { return selinux(src) })
 	f.Firewalld = collect(func() (string, error) { return firewalld(src) })
 	f.Checkout = collect(func() (Checkout, error) { return checkout(src, checkoutRoot) })
@@ -337,6 +338,22 @@ func flatpak(src native.Source) (Flatpak, error) {
 		f.Apps = append(f.Apps, FlatpakApp{ID: r[0], Version: r[1], Origin: r[2]})
 	}
 	return f, nil
+}
+
+func virtualMachine(src native.Source) (bool, error) {
+	out, err := src.Run("systemd-detect-virt", "--vm")
+	name := strings.TrimSpace(string(out))
+	// No VM is reported as "none" with exit status 1.
+	if name == "none" {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if name == "" {
+		return false, errors.New("systemd-detect-virt reported no virtualization state")
+	}
+	return true, nil
 }
 
 // secureBoot reads the EFI variable: four bytes of attributes then the
