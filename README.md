@@ -75,7 +75,8 @@ changes, including this new workflow, need a new Nimbus RPM.
 `--plan` uses local definitions without pulling or applying anything. Status,
 doctor and lists also stay read-only. JSON mutation requires `--yes`; the
 combined upgrade does not support JSON. Chezmoi commands still work directly.
-Bare `nimbus` prints help; the dashboard comes next.
+Bare `nimbus` prints help. [Next steps](docs/ROADMAP.md#next-steps): GRUB,
+FDE auto-unlock post-install, shared operations, then the dashboard.
 
 COPR helpers own application downloads and removal. Copilot initial setup is
 available through `nimbus postinstall copilot`. WoWUp still needs standalone

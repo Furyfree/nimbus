@@ -7,6 +7,17 @@ small CLI and a Bubble Tea interface. [SPEC.md](SPEC.md) defines the behavior;
 This sequence replaces the old phase-by-phase implementation narrative.
 Existing local code is a candidate, not proof that the new contract is shipped.
 
+## Next steps
+
+1. Finish the minimal dark GRUB theme and verify booting and theme removal.
+2. Add FDE auto-unlock as an explicit post-install action, retaining passphrase
+   unlock. Verify enrollment, booting and removal on real hardware.
+3. Extract shared operations from the CLI, then build the Bubble Tea dashboard.
+
+This is the current priority order. GRUB and FDE auto-unlock come before the
+remaining CLI refactor and TUI work. Other installation checks below remain
+open; this change does not mark them complete.
+
 ## 1. Simplify the documentation
 
 Keep SPEC, TASKS and ROADMAP as the product documents. INSTALLATION is the
@@ -58,16 +69,41 @@ Go Guidelines for the project's Go version to each bounded code change.
 Keep package names tied to their jobs and split large files by responsibility.
 The README maps the code; repository-tool tests live outside the CLI package.
 
-Native execution and read-only inspection now have separate owners. Next,
-extract reconciliation from Cobra, then setup, selection and file capture.
-Preserve the lock held across a selection write and sync. Keep presentation in
-CLI and reuse the same operations for the dashboard. Replace description-based
-execution decisions with explicit data covered by the approved plan.
+Native execution and read-only inspection now have separate owners. The
+remaining extraction follows boot work, under the dashboard step below.
 
 Done when CLI workflows and fake-native integration tests match SPEC, existing
 state is handled safely, and both affected repositories pass their local gates.
 
 ## 3. Finish workstation integration
+
+### GRUB first
+
+Activate the dark GRUB theme through a small, reversible native integration.
+Test Fedora-only and Windows-present menus, the five-second timeout, Fedora
+default, older-kernel selection, and removal of the theme. Preserve BLS entries
+and the EFI stub. Use a disposable VM snapshot as an independent test safeguard.
+
+### FDE auto-unlock second
+
+Add an optional post-install action for the existing LUKS2 installation.
+First inspect Fedora's boot path, encryption, TPM and Secure Boot support;
+choose and document the native enrollment method and boot-change policy before
+implementation. Do not assume a UKI migration is required. Broad UKI generation
+and boot-key management remain deferred.
+
+The action must preview the target and changes, request approval, preserve a
+working passphrase, and report unsupported setups without weakening security.
+Provide status and instructions to remove the enrollment without losing disk
+access. Sync and upgrades must not enroll a machine automatically.
+
+Done when enrollment, unattended unlock, passphrase fallback and removal pass
+on real hardware, including fallback after a boot change that invalidates the
+chosen policy. VM checks can prepare this work but do not close the hardware
+gate. This scoped boot test precedes the dashboard; the full workstation trial
+still follows it. Until then, auto-unlock remains planned, not working.
+
+### Remaining integration
 
 Complete COPR application selection after verifying the actual published
 helper interfaces and package sources. Retain the Hyprland and Noctalia version
@@ -92,16 +128,18 @@ The existing-mount setup and native config listing passed on the test VM;
 fresh-layout setup, snapshot pairs, retention and restoration remain open.
 Keep separate boot/EFI coverage explicit; do not claim automatic rollback.
 
-Activate the dark GRUB theme through a small, reversible native integration.
-Test Fedora-only and Windows-present menus, the five-second timeout, Fedora
-default, older-kernel selection, and removal of the theme. Preserve BLS entries
-and the EFI stub. Use a disposable VM snapshot as an independent test safeguard.
-
 Done when the affected installation, upgrade, removal and retry paths pass in
 a disposable Fedora VM. GRUB requires an actual boot and restoration of its
-previous configuration. Physical-device behavior remains the hardware trial.
+previous configuration. FDE auto-unlock needs the scoped hardware test above;
+other physical-device behavior remains the later hardware trial.
 
 ## 4. Build the dashboard
+
+After GRUB and FDE auto-unlock, extract reconciliation from Cobra, then setup,
+selection and file capture.
+Preserve the lock held across a selection write and sync. Keep presentation in
+CLI and reuse the same operations for the dashboard. Replace description-based
+execution decisions with explicit data covered by the approved plan.
 
 Bare `nimbus` opens the TUI in a terminal and otherwise prints help. Provide
 status, sync, upgrade, software selection, post-install and diagnostics. Reuse
@@ -120,14 +158,15 @@ entire feature set.
 
 Commit, publication and COPR builds require their own authorization. Record
 the exact release and packaging results before calling the candidate ready.
-Install on desktop hardware only after the dashboard and delivery are ready.
+Run the full desktop trial after the dashboard and delivery are ready. The
+scoped FDE auto-unlock hardware test happens earlier, as described above.
 
 ## Deferred beyond the desktop milestone
 
 | Work | Reason to keep it separate |
 | --- | --- |
 | Boot archives and automatic whole-system restore | Beyond native Snapper |
-| TPM unlock, UKIs and boot keys | Needs a separate boot/recovery design |
+| UKI generation and broader boot-key management | Separate boot design |
 | Hibernation and disk-backed swap | Needs hardware and storage validation |
 | Windows VM setup and lifecycle | Native Windows covers the immediate need |
 | Home Assistant integration | Owner wants to understand it first |

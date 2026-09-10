@@ -137,7 +137,8 @@ and existing disk layouts.
 3. Review the exact target disk before partitioning. Preserve Windows data and
    its EFI loader on dual-boot machines; do not format a shared EFI partition.
    Preserve irreplaceable data independently. Keep Fedora zram; hibernation
-   and TPM unlock are deferred.
+   remains deferred. FDE auto-unlock is planned as an optional post-install
+   action; installation starts with passphrase unlock.
 4. Sign in, check networking and sudo access, and inspect `lsblk -f` and
    `findmnt -t btrfs,ext4,vfat`. Then bootstrap the chosen machine.
 
@@ -337,6 +338,15 @@ because its helper RPM exists. Opening 1Password does not prove
 sign-in. Fingerprint enrollment may run the native tool after approval. MOK,
 reboot and logout tasks provide instructions; they do not silently perform
 those actions. Listing tasks never changes the machine.
+
+FDE auto-unlock is a planned optional post-install action, before the dashboard.
+It must inspect the existing encryption and boot setup, show the proposed
+native enrollment and ask for approval. Preserve working passphrase access;
+provide status and enrollment-removal instructions. Unsupported setups retain
+manual unlock. Sync and upgrades must not enroll automatically. The native
+method and boot-change policy must be settled before implementation. Enrollment,
+booting, passphrase fallback and removal need real-hardware validation before
+claiming support. UKI generation and broader boot-key management stay deferred.
 
 ## Preview, approval and results
 
@@ -585,19 +595,21 @@ verification. Nimbus no longer has custom app providers or Cargo/user-tool
 installation lists; the Mise and Zed binary bootstraps remain.
 
 Bare `nimbus` prints help until the dashboard is built. GRUB assets are present
-but inactive. Installed TTY repair, legacy session retirement, clean install,
-upgrade and hardware trials remain open. [TASKS.md](TASKS.md) records evidence.
+but inactive; FDE auto-unlock is not implemented. These boot features come
+before shared-operation extraction and the TUI. Installed TTY repair, legacy
+session retirement, clean install, upgrade and hardware trials remain open.
+[TASKS.md](TASKS.md) records evidence.
 
 ## Out of scope
 
 No custom snapshot/boot-archive manager, automatic restoration, backup service,
-Windows VM lifecycle, Home Assistant integration, TPM enrollment or UKI build
-pipeline is required for the desktop milestone. The installation guide's
-partition layout is operator-owned. Nimbus registers suitable existing
+Windows VM lifecycle, Home Assistant integration, UKI build pipeline or broad
+boot-key management is required for the desktop milestone. The installation
+guide's partition layout is operator-owned. Nimbus registers suitable existing
 snapshot storage or lets native Snapper create it; it does not partition
 disks or maintain a boot-archive scheme.
 
-Fedora installation, partitioning, encryption setup and Fedora major-version
+Fedora installation, partitioning, initial encryption and Fedora major-version
 upgrades remain native operator workflows. Nimbus reports current compatibility
 and repairs its own drift afterwards; it does not manage those transactions.
 There is no background reconciliation daemon, generic provider/plugin system,

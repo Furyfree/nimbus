@@ -8,6 +8,23 @@ the installation fixes below and is available in COPR.
 The 0.3.1 existing-layout VM install and login passed; the reporting fixes below
 are local and have not been installed.
 
+## Next: GRUB, then FDE auto-unlock
+
+Follow the [priority order](ROADMAP.md#next-steps) before the shared-operation
+refactor and TUI.
+
+- [ ] Finish the minimal dark GRUB integration. Check appearance, Fedora-only
+  and Windows-present menus, Fedora default, five-second timeout, older kernels
+  and theme removal through actual boots.
+- [ ] Inspect the Fedora/LUKS2 boot path, TPM and Secure Boot support; choose
+  the native auto-unlock method and boot-change policy before implementation.
+- [ ] Add explicit post-install preview and approval for FDE auto-unlock,
+  preserving passphrase access, with status and enrollment-removal instructions.
+  Unsupported setups must retain manual unlock.
+- [ ] Test auto-unlock enrollment, booting, passphrase fallback, boot-change
+  fallback and removal on real hardware. This scoped test precedes the TUI;
+  it is separate from the later full desktop trial. No working claim yet.
+
 ## Installer follow-up
 
 - [x] Recover the Fedora installation guide and replace obsolete storage and
@@ -83,15 +100,15 @@ are local and have not been installed.
 - [ ] Check regular, private and webapp windows in an installed session,
   including private webapps. Local tests verify arguments, not browser UI.
 
-## Next code cleanup
+## After boot work: shared operations
 
 - [ ] Extract reconciliation from Cobra, preserving approval and shared locks.
 - [ ] Move setup, selection changes and file capture to their operation owners;
   keep prompts and rendering in CLI. Complete post-install execution ownership.
 - [ ] Replace execution's description parsing with explicit approved data.
 
-These are subsequent changes; the native/inspection split does not complete
-the CLI/TUI operation boundary.
+Start these after the GRUB and FDE auto-unlock steps above. The existing
+native/inspection split does not complete the CLI/TUI operation boundary.
 
 ## Before the desktop trial
 
@@ -114,8 +131,6 @@ See [integration](ROADMAP.md#3-finish-workstation-integration) and
   local fake-tool tests do not prove restoration.
 - [ ] Test managed-file acceptance/removal, service/group restoration, failed
   activation, receipt retirement and relevant legacy-state compatibility.
-- [ ] Finish the minimal GRUB integration. Boot Fedora-only and Windows-present
-  layouts; check Fedora default, five-second menu, old kernels and restoration.
 - [ ] Verify post-install actions and browser/webapp integration; enable waiting
   Chezmoi entries after compatible delivery.
 - [ ] Check clean init, cancellation, retry, keyring setup and repeat sync.
@@ -144,11 +159,12 @@ These wait for a proper installation and do not block independent local work.
 
 ## Deferred
 
-The [roadmap](ROADMAP.md#deferred-beyond-the-desktop-milestone) retains
-custom boot archives and automatic restoration, TPM/UKI automation, hibernation,
-Windows VM commands, Home Assistant, optional desktops and measured performance
-work. They are not desktop release gates. AI Usage needs no separate Nimbus
-implementation.
+The [roadmap](ROADMAP.md#deferred-beyond-the-desktop-milestone) retains custom
+boot archives and automatic restoration, UKI generation, broader boot-key
+management, hibernation, Windows VM commands, Home Assistant, optional
+desktops and measured performance work. They are not desktop release gates. AI
+Usage needs no separate Nimbus implementation. FDE auto-unlock is now active
+work, not deferred.
 
 - [ ] Revisit browser/webapp launching through UWSM; check terminal independence,
   session environment, logout cleanup and operation outside UWSM. See the
