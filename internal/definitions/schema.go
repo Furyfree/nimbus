@@ -45,12 +45,13 @@ type Machine struct {
 	ID     string `toml:"id"`
 	// Hardware is a substring of the DMI product or board name that
 	// identifies this machine, so init can propose it on that hardware.
-	Hardware          string    `toml:"hardware,omitempty"`
-	Profiles          []string  `toml:"profiles"`
-	Components        []string  `toml:"components"`
-	Packages          []string  `toml:"packages"`
-	PackageExclusions []string  `toml:"package_exclusions"`
-	Dotfiles          *Dotfiles `toml:"dotfiles"`
+	Hardware           string            `toml:"hardware,omitempty"`
+	Profiles           []string          `toml:"profiles"`
+	Components         []string          `toml:"components"`
+	Packages           []string          `toml:"packages"`
+	PackageExclusions  []string          `toml:"package_exclusions"`
+	PackageConstraints map[string]string `toml:"package_constraints"`
+	Dotfiles           *Dotfiles         `toml:"dotfiles"`
 }
 
 // Dotfiles names the Chezmoi repository for the handoff.
@@ -78,7 +79,6 @@ type Component struct {
 	Services      []ServiceDecl `toml:"services"`
 	Groups        []GroupDecl   `toml:"groups"`
 	DefaultTarget string        `toml:"default_target"`
-	Recovery      *RecoveryDecl `toml:"recovery"`
 	// Detect says which hardware makes init propose this component.
 	Detect *Detect `toml:"detect"`
 	// Installer is a user-scope tool the maker's installer script places
@@ -86,15 +86,11 @@ type Component struct {
 	Installer *Installer `toml:"installer"`
 }
 
-// Installer describes a maker's installer script run as the user: its URL,
-// the binary it leaves relative to the home directory, and optionally the
-// command run once the Chezmoi-written config exists, such as mise install.
-// "<home>" in the command stands for the home directory.
+// Installer describes a maker's installer script and the binary it leaves
+// relative to the home directory. Chezmoi owns subsequent user configuration.
 type Installer struct {
-	URL     string   `toml:"url"`
-	Binary  string   `toml:"binary"`
-	Config  string   `toml:"config"`
-	Install []string `toml:"install"`
+	URL    string `toml:"url"`
+	Binary string `toml:"binary"`
 }
 
 // Detect is a hardware rule: the chassis kind, "laptop" or "desktop", or
@@ -125,9 +121,4 @@ type ServiceDecl struct {
 type GroupDecl struct {
 	Name string `toml:"name" json:"name"`
 	User string `toml:"user" json:"user"`
-}
-
-// RecoveryDecl selects the fixed Nimbus recovery-session integration.
-type RecoveryDecl struct {
-	Enabled bool `toml:"enabled"`
 }

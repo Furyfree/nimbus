@@ -9,20 +9,21 @@ import (
 
 	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/doctor"
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/native"
 	"github.com/Furyfree/nimbus/internal/selector"
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
-// newSource builds the inspector's source. Tests replace it with recorded
-// output so nothing reads the host.
-var newSource = func() facts.Source { return facts.ExecSource{} }
+// newSource supplies native access. Tests replace it with recorded output
+// so no command reads or changes the host.
+var newSource = func() native.Source { return native.ExecSource{} }
 
 type doctorResult struct {
-	Platform facts.Section[facts.Platform] `json:"platform"`
-	Checks   []doctor.Check                `json:"checks"`
-	Failed   int                           `json:"failed"`
-	Unknown  int                           `json:"unknown"`
+	Platform inspect.Section[inspect.Platform] `json:"platform"`
+	Checks   []doctor.Check                    `json:"checks"`
+	Failed   int                               `json:"failed"`
+	Unknown  int                               `json:"unknown"`
 }
 
 func newDoctor(opts *options) *cobra.Command {
@@ -106,7 +107,7 @@ func runDoctor(cmd *cobra.Command, opts *options, override, machine string) erro
 	}
 
 	src := newSource()
-	f := facts.Inspect(src, root)
+	f := inspect.Inspect(src, root)
 	report := doctor.Run(f, cfg)
 	if resolved != nil && (len(resolved.Files) > 0 || len(resolved.Services) > 0 || len(resolved.Groups) > 0 || resolved.DefaultTarget != "") {
 		applied, err := state.Read(stateRoot)

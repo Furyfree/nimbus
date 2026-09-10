@@ -2,7 +2,6 @@ package definitions
 
 import (
 	"cmp"
-	"maps"
 	"regexp"
 	"slices"
 )
@@ -76,22 +75,6 @@ func resolveResources(c *Checkout, r *Resolved, errs *ErrorList) {
 	units, groups := map[string]string{}, map[string]string{}
 	for _, rc := range r.Components {
 		comp := c.Components[rc.ID]
-		if comp.Recovery != nil && comp.Recovery.Enabled {
-			for _, source := range slices.Sorted(maps.Keys(RecoveryFiles)) {
-				entry, ok := c.Entry(source)
-				if !ok {
-					errs.Add("components/"+rc.ID+".toml", "recovery source %s is missing", source)
-					continue
-				}
-				target := RecoveryFiles[source]
-				for _, f := range r.Files {
-					if f.Target == target {
-						errs.Add("components/"+rc.ID+".toml", "duplicate recovery target %s", target)
-					}
-				}
-				r.Files = append(r.Files, ResolvedFile{Target: target, Source: source, Owner: "root", Group: "root", Mode: "0644", Component: rc.ID, Content: entry.Content, Recovery: true})
-			}
-		}
 		for _, s := range comp.Services {
 			if prev, ok := units[s.Unit]; ok {
 				errs.Add("components/"+rc.ID+".toml", "service %s also belongs to %s", s.Unit, prev)
@@ -122,17 +105,13 @@ func resolveResources(c *Checkout, r *Resolved, errs *ErrorList) {
 	})
 }
 
-// RecoveryFiles fixes both ends of the separately typed /usr integration.
-var RecoveryFiles = map[string]string{
-	"system/recovery/hyprland.lua":            "/usr/local/lib/nimbus/recovery/hyprland.lua",
-	"system/recovery/nimbus-recovery.desktop": "/usr/share/wayland-sessions/nimbus-recovery.desktop",
-}
-
-func RecoveryTarget(target string) bool {
-	for t := range maps.Values(RecoveryFiles) {
-		if target == t {
-			return true
-		}
+// LegacyRecoveryTarget permits cleanup of the two retired session files.
+// No definition can select these targets for a new installation.
+func LegacyRecoveryTarget(target string) bool {
+	switch target {
+	case "/usr/local/lib/nimbus/recovery/hyprland.lua",
+		"/usr/share/wayland-sessions/nimbus-recovery.desktop":
+		return true
 	}
 	return false
 }

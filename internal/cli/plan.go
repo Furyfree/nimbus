@@ -8,11 +8,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/native"
 	"github.com/Furyfree/nimbus/internal/plan"
 )
 
-func buildPlan(s *selected, src facts.Source) (*plan.Plan, error) {
+func buildPlan(s *selected, src native.Source) (*plan.Plan, error) {
 	p, _, err := planWithState(s, src, false)
 	return p, err
 }
@@ -36,6 +36,19 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 		fmt.Fprintf(&b, " (checkout %s at %.12s, %s)", p.Checkout.Origin, p.Checkout.Commit, state)
 	}
 	b.WriteString("\n")
+	if p.Snapshots != nil {
+		switch {
+		case p.Snapshots.Blocked != "":
+			fmt.Fprintf(&b, "Snapper: %s\n", p.Snapshots.Blocked)
+		case p.Snapshots.Setup:
+			fmt.Fprintln(&b, "Snapper: initialize root snapshots after this first sync. This setup run has no before snapshot.")
+		default:
+			fmt.Fprintln(&b, "Snapper: before/after root snapshots for system changes, then native number cleanup; no snapshots for previews or unchanged sync.")
+		}
+		if changes := p.Snapshots.Changes(); len(changes) > 0 {
+			fmt.Fprintf(&b, "Snapper settings: %s\n", strings.Join(changes, ", "))
+		}
+	}
 	if p.RepositoryReconciliation != "" {
 		fmt.Fprintf(&b, "%s\n", p.RepositoryReconciliation)
 	}
@@ -225,7 +238,9 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 		}
 		writeWrapped(&b, "  ", items, ", ", ",", "  ")
 	}
-	writeUpdates(&b, p.Updates, listUpdates)
+	if listUpdates {
+		writeUpdates(&b, p.Updates)
+	}
 	if len(problems) > 0 {
 		b.WriteString("\nproblems:\n")
 		for _, pr := range problems {
@@ -244,17 +259,9 @@ func isSystemResource(kind string) bool {
 	return false
 }
 
-// describeAfter names what an operation waits for in the plan's own words:
-// the Chezmoi handoff, a component's runtimes, a component's installer, or
-// the operation ID when it is none of those.
+// describeAfter names a pending bootstrap dependency.
 func describeAfter(p *plan.Plan, after string) string {
-	if after == plan.AfterHandoff {
-		return "the Chezmoi handoff"
-	}
 	if rest, ok := strings.CutPrefix(after, "user:"); ok {
-		if component, ok := strings.CutSuffix(rest, ":install"); ok {
-			return "the " + component + " runtimes"
-		}
 		return rest + " is installed"
 	}
 	return after
@@ -278,15 +285,9 @@ func writeTransactionInto(lines *[]string, tx *plan.Transaction) {
 	}
 }
 
-// writeUpdates renders the system updates: with upgrade on, as the step sync
-// will run; with it off, as a count the owner can act on later.
-func writeUpdates(b *bytes.Buffer, u plan.Updates, upgrade bool) {
+// writeUpdates renders cached information for the native system upgrade.
+func writeUpdates(b *bytes.Buffer, u plan.Updates) {
 	switch {
-	case !upgrade && u.Unavailable != "":
-		fmt.Fprintf(b, "\nupdates: %s\n", u.Unavailable)
-	case !upgrade && len(u.Available) > 0:
-		fmt.Fprintf(b, "\n%d updates are available; sync without -n installs them\n", len(u.Available))
-	case !upgrade:
 	case u.Unavailable != "":
 		fmt.Fprintf(b, "\nupgrade the system (dnf5 upgrade, flatpak update): %s\n", u.Unavailable)
 	case len(u.Available) == 0:

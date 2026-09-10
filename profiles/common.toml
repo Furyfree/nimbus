@@ -55,6 +55,5 @@ packages = [
 
 components = [
   "mise",
-  "snapper",
   "tailscale",
 ]

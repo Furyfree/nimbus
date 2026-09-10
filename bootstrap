@@ -131,4 +131,6 @@ if [ -n "${work:-}" ]; then
   rm -rf -- "${work}"
   work=""
 fi
+say "Refreshing the user package cache for the installation preview."
+installer_run dnf5 makecache
 installer_handoff "${ENGINE}" init --checkout "${CHECKOUT}" "$@"

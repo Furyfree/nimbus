@@ -8,7 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/native/nativetest"
 	"github.com/Furyfree/nimbus/internal/plan"
 	"github.com/Furyfree/nimbus/internal/state"
 )
@@ -19,15 +20,15 @@ type retiringSource struct {
 }
 
 func (s *retiringSource) Run(name string, args ...string) ([]byte, error) {
-	if facts.Key(name, args...) == "flatpak list --system --all --app --runtime --columns=ref,origin,options" {
+	if nativetest.Key(name, args...) == "flatpak list --system --all --app --runtime --columns=ref,origin,options" {
 		return []byte(s.refs), nil
 	}
 	return s.scripted.Run(name, args...)
 }
 
 func (s *retiringSource) Stream(out, errOut io.Writer, name string, args ...string) error {
-	if facts.Key(name, args...) == "sudo flatpak remote-delete --system old" {
-		s.log = append(s.log, facts.Key(name, args...))
+	if nativetest.Key(name, args...) == "sudo flatpak remote-delete --system old" {
+		s.log = append(s.log, nativetest.Key(name, args...))
 		if msg := s.fail["remote-delete"]; msg != "" {
 			return errors.New(msg)
 		}
@@ -48,10 +49,10 @@ func retirementExecutor(kind string) (*executor, *retiringSource, plan.Operation
 		src.remotes = []string{native}
 		argv = []string{"flatpak", "remote-delete", "--system", native}
 	} else {
-		src.Dirs[facts.RepoDir] = []string{"nimbus-old.repo"}
-		src.Files[filepath.Join(facts.RepoDir, "nimbus-old.repo")] = []byte("[nimbus-old]\nbaseurl=https://example.invalid/repo\nenabled=1\ngpgcheck=1\n")
+		src.Dirs[inspect.RepoDir] = []string{"nimbus-old.repo"}
+		src.Files[filepath.Join(inspect.RepoDir, "nimbus-old.repo")] = []byte("[nimbus-old]\nbaseurl=https://example.invalid/repo\nenabled=1\ngpgcheck=1\n")
 	}
-	f := facts.Inspect(src, "")
+	f := inspect.Inspect(src, "")
 	op := plan.Operation{ID: kind + ":old", Kind: kind, Action: plan.ActionRemove,
 		Source: &state.SourceOwnership{Applied: plan.SourceSnapshot(kind, []string{native}, f)},
 		Steps:  []plan.Step{{Argv: argv, Privileged: true}}}
@@ -68,7 +69,7 @@ func TestSourceRetirementVerifiesNativeDisableOrRemoval(t *testing.T) {
 				t.Fatalf("retirement: %v %v %v", receipts, removed, err)
 			}
 			if kind == plan.KindRepository {
-				if _, ok := src.Files[filepath.Join(facts.RepoDir, "nimbus-old.repo")]; !ok {
+				if _, ok := src.Files[filepath.Join(inspect.RepoDir, "nimbus-old.repo")]; !ok {
 					t.Fatal("retirement deleted a repository file")
 				}
 			}
@@ -115,7 +116,7 @@ func TestRepairReceiptPreservesOriginalSourceOwnership(t *testing.T) {
 	ex, _, op := retirementExecutor(plan.KindRepository)
 	op.Source.Original = []state.NativeSource{{ID: "nimbus-old", Enabled: false}}
 	var receipt state.Receipt
-	recordSourceOwnership(&receipt, op, plan.SourceIDs(op.Source), facts.Inspect(ex.opts.Source, ""))
+	recordSourceOwnership(&receipt, op, plan.SourceIDs(op.Source), inspect.Inspect(ex.opts.Source, ""))
 	if receipt.Source == nil || len(receipt.Source.Original) != 1 || receipt.Source.Original[0].Enabled || !receipt.Source.Applied[0].Enabled {
 		t.Fatal("repair forgot original disabled state")
 	}

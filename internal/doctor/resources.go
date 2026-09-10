@@ -7,13 +7,14 @@ import (
 	"strings"
 
 	defs "github.com/Furyfree/nimbus/internal/definitions"
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/native"
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
 // SystemResources checks effective native state without a plan, package
 // preview, network access, privilege escalation, or repair.
-func SystemResources(src facts.Source, r *defs.Resolved, applied *state.Applied, username string) []Check {
+func SystemResources(src native.Source, r *defs.Resolved, applied *state.Applied, username string) []Check {
 	var checks []Check
 	add := func(id, provider, observation string, matches bool, err error) {
 		c := Check{ID: id, Status: Pass, Observation: observation}
@@ -37,11 +38,11 @@ func SystemResources(src facts.Source, r *defs.Resolved, applied *state.Applied,
 		checks = append(checks, c)
 	}
 	for _, file := range r.Files {
-		have, err := facts.ObserveFile(src, file.Target)
+		have, err := inspect.ObserveFile(src, file.Target)
 		matches := have.Exists && bytes.Equal(have.Content, file.Content) && have.Owner == file.Owner && have.Group == file.Group && have.Mode == file.Mode
 		add("file:"+file.Target, "system-file", fmt.Sprintf("%s: present %t, owner %s:%s, mode %s, content matches %t", file.Target, have.Exists, have.Owner, have.Group, have.Mode, bytes.Equal(have.Content, file.Content)), matches, err)
 		if file.Target == "/etc/docker/daemon.json" {
-			unit, unitErr := facts.ObserveService(src, "docker.service")
+			unit, unitErr := inspect.ObserveService(src, "docker.service")
 			c := Check{ID: "docker-logging", Status: Unknown, Observation: "Docker daemon is not active; effective logging driver cannot be read", Remediation: "after the planned service change and any required logout, run doctor again"}
 			if unitErr == nil && unit.Active == "active" {
 				out, err := src.Run("docker", "info", "--format", "{{.LoggingDriver}}")
@@ -62,7 +63,7 @@ func SystemResources(src facts.Source, r *defs.Resolved, applied *state.Applied,
 		}
 	}
 	for _, service := range r.Services {
-		have, err := facts.ObserveService(src, service.Unit)
+		have, err := inspect.ObserveService(src, service.Unit)
 		matches := have.Load == "loaded" && have.Enabled != "masked" && have.Enabled != "masked-runtime"
 		if service.Enabled != nil {
 			want := "disabled"
@@ -89,7 +90,7 @@ func SystemResources(src facts.Source, r *defs.Resolved, applied *state.Applied,
 		if user == "" {
 			err = fmt.Errorf("invoking username is unknown")
 		} else {
-			present, err = facts.ObserveMembership(src, user, group.Name)
+			present, err = inspect.ObserveMembership(src, user, group.Name)
 		}
 		add("group:"+group.Name+":"+user, "group", fmt.Sprintf("%s membership in %s: %t (existing sessions may need logout)", user, group.Name, present), present, err)
 	}
@@ -106,7 +107,7 @@ func SystemResources(src facts.Source, r *defs.Resolved, applied *state.Applied,
 
 // Report effective native defaults without inventing tuning targets. These
 // observations are not claims about workload suitability or hardware support.
-func workstationDefaults(src facts.Source) []Check {
+func workstationDefaults(src native.Source) []Check {
 	var checks []Check
 	for _, probe := range []struct {
 		id   string

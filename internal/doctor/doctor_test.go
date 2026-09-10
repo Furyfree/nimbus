@@ -5,21 +5,21 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
 )
 
-func healthy() *facts.Facts {
-	f := &facts.Facts{Commands: map[string]string{}}
-	for _, name := range facts.RequiredCommands {
+func healthy() *inspect.Facts {
+	f := &inspect.Facts{Commands: map[string]string{}}
+	for _, name := range inspect.RequiredCommands {
 		f.Commands[name] = "/usr/bin/" + name
 	}
-	f.Platform.Value = facts.Platform{ID: "fedora", VersionID: "44", Arch: "x86_64"}
-	f.Packages.Value = []facts.Package{{Name: "bash"}}
-	f.Repositories.Value = []facts.Repository{{ID: "fedora", Enabled: true, GPGCheck: "1"}, {ID: "updates-testing", Enabled: false, GPGCheck: "0"}}
-	f.SecureBoot.Value = facts.SecureBootEnabled
-	f.SELinux.Value = facts.SELinuxEnforcing
+	f.Platform.Value = inspect.Platform{ID: "fedora", VersionID: "44", Arch: "x86_64"}
+	f.Packages.Value = []inspect.Package{{Name: "bash"}}
+	f.Repositories.Value = []inspect.Repository{{ID: "fedora", Enabled: true, GPGCheck: "1"}, {ID: "updates-testing", Enabled: false, GPGCheck: "0"}}
+	f.SecureBoot.Value = inspect.SecureBootEnabled
+	f.SELinux.Value = inspect.SELinuxEnforcing
 	f.Firewalld.Value = "active"
-	f.Checkout.Value = facts.Checkout{Origin: "github.com/furyfree-org/nimbus", Commit: "0123456789abcdef"}
+	f.Checkout.Value = inspect.Checkout{Origin: "github.com/furyfree-org/nimbus", Commit: "0123456789abcdef"}
 	return f
 }
 
@@ -49,22 +49,22 @@ func TestHealthySystemPasses(t *testing.T) {
 func TestEveryFailureExplainsItself(t *testing.T) {
 	cases := []struct {
 		name  string
-		facts func(*facts.Facts)
+		facts func(*inspect.Facts)
 		cfg   func(*Config)
 		id    string
 		want  string
 	}{
-		{"unsupported release", func(f *facts.Facts) { f.Platform.Value.VersionID = "43" }, nil, "platform", "supports 44"},
-		{"wrong distribution", func(f *facts.Facts) { f.Platform.Value.ID = "arch" }, nil, "platform", "Fedora only"},
+		{"unsupported release", func(f *inspect.Facts) { f.Platform.Value.VersionID = "43" }, nil, "platform", "supports 44"},
+		{"wrong distribution", func(f *inspect.Facts) { f.Platform.Value.ID = "arch" }, nil, "platform", "Fedora only"},
 		{"missing selector", nil, func(c *Config) { c.SelectorError = "read selector: no such file" }, "selector", "nimbus init"},
-		{"origin mismatch", func(f *facts.Facts) { f.Checkout.Value.Origin = "github.com/someone/else" }, nil, "selector", "not the approved repository"},
+		{"origin mismatch", func(f *inspect.Facts) { f.Checkout.Value.Origin = "github.com/someone/else" }, nil, "selector", "not the approved repository"},
 		{"broken definitions", nil, func(c *Config) { c.DefinitionsError = "2 definition error(s)" }, "definitions", "nimbus validate"},
-		{"missing command", func(f *facts.Facts) { f.Commands["flatpak"] = "" }, nil, "commands", "missing: flatpak"},
-		{"unreadable packages", func(f *facts.Facts) { f.Packages.Error = "dnf5 failed" }, nil, "packages", "dnf5"},
-		{"unsigned repository", func(f *facts.Facts) { f.Repositories.Value[0].GPGCheck = "0" }, nil, "repository-signatures", "gpgcheck=1"},
-		{"secure boot off", func(f *facts.Facts) { f.SecureBoot.Value = facts.SecureBootDisabled }, nil, "secure-boot", "never changes it"},
-		{"selinux permissive", func(f *facts.Facts) { f.SELinux.Value = facts.SELinuxPermissive }, nil, "selinux", "SELINUX=enforcing"},
-		{"firewalld inactive", func(f *facts.Facts) { f.Firewalld.Value = "inactive" }, nil, "firewalld", "enable --now firewalld"},
+		{"missing command", func(f *inspect.Facts) { f.Commands["flatpak"] = "" }, nil, "commands", "missing: flatpak"},
+		{"unreadable packages", func(f *inspect.Facts) { f.Packages.Error = "dnf5 failed" }, nil, "packages", "dnf5"},
+		{"unsigned repository", func(f *inspect.Facts) { f.Repositories.Value[0].GPGCheck = "0" }, nil, "repository-signatures", "gpgcheck=1"},
+		{"secure boot off", func(f *inspect.Facts) { f.SecureBoot.Value = inspect.SecureBootDisabled }, nil, "secure-boot", "never changes it"},
+		{"selinux permissive", func(f *inspect.Facts) { f.SELinux.Value = inspect.SELinuxPermissive }, nil, "selinux", "SELINUX=enforcing"},
+		{"firewalld inactive", func(f *inspect.Facts) { f.Firewalld.Value = "inactive" }, nil, "firewalld", "enable --now firewalld"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -90,7 +90,7 @@ func TestEveryFailureExplainsItself(t *testing.T) {
 
 func TestUnknownIsNeverAFailure(t *testing.T) {
 	f, cfg := healthy(), healthyConfig()
-	f.SecureBoot.Value = facts.SecureBootUnavailable
+	f.SecureBoot.Value = inspect.SecureBootUnavailable
 	f.Repositories.Error = "permission denied"
 	cfg.SupportedReleases = nil
 	r := Run(f, cfg)
@@ -113,7 +113,7 @@ func TestCheckoutOverrideSkipsSelector(t *testing.T) {
 
 func TestUnsetGPGCheckIsUnknown(t *testing.T) {
 	f, cfg := healthy(), healthyConfig()
-	f.Repositories.Value = append(f.Repositories.Value, facts.Repository{ID: "vendor", Enabled: true})
+	f.Repositories.Value = append(f.Repositories.Value, inspect.Repository{ID: "vendor", Enabled: true})
 	c := status(Run(f, cfg), "repository-signatures")
 	if c.Status != Unknown || !strings.Contains(c.Observation, "vendor") || c.Remediation == "" {
 		t.Fatalf("unset gpgcheck = %+v", c)
@@ -122,7 +122,7 @@ func TestUnsetGPGCheckIsUnknown(t *testing.T) {
 
 func TestOverrideStillNeedsAReadableCheckout(t *testing.T) {
 	f, cfg := healthy(), Config{SupportedReleases: []string{"44"}, CheckoutOverride: true}
-	f.Checkout = facts.Section[facts.Checkout]{Error: "/tmp/x is not a Git checkout"}
+	f.Checkout = inspect.Section[inspect.Checkout]{Error: "/tmp/x is not a Git checkout"}
 	c := status(Run(f, cfg), "selector")
 	if c.Status != Fail || !strings.Contains(c.Observation, "not a Git checkout") || c.Remediation == "" {
 		t.Fatalf("override with unknown checkout = %+v", c)
@@ -131,7 +131,7 @@ func TestOverrideStillNeedsAReadableCheckout(t *testing.T) {
 
 func TestUnrecognizedGPGCheckIsUnknown(t *testing.T) {
 	f, cfg := healthy(), healthyConfig()
-	f.Repositories.Value = append(f.Repositories.Value, facts.Repository{ID: "vendor", Enabled: true, GPGCheck: "maybe"})
+	f.Repositories.Value = append(f.Repositories.Value, inspect.Repository{ID: "vendor", Enabled: true, GPGCheck: "maybe"})
 	c := status(Run(f, cfg), "repository-signatures")
 	if c.Status != Unknown || !strings.Contains(c.Observation, "vendor (gpgcheck=maybe)") {
 		t.Fatalf("unrecognized gpgcheck = %+v", c)
@@ -141,7 +141,7 @@ func TestUnrecognizedGPGCheckIsUnknown(t *testing.T) {
 func TestMissingGitIsUnknownNotABrokenCheckout(t *testing.T) {
 	f, cfg := healthy(), healthyConfig()
 	f.Commands["git"] = ""
-	f.Checkout = facts.Section[facts.Checkout]{Error: `git: executable file not found`}
+	f.Checkout = inspect.Section[inspect.Checkout]{Error: `git: executable file not found`}
 	c := status(Run(f, cfg), "selector")
 	if c.Status != Unknown || !strings.Contains(c.Remediation, "common profile") {
 		t.Fatalf("missing git = %+v", c)
@@ -157,7 +157,7 @@ func TestChezmoiSelectionIsComparedWithTheManifest(t *testing.T) {
 	cfg.Machine, cfg.Profiles, cfg.Dotfiles = "laptop", []string{"common", "development"}, true
 	f := healthy()
 	f.Commands["chezmoi"] = "/usr/bin/chezmoi"
-	f.Chezmoi = facts.Section[facts.Chezmoi]{Value: facts.Chezmoi{Initialized: true, Machine: "laptop", ManagedByNimbus: true, Profiles: []string{"development", "common"}}}
+	f.Chezmoi = inspect.Section[inspect.Chezmoi]{Value: inspect.Chezmoi{Initialized: true, Machine: "laptop", ManagedByNimbus: true, Profiles: []string{"development", "common"}}}
 	if c := status(Run(f, cfg), "chezmoi"); c.Status != Pass {
 		t.Fatalf("matching selection = %+v", c)
 	}
@@ -165,7 +165,7 @@ func TestChezmoiSelectionIsComparedWithTheManifest(t *testing.T) {
 	if c := status(Run(f, cfg), "chezmoi"); c.Status != Fail || !strings.Contains(c.Remediation, "chezmoi init --prompt --promptString Machine=laptop") || !strings.Contains(c.Remediation, "Profiles=common/development") {
 		t.Fatalf("stale profiles = %+v", c)
 	}
-	f.Chezmoi.Value = facts.Chezmoi{}
+	f.Chezmoi.Value = inspect.Chezmoi{}
 	if c := status(Run(f, cfg), "chezmoi"); c.Status != Fail || !strings.Contains(c.Remediation, "nimbus init") {
 		t.Fatalf("not initialized = %+v", c)
 	}

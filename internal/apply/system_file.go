@@ -12,10 +12,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Furyfree/nimbus/internal/definitions"
-	"github.com/Furyfree/nimbus/internal/facts"
-	"github.com/Furyfree/nimbus/internal/plan"
 	"golang.org/x/sys/unix"
+
+	"github.com/Furyfree/nimbus/internal/definitions"
+	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/plan"
 )
 
 // ApplySystemFile performs one reviewed replacement beneath an anchored root.
@@ -24,12 +25,12 @@ import (
 // later lookup through a symlink. Parent directories must not be user-writable.
 func ApplySystemFile(root string, change plan.FileChange) (resultErr error) {
 	target := change.Target
-	allowed := strings.HasPrefix(target, "/etc/") || change.Recovery && definitions.RecoveryTarget(target)
+	allowed := strings.HasPrefix(target, "/etc/") || change.Recovery && definitions.LegacyRecoveryTarget(target)
 	if path.Clean(target) != target || !allowed {
 		return fmt.Errorf("target is outside the allowed system-file boundary")
 	}
 	if strings.HasPrefix(target, "/etc/") && change.Recovery {
-		return fmt.Errorf("recovery integration cannot target /etc")
+		return fmt.Errorf("legacy recovery cleanup cannot target /etc")
 	}
 	allowedOwner := uint32(0)
 	if root != "/" {
@@ -161,8 +162,8 @@ func ApplySystemFile(root string, change plan.FileChange) (resultErr error) {
 	return unix.Fsync(fd)
 }
 
-func readFileAt(dir int, name string) (facts.SystemFile, error) {
-	result := facts.SystemFile{}
+func readFileAt(dir int, name string) (inspect.SystemFile, error) {
+	result := inspect.SystemFile{}
 	fd, err := unix.Openat(dir, name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	if errors.Is(err, unix.ENOENT) {
 		return result, nil
@@ -191,5 +192,5 @@ func readFileAt(dir int, name string) (facts.SystemFile, error) {
 	if err != nil {
 		return result, err
 	}
-	return facts.SystemFile{Exists: true, Content: data, Owner: owner.Username, Group: group.Name, Mode: fmt.Sprintf("%04o", st.Mode&07777)}, nil
+	return inspect.SystemFile{Exists: true, Content: data, Owner: owner.Username, Group: group.Name, Mode: fmt.Sprintf("%04o", st.Mode&07777)}, nil
 }

@@ -4,13 +4,22 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
 	"github.com/Furyfree/nimbus/internal/plan"
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
 func (ex *executor) sourceRetirement(op plan.Operation) ([]state.Receipt, []string, error) {
-	f := facts.Inspect(ex.opts.Source, "")
+	observe := func() *inspect.Facts {
+		if op.Kind == plan.KindFlatpakRemote {
+			return &inspect.Facts{Flatpak: inspect.SystemFlatpak(ex.opts.Source)}
+		}
+		return &inspect.Facts{
+			Packages:     inspect.Packages(ex.opts.Source),
+			Repositories: inspect.Repositories(ex.opts.Source),
+		}
+	}
+	f := observe()
 	if err := plan.CheckSourceRetirement(op, f, ex.opts.Source); err != nil {
 		return nil, nil, fmt.Errorf("source changed after approval: %w", err)
 	}
@@ -19,7 +28,7 @@ func (ex *executor) sourceRetirement(op plan.Operation) ([]state.Receipt, []stri
 			return nil, nil, err
 		}
 	}
-	f = facts.Inspect(ex.opts.Source, "")
+	f = observe()
 	if err := plan.CheckSourceRetirement(op, f, ex.opts.Source); err != nil {
 		return nil, nil, fmt.Errorf("source retirement verification: %w", err)
 	}
@@ -34,7 +43,7 @@ func (ex *executor) sourceRetirement(op plan.Operation) ([]state.Receipt, []stri
 	return nil, []string{op.ID}, nil
 }
 
-func recordSourceOwnership(receipt *state.Receipt, op plan.Operation, ids []string, f *facts.Facts) {
+func recordSourceOwnership(receipt *state.Receipt, op plan.Operation, ids []string, f *inspect.Facts) {
 	if op.Source == nil {
 		return // Legacy repairs do not manufacture removal authority.
 	}

@@ -13,20 +13,21 @@ import (
 	"testing"
 
 	"github.com/Furyfree/nimbus/internal/apply"
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/native/nativetest"
 	"github.com/Furyfree/nimbus/internal/plan"
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
 type reconcileSource struct {
-	*facts.FakeSource
+	*nativetest.FakeSource
 	calls        []string
 	leaveEnabled bool
 	fail         bool
 }
 
 func (s *reconcileSource) Stream(_, _ io.Writer, name string, args ...string) error {
-	call := facts.Key(name, args...)
+	call := nativetest.Key(name, args...)
 	s.calls = append(s.calls, call)
 	if name != "sudo" || len(args) != 4 || strings.Join(args[:3], " ") != "dnf5 config-manager setopt" {
 		return fmt.Errorf("unexpected mutation: %s", call)
@@ -36,8 +37,8 @@ func (s *reconcileSource) Stream(_, _ io.Writer, name string, args ...string) er
 	}
 	if !s.leaveEnabled {
 		id := strings.TrimSuffix(args[3], ".enabled=0")
-		path := filepath.Join(facts.RepoOverride, "99-config_manager.repo")
-		s.Dirs[facts.RepoOverride] = []string{"99-config_manager.repo"}
+		path := filepath.Join(inspect.RepoOverride, "99-config_manager.repo")
+		s.Dirs[inspect.RepoOverride] = []string{"99-config_manager.repo"}
 		s.Files[path] = append(s.Files[path], []byte("["+id+"]\nenabled=0\n")...)
 	}
 	return nil
@@ -63,11 +64,11 @@ func TestReconcileVendorRepositoriesAfterPackageTransaction(t *testing.T) {
 			vendorFiles := map[string]string{}
 			for id, host := range map[string]string{"chatgpt": "openai-chatgpt", "onepassword": "1password"} {
 				name := host + ".repo"
-				path := filepath.Join(facts.RepoDir, name)
+				path := filepath.Join(inspect.RepoDir, name)
 				data := fmt.Sprintf("[%s]\nbaseurl=%s\nenabled=1\ngpgcheck=1\n", host, s.Checkout.Definitions().Repositories[id].BaseURL)
 				vendorFiles[path] = data
 				fake.Files[path] = []byte(data)
-				fake.Dirs[facts.RepoDir] = append(fake.Dirs[facts.RepoDir], name)
+				fake.Dirs[inspect.RepoDir] = append(fake.Dirs[inspect.RepoDir], name)
 			}
 			switch mode {
 			case "native failure":
@@ -75,9 +76,9 @@ func TestReconcileVendorRepositoriesAfterPackageTransaction(t *testing.T) {
 			case "verification failure":
 				src.leaveEnabled = true
 			case "key drift":
-				fake.Commands[facts.Key("gpg", facts.KeyInspectArgs(plan.KeyPath("chatgpt"))...)] = []byte("pub:::::::::\nfpr:::::::::AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA:\n")
+				fake.Commands[nativetest.Key("gpg", inspect.KeyInspectArgs(plan.KeyPath("chatgpt"))...)] = []byte("pub:::::::::\nfpr:::::::::AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA:\n")
 			case "checkout drift":
-				fake.Commands[facts.Key("git", facts.GitArgs(root, "rev-parse", "HEAD")...)] = []byte("different-head\n")
+				fake.Commands[nativetest.Key("git", inspect.GitArgs(root, "rev-parse", "HEAD")...)] = []byte("different-head\n")
 			}
 			var out bytes.Buffer
 			var review io.Writer = &out
@@ -158,7 +159,7 @@ type transactionReconcileSource struct {
 }
 
 func (s *transactionReconcileSource) Stream(out, errOut io.Writer, name string, args ...string) error {
-	call := facts.Key(name, args...)
+	call := nativetest.Key(name, args...)
 	if call != "sudo dnf5 -y install demo" && call != "sudo dnf5 -y upgrade" {
 		return s.reconcileSource.Stream(out, errOut, name, args...)
 	}
@@ -171,10 +172,10 @@ func (s *transactionReconcileSource) Stream(out, errOut io.Writer, name string, 
 		host = "vendor-upgrade"
 	}
 	file := host + ".repo"
-	s.Dirs[facts.RepoDir] = append(s.Dirs[facts.RepoDir], file)
-	s.Files[filepath.Join(facts.RepoDir, file)] = []byte("[" + host + "]\nbaseurl=https://example.invalid/repo\nenabled=1\ngpgcheck=1\n")
+	s.Dirs[inspect.RepoDir] = append(s.Dirs[inspect.RepoDir], file)
+	s.Files[filepath.Join(inspect.RepoDir, file)] = []byte("[" + host + "]\nbaseurl=https://example.invalid/repo\nenabled=1\ngpgcheck=1\n")
 	if host == "vendor-install" {
-		key := facts.Key("dnf5", facts.PackageQueryArgs...)
+		key := nativetest.Key("dnf5", inspect.PackageQueryArgs...)
 		s.Commands[key] = append(s.Commands[key], []byte("demo|0|1|1|x86_64|nimbus-vendor|User\n")...)
 	}
 	return nil
@@ -201,6 +202,13 @@ func TestSyncReconcilesInstallAndUpgradeCreatedRepositories(t *testing.T) {
 	code, out, errOut := run(t, "sync", "--checkout", root, "--machine", "vm", "-y")
 	if code != ExitOK {
 		t.Fatalf("sync failed: %d %s%s calls=%v", code, out, errOut, src.calls)
+	}
+	if slices.Contains(src.calls, "sudo dnf5 -y upgrade") {
+		t.Fatal("sync upgraded the system")
+	}
+	code, out, errOut = run(t, "upgrade", "--system", "--checkout", root, "--machine", "vm", "-y")
+	if code != ExitOK {
+		t.Fatalf("system upgrade failed: %d %s%s calls=%v", code, out, errOut, src.calls)
 	}
 	want := []string{
 		"sudo dnf5 -y install demo",

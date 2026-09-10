@@ -124,7 +124,7 @@ func TestInvalidTrees(t *testing.T) {
 			f["machines/one.toml"] = strings.Replace(f["machines/one.toml"], `["common", "extra"]`, `["extra"]`, 1)
 		}, `profiles must include "common"`},
 		{"unknown field rejected", func(f map[string]string) {
-			f["machines/one.toml"] += "[package_constraints]\n\"dnf:git\" = \"=1.0\"\n"
+			f["machines/one.toml"] += "[unknown_constraints]\n\"dnf:git\" = \"=1.0\"\n"
 		}, "unknown field"},
 		{"undeclared prefix", func(f map[string]string) {
 			f["profiles/extra.toml"] = strings.Replace(f["profiles/extra.toml"], `packages = []`, `packages = ["copr:thing"]`, 1)
@@ -335,9 +335,7 @@ func TestRPMSourceConflictsUseNativeRequests(t *testing.T) {
 		{"same declared source", "terra:git", "terra:git.x86_64", false},
 		{"different dotted names", "python3", "terra:python3.14", false},
 		{"qualified dotted name", "python3.14", "terra:python3.14.x86_64", true},
-		{"Cargo is not an RPM request", "cargo:demo", "terra:demo.x86_64", false},
 		{"Flatpak is not an RPM request", "flatpak:org.control.App", "terra:org.control.App.x86_64", false},
-		{"exact Cargo name still conflicts", "cargo:demo", "terra:demo", true},
 		{"exact Flatpak name still conflicts", "flatpak:org.control.App", "terra:org.control.App", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -375,27 +373,17 @@ func TestRPMSourceConflictsUseNativeRequests(t *testing.T) {
 }
 
 func TestInstallerPathsNameFiles(t *testing.T) {
-	for _, tc := range []struct {
-		name, binary, config, want string
-	}{
-		{"home as binary", ".", "", "installer.binary"},
-		{"home as config", ".local/bin/example", ".", "installer.config"},
-		{"binary only", ".local/bin/example", "", ""},
-		{"binary and config", ".local/bin/example", ".config/example.toml", ""},
-		{"two dots inside names", ".local/bin/example..tool", ".config/example..toml", ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, binary := range []string{".", "../example", "/usr/bin/example", ".local/bin/example", ".local/bin/example..tool"} {
+		t.Run(binary, func(t *testing.T) {
 			tree := baseTree()
-			decl := "\n[installer]\nurl = \"https://example.invalid/install.sh\"\nbinary = \"" + tc.binary + "\"\n"
-			if tc.config != "" {
-				decl += "config = \"" + tc.config + "\"\ninstall = [\"example\", \"install\"]\n"
-			}
-			tree["components/hardware.toml"] += decl
+			tree["components/hardware.toml"] += "\n[installer]\nurl = \"https://example.invalid/install.sh\"\nbinary = \"" + binary + "\"\n"
 			errs := loadAndValidate(t, writeTree(t, tree))
-			if tc.want != "" {
-				requireError(t, errs, tc.want)
-			} else if len(errs) > 0 {
-				t.Fatal(errs)
+			if strings.HasPrefix(binary, ".local/bin/") {
+				if len(errs) > 0 {
+					t.Fatal(errs)
+				}
+			} else {
+				requireError(t, errs, "installer.binary")
 			}
 		})
 	}
@@ -417,7 +405,7 @@ func TestMinimumEngine(t *testing.T) {
 	}
 }
 
-func TestInvalidIDsAndReservedCargo(t *testing.T) {
+func TestInvalidIDsAndReservedPrefixes(t *testing.T) {
 	for _, kind := range []string{"machines", "profiles", "components"} {
 		t.Run(kind, func(t *testing.T) {
 			tree := baseTree()
@@ -430,12 +418,12 @@ func TestInvalidIDsAndReservedCargo(t *testing.T) {
 			}
 		})
 	}
-	t.Run("cargo repository", func(t *testing.T) {
+	t.Run("flatpak repository", func(t *testing.T) {
 		tree := baseTree()
-		tree["nimbus.toml"] = strings.ReplaceAll(tree["nimbus.toml"], "repositories.terra", "repositories.cargo")
-		tree["profiles/common.toml"] = strings.ReplaceAll(tree["profiles/common.toml"], "terra:ghostty", "cargo:ghostty")
+		tree["nimbus.toml"] = strings.ReplaceAll(tree["nimbus.toml"], "repositories.terra", "repositories.flatpak")
+		tree["profiles/common.toml"] = strings.ReplaceAll(tree["profiles/common.toml"], "terra:ghostty", "flatpak:ghostty")
 		if errs := loadAndValidate(t, writeTree(t, tree)); len(errs) == 0 {
-			t.Fatal("reserved cargo repository accepted")
+			t.Fatal("reserved flatpak repository accepted")
 		}
 	})
 	t.Run("DNF newline", func(t *testing.T) {

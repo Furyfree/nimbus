@@ -6,7 +6,7 @@ import (
 	"compress/gzip"
 	"testing"
 
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/native/nativetest"
 )
 
 func TestKeysAreReadFromRPM2ArchiveOutput(t *testing.T) {
@@ -33,8 +33,8 @@ func TestKeysAreReadFromRPM2ArchiveOutput(t *testing.T) {
 	}
 	// rpm2archive writes the archive to standard output when that is a
 	// pipe, which is how Nimbus runs it; nothing appears beside the RPM.
-	src := &facts.FakeSource{Commands: map[string][]byte{
-		facts.Key("rpm2archive", "/stage/rpmfusion-free-release.rpm"): buf.Bytes(),
+	src := &nativetest.FakeSource{Commands: map[string][]byte{
+		nativetest.Key("rpm2archive", "/stage/rpmfusion-free-release.rpm"): buf.Bytes(),
 	}}
 	keys, err := ExtractKeysWithRPM2Archive(src)("/stage/rpmfusion-free-release.rpm")
 	if err != nil {
@@ -43,7 +43,7 @@ func TestKeysAreReadFromRPM2ArchiveOutput(t *testing.T) {
 	if len(keys) != 2 || string(keys["etc/pki/rpm-gpg/RPM-GPG-KEY-rpmfusion-free-fedora-44"]) != "KEY 44" {
 		t.Fatalf("keys = %v", keys)
 	}
-	src.Commands[facts.Key("rpm2archive", "/stage/broken.rpm")] = []byte("not an archive")
+	src.Commands[nativetest.Key("rpm2archive", "/stage/broken.rpm")] = []byte("not an archive")
 	if _, err := ExtractKeysWithRPM2Archive(src)("/stage/broken.rpm"); err == nil {
 		t.Fatal("garbage output was accepted as an archive")
 	}

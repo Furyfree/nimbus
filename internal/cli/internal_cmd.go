@@ -19,9 +19,8 @@ import (
 var stateRoot = state.Root
 
 // newInternal is the hidden group for the narrow privileged actions that
-// sync runs through sudo. Each accepts only staged data bound to the plan
-// digest and does one atomic thing; there is no general
-// privileged executor.
+// sync runs through sudo. Each validates its fixed resources and staged
+// inputs; there is no general privileged executor.
 func newInternal() *cobra.Command {
 	group := &cobra.Command{Use: "internal", Hidden: true, Short: "Narrow privileged actions used by apply", Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error { return cmd.Help() }}

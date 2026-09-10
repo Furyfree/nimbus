@@ -3,31 +3,33 @@ package plan
 import (
 	"encoding/json"
 	"errors"
+	"path"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/native/nativetest"
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
-func resourceBuilder() (*builder, *facts.FakeSource) {
-	src := &facts.FakeSource{Commands: map[string][]byte{}, Files: map[string][]byte{}, Dirs: map[string][]string{"/": {"etc"}, "/etc": {}, "/etc/systemd/system": {}}, Failures: map[string]string{}}
-	src.Commands[facts.Key("stat", "--format=%F|%U|%G|%a|%h", "--", "/etc")] = []byte("directory|root|root|755|1")
-	b := &builder{in: Inputs{Resolved: &definitions.Resolved{Machine: "vm"}, Facts: &facts.Facts{User: facts.Section[facts.User]{Value: facts.User{Name: "owner"}}}, Source: src, Definitions: "new", Applied: &state.Applied{Receipts: map[string]state.Receipt{}}}}
+func resourceBuilder() (*builder, *nativetest.FakeSource) {
+	src := &nativetest.FakeSource{Commands: map[string][]byte{}, Files: map[string][]byte{}, Dirs: map[string][]string{"/": {"etc"}, "/etc": {}, "/etc/systemd/system": {}}, Failures: map[string]string{}}
+	src.Commands[nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", "/etc")] = []byte("directory|root|root|755|1")
+	b := &builder{in: Inputs{Resolved: &definitions.Resolved{Machine: "vm"}, Facts: &inspect.Facts{User: inspect.Section[inspect.User]{Value: inspect.User{Name: "owner"}}}, Source: src, Definitions: "new", Applied: &state.Applied{Receipts: map[string]state.Receipt{}}}}
 	return b, src
 }
-func answerUnit(src *facts.FakeSource, unit, enabled, active string) {
-	src.Commands[facts.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", unit)] = []byte("LoadState=loaded\nUnitFileState=" + enabled + "\nActiveState=" + active + "\n")
+func answerUnit(src *nativetest.FakeSource, unit, enabled, active string) {
+	src.Commands[nativetest.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", unit)] = []byte("LoadState=loaded\nUnitFileState=" + enabled + "\nActiveState=" + active + "\n")
 }
-func fileReceipt(target string, value facts.SystemFile) state.Receipt {
-	return state.Receipt{Resource: "file:" + target, Provider: KindFile, Machine: "vm", Verified: true, Previous: encodeResource(facts.SystemFile{}), Intended: encodeResource(value)}
+func fileReceipt(target string, value inspect.SystemFile) state.Receipt {
+	return state.Receipt{Resource: "file:" + target, Provider: KindFile, Machine: "vm", Verified: true, Previous: encodeResource(inspect.SystemFile{}), Intended: encodeResource(value)}
 }
-func answerFile(src *facts.FakeSource, target string, value facts.SystemFile) {
+func answerFile(src *nativetest.FakeSource, target string, value inspect.SystemFile) {
 	src.Dirs["/etc"] = []string{"nimbus.conf"}
 	src.Files[target] = value.Content
-	src.Commands[facts.Key("stat", "--format=%F|%U|%G|%a|%h", "--", target)] = []byte("regular file|" + value.Owner + "|" + value.Group + "|644|1")
+	src.Commands[nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", target)] = []byte("regular file|" + value.Owner + "|" + value.Group + "|644|1")
 }
 
 func TestSystemFilesRequireOwnershipAndBindFullPayload(t *testing.T) {
@@ -38,7 +40,7 @@ func TestSystemFilesRequireOwnershipAndBindFullPayload(t *testing.T) {
 	if len(ops) != 1 || ops[0].Blocked != "" || string(ops[0].File.After.Content) != "desired\n" {
 		t.Fatalf("fresh file: %+v", ops)
 	}
-	have := facts.SystemFile{Exists: true, Content: []byte("old\n"), Owner: "root", Group: "root", Mode: "0644"}
+	have := inspect.SystemFile{Exists: true, Content: []byte("old\n"), Owner: "root", Group: "root", Mode: "0644"}
 	answerFile(src, target, have)
 	if op := b.systemResources(nil)[0]; op.Blocked == "" {
 		t.Fatal("foreign file was adopted")
@@ -66,7 +68,7 @@ func TestFileChangeTimeJSONPreservesPlanDigest(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			b, src := resourceBuilder()
 			target := "/etc/nimbus.conf"
-			have := facts.SystemFile{Exists: true, Content: []byte("same"), Owner: "root", Group: "root", Mode: "0644"}
+			have := inspect.SystemFile{Exists: true, Content: []byte("same"), Owner: "root", Group: "root", Mode: "0644"}
 			answerFile(src, target, have)
 			b.in.Resolved.Files = []definitions.ResolvedFile{{Target: target, Content: have.Content, Owner: have.Owner, Group: have.Group, Mode: have.Mode}}
 			r := fileReceipt(target, have)
@@ -113,7 +115,7 @@ func TestBuildRejectsUnencodableReceiptChangeTime(t *testing.T) {
 		t.Run(field, func(t *testing.T) {
 			b, src := resourceBuilder()
 			target := "/etc/nimbus.conf"
-			have := facts.SystemFile{Exists: true, Content: []byte("observed"), Owner: "root", Group: "root", Mode: "0644"}
+			have := inspect.SystemFile{Exists: true, Content: []byte("observed"), Owner: "root", Group: "root", Mode: "0644"}
 			answerFile(src, target, have)
 			r := fileReceipt(target, have)
 			r.Operation = ActionRepair
@@ -146,7 +148,7 @@ func TestServiceEnablementDoesNotStartGreeterAndRejectsForeignManager(t *testing
 		t.Fatalf("enable only: %+v", op)
 	}
 	src.Dirs["/etc/systemd/system"] = []string{"display-manager.service"}
-	src.Commands[facts.Key("readlink", "--", "/etc/systemd/system/display-manager.service")] = []byte("/usr/lib/systemd/system/gdm.service\n")
+	src.Commands[nativetest.Key("readlink", "--", "/etc/systemd/system/display-manager.service")] = []byte("/usr/lib/systemd/system/gdm.service\n")
 	if op := b.serviceOperation("service:greetd.service", want, "desktop", ""); op.Blocked == "" {
 		t.Fatal("foreign display manager takeover allowed")
 	}
@@ -168,13 +170,13 @@ func TestServicePlanningRetainsObservationFailures(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			b, src := resourceBuilder()
 			b.in.Resolved.Services = []definitions.ResolvedService{{ServiceDecl: tc.want}}
-			src.Failures[facts.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", tc.want.Unit)] = cause
+			src.Failures[nativetest.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", tc.want.Unit)] = cause
 			// A later ownership failure must not replace the service failure.
 			src.Dirs["/etc/systemd/system"] = []string{"display-manager.service"}
-			src.Failures[facts.Key("readlink", "--", "/etc/systemd/system/display-manager.service")] = "ownership inspection unavailable"
+			src.Failures[nativetest.Key("readlink", "--", "/etc/systemd/system/display-manager.service")] = "ownership inspection unavailable"
 			if tc.pending {
 				b.in.Resolved.Packages = []definitions.ResolvedPackage{{Name: "greetd", Prefix: "dnf", Canonical: "dnf:greetd"}}
-				src.Commands[facts.Key("dnf5", "--assumeno", "--cacheonly", "install", "greetd")] = previewText([]TxPackage{{Name: "greetd", Arch: "x86_64", EVR: "1-1", Repository: "fedora", Section: "installing"}})
+				src.Commands[nativetest.Key("dnf5", "--assumeno", "--cacheonly", "install", "greetd")] = previewText([]TxPackage{{Name: "greetd", Arch: "x86_64", EVR: "1-1", Repository: "fedora", Section: "installing"}})
 			}
 			p, err := Build(b.in)
 			if err != nil {
@@ -233,7 +235,7 @@ func TestMatchingServiceIntentUsesSemanticReceiptState(t *testing.T) {
 			b, src := resourceBuilder()
 			const id = "service:demo.service"
 			answerUnit(src, "demo.service", "disabled", "active")
-			previous := encodeResource(facts.Service{Unit: "demo.service", Load: "loaded", Enabled: "enabled", Active: "inactive"})
+			previous := encodeResource(inspect.Service{Unit: "demo.service", Load: "loaded", Enabled: "enabled", Active: "inactive"})
 			b.in.Applied.Receipts[id] = state.Receipt{Resource: id, Provider: KindService, Machine: "vm", Verified: true, Previous: previous, Intended: tc.intended}
 			want := definitions.ServiceDecl{Unit: "demo.service", Enabled: tc.enabled, Running: new(true)}
 			op := b.serviceOperation(id, want, "demo", "")
@@ -257,7 +259,7 @@ func TestGreeterPlanningDistinguishesFailedAndForeignOwnership(t *testing.T) {
 			b.in.Resolved.Services = []definitions.ResolvedService{{ServiceDecl: definitions.ServiceDecl{Unit: "greetd.service", Enabled: new(true)}}}
 			answerUnit(src, "greetd.service", "disabled", "inactive")
 			src.Dirs["/etc/systemd/system"] = []string{"display-manager.service"}
-			key := facts.Key("readlink", "--", "/etc/systemd/system/display-manager.service")
+			key := nativetest.Key("readlink", "--", "/etc/systemd/system/display-manager.service")
 			src.Commands[key] = []byte(tc.target)
 			if tc.failure != "" {
 				src.Failures[key] = tc.failure
@@ -289,7 +291,7 @@ func TestTargetIntentAdoptionRequiresKnownOwnedState(t *testing.T) {
 			b, src := resourceBuilder()
 			b.in.Resolved.DefaultTarget = "multi-user.target"
 			b.in.Applied.Receipts["default-target"] = state.Receipt{Resource: "default-target", Provider: KindTarget, Machine: tc.machine, Verified: tc.verified, Previous: "graphical.target", Intended: "graphical.target"}
-			key := facts.Key("systemctl", "get-default")
+			key := nativetest.Key("systemctl", "get-default")
 			src.Commands[key] = []byte(tc.observed + "\n")
 			if tc.failure != "" {
 				src.Failures[key] = tc.failure
@@ -316,7 +318,7 @@ func TestTargetRetirementDistinguishesFailedObservationAndDrift(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			b, src := resourceBuilder()
 			b.in.Applied.Receipts["default-target"] = state.Receipt{Resource: "default-target", Provider: KindTarget, Machine: "vm", Verified: true, Previous: "multi-user.target", Intended: "graphical.target"}
-			key := facts.Key("systemctl", "get-default")
+			key := nativetest.Key("systemctl", "get-default")
 			src.Commands[key] = []byte(tc.target)
 			if tc.failure != "" {
 				src.Failures[key] = tc.failure
@@ -335,12 +337,12 @@ func TestTargetRetirementDistinguishesFailedObservationAndDrift(t *testing.T) {
 
 func TestMembershipRemovalPreservesPreexistingAndPrimaryGroups(t *testing.T) {
 	b, src := resourceBuilder()
-	src.Commands[facts.Key("id", "-nG", "--", "owner")] = []byte("owner docker")
+	src.Commands[nativetest.Key("id", "-nG", "--", "owner")] = []byte("owner docker")
 	receipt := state.Receipt{Resource: "group:docker:owner", Provider: KindGroup, Machine: "vm", Verified: true, Previous: "true", Intended: "true"}
 	if op := b.retireResource(receipt.Resource, receipt); op.Blocked != "" || len(op.Steps) != 0 {
 		t.Fatalf("preexisting membership: %+v", op)
 	}
-	src.Commands[facts.Key("id", "-nG", "--", "owner")] = []byte("owner")
+	src.Commands[nativetest.Key("id", "-nG", "--", "owner")] = []byte("owner")
 	if op := b.retireResource(receipt.Resource, receipt); op.Blocked != "" || len(op.Steps) != 0 || op.Resource.Before != "false" || op.Resource.After != "false" || op.Resource.Previous != "true" {
 		t.Fatalf("removed preexisting membership: %+v", op)
 	}
@@ -348,12 +350,12 @@ func TestMembershipRemovalPreservesPreexistingAndPrimaryGroups(t *testing.T) {
 	if op := b.retireResource(receipt.Resource, receipt); op.Blocked != "" || len(op.Steps) != 0 || op.Resource.After != "false" {
 		t.Fatalf("absent Nimbus-added membership: %+v", op)
 	}
-	src.Commands[facts.Key("id", "-nG", "--", "owner")] = []byte("owner docker")
-	src.Commands[facts.Key("id", "-gn", "--", "owner")] = []byte("owner")
+	src.Commands[nativetest.Key("id", "-nG", "--", "owner")] = []byte("owner docker")
+	src.Commands[nativetest.Key("id", "-gn", "--", "owner")] = []byte("owner")
 	if op := b.retireResource(receipt.Resource, receipt); op.Blocked != "" || len(op.Steps) != 1 || op.Resource.After != "false" {
 		t.Fatalf("Nimbus-added membership: %+v", op)
 	}
-	src.Commands[facts.Key("id", "-gn", "--", "owner")] = []byte("docker")
+	src.Commands[nativetest.Key("id", "-gn", "--", "owner")] = []byte("docker")
 	if op := b.retireResource(receipt.Resource, receipt); op.Blocked == "" {
 		t.Fatal("primary group removal allowed")
 	}
@@ -368,18 +370,18 @@ func TestRetirementPlansShowSessionRequirementsOnlyForChanges(t *testing.T) {
 				var note string
 				if kind == KindGroup {
 					receipt.Resource, receipt.Previous, receipt.Intended = "group:docker:owner", "false", "true"
-					src.Commands[facts.Key("id", "-nG", "--", "owner")] = []byte("owner docker")
-					src.Commands[facts.Key("id", "-gn", "--", "owner")] = []byte("owner")
+					src.Commands[nativetest.Key("id", "-nG", "--", "owner")] = []byte("owner docker")
+					src.Commands[nativetest.Key("id", "-gn", "--", "owner")] = []byte("owner")
 					switch outcome {
 					case "unchanged":
 						receipt.Previous = "true"
 					case "blocked":
-						src.Commands[facts.Key("id", "-gn", "--", "owner")] = []byte("docker")
+						src.Commands[nativetest.Key("id", "-gn", "--", "owner")] = []byte("docker")
 					}
 					note = "logout and login"
 				} else {
 					receipt.Resource, receipt.Previous, receipt.Intended = "default-target", "graphical.target", "multi-user.target"
-					src.Commands[facts.Key("systemctl", "get-default")] = []byte("multi-user.target\n")
+					src.Commands[nativetest.Key("systemctl", "get-default")] = []byte("multi-user.target\n")
 					switch outcome {
 					case "unchanged":
 						receipt.Previous = "multi-user.target"
@@ -400,7 +402,7 @@ func TestRetirementPlansShowSessionRequirementsOnlyForChanges(t *testing.T) {
 func TestTriggerRetriesAfterFileReceiptAndDeduplicates(t *testing.T) {
 	b, src := resourceBuilder()
 	target := "/etc/nimbus.conf"
-	have := facts.SystemFile{Exists: true, Content: []byte("same"), Owner: "root", Group: "root", Mode: "0644"}
+	have := inspect.SystemFile{Exists: true, Content: []byte("same"), Owner: "root", Group: "root", Mode: "0644"}
 	answerFile(src, target, have)
 	b.in.Resolved.Files = []definitions.ResolvedFile{{Target: target, Content: have.Content, Owner: have.Owner, Group: have.Group, Mode: have.Mode, Triggers: []string{"systemd-daemon-reload", "systemd-daemon-reload"}}}
 	receipt := fileReceipt(target, have)
@@ -423,7 +425,7 @@ func TestTriggerRetriesAfterFileReceiptAndDeduplicates(t *testing.T) {
 func TestRetirementWaitsForReplanBeforePackageRemoval(t *testing.T) {
 	b, src := resourceBuilder()
 	answerUnit(src, "demo.service", "enabled", "inactive")
-	previous := facts.Service{Unit: "demo.service", Load: "loaded", Enabled: "disabled", Active: "inactive"}
+	previous := inspect.Service{Unit: "demo.service", Load: "loaded", Enabled: "disabled", Active: "inactive"}
 	b.in.Applied.Receipts["service:demo.service"] = state.Receipt{Resource: "service:demo.service", Provider: KindService, Machine: "vm", Verified: true, Previous: encodeResource(previous), Intended: encodeResource(definitions.ServiceDecl{Unit: "demo.service", Enabled: new(true)})}
 	ops := b.systemResources([]Operation{{ID: "packages:install", Kind: KindPackage, Action: ActionInstall}})
 	if len(ops) != 1 || ops[0].After != "packages:install" {
@@ -439,7 +441,7 @@ func TestRetirementWaitsForReplanBeforePackageRemoval(t *testing.T) {
 func TestDefinitionOnlyFileAdoptionDoesNotRestartServices(t *testing.T) {
 	b, src := resourceBuilder()
 	target := "/etc/nimbus.conf"
-	have := facts.SystemFile{Exists: true, Content: []byte("same"), Owner: "root", Group: "root", Mode: "0644"}
+	have := inspect.SystemFile{Exists: true, Content: []byte("same"), Owner: "root", Group: "root", Mode: "0644"}
 	answerFile(src, target, have)
 	b.in.Resolved.Files = []definitions.ResolvedFile{{Target: target, Content: have.Content, Owner: have.Owner, Group: have.Group, Mode: have.Mode, Triggers: []string{"docker-restart"}}}
 	file := fileReceipt(target, have)
@@ -465,13 +467,13 @@ func TestDefinitionOnlyFileAdoptionDoesNotRestartServices(t *testing.T) {
 func TestMissingDeselectedUnitRetiresReceiptWithoutRecreatingIt(t *testing.T) {
 	b, src := resourceBuilder()
 	unit := "demo.service"
-	src.Commands[facts.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", unit)] = []byte("LoadState=not-found\nUnitFileState=\nActiveState=inactive\n")
+	src.Commands[nativetest.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", unit)] = []byte("LoadState=not-found\nUnitFileState=\nActiveState=inactive\n")
 	receipt := state.Receipt{Resource: "service:" + unit, Provider: KindService, Machine: "vm", Verified: true}
 	op := b.retireResource(receipt.Resource, receipt)
 	if op.Action != ActionRetire || op.Blocked != "" || len(op.Steps) != 0 {
 		t.Fatalf("absent unit recreated or blocked: %+v", op)
 	}
-	src.Commands[facts.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", unit)] = []byte("LoadState=not-found\nUnitFileState=\nActiveState=active\n")
+	src.Commands[nativetest.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", unit)] = []byte("LoadState=not-found\nUnitFileState=\nActiveState=active\n")
 	if op := b.retireResource(receipt.Resource, receipt); op.Blocked == "" {
 		t.Fatal("running unit lost its ownership receipt")
 	}
@@ -482,7 +484,7 @@ func TestAdoptedManualChangeAndNewTriggerAssociationRetryActivation(t *testing.T
 		t.Run(reason, func(t *testing.T) {
 			b, src := resourceBuilder()
 			target := "/etc/nimbus.conf"
-			have := facts.SystemFile{Exists: true, Content: []byte("current"), Owner: "root", Group: "root", Mode: "0644"}
+			have := inspect.SystemFile{Exists: true, Content: []byte("current"), Owner: "root", Group: "root", Mode: "0644"}
 			answerFile(src, target, have)
 			b.in.Resolved.Files = []definitions.ResolvedFile{{Target: target, Content: have.Content, Owner: have.Owner, Group: have.Group, Mode: have.Mode, Triggers: []string{"docker-restart"}}}
 			file := fileReceipt(target, have)
@@ -521,6 +523,47 @@ func TestAdoptedManualChangeAndNewTriggerAssociationRetryActivation(t *testing.T
 			ops = b.systemResources(nil)
 			if len(ops) != 1 || ops[0].Action != ActionKeep {
 				t.Fatalf("successful activation repeats: %+v", ops)
+			}
+		})
+	}
+}
+
+func TestRetiredRecoveryFilesRequireUnchangedOwnership(t *testing.T) {
+	for _, target := range []string{
+		"/usr/local/lib/nimbus/recovery/hyprland.lua",
+		"/usr/share/wayland-sessions/nimbus-recovery.desktop",
+	} {
+		t.Run(target, func(t *testing.T) {
+			b, src := resourceBuilder()
+			for dir := path.Dir(target); dir != "/"; dir = path.Dir(dir) {
+				src.Dirs[path.Dir(dir)] = append(src.Dirs[path.Dir(dir)], path.Base(dir))
+				src.Commands[nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", dir)] = []byte("directory|root|root|755|1")
+			}
+			src.Dirs[path.Dir(target)] = []string{path.Base(target)}
+			have := inspect.SystemFile{Exists: true, Content: []byte("legacy session"), Owner: "root", Group: "root", Mode: "0644"}
+			answerFile(src, target, have)
+			if ops := b.systemResources(nil); len(ops) != 0 {
+				t.Fatalf("unowned session scheduled for removal: %+v", ops)
+			}
+			receipt := fileReceipt(target, have)
+			b.in.Applied.Receipts[receipt.Resource] = receipt
+			ops := b.systemResources(nil)
+			if len(ops) != 1 || ops[0].Blocked != "" || ops[0].Action != ActionRemove || !ops[0].File.Recovery || ops[0].File.After.Exists {
+				t.Fatalf("owned legacy removal: %+v", ops)
+			}
+			have.Content = []byte("local edit")
+			answerFile(src, target, have)
+			if op := b.systemResources(nil)[0]; op.Blocked == "" {
+				t.Fatal("modified legacy file scheduled for deletion")
+			}
+			// Retry after the file was removed but receipt retirement failed.
+			src.Dirs[path.Dir(target)] = nil
+			if op := b.systemResources(nil)[0]; op.Blocked != "" || op.File.After.Exists {
+				t.Fatalf("absent legacy file cannot be retired: %+v", op)
+			}
+			delete(b.in.Applied.Receipts, receipt.Resource)
+			if ops := b.systemResources(nil); len(ops) != 0 {
+				t.Fatalf("completed cleanup repeated: %+v", ops)
 			}
 		})
 	}

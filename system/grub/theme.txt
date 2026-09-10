@@ -1,0 +1,65 @@
+title-text: ""
+desktop-color: "#10151c"
+terminal-left: "5%"
+terminal-top: "5%"
+terminal-width: "90%"
+terminal-height: "90%"
+terminal-border: "0"
+
++ label {
+    left = 8%
+    top = 12%
+    width = 84%
+    height = 24
+    text = "Nimbus"
+    color = "#edf3fa"
+}
+
++ label {
+    left = 8%
+    top = 12%+30
+    width = 84%
+    height = 20
+    text = "Choose an operating system"
+    color = "#a7b5c5"
+}
+
++ boot_menu {
+    left = 8%
+    top = 30%
+    width = 84%
+    height = 42%
+    item_color = "#c9d4e0"
+    selected_item_color = "#ffffff"
+    selected_item_pixmap_style = "selection_*.png"
+    item_height = 32
+    item_padding = 8
+    item_spacing = 4
+    icon_width = 0
+    icon_height = 0
+    item_icon_space = 0
+    scrollbar = true
+    scrollbar_slice = "center"
+    scrollbar_frame = "scrollbar_frame_*.png"
+    scrollbar_thumb = "scrollbar_thumb_*.png"
+    scrollbar_left_pad = 8
+}
+
++ label {
+    id = "__timeout__"
+    left = 8%
+    top = 79%
+    width = 84%
+    height = 20
+    text = "Starting the default entry in %d seconds"
+    color = "#a7b5c5"
+}
+
++ label {
+    left = 8%
+    top = 91%
+    width = 84%
+    height = 20
+    text = "Up/Down: select   Enter: boot   e: edit   c: console"
+    color = "#a7b5c5"
+}

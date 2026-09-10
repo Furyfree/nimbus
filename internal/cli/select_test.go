@@ -13,7 +13,8 @@ import (
 	"github.com/pelletier/go-toml/v2"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/native/nativetest"
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
@@ -51,6 +52,9 @@ func TestSelectionStopsWhenReviewCannotBeWritten(t *testing.T) {
 			cmd.SilenceErrors, cmd.SilenceUsage = true, true
 			args := []string{"add", "demo", "--checkout", root, "--machine", "vm"}
 			if tc.yes {
+				args = append(args, "--yes")
+			}
+			if tc.asJSON {
 				args = append(args, "--yes")
 			}
 			cmd.SetArgs(args)
@@ -313,6 +317,19 @@ func editableCheckout(t *testing.T) string {
 			if err != nil {
 				return err
 			}
+			if dir == "machines" {
+				// These package/selection fixtures predate native constraints.
+				// Constraint tests exercise the full definitions separately.
+				var manifest map[string]any
+				if err := toml.Unmarshal(data, &manifest); err != nil {
+					return err
+				}
+				delete(manifest, "package_constraints")
+				data, err = toml.Marshal(manifest)
+				if err != nil {
+					return err
+				}
+			}
 			return os.WriteFile(filepath.Join(dst, rel), data, 0o644)
 		}); err != nil {
 			t.Fatal(err)
@@ -561,7 +578,7 @@ func TestPackageSelectionRoundTrip(t *testing.T) {
 			if err := writeManifest(path, data); err != nil {
 				t.Fatal(err)
 			}
-			inventory := facts.Key("dnf5", facts.PackageQueryArgs...)
+			inventory := nativetest.Key("dnf5", inspect.PackageQueryArgs...)
 			installed := []byte("demo|0|1|1|x86_64|fedora|User\n")
 			src.Commands[inventory] = nil
 			if tc.exclusion == "" {
@@ -581,7 +598,7 @@ func TestPackageSelectionRoundTrip(t *testing.T) {
 			const remove = "sudo dnf5 -y remove --no-autoremove demo.x86_64"
 			src.Commands[install], src.Commands[remove] = nil, nil
 			withSource(t, handoffOutputSource{Source: src, afterStream: func(name string, args []string) {
-				switch facts.Key(name, args...) {
+				switch nativetest.Key(name, args...) {
 				case install:
 					src.Commands[inventory] = installed
 				case remove:
@@ -688,5 +705,40 @@ func TestPackagesRemoveRefusesRequiredComponentPackage(t *testing.T) {
 	after, err := os.ReadFile(manifestPath(root, "vm"))
 	if code != ExitFailure || !strings.Contains(errOut, "another selected component requires") || strings.Contains(out, "plan for") || err != nil || string(after) != manifest || len(src.calls) != 0 || len(src.reads) != 0 {
 		t.Fatalf("required package removal was not refused before review: %d %s%s; manifest=%q, error=%v, calls=%v, reads=%v", code, out, errOut, after, err, src.calls, src.reads)
+	}
+}
+
+func TestSelectionPreviewAndJSONNeverGrantApproval(t *testing.T) {
+	for _, mode := range []string{"plan", "json-plan", "json"} {
+		t.Run(mode, func(t *testing.T) {
+			root, src := installerFixture(t)
+			if err := os.WriteFile(filepath.Join(root, "components/demo.toml"), []byte("schema=1\nid='demo'\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			path := manifestPath(root, "vm")
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := []string{"components", "add", "demo", "--checkout", root, "--machine", "vm"}
+			if mode != "json" {
+				args = append(args, "--plan")
+			}
+			if mode != "plan" {
+				args = append(args, "--json")
+			}
+			code, out, errOut := run(t, args...)
+			want := ExitOK
+			if mode == "json" {
+				want = ExitUsage
+			}
+			if code != want {
+				t.Fatalf("%d %s%s", code, out, errOut)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil || string(before) != string(after) || len(src.calls) > 0 || slices.Contains(src.reads, "dnf5 makecache") {
+				t.Fatalf("preview/JSON mutated: %v %v %v", err, src.calls, src.reads)
+			}
+		})
 	}
 }

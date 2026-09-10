@@ -5,14 +5,14 @@ import (
 	"testing"
 
 	defs "github.com/Furyfree/nimbus/internal/definitions"
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/native/nativetest"
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
 func TestResourceDoctorReportsGreeterReadinessAndUnknownState(t *testing.T) {
 	r := &defs.Resolved{Machine: "vm", Services: []defs.ResolvedService{{ServiceDecl: defs.ServiceDecl{Unit: "greetd.service", Enabled: new(true)}}}}
-	src := &facts.FakeSource{Commands: map[string][]byte{
-		facts.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", "greetd.service"): []byte("LoadState=loaded\nUnitFileState=enabled\nActiveState=inactive\n"),
+	src := &nativetest.FakeSource{Commands: map[string][]byte{
+		nativetest.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", "greetd.service"): []byte("LoadState=loaded\nUnitFileState=enabled\nActiveState=inactive\n"),
 	}}
 	applied := &state.Applied{Receipts: map[string]state.Receipt{"service:greetd.service": {Verified: true, Resource: "service:greetd.service", Machine: "vm", Provider: "service"}}}
 	checks := SystemResources(src, r, applied, "test")
@@ -28,9 +28,9 @@ func TestResourceDoctorReportsGreeterReadinessAndUnknownState(t *testing.T) {
 
 func TestResourceDoctorDistinguishesFileDriftAndOwnership(t *testing.T) {
 	r := &defs.Resolved{Machine: "vm", Files: []defs.ResolvedFile{{Target: "/etc/nimbus.conf", Owner: "root", Group: "root", Mode: "0644", Content: []byte("desired\n")}}}
-	src := &facts.FakeSource{Commands: map[string][]byte{
-		facts.Key("stat", "--format=%F|%U|%G|%a|%h", "--", "/etc"):             []byte("directory|root|root|755|1\n"),
-		facts.Key("stat", "--format=%F|%U|%G|%a|%h", "--", "/etc/nimbus.conf"): []byte("regular file|root|root|644|1\n"),
+	src := &nativetest.FakeSource{Commands: map[string][]byte{
+		nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", "/etc"):             []byte("directory|root|root|755|1\n"),
+		nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", "/etc/nimbus.conf"): []byte("regular file|root|root|644|1\n"),
 	}, Dirs: map[string][]string{"/": {"etc"}, "/etc": {"nimbus.conf"}}, Files: map[string][]byte{"/etc/nimbus.conf": []byte("desired\n")}}
 	applied := &state.Applied{Receipts: map[string]state.Receipt{}}
 	checks := SystemResources(src, r, applied, "test")
@@ -64,8 +64,8 @@ func TestResourceDoctorRequiresDisabledNativeEnablement(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := &defs.Resolved{Machine: "vm", Services: []defs.ResolvedService{{ServiceDecl: defs.ServiceDecl{Unit: "demo.service", Enabled: tc.enabled, Running: new(false)}}}}
-			src := &facts.FakeSource{Commands: map[string][]byte{
-				facts.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", "demo.service"): []byte("LoadState=loaded\nUnitFileState=" + tc.native + "\nActiveState=inactive\n"),
+			src := &nativetest.FakeSource{Commands: map[string][]byte{
+				nativetest.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", "demo.service"): []byte("LoadState=loaded\nUnitFileState=" + tc.native + "\nActiveState=inactive\n"),
 			}}
 			applied := &state.Applied{Receipts: map[string]state.Receipt{"service:demo.service": {Verified: true, Resource: "service:demo.service", Machine: "vm", Provider: "service"}}}
 			checks := SystemResources(src, r, applied, "test")

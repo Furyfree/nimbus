@@ -1,0 +1,486 @@
+// Package inspect reads the installed system without mutation or network access.
+package inspect
+
+import (
+	"cmp"
+	"errors"
+	"fmt"
+	"maps"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"syscall"
+
+	"github.com/Furyfree/nimbus/internal/native"
+	"github.com/Furyfree/nimbus/internal/selector"
+)
+
+// Paths the inspector reads.
+const (
+	OSReleasePath = "/etc/os-release"
+	// DNFDropInPath is the libdnf5 configuration file Nimbus owns.
+	DNFDropInPath = "/etc/dnf/libdnf5.conf.d/20-nimbus.conf"
+	// DMIDir holds the firmware's machine identity; PCIDir lists devices.
+	DMIDir         = "/sys/class/dmi/id"
+	PCIDir         = "/sys/bus/pci/devices"
+	RepoDir        = "/etc/yum.repos.d"
+	RepoOverride   = "/etc/dnf/repos.override.d"
+	SecureBootPath = "/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"
+	SELinuxPath    = "/sys/fs/selinux/enforce"
+)
+
+// Inspect collects every fact family. checkoutRoot may be empty when no
+// checkout is selected; the checkout section then records that.
+func Inspect(src native.Source, checkoutRoot string) *Facts {
+	f := &Facts{Commands: map[string]string{}}
+	for _, name := range append(slices.Clone(RequiredCommands), OptionalCommands...) {
+		if p, err := src.LookPath(name); err == nil {
+			f.Commands[name] = p
+		} else {
+			f.Commands[name] = ""
+		}
+	}
+	f.Platform = collect(func() (Platform, error) { return platform(src) })
+	f.Packages = Packages(src)
+	f.Repositories = Repositories(src)
+	f.Flatpak = SystemFlatpak(src)
+	f.SecureBoot = collect(func() (string, error) { return secureBoot(src) })
+	f.SELinux = collect(func() (string, error) { return selinux(src) })
+	f.Firewalld = collect(func() (string, error) { return firewalld(src) })
+	f.Checkout = collect(func() (Checkout, error) { return checkout(src, checkoutRoot) })
+	f.DNFDropIn = collect(func() (string, error) { return dnfDropIn(src) })
+	f.Hardware = collect(func() (Hardware, error) { return hardware(src) })
+	f.Chezmoi = collect(func() (Chezmoi, error) { return chezmoi(src) })
+	f.User = collect(func() (User, error) { return user(src) })
+	return f
+}
+
+// InspectTasks collects only manual-task prerequisites. It does not inspect
+// accounts, user configuration, repositories, or running applications.
+func InspectTasks(src native.Source) *Facts {
+	return &Facts{
+		Platform:   collect(func() (Platform, error) { return platform(src) }),
+		Packages:   Packages(src),
+		SecureBoot: collect(func() (string, error) { return secureBoot(src) }),
+		User: collect(func() (User, error) {
+			out, err := src.Run("id", "-un")
+			if err != nil {
+				return User{}, err
+			}
+			name := strings.TrimSpace(string(out))
+			if name == "" || strings.ContainsAny(name, " \t\r\n") {
+				return User{}, errors.New("invoking username is unavailable")
+			}
+			return User{Name: name}, nil
+		}),
+	}
+}
+
+// user reads the invoking user and bootstrap home.
+func user(src native.Source) (User, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return User{}, err
+	}
+	u := User{Home: home}
+	if name, err := src.Run("id", "-un"); err == nil {
+		u.Name = strings.TrimSpace(string(name))
+	}
+	return u, nil
+}
+
+// ChezmoiDataArgs reads Chezmoi's template data without changing anything.
+var ChezmoiDataArgs = []string{"data", "--format", "json"}
+
+// ChezmoiInitialized reports whether the home holds a Chezmoi source
+// checkout. An empty source directory, which a failed clone leaves behind,
+// does not count.
+func ChezmoiInitialized(src native.Source, home string) (bool, error) {
+	path := filepath.Join(home, ".local", "share", "chezmoi")
+	names, err := src.ReadDir(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspect Chezmoi source %s: %w", path, err)
+	}
+	return len(names) > 0, nil
+}
+
+// chezmoi reports whether Chezmoi is initialized in this home and what it
+// stored. An absent tool or source directory is not an error.
+func chezmoi(src native.Source) (Chezmoi, error) {
+	if _, err := src.LookPath("chezmoi"); err != nil {
+		return Chezmoi{}, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return Chezmoi{}, err
+	}
+	initialized, err := ChezmoiInitialized(src, home)
+	if err != nil {
+		return Chezmoi{}, err
+	}
+	if !initialized {
+		return Chezmoi{}, nil
+	}
+	out, err := src.Run("chezmoi", ChezmoiDataArgs...)
+	if err != nil {
+		return Chezmoi{Initialized: true}, err
+	}
+	return ParseChezmoiData(out)
+}
+
+// hardware reads the DMI identity and the display adapters. A machine
+// without DMI, such as some virtual machines, still reports its adapters.
+func hardware(src native.Source) (Hardware, error) {
+	var h Hardware
+	read := func(name string) string {
+		data, err := src.ReadFile(filepath.Join(DMIDir, name))
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(data))
+	}
+	h.Product, h.Board = read("product_name"), read("board_name")
+	h.Chassis = chassisKind(read("chassis_type"))
+	devices, err := src.ReadDir(PCIDir)
+	if err != nil {
+		return h, fmt.Errorf("list PCI devices: %w", err)
+	}
+	for _, dev := range devices {
+		class, err := src.ReadFile(filepath.Join(PCIDir, dev, "class"))
+		if err != nil || !strings.HasPrefix(strings.TrimSpace(string(class)), "0x03") {
+			continue // not a display controller
+		}
+		vendor, _ := src.ReadFile(filepath.Join(PCIDir, dev, "vendor"))
+		device, _ := src.ReadFile(filepath.Join(PCIDir, dev, "device"))
+		h.Display = append(h.Display, PCIDevice{Vendor: pciID(vendor), Device: pciID(device)})
+	}
+	return h, nil
+}
+
+func pciID(data []byte) string {
+	return strings.TrimPrefix(strings.TrimSpace(string(data)), "0x")
+}
+
+// chassisKind maps the SMBIOS chassis type to the two kinds the
+// definitions distinguish.
+func chassisKind(code string) string {
+	switch code {
+	case "8", "9", "10", "11", "14", "31", "32":
+		return "laptop"
+	case "3", "4", "5", "6", "7", "13", "15", "16", "35", "36":
+		return "desktop"
+	}
+	return ""
+}
+
+func dnfDropIn(src native.Source) (string, error) {
+	data, err := src.ReadFile(DNFDropInPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func collect[T any](fn func() (T, error)) Section[T] {
+	v, err := fn()
+	if err != nil {
+		var zero T
+		return Section[T]{Value: zero, Error: err.Error()}
+	}
+	return Section[T]{Value: v}
+}
+
+func platform(src native.Source) (Platform, error) {
+	data, err := src.ReadFile(OSReleasePath)
+	if err != nil {
+		return Platform{}, err
+	}
+	values := parseOSRelease(data)
+	arch, err := src.Run("uname", "-m")
+	if err != nil {
+		return Platform{}, err
+	}
+	p := Platform{ID: values["ID"], VersionID: values["VERSION_ID"], PrettyName: values["PRETTY_NAME"], Arch: strings.TrimSpace(string(arch))}
+	if p.ID == "" || p.VersionID == "" {
+		return Platform{}, errors.New(OSReleasePath + " lacks ID or VERSION_ID")
+	}
+	return p, nil
+}
+
+// PackageQueryArgs are the DNF5 arguments for the installed-package query.
+// --cacheonly keeps it off the network; the installed set needs no metadata.
+var PackageQueryArgs = []string{"-q", "--cacheonly", "repoquery", "--installed", "--qf", PackageQueryFormat}
+
+func packages(src native.Source) ([]Package, error) {
+	out, err := src.Run("dnf5", PackageQueryArgs...)
+	if err != nil {
+		return nil, err
+	}
+	return parsePackages(out)
+}
+
+func repositories(src native.Source) ([]Repository, error) {
+	names, err := src.ReadDir(RepoDir)
+	if err != nil {
+		return nil, err
+	}
+	var repos []Repository
+	for _, name := range names {
+		if !strings.HasSuffix(name, ".repo") {
+			continue
+		}
+		data, err := src.ReadFile(filepath.Join(RepoDir, name))
+		if err != nil {
+			return nil, err
+		}
+		sections, err := parseRepoFile(name, data)
+		if err != nil {
+			return nil, err
+		}
+		repos = append(repos, sections...)
+	}
+	// dnf5 config-manager setopt writes overrides here; they win over the
+	// repository file, so the effective values are what matter.
+	overrides, err := src.ReadDir(RepoOverride)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	for _, name := range overrides {
+		if !strings.HasSuffix(name, ".repo") {
+			continue
+		}
+		data, err := src.ReadFile(filepath.Join(RepoOverride, name))
+		if err != nil {
+			return nil, err
+		}
+		sections, err := parseRepoFile(name, data)
+		if err != nil {
+			return nil, err
+		}
+		for _, o := range sections {
+			// DNF uses fnmatch with extended patterns and substitutes variables.
+			// Keep only the syntax whose meaning filepath.Match preserves.
+			if strings.ContainsAny(o.ID, "!()\\$") || strings.Contains(o.ID, "[[") {
+				return nil, fmt.Errorf("%s: unsupported repository override pattern %q; use literal IDs, *, ?, or ordinary bracket classes", name, o.ID)
+			}
+			for i := range repos {
+				match, err := filepath.Match(o.ID, repos[i].ID)
+				if err != nil {
+					return nil, fmt.Errorf("%s: repository override pattern %q: %w", name, o.ID, err)
+				}
+				if match {
+					if repos[i].OverrideOptions == nil {
+						repos[i].OverrideOptions = map[string]string{}
+					}
+					maps.Copy(repos[i].OverrideOptions, o.Options)
+					if value, ok := o.Options["baseurl"]; ok {
+						repos[i].BaseURL = value
+					}
+					if value, ok := o.Options["metalink"]; ok {
+						repos[i].Metalink = value
+					}
+					if value, ok := o.Options["mirrorlist"]; ok {
+						repos[i].Mirrorlist = value
+					}
+					if _, ok := o.Options["gpgkey"]; ok {
+						repos[i].GPGKey = o.GPGKey
+					}
+					repos[i].Priority = cmp.Or(o.Priority, repos[i].Priority)
+					repos[i].GPGCheck = cmp.Or(o.GPGCheck, repos[i].GPGCheck)
+					if _, ok := o.Options["enabled"]; ok {
+						repos[i].Enabled = o.Enabled
+					}
+					repos[i].Overrides = append(repos[i].Overrides, name)
+				}
+			}
+		}
+	}
+	for i := range repos {
+		if repos[i].Enabled {
+			repos[i].KeyFingerprints, repos[i].KeyError = repositoryKeys(src, repos[i].GPGKey)
+		}
+	}
+	return repos, nil
+}
+
+func flatpak(src native.Source) (Flatpak, error) {
+	var f Flatpak
+	out, err := src.Run("flatpak", "remotes", "--system", "--columns=name,url")
+	if err != nil {
+		return f, err
+	}
+	rows, err := parseColumns(out, 2)
+	if err != nil {
+		return f, err
+	}
+	for _, r := range rows {
+		remote := FlatpakRemote{Name: r[0], URL: r[1]}
+		inspectRemoteTrust(src, &remote)
+		f.Remotes = append(f.Remotes, remote)
+	}
+	out, err = src.Run("flatpak", "list", "--system", "--app", "--columns=application,version,origin")
+	if err != nil {
+		return f, err
+	}
+	rows, err = parseColumns(out, 3)
+	if err != nil {
+		return f, err
+	}
+	for _, r := range rows {
+		f.Apps = append(f.Apps, FlatpakApp{ID: r[0], Version: r[1], Origin: r[2]})
+	}
+	return f, nil
+}
+
+// secureBoot reads the EFI variable: four bytes of attributes then the
+// value byte.
+func secureBoot(src native.Source) (string, error) {
+	data, err := src.ReadFile(SecureBootPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return SecureBootUnavailable, nil
+		}
+		return "", err
+	}
+	if len(data) < 5 {
+		return "", errors.New(SecureBootPath + " is shorter than five bytes")
+	}
+	if data[4] == 1 {
+		return SecureBootEnabled, nil
+	}
+	return SecureBootDisabled, nil
+}
+
+func selinux(src native.Source) (string, error) {
+	data, err := src.ReadFile(SELinuxPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return SELinuxDisabled, nil
+		}
+		return "", err
+	}
+	switch strings.TrimSpace(string(data)) {
+	case "1":
+		return SELinuxEnforcing, nil
+	case "0":
+		return SELinuxPermissive, nil
+	}
+	return "", errors.New(SELinuxPath + " holds an unexpected value")
+}
+
+// firewalld returns systemctl's unit state, such as active or inactive.
+// systemctl exits non-zero for every state but active, so the output is
+// read even when the command reports failure.
+func firewalld(src native.Source) (string, error) {
+	out, err := src.Run("systemctl", "is-active", "firewalld")
+	state := strings.TrimSpace(string(out))
+	if state == "" {
+		if err != nil {
+			return "", err
+		}
+		return "", errors.New("systemctl reported no state")
+	}
+	return state, nil
+}
+
+// GitArgs prefixes every Git invocation. --no-optional-locks stops status
+// from refreshing and rewriting the index, so inspection never mutates the
+// checkout.
+func GitArgs(root string, args ...string) []string {
+	return append([]string{"--no-optional-locks", "-C", root}, args...)
+}
+
+func checkout(src native.Source, root string) (Checkout, error) {
+	if root == "" {
+		return Checkout{}, errors.New("no checkout selected")
+	}
+	origin, err := checkoutOrigin(src, root)
+	if err != nil {
+		return Checkout{}, err
+	}
+	normalized, err := selector.NormalizeOrigin(origin)
+	if err != nil {
+		return Checkout{}, err
+	}
+	commit, err := src.Run("git", GitArgs(root, "rev-parse", "HEAD")...)
+	if err != nil {
+		return Checkout{}, err
+	}
+	status, err := src.Run("git", GitArgs(root, "status", "--porcelain")...)
+	if err != nil {
+		return Checkout{}, err
+	}
+	return Checkout{Root: root, Origin: normalized, Commit: strings.TrimSpace(string(commit)), Dirty: strings.TrimSpace(string(status)) != ""}, nil
+}
+
+// checkoutOrigin reads remote.origin.url through the source, following a
+// worktree pointer and its commondir the way selector.CheckoutOrigin does.
+func checkoutOrigin(src native.Source, root string) (string, error) {
+	gitPath := filepath.Join(root, ".git")
+	gitDir := gitPath
+	data, err := src.ReadFile(gitPath)
+	switch {
+	case err == nil:
+		line := strings.TrimSpace(string(data))
+		dir, ok := strings.CutPrefix(line, "gitdir: ")
+		if !ok {
+			return "", fmt.Errorf("%s is not a worktree pointer", gitPath)
+		}
+		gitDir = dir
+		if !filepath.IsAbs(gitDir) {
+			gitDir = filepath.Join(root, gitDir)
+		}
+	case errors.Is(err, syscall.EISDIR):
+	case errors.Is(err, os.ErrNotExist):
+		return "", fmt.Errorf("%s is not a Git checkout", root)
+	default:
+		return "", err
+	}
+	configPath := filepath.Join(gitDir, "config")
+	common, err := src.ReadFile(filepath.Join(gitDir, "commondir"))
+	switch {
+	case err == nil:
+		dir := strings.TrimSpace(string(common))
+		if dir == "" {
+			return "", fmt.Errorf("%s: commondir is empty", gitDir)
+		}
+		if !filepath.IsAbs(dir) {
+			dir = filepath.Join(gitDir, dir)
+		}
+		configPath = filepath.Join(dir, "config")
+	case errors.Is(err, os.ErrNotExist):
+	default:
+		return "", fmt.Errorf("read %s: %w", filepath.Join(gitDir, "commondir"), err)
+	}
+	config, err := src.ReadFile(configPath)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", configPath, err)
+	}
+	origin, err := selector.ParseOriginURL(config)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", configPath, err)
+	}
+	return origin, nil
+}
+
+// Packages reads installed RPMs. Inspection failures remain unknown state.
+func Packages(src native.Source) Section[[]Package] {
+	return collect(func() ([]Package, error) { return packages(src) })
+}
+
+// Repositories reads effective DNF repository settings and their local keys.
+func Repositories(src native.Source) Section[[]Repository] {
+	return collect(func() ([]Repository, error) { return repositories(src) })
+}
+
+// SystemFlatpak reads system applications, remotes and their local trust state.
+func SystemFlatpak(src native.Source) Section[Flatpak] {
+	return collect(func() (Flatpak, error) { return flatpak(src) })
+}

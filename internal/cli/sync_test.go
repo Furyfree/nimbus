@@ -12,7 +12,9 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/native"
+	"github.com/Furyfree/nimbus/internal/native/nativetest"
 	"github.com/Furyfree/nimbus/internal/plan"
 	"github.com/Furyfree/nimbus/internal/state"
 )
@@ -23,7 +25,7 @@ type previewErrorWriter struct {
 }
 
 type streamErrorSource struct {
-	facts.Source
+	native.Source
 	err error
 }
 
@@ -52,9 +54,9 @@ func TestSyncStopsWhenUpgradeAnnouncementFails(t *testing.T) {
 			}
 			var report bytes.Buffer
 			failedOutput := resultErrorWriter{match: "-> upgrade the system", err: syscall.ENOSPC, out: &report}
-			cmd := newSync(&options{json: asJSON})
+			cmd := newUpgrade(&options{json: asJSON})
 			cmd.SilenceErrors, cmd.SilenceUsage = true, true
-			cmd.SetArgs([]string{"--checkout", root, "--machine", "vm", "--yes"})
+			cmd.SetArgs([]string{"--system", "--checkout", root, "--machine", "vm", "--yes"})
 			cmd.SetOut(failedOutput)
 			cmd.SetErr(io.Discard)
 			if asJSON {
@@ -89,25 +91,14 @@ func TestSyncReportsFailedReadOnlyResults(t *testing.T) {
 	}{
 		{"plan", "plan for vm", syncFlags{plan: true}},
 		{"cache note", "from the local metadata cache", syncFlags{plan: true}},
-		{"unchanged", "nothing to do;", syncFlags{noUpgrade: true}},
-		{"waiting plan", "plan for vm", syncFlags{noUpgrade: true}},
-		{"waiting reason", "operations wait for", syncFlags{noUpgrade: true}},
+		{"unchanged", "nothing to do;", syncFlags{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, src := installerFixture(t)
-			if !strings.HasPrefix(tc.name, "waiting ") {
-				if err := os.WriteFile(filepath.Join(root, "profiles/common.toml"), []byte("schema=1\nid=\"common\"\npackages=[]\n"), 0o644); err != nil {
-					t.Fatal(err)
-				}
-			} else {
-				if err := os.WriteFile(filepath.Join(root, "profiles/common.toml"), []byte("schema=1\nid=\"common\"\ncomponents=[\"runtime\"]\n"), 0o644); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(filepath.Join(root, "components/runtime.toml"), []byte("schema=1\nid=\"runtime\"\n[installer]\nurl=\"https://example.invalid/install.sh\"\nbinary=\".local/bin/runtime\"\nconfig=\".config/runtime.toml\"\ninstall=[\"<home>/.local/bin/runtime\",\"install\"]\n"), 0o644); err != nil {
-					t.Fatal(err)
-				}
-				src.Dirs[filepath.Join(os.Getenv("HOME"), ".local/bin")] = []string{"runtime"}
+			if err := os.WriteFile(filepath.Join(root, "profiles/common.toml"), []byte("schema=1\nid='common'\npackages=[]\n"), 0o644); err != nil {
+				t.Fatal(err)
 			}
+
 			var report bytes.Buffer
 			cmd := New()
 			cmd.SetOut(resultErrorWriter{match: tc.output, err: syscall.ENOSPC, out: &report})
@@ -204,12 +195,12 @@ func TestSyncStopsWhenReplannedOutputFails(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			src.Files[facts.DNFDropInPath] = []byte(plan.DNFDropIn(checkout.Definitions()))
+			src.Files[inspect.DNFDropInPath] = []byte(plan.DNFDropIn(checkout.Definitions()))
 			src.Commands["dnf5 --assumeno --cacheonly install demo"] = []byte("Repositories loaded.\nPackage Arch Version Repository Size\nInstalling:\n demo x86_64 1-1 fedora 1 KiB\n\nTransaction Summary:\n")
 			out := &previewErrorWriter{after: -1, err: syscall.ENOSPC}
 			saved := newRecorder
 			t.Cleanup(func() { newRecorder = saved })
-			newRecorder = func(source facts.Source, stage string) func(string, *state.Stage) error {
+			newRecorder = func(source native.Source, stage string) func(string, *state.Stage) error {
 				record := saved(source, stage)
 				return func(digest string, st *state.Stage) error {
 					if err := record(digest, st); err != nil {
@@ -256,10 +247,10 @@ func TestSyncPreservesFailureWhenReportCannotBeWritten(t *testing.T) {
 				t.Fatal(err)
 			}
 			withSource(t, streamErrorSource{src, errors.New("native upgrade failed")})
-			cmd := newSync(&options{json: mode == "json"})
+			cmd := newUpgrade(&options{json: mode == "json"})
 			cmd.SilenceErrors, cmd.SilenceUsage = true, true
-			cmd.SetArgs([]string{"--checkout", root, "--machine", "vm", "--yes"})
-			cmd.SetOut(resultErrorWriter{match: "\nsync summary:\n", err: syscall.ENOSPC})
+			cmd.SetArgs([]string{"--system", "--checkout", root, "--machine", "vm", "--yes"})
+			cmd.SetOut(resultErrorWriter{match: "\nupgrade summary:\n", err: syscall.ENOSPC})
 			cmd.SetErr(io.Discard)
 			if mode == "json" {
 				cmd.SetOut(&previewErrorWriter{err: syscall.ENOSPC})
@@ -274,7 +265,7 @@ func TestSyncPreservesFailureWhenReportCannotBeWritten(t *testing.T) {
 
 func applyEnv(t *testing.T) string {
 	t.Helper()
-	root := repoRoot(t)
+	root := editableCheckout(t)
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("NIMBUS_INSTALL_LOG_DIR", "")
@@ -282,12 +273,12 @@ func applyEnv(t *testing.T) string {
 	stateRoot = filepath.Join(t.TempDir(), "state")
 	t.Cleanup(func() { stateRoot = saved })
 	savedRec := newRecorder
-	newRecorder = func(facts.Source, string) func(string, *state.Stage) error {
+	newRecorder = func(native.Source, string) func(string, *state.Stage) error {
 		return func(d string, st *state.Stage) error { return state.Record(stateRoot, d, st) }
 	}
 	t.Cleanup(func() { newRecorder = savedRec })
 	savedSudo := sudoKeepalive
-	sudoKeepalive = func(facts.Source, io.Writer, io.Writer) (func(), error) { return func() {}, nil }
+	sudoKeepalive = func(native.Source, io.Writer, io.Writer) (func(), error) { return func() {}, nil }
 	t.Cleanup(func() { sudoKeepalive = savedSudo })
 	savedFetch := newFetcher
 	newFetcher = func() func(string) ([]byte, error) {
@@ -340,7 +331,7 @@ func TestSyncStopsAtTheFirstFailedOperation(t *testing.T) {
 	if src.Failures == nil {
 		src.Failures = map[string]string{}
 	}
-	src.Failures[facts.Key("gpg", facts.KeyInspectArgs(key)...)] = "key inspection failed"
+	src.Failures[nativetest.Key("gpg", inspect.KeyInspectArgs(key)...)] = "key inspection failed"
 	withSource(t, src)
 	code, out, _ := run(t, "sync", "-y", "-n", "--checkout", root, "--machine", "laptop")
 	if code != ExitFailure || !strings.Contains(out, "plan for laptop") || !strings.Contains(out, "failed     repository:brave") || !strings.Contains(out, "key inspection failed") {
@@ -369,7 +360,7 @@ func TestSyncJSONReportsFailureWithExitOne(t *testing.T) {
 	src := fixtureSource(t, root)
 	answerLaptopInstall(t, src, root)
 	withSource(t, src)
-	code, out, _ := run(t, "sync", "-n", "--checkout", root, "--machine", "laptop", "--json")
+	code, out, _ := run(t, "sync", "-n", "--checkout", root, "--machine", "laptop", "--json", "--yes")
 	if code != ExitFailure || !strings.Contains(out, `"failed": "repository:brave"`) {
 		t.Fatalf("json failure: %d\n%s", code, out)
 	}
@@ -405,7 +396,7 @@ func TestSyncStopsWhenThePlanChangesWhileTheQuestionIsOpen(t *testing.T) {
 	saved := approver
 	approver = func(_ io.Reader, _ io.Writer, _ string) bool {
 		// Another run finished meanwhile: a desired package is now installed.
-		src.Commands[facts.Key("dnf5", facts.PackageQueryArgs...)] = append(src.Commands[facts.Key("dnf5", facts.PackageQueryArgs...)], []byte("ripgrep|0|15.2.0|1.fc44|x86_64|updates|User\n")...)
+		src.Commands[nativetest.Key("dnf5", inspect.PackageQueryArgs...)] = append(src.Commands[nativetest.Key("dnf5", inspect.PackageQueryArgs...)], []byte("ripgrep|0|15.2.0|1.fc44|x86_64|updates|User\n")...)
 		return true
 	}
 	t.Cleanup(func() { approver = saved })
@@ -422,7 +413,7 @@ func TestSelectionCommandsKeepJSONOnStdout(t *testing.T) {
 	readyRepositories(t, src, root)
 	answerLaptopInstall(t, src, root)
 	withSource(t, src)
-	code, out, errOut := run(t, "components", "add", "docker", "--checkout", root, "--machine", "laptop", "--json")
+	code, out, errOut := run(t, "components", "add", "docker", "--checkout", root, "--machine", "laptop", "--json", "--yes")
 	if code != ExitFailure || !strings.HasPrefix(strings.TrimSpace(out), "{") || !strings.Contains(out, `"failed"`) {
 		t.Fatalf("stdout is not one envelope: %d\n%s", code, out)
 	}
@@ -445,13 +436,13 @@ func TestSyncShowsNewlyResolvedErasureBeforeExecuting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	src.Files[facts.DNFDropInPath] = []byte(plan.DNFDropIn(checkout.Definitions()))
+	src.Files[inspect.DNFDropInPath] = []byte(plan.DNFDropIn(checkout.Definitions()))
 	preview := "dnf5 --assumeno --cacheonly install demo"
 	initial := "Repositories loaded.\nPackage Arch Version Repository Size\nInstalling:\n demo x86_64 1-1 fedora 1 KiB\n"
 	src.Commands[preview] = []byte(initial + "\nTransaction Summary:\n")
 	saved := newRecorder
 	t.Cleanup(func() { newRecorder = saved })
-	newRecorder = func(source facts.Source, stage string) func(string, *state.Stage) error {
+	newRecorder = func(source native.Source, stage string) func(string, *state.Stage) error {
 		record := saved(source, stage)
 		return func(digest string, st *state.Stage) error {
 			if err := record(digest, st); err != nil {
@@ -492,15 +483,15 @@ func TestSyncTracksCheckoutIdentityAcrossApprovalAndReplanning(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				src.Files[facts.DNFDropInPath] = []byte(plan.DNFDropIn(selected.Checkout.Definitions()))
+				src.Files[inspect.DNFDropInPath] = []byte(plan.DNFDropIn(selected.Checkout.Definitions()))
 				change := func() {
 					switch field {
 					case "commit":
-						src.Commands[facts.Key("git", facts.GitArgs(root, "rev-parse", "HEAD")...)] = []byte("changed-head\n")
+						src.Commands[nativetest.Key("git", inspect.GitArgs(root, "rev-parse", "HEAD")...)] = []byte("changed-head\n")
 					case "origin":
 						src.Files[filepath.Join(root, ".git/config")] = []byte("[remote \"origin\"]\nurl=https://example.invalid/other\n")
 					case "dirty":
-						src.Commands[facts.Key("git", facts.GitArgs(root, "status", "--porcelain")...)] = []byte(" M README.md\n")
+						src.Commands[nativetest.Key("git", inspect.GitArgs(root, "status", "--porcelain")...)] = []byte(" M README.md\n")
 					}
 				}
 				saved := approver
@@ -515,7 +506,7 @@ func TestSyncTracksCheckoutIdentityAcrossApprovalAndReplanning(t *testing.T) {
 				}
 				if phase == "replan" {
 					record := newRecorder
-					newRecorder = func(source facts.Source, stage string) func(string, *state.Stage) error {
+					newRecorder = func(source native.Source, stage string) func(string, *state.Stage) error {
 						save := record(source, stage)
 						return func(digest string, st *state.Stage) error { err := save(digest, st); change(); return err }
 					}
@@ -554,7 +545,7 @@ func TestSyncIncompleteJSONNamesBlockedOperation(t *testing.T) {
 	src := fixtureSource(t, root)
 	withForeignTerra(t, src)
 	withSource(t, src)
-	code, out, errOut := run(t, "sync", "-n", "--json", "--checkout", root, "--machine", "laptop")
+	code, out, errOut := run(t, "sync", "-n", "--json", "--yes", "--checkout", root, "--machine", "laptop")
 	if code != ExitFailure || !strings.Contains(out, "terra.repo") {
 		t.Fatalf("blocked reason missing: %d %s%s", code, out, errOut)
 	}

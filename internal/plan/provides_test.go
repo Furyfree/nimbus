@@ -7,7 +7,8 @@ import (
 	"testing"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/native/nativetest"
 )
 
 func TestProvidesRequireEvidenceForTheReviewedPackage(t *testing.T) {
@@ -68,18 +69,18 @@ func TestProvidesRequireEvidenceForTheReviewedPackage(t *testing.T) {
 						for _, name := range tt.requests {
 							desired.Packages = append(desired.Packages, definitions.ResolvedPackage{Canonical: "dnf:" + name, Prefix: "dnf", Name: name})
 						}
-						src := &facts.FakeSource{Commands: map[string][]byte{
-							facts.Key("dnf5", append([]string{"--assumeno", "--cacheonly", "install"}, tt.requests...)...): previewText(rows),
-							facts.Key("dnf5", "--cacheonly", "check-upgrade"):                                              nil,
+						src := &nativetest.FakeSource{Commands: map[string][]byte{
+							nativetest.Key("dnf5", append([]string{"--assumeno", "--cacheonly", "install"}, tt.requests...)...): previewText(rows),
+							nativetest.Key("dnf5", "--cacheonly", "check-upgrade"):                                              nil,
 						}, Failures: map[string]string{}}
 						for request, evidence := range tt.evidence {
-							key := facts.Key("dnf5", "--cacheonly", "repoquery", "--available", "--whatprovides", request, "--queryformat", "%{name}|%{arch}|%{evr}|%{repoid}\\n")
+							key := nativetest.Key("dnf5", "--cacheonly", "repoquery", "--available", "--whatprovides", request, "--queryformat", "%{name}|%{arch}|%{evr}|%{repoid}\\n")
 							src.Commands[key] = []byte(evidence)
 							if tt.queryErr != "" {
 								src.Failures[key] = tt.queryErr
 							}
 						}
-						p, err := Build(Inputs{Resolved: desired, Facts: &facts.Facts{}, Source: src})
+						p, err := Build(Inputs{Resolved: desired, Facts: &inspect.Facts{}, Source: src})
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -117,11 +118,11 @@ Operation aborted by the user.
 	for _, name := range []string{"clang", "gcc", "gcc-c++", "make"} {
 		desired.Packages = append(desired.Packages, definitions.ResolvedPackage{Canonical: "dnf:" + name, Prefix: "dnf", Name: name})
 	}
-	src := &facts.FakeSource{Commands: map[string][]byte{
-		facts.Key("dnf5", "--assumeno", "--cacheonly", "install", "clang", "gcc", "gcc-c++", "make"): []byte(preview),
-		facts.Key("dnf5", "--cacheonly", "check-upgrade"):                                            nil,
+	src := &nativetest.FakeSource{Commands: map[string][]byte{
+		nativetest.Key("dnf5", "--assumeno", "--cacheonly", "install", "clang", "gcc", "gcc-c++", "make"): []byte(preview),
+		nativetest.Key("dnf5", "--cacheonly", "check-upgrade"):                                            nil,
 	}}
-	p, err := Build(Inputs{Resolved: desired, Facts: &facts.Facts{}, Source: src})
+	p, err := Build(Inputs{Resolved: desired, Facts: &inspect.Facts{}, Source: src})
 	if err != nil {
 		t.Fatal(err)
 	}

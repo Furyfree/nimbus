@@ -1,13 +1,9 @@
 package cli
 
 import (
-	"bufio"
-	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,205 +13,82 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Furyfree/nimbus/internal/apply"
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/native"
 	"github.com/Furyfree/nimbus/internal/plan"
+	"github.com/Furyfree/nimbus/internal/snapper"
 	"github.com/Furyfree/nimbus/internal/state"
 	"github.com/Furyfree/nimbus/internal/version"
 )
 
-// Test hooks. The real recorder runs the hidden privileged action through
-// sudo; the real fetcher uses HTTP.
-var (
-	newFetcher = func() func(string) ([]byte, error) {
-		client := &http.Client{Timeout: 5 * time.Minute}
-		return func(url string) ([]byte, error) {
-			resp, err := client.Get(url)
-			if err != nil {
-				return nil, err
-			}
-			defer func() { _ = resp.Body.Close() }()
-			if resp.StatusCode != http.StatusOK {
-				return nil, fmt.Errorf("%s: HTTP %s", url, resp.Status)
-			}
-			return io.ReadAll(io.LimitReader(resp.Body, 256<<20))
-		}
-	}
-	newRecorder = func(src facts.Source, stage string) func(string, *state.Stage) error {
-		return func(digest string, st *state.Stage) error {
-			exe, err := os.Executable()
-			if err != nil {
-				return err
-			}
-			data, err := json.Marshal(st)
-			if err != nil {
-				return err
-			}
-			path := filepath.Join(stage, "receipts-"+strings.TrimPrefix(digest, "sha256:")[:12]+".json")
-			if err := os.WriteFile(path, data, 0o644); err != nil {
-				return err
-			}
-			defer func() { _ = os.Remove(path) }()
-			_, err = src.Run("sudo", exe, "internal", "record", "--plan", digest, "--stage", path)
-			return err
-		}
-	}
-	// sudoKeepalive asks for the sudo password once, before the first
-	// privileged command, and renews the credential while apply runs, so a
-	// long transaction does not ask again. Tests replace it.
-	sudoKeepalive = func(src facts.Source, out, errOut io.Writer) (func(), error) {
-		if _, err := src.Run("sudo", "-n", "-v"); err != nil {
-			if _, err := fmt.Fprintln(out, "sudo is needed for the privileged commands; the password is asked once"); err != nil {
-				return nil, err
-			}
-			if err := src.Stream(out, errOut, "sudo", "-v"); err != nil {
-				return nil, err
-			}
-		}
-		done := make(chan struct{})
-		stopped := make(chan struct{})
-		go func() {
-			defer close(stopped)
-			ticks := time.Tick(time.Minute)
-			for {
-				select {
-				case <-done:
-					return
-				case <-ticks:
-					_, _ = src.Run("sudo", "-n", "-v")
-				}
-			}
-		}()
-		return func() { close(done); <-stopped }, nil
-	}
-	// approver reads the interactive answer. Tests replace it.
-	approver = func(in io.Reader, out io.Writer, _ string) bool {
-		if _, err := fmt.Fprint(out, "Proceed? [Y/n] "); err != nil {
-			return false
-		}
-		reader := bufio.NewReader(in)
-		line, err := reader.ReadString('\n')
-		if err != nil && (!errors.Is(err, io.EOF) || strings.TrimSpace(line) == "") {
-			return false
-		}
-		answer := strings.TrimSpace(strings.ToLower(line))
-		return (answer == "") || answer == "y" || answer == "yes"
-	}
-)
-
 type syncFlags struct {
-	plan, yes, noUpgrade, prune bool
-	deferUser, userOnly         bool
-	approvedDigest              string
-	approvedCheckout            *facts.Checkout
-	definitionsDigest           string
+	plan, yes, systemUpgrade, prune bool
+	approvedDigest                  string
+	approvedCheckout                *inspect.Checkout
+	definitionsDigest               string
 }
 
 func newSync(opts *options) *cobra.Command {
 	var flags machineFlags
 	var sf syncFlags
+	var upgrade, noUpgrade bool
 	cmd := &cobra.Command{
-		Use:   "sync [-p] [-y] [-n] [-r]",
-		Short: "Make the system match the definitions and bring it current",
-		Long: `Sync is the one command that changes the system. It shows what it will do,
-asks once, and runs: prepares the declared sources, installs and removes
-packages and Flatpaks as the definitions say, then upgrades the system with
-dnf5 upgrade and flatpak update. Native tools print their own progress. At the
-end it reports what differed from the plan and records receipts under
-/var/lib/nimbus.
-
-  -p, --plan        show the plan and change nothing
-  -y, --yes         do not ask
-  -n, --no-upgrade  only the definition changes, no system updates
-  -r, --prune       also remove the unmanaged packages the plan lists
-  -j, --json        machine-readable output; asks nothing`,
+		Use: "sync", Short: "Make the system match the definitions",
+		Long: "Show and apply system changes from the selected definitions. Use --upgrade to run Topgrade after reconciliation succeeds. --json controls output only; mutation still requires --yes.",
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSync(cmd, opts, flags, sf)
+			if upgrade && noUpgrade {
+				return usageError{errors.New("--upgrade and --no-upgrade exclude each other")}
+			}
+			if upgrade && opts.json {
+				return usageError{errors.New("sync --upgrade delegates interactive output to Topgrade and does not support --json")}
+			}
+			if upgrade && os.Getenv(upgradeActive) != "" {
+				return errors.New("recursive upgrade refused; Topgrade must call nimbus upgrade --system")
+			}
+			if err := runSync(cmd, opts, flags, sf); err != nil {
+				return err
+			}
+			if upgrade {
+				return runTopgrade(cmd, nil, sf.plan, flags)
+			}
+			return nil
 		},
 	}
 	addMachineFlags(&flags, cmd.Flags())
 	cmd.Flags().BoolVarP(&sf.plan, "plan", "p", false, "show the plan and change nothing")
-	cmd.Flags().BoolVarP(&sf.yes, "yes", "y", false, "do not ask")
-	cmd.Flags().BoolVarP(&sf.noUpgrade, "no-upgrade", "n", false, "only the definition changes, no system updates")
+	cmd.Flags().BoolVarP(&sf.yes, "yes", "y", false, "approve the displayed changes")
+	cmd.Flags().BoolVar(&upgrade, "upgrade", false, "run Topgrade after a successful sync")
+	cmd.Flags().BoolVarP(&noUpgrade, "no-upgrade", "n", false, "compatibility alias; sync already omits general updates")
+	_ = cmd.Flags().MarkHidden("no-upgrade")
 	cmd.Flags().BoolVarP(&sf.prune, "prune", "r", false, "also remove the unmanaged packages the plan lists")
 	return cmd
-}
-
-type syncResult struct {
-	Digest      string          `json:"digest"`
-	Executed    []string        `json:"executed"`
-	Differences []string        `json:"differences"`
-	Upgraded    bool            `json:"upgraded"`
-	Reboot      bool            `json:"reboot_required,omitzero"`
-	Logout      bool            `json:"logout_required,omitzero"`
-	Failed      string          `json:"failed,omitempty"`
-	Error       string          `json:"error,omitempty"`
-	Steps       []runStep       `json:"steps"`
-	Failures    []apply.Failure `json:"failures,omitempty"`
 }
 
 func runSync(cmd *cobra.Command, opts *options, flags machineFlags, sf syncFlags) error {
 	return runSyncWith(cmd, opts, flags, sf, nil)
 }
 
-// runSyncWith runs sync: refresh, plan, ask once, prepare sources, install,
+// runSyncWith runs sync: refresh, plan, approve, prepare sources, install,
 // upgrade, report. A lock already held by the caller (the selection
 // commands hold it across the manifest write) remains owned by the caller.
 func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncFlags, held *apply.Lock) (retErr error) {
+	if opts.json && !sf.plan && !sf.yes {
+		return usageError{errors.New("mutation with --json requires --yes; use --plan to inspect changes")}
+	}
+
 	out := cmd.OutOrStdout()
 	result := syncResult{Executed: []string{}, Differences: []string{}}
 	phase := "preflight"
 	var currentPlan *plan.Plan
 	if !sf.plan {
 		defer func() {
-			if retErr != nil && result.Error == "" {
-				result.Failed, result.Error = phase, retErr.Error()
-			}
-			for _, id := range result.Executed {
-				result.Steps = append(result.Steps, runStep{Name: id, Status: "succeeded"})
-			}
-			failedIDs := map[string]bool{}
-			for _, failure := range result.Failures {
-				failedIDs[failure.ID] = true
-				result.Steps = append(result.Steps, runStep{Name: failure.ID, Status: "failed", Detail: failure.Error})
-			}
-			if result.Error != "" && !failedIDs[result.Failed] {
-				failedIDs[result.Failed] = true
-				result.Steps = append(result.Steps, runStep{Name: result.Failed, Status: "failed", Detail: result.Error})
-			}
-			if currentPlan != nil {
-				for _, op := range syncOperations(currentPlan, sf).Operations {
-					if op.Action == plan.ActionKeep || slices.Contains(result.Executed, op.ID) || failedIDs[op.ID] {
-						continue
-					}
-					detail := "an earlier stage did not complete"
-					if op.Blocked != "" {
-						detail = "blocked: " + op.Blocked
-					} else if op.After != "" {
-						detail = "waiting for " + describeAfter(currentPlan, op.After)
-					}
-					result.Steps = append(result.Steps, runStep{Name: op.ID, Status: "skipped", Detail: detail})
-				}
-			}
+			result.finish(phase, retErr, currentPlan)
 			var reportErr error
 			if opts.json {
 				reportErr = writeJSON(out, result, nil)
 			} else {
-				var summary bytes.Buffer
-				_ = renderRunSummary(&summary, "sync", result.Steps)
-				if result.Reboot {
-					fmt.Fprintln(&summary, "Reboot required to use the configured boot target or greeter.")
-				}
-				if result.Logout {
-					fmt.Fprintln(&summary, "Log out and log in again to use changed group memberships.")
-				}
-				if len(result.Differences) > 0 {
-					fmt.Fprintln(&summary, "differences from the plan:")
-					for _, d := range result.Differences {
-						fmt.Fprintf(&summary, "  %s\n", d)
-					}
-				}
-				_, reportErr = summary.WriteTo(out)
+				reportErr = result.render(out, sf.systemUpgrade)
 			}
 			if reportErr != nil {
 				if errors.Is(retErr, reported{}) {
@@ -235,7 +108,6 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	execOut := out
 	if opts.json {
 		execOut = errOut
-		sf.yes = true
 	}
 	s, err := loadSelected(flags)
 	if err != nil {
@@ -246,17 +118,15 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 		src = installSource{src, opts.installLog, unlogged(cmd.ErrOrStderr())}
 	}
 	if !sf.plan {
-		if err := facts.CheckPlatform(src, s.Checkout.Definitions().Compatibility.Fedora); err != nil {
+		if err := inspect.CheckPlatform(src, s.Checkout.Definitions().Compatibility.Fedora); err != nil {
 			return err
 		}
 	}
 	if sf.definitionsDigest != "" && s.Checkout.Digest() != sf.definitionsDigest {
 		return errors.New("definitions changed during initialization; run init again")
 	}
-	// The run refreshes metadata first so the plan and the upgrade are
-	// exact; the cache is the user's and needs no privilege. Plan-only
-	// reads the cache as it is and touches nothing.
-	if !sf.plan && sf.approvedDigest == "" && !sf.userOnly {
+	// Execution refreshes native metadata; previews only read the cache.
+	if !sf.plan && sf.approvedDigest == "" {
 		if _, err := src.Run("dnf5", "makecache"); err != nil {
 			if _, writeErr := fmt.Fprintf(errOut, "metadata not refreshed: %v\n", err); writeErr != nil {
 				return errors.Join(err, writeErr)
@@ -267,6 +137,9 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	p, _, err := planWithState(s, src, sf.prune)
 	if err != nil {
 		return err
+	}
+	if sf.systemUpgrade {
+		p = systemUpgradePlan(p)
 	}
 	currentPlan = p
 	result.Digest = p.Digest
@@ -279,7 +152,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 				return err
 			}
 		} else {
-			if _, err := out.Write(renderPlan(p, sf.prune, !sf.noUpgrade)); err != nil {
+			if _, err := out.Write(renderPlan(p, sf.prune, sf.systemUpgrade)); err != nil {
 				return fmt.Errorf("show plan: %w", err)
 			}
 			if _, err := fmt.Fprintln(out, "\nfrom the local metadata cache; sync refreshes it before it runs"); err != nil {
@@ -299,24 +172,23 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	}
 	if !p.Complete {
 		if !opts.json {
-			if _, err := out.Write(renderPlan(p, sf.prune, !sf.noUpgrade)); err != nil {
+			if _, err := out.Write(renderPlan(p, sf.prune, sf.systemUpgrade)); err != nil {
 				return fmt.Errorf("show plan: %w", err)
 			}
 		}
 		return errors.New("the plan has problems; see above")
 	}
-	if nothingToRun(syncOperations(p, sf)) && sf.noUpgrade {
+	if nothingToRun(p) && !sf.systemUpgrade {
 		if opts.json {
 			return nil
 		}
 		_, err := fmt.Fprintln(out, "nothing to do; the system matches the definitions")
 		return err
 	}
-	// Everything left waits for something outside this run, such as the
-	// Chezmoi handoff: say so and touch nothing, sudo included.
-	if runnable(syncOperations(p, sf)) == 0 && sf.noUpgrade {
+	// Report unresolved dependencies without starting a partial run.
+	if runnable(p) == 0 && !sf.systemUpgrade && !snapshotConfigurationPending(p) {
 		if opts.json {
-			if !sf.deferUser && !nothingToRun(syncOperations(p, sf)) {
+			if !nothingToRun(p) {
 				return errors.New(waitingLine(p))
 			}
 			return nil
@@ -327,19 +199,18 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 		if _, err := fmt.Fprintln(out, "\n"+waitingLine(p)); err != nil {
 			return err
 		}
-		if !sf.deferUser {
-			return errors.New(waitingLine(p))
-		}
-		return nil
+		return errors.New(waitingLine(p))
 	}
 	// One decision, at the start: the plan as it is known now. On a fresh
 	// host that names the packages; DNF prints the exact transaction as it
 	// starts, and the report at the end names what differed.
 	if !opts.json {
-		if _, err := out.Write(renderPlan(p, sf.prune, !sf.noUpgrade)); err != nil {
+		if _, err := out.Write(renderPlan(p, sf.prune, sf.systemUpgrade)); err != nil {
 			return fmt.Errorf("show plan: %w", err)
 		}
-		if !sf.yes && !approver(cmd.InOrStdin(), out, p.Digest) {
+	}
+	if !sf.yes {
+		if !approver(cmd.InOrStdin(), out, p.Digest) {
 			return errors.New("not applied")
 		}
 	}
@@ -370,13 +241,16 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	if err != nil {
 		return err
 	}
+	if sf.systemUpgrade {
+		fresh = systemUpgradePlan(fresh)
+	}
 	if !sameCheckoutIdentity(fresh.Checkout, p.Checkout) {
 		return errors.New("checkout identity changed while the question was open; run sync again")
 	}
 	if fresh.Digest != p.Digest {
 		return errors.New("the system changed while the question was open and the plan with it; run sync again")
 	}
-	if err := facts.CheckPlatform(src, freshSelection.Checkout.Definitions().Compatibility.Fedora); err != nil {
+	if err := inspect.CheckPlatform(src, freshSelection.Checkout.Definitions().Compatibility.Fedora); err != nil {
 		return err
 	}
 	p, currentPlan = fresh, fresh
@@ -388,24 +262,66 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	}
 	// User-scope steps run without sudo; the credential is primed only when
 	// a privileged command, a receipt, or the upgrade will need it.
-	if !sf.userOnly && needsSudo(syncOperations(p, sf), sf.noUpgrade, applied.Present) {
+	snapshotWork := p.Snapshots != nil && (sf.systemUpgrade || systemChanges(p))
+	if needsSudo(p, sf.systemUpgrade, applied.Present) || snapshotWork {
 		stopSudo, err := sudoKeepalive(src, execOut, errOut)
 		if err != nil {
 			return err
 		}
 		defer stopSudo()
 	}
-	var upgradePreview *plan.Transaction
-	if p.Updates.Unavailable == "" {
-		upgradePreview = &plan.Transaction{}
-		for _, row := range p.Updates.Available {
-			upgradePreview.Packages = append(upgradePreview.Packages, plan.TxPackage{Name: row.Name, Arch: row.Arch, EVR: row.EVR, Repository: row.Repository, Section: "upgrading"})
+	if snapshotWork && !p.Snapshots.Setup {
+		phase = "snapper"
+		if _, err := fmt.Fprintln(execOut, "-> create Snapper before snapshot"); err != nil {
+			return err
+		}
+		pre, err := snapper.Create(src, "pre", "")
+		if err != nil {
+			return fmt.Errorf("create before snapshot; system changes stopped: %w", err)
+		}
+		result.Steps = append(result.Steps, runStep{Name: "snapper pre", Status: "succeeded", Detail: pre})
+		defer func() {
+			if retErr != nil && result.Error == "" {
+				result.Failed, result.Error = phase, retErr.Error()
+			}
+			post, postErr := snapper.Create(src, "post", pre)
+			cleanupErr := snapper.Cleanup(src)
+			for _, step := range []struct {
+				name, detail string
+				err          error
+			}{
+				{"snapper post", post, postErr}, {"snapper cleanup", "number retention", cleanupErr},
+			} {
+				if step.err == nil {
+					result.Steps = append(result.Steps, runStep{Name: step.name, Status: "succeeded", Detail: step.detail})
+				} else {
+					result.Failures = append(result.Failures, apply.Failure{ID: step.name, Error: step.err.Error()})
+					if result.Error == "" {
+						result.Failed, result.Error = step.name, step.err.Error()
+					}
+					retErr = errors.Join(retErr, step.err)
+				}
+			}
+		}()
+		if err := p.Snapshots.Configure(src); err != nil {
+			return err
+		}
+		if changes := p.Snapshots.Changes(); len(changes) > 0 {
+			result.Steps = append(result.Steps, runStep{Name: "snapper settings", Status: "succeeded", Detail: strings.Join(changes, ", ")})
 		}
 	}
 	options := func(p *plan.Plan) apply.Options {
+		var upgradePreview *plan.Transaction
+		if p.Updates.Unavailable == "" {
+			upgradePreview = &plan.Transaction{}
+			for _, row := range p.Updates.Available {
+				upgradePreview.Packages = append(upgradePreview.Packages, plan.TxPackage{Name: row.Name, Arch: row.Arch, EVR: row.EVR, Repository: row.Repository, Section: "upgrading"})
+			}
+		}
 		return apply.Options{
-			Source: src, Fetch: newFetcher(), Record: newRecorder(src, stage), Keys: apply.ExtractKeysWithRPM2Archive(src),
-			Stage: stage, Checkout: s.Checkout, Root: s.Checkout.Definitions(), FirstApply: !applied.Present && !sf.userOnly,
+			Constraints: s.Resolved.Constraints,
+			Source:      src, Fetch: newFetcher(), Record: newRecorder(src, stage), Keys: apply.ExtractKeysWithRPM2Archive(src),
+			Stage: stage, Checkout: s.Checkout, Root: s.Checkout.Definitions(), FirstApply: !applied.Present,
 			Engine: version.Engine, Definitions: state.Definitions{Origin: p.Checkout.Origin, Commit: p.Checkout.Commit, Dirty: p.Checkout.Dirty, Digest: p.Definitions},
 			Out: execOut, ErrOut: errOut, UpgradePreview: upgradePreview,
 		}
@@ -417,7 +333,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	// Sources first, so the transactions that follow resolve against them;
 	// then whatever the plan holds, in passes until nothing waits.
 	phase = "apply"
-	for pass := range 4 {
+	for pass := 0; !sf.systemUpgrade && pass < 4; pass++ {
 		if pass > 0 {
 			if p, applied, err = replanUnchanged(s, flags, src, sf.prune, approvedCheckout); err != nil {
 				return err
@@ -438,9 +354,6 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 		}
 		currentPlan = p
 		prep := sourceOperations(p)
-		if sf.userOnly {
-			prep = nil
-		}
 		if len(prep) > 0 {
 			r := apply.Run(&plan.Plan{Machine: p.Machine, Definitions: p.Definitions, Checkout: p.Checkout, Complete: true, Digest: p.Digest, Operations: prep}, options(p))
 			result.Reboot = result.Reboot || r.Reboot
@@ -474,13 +387,14 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			}
 		}
 		currentPlan = p
-		executable := syncOperations(p, sf)
+		executable := *p
+		executable.Operations = slices.Clone(p.Operations)
 		for i := range executable.Operations {
 			if executable.Operations[i].Kind == plan.KindUser && slices.Contains(result.Executed, executable.Operations[i].ID) {
 				executable.Operations[i].Action = plan.ActionKeep
 			}
 		}
-		r := apply.Run(executable, options(p))
+		r := apply.Run(&executable, options(p))
 		result.Reboot = result.Reboot || r.Reboot
 		result.Logout = result.Logout || r.Logout
 		result.Executed = append(result.Executed, r.Executed...)
@@ -493,7 +407,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			}
 			break
 		}
-		if !sf.userOnly && p.RepositoryReconciliation != "" {
+		if p.RepositoryReconciliation != "" {
 			if err := reconcileRepositories(s, flags, src, approvedCheckout, options, execOut, &result); err != nil {
 				return err
 			}
@@ -502,7 +416,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			break
 		}
 	}
-	if !sf.noUpgrade {
+	if sf.systemUpgrade {
 		phase = "upgrade"
 		if _, err := fmt.Fprintln(execOut, "-> upgrade the system"); err != nil {
 			return err
@@ -524,17 +438,53 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	if result.Error != "" {
 		return reported{}
 	}
-	for _, op := range syncOperations(p, sf).Operations {
+	for _, op := range p.Operations {
 		if op.After != "" && op.Action != plan.ActionKeep && !slices.Contains(result.Executed, op.ID) {
-			return fail("dependencies", waitingLine(syncOperations(p, sf)))
+			return fail("dependencies", waitingLine(p))
+		}
+	}
+	if p.Snapshots != nil {
+		phase = "snapper"
+		if p.Snapshots.Setup {
+			if _, err := fmt.Fprintln(execOut, "-> initialize Snapper root configuration (this setup run was not snapshotted)"); err != nil {
+				return err
+			}
+			if err := p.Snapshots.Configure(src); err != nil {
+				return err
+			}
+			result.Steps = append(result.Steps, runStep{Name: "snapper setup", Status: "succeeded"})
+		}
+		// Re-read native state rather than claiming configuration from command exit alone.
+		var template []byte
+		for _, file := range s.Resolved.Files {
+			if file.Target == snapper.Template {
+				template = file.Content
+			}
+		}
+		configured, err := snapper.Inspect(src, template)
+		if err != nil {
+			return err
+		}
+		if configured.Setup || len(configured.Changes()) != 0 {
+			return errors.New("Snapper configuration did not converge; run sync again")
 		}
 	}
 	return nil
 }
 
+func snapshotConfigurationPending(p *plan.Plan) bool {
+	return p.Snapshots != nil && (p.Snapshots.Setup || len(p.Snapshots.Changes()) > 0)
+}
+
+func systemChanges(p *plan.Plan) bool {
+	return snapshotConfigurationPending(p) || slices.ContainsFunc(p.Operations, func(op plan.Operation) bool {
+		return op.Kind != plan.KindUser && op.Action != plan.ActionKeep && op.Action != plan.ActionAdopt && op.Action != plan.ActionRetire
+	})
+}
+
 // replanUnchanged refreshes facts while requiring the approved definitions
 // and selection to remain unchanged for the entire run.
-func replanUnchanged(s *selected, flags machineFlags, src facts.Source, prune bool, approvedCheckout facts.Checkout) (*plan.Plan, *state.Applied, error) {
+func replanUnchanged(s *selected, flags machineFlags, src native.Source, prune bool, approvedCheckout inspect.Checkout) (*plan.Plan, *state.Applied, error) {
 	fresh, err := loadSelected(flags)
 	if err != nil {
 		return nil, nil, err
@@ -552,28 +502,20 @@ func replanUnchanged(s *selected, flags machineFlags, src facts.Source, prune bo
 	return p, applied, nil
 }
 
-func sameCheckoutIdentity(a, b facts.Checkout) bool {
+func sameCheckoutIdentity(a, b inspect.Checkout) bool {
 	return a.Origin != "" && a.Commit != "" && a.Root == b.Root && a.Origin == b.Origin && a.Commit == b.Commit
 }
 
-func syncOperations(p *plan.Plan, sf syncFlags) *plan.Plan {
-	copy := *p
-	copy.Operations = nil
-	for _, op := range p.Operations {
-		dependentUser := op.Kind == plan.KindUser && (strings.HasPrefix(op.ID, "package:cargo:") || strings.HasSuffix(op.ID, ":install"))
-		if sf.deferUser && dependentUser || sf.userOnly && op.Kind != plan.KindUser {
-			continue
-		}
-		copy.Operations = append(copy.Operations, op)
-	}
-	return &copy
-}
-
 // sourceOperations are the runnable operations that prepare package
-// sources: the DNF drop-in, repositories, and Flatpak remotes.
+// sources and constraints: the DNF drop-in, version locks, repositories,
+// and Flatpak remotes.
 func sourceOperations(p *plan.Plan) []plan.Operation {
 	var ops []plan.Operation
 	for _, op := range p.Operations {
+		if plan.IsConstraintOperation(op) && op.Blocked == "" && op.Action != plan.ActionKeep {
+			ops = append(ops, op)
+			continue
+		}
 		switch op.Kind {
 		case plan.KindDNFConfig, plan.KindRepository, plan.KindFlatpakRemote:
 			if op.After == "" && op.Blocked == "" && op.Action != plan.ActionKeep && op.Action != plan.ActionRemove && op.Action != plan.ActionRetire {
@@ -605,8 +547,8 @@ func runnable(p *plan.Plan) int {
 // needsSudo reports whether the run will invoke sudo: the upgrade, the
 // baseline of a first run, or any operation that is not a user-scope step,
 // since those run privileged commands or record receipts.
-func needsSudo(p *plan.Plan, noUpgrade, statePresent bool) bool {
-	if !noUpgrade || !statePresent {
+func needsSudo(p *plan.Plan, systemUpgrade, statePresent bool) bool {
+	if systemUpgrade || !statePresent {
 		return true
 	}
 	return slices.ContainsFunc(p.Operations, func(op plan.Operation) bool { return op.Action != plan.ActionKeep && op.Kind != plan.KindUser })
@@ -633,16 +575,16 @@ func waitingLine(p *plan.Plan) string {
 }
 
 func nothingToRun(p *plan.Plan) bool {
-	return !slices.ContainsFunc(p.Operations, func(op plan.Operation) bool { return op.Action != plan.ActionKeep })
+	return !snapshotConfigurationPending(p) && !slices.ContainsFunc(p.Operations, func(op plan.Operation) bool { return op.Action != plan.ActionKeep })
 }
 
 // planWithState builds the plan with the applied state read as the user.
-func planWithState(s *selected, src facts.Source, prune bool) (*plan.Plan, *state.Applied, error) {
+func planWithState(s *selected, src native.Source, prune bool) (*plan.Plan, *state.Applied, error) {
 	applied, err := state.Read(stateRoot)
 	if err != nil {
 		return nil, nil, err
 	}
-	f := facts.Inspect(src, s.Root)
+	f := inspect.Inspect(src, s.Root)
 	p, err := plan.Build(plan.Inputs{Resolved: s.Resolved, Root: s.Checkout.Definitions(), Definitions: s.Checkout.Digest(), Facts: f, Applied: applied, Source: src, Prune: prune})
 	if err != nil {
 		return nil, nil, err

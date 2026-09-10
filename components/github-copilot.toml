@@ -1,0 +1,7 @@
+# COPR supplies the helper; the proprietary app is fetched from GitHub.
+schema = 1
+id = "github-copilot"
+requires = []
+conflicts = []
+packages = ["copilot-installer:github-copilot-installer"]
+removes = []

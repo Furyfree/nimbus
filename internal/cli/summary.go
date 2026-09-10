@@ -9,6 +9,9 @@ import (
 	"sync"
 	"time"
 	"unicode"
+
+	"github.com/Furyfree/nimbus/internal/apply"
+	"github.com/Furyfree/nimbus/internal/plan"
 )
 
 type runStep struct {
@@ -91,6 +94,74 @@ func renderRunSummary(out io.Writer, command string, steps []runStep) error {
 			fmt.Fprintf(&summary, ": %s", step.Detail)
 		}
 		fmt.Fprintln(&summary)
+	}
+	_, err := summary.WriteTo(out)
+	return err
+}
+
+type syncResult struct {
+	Digest      string          `json:"digest"`
+	Executed    []string        `json:"executed"`
+	Differences []string        `json:"differences"`
+	Upgraded    bool            `json:"upgraded"`
+	Reboot      bool            `json:"reboot_required,omitzero"`
+	Logout      bool            `json:"logout_required,omitzero"`
+	Failed      string          `json:"failed,omitempty"`
+	Error       string          `json:"error,omitempty"`
+	Steps       []runStep       `json:"steps"`
+	Failures    []apply.Failure `json:"failures,omitempty"`
+}
+
+func (result *syncResult) finish(phase string, retErr error, currentPlan *plan.Plan) {
+	if retErr != nil && result.Error == "" {
+		result.Failed, result.Error = phase, retErr.Error()
+	}
+	for _, id := range result.Executed {
+		result.Steps = append(result.Steps, runStep{Name: id, Status: "succeeded"})
+	}
+	failedIDs := map[string]bool{}
+	for _, failure := range result.Failures {
+		failedIDs[failure.ID] = true
+		result.Steps = append(result.Steps, runStep{Name: failure.ID, Status: "failed", Detail: failure.Error})
+	}
+	if result.Error != "" && !failedIDs[result.Failed] {
+		failedIDs[result.Failed] = true
+		result.Steps = append(result.Steps, runStep{Name: result.Failed, Status: "failed", Detail: result.Error})
+	}
+	if currentPlan != nil {
+		for _, op := range currentPlan.Operations {
+			if op.Action == plan.ActionKeep || slices.Contains(result.Executed, op.ID) || failedIDs[op.ID] {
+				continue
+			}
+			detail := "an earlier stage did not complete"
+			if op.Blocked != "" {
+				detail = "blocked: " + op.Blocked
+			} else if op.After != "" {
+				detail = "waiting for " + describeAfter(currentPlan, op.After)
+			}
+			result.Steps = append(result.Steps, runStep{Name: op.ID, Status: "skipped", Detail: detail})
+		}
+	}
+}
+
+func (result *syncResult) render(out io.Writer, systemUpgrade bool) error {
+	var summary bytes.Buffer
+	name := "sync"
+	if systemUpgrade {
+		name = "upgrade"
+	}
+	_ = renderRunSummary(&summary, name, result.Steps)
+	if result.Reboot {
+		fmt.Fprintln(&summary, "Reboot required to use the configured boot target or greeter.")
+	}
+	if result.Logout {
+		fmt.Fprintln(&summary, "Log out and log in again to use changed group memberships.")
+	}
+	if len(result.Differences) > 0 {
+		fmt.Fprintln(&summary, "differences from the plan:")
+		for _, d := range result.Differences {
+			fmt.Fprintf(&summary, "  %s\n", d)
+		}
 	}
 	_, err := summary.WriteTo(out)
 	return err

@@ -2,36 +2,16 @@ package cli
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/native/nativetest"
 	"github.com/Furyfree/nimbus/internal/plan"
 	"github.com/Furyfree/nimbus/internal/state"
 )
-
-func TestCargoOwnershipRequiresReceipt(t *testing.T) {
-	root, src := installerFixture(t)
-	src.Commands[facts.Key(filepath.Join(os.Getenv("HOME"), ".cargo/bin/cargo"), facts.CargoListArgs...)] = []byte("demo v1.0.0:\n    demo\n")
-	args := []string{"managed", "--checkout", root, "--machine", "vm"}
-	if code, out, errOut := run(t, args...); code != ExitOK || !strings.Contains(out, "adopt      cargo:demo") {
-		t.Fatalf("crate without receipt: %d %s%s", code, out, errOut)
-	}
-	stage := &state.Stage{Schema: state.Schema, PlanDigest: "sha256:p", Receipts: []state.Receipt{{
-		Schema: state.ReceiptSchema, Resource: "package:cargo:demo", Provider: "cargo",
-		Operation: "adopt", PlanDigest: "sha256:p", Verified: true,
-	}}}
-	if err := state.Record(stateRoot, "sha256:p", stage); err != nil {
-		t.Fatal(err)
-	}
-	if code, out, errOut := run(t, args...); code != ExitOK || !strings.Contains(out, "managed    cargo:demo") {
-		t.Fatalf("crate with receipt: %d %s%s", code, out, errOut)
-	}
-}
 
 func TestOwnershipViews(t *testing.T) {
 	root := repoRoot(t)
@@ -74,7 +54,7 @@ func TestDesiredFlatpakIsAdoptableFromAnyRemote(t *testing.T) {
 		t.Run(remote, func(t *testing.T) {
 			root := repoRoot(t)
 			src := fixtureSource(t, root)
-			src.Commands[facts.Key("flatpak", "list", "--system", "--app", "--columns=application,version,origin")] = []byte("com.spotify.Client\t1.0\t" + remote + "\n")
+			src.Commands[nativetest.Key("flatpak", "list", "--system", "--app", "--columns=application,version,origin")] = []byte("com.spotify.Client\t1.0\t" + remote + "\n")
 			withSource(t, src)
 			for _, command := range [][]string{{"managed"}, {"packages", "installed", "spotify"}} {
 				args := append(command, "--checkout", root, "--machine", "desktop")
@@ -103,7 +83,7 @@ func TestInstalledFlatpaksDoNotRequireVersionMetadata(t *testing.T) {
 			root := repoRoot(t)
 			src := fixtureSource(t, root)
 			if tc.present {
-				src.Commands[facts.Key("flatpak", "list", "--system", "--app", "--columns=application,version,origin")] = []byte(tc.app + "\t\tflathub\n")
+				src.Commands[nativetest.Key("flatpak", "list", "--system", "--app", "--columns=application,version,origin")] = []byte(tc.app + "\t\tflathub\n")
 			}
 			withSource(t, src)
 			if tc.owned {
@@ -139,7 +119,7 @@ func TestInstalledFlatpaksDoNotRequireVersionMetadata(t *testing.T) {
 }
 
 func TestRPMViewsResolveReceiptOwnershipByNativeIdentity(t *testing.T) {
-	multilib := []facts.Package{
+	multilib := []inspect.Package{
 		{Name: "demo", Arch: "i686", Version: "1", Reason: "user"},
 		{Name: "demo", Arch: "x86_64", Version: "1", Reason: "user"},
 	}
@@ -147,7 +127,7 @@ func TestRPMViewsResolveReceiptOwnershipByNativeIdentity(t *testing.T) {
 	native := state.Receipt{Schema: 2, Resource: "package:dnf:demo", Provider: "dnf", Verified: true, Package: "demo.i686"}
 	for _, tc := range []struct {
 		name     string
-		packages []facts.Package
+		packages []inspect.Package
 		receipts []state.Receipt
 		baseline []string
 		desired  []definitions.ResolvedPackage
@@ -213,7 +193,7 @@ func TestRPMViewsResolveReceiptOwnershipByNativeIdentity(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := &selected{Checkout: &definitions.Checkout{}, Resolved: &definitions.Resolved{Packages: tc.desired}}
-			f := &facts.Facts{Packages: facts.Section[[]facts.Package]{Value: tc.packages}}
+			f := &inspect.Facts{Packages: inspect.Section[[]inspect.Package]{Value: tc.packages}}
 			applied := &state.Applied{Receipts: map[string]state.Receipt{}, Baseline: &state.Baseline{Packages: tc.baseline}}
 			for _, receipt := range tc.receipts {
 				applied.Receipts[receipt.Resource] = receipt
@@ -252,7 +232,7 @@ func TestRPMViewsAgreeWithPlanForExplicitArchitectureMigration(t *testing.T) {
 			for _, name := range names {
 				s.Resolved.Packages = append(s.Resolved.Packages, definitions.ResolvedPackage{Name: name, Prefix: "dnf", Canonical: "dnf:" + name})
 			}
-			f := &facts.Facts{Packages: facts.Section[[]facts.Package]{Value: []facts.Package{
+			f := &inspect.Facts{Packages: inspect.Section[[]inspect.Package]{Value: []inspect.Package{
 				{Name: "demo", Arch: "i686", Version: "1", Release: "1", FromRepo: "fedora", Reason: "user"},
 				{Name: "demo", Arch: "x86_64", Version: "1", Release: "1", FromRepo: "fedora", Reason: "user"},
 			}}}
@@ -260,7 +240,7 @@ func TestRPMViewsAgreeWithPlanForExplicitArchitectureMigration(t *testing.T) {
 			applied := &state.Applied{Receipts: map[string]state.Receipt{
 				legacyID: {Schema: 1, Resource: legacyID, Provider: "dnf", Verified: true},
 			}}
-			src := &facts.FakeSource{Commands: map[string][]byte{"dnf5 --cacheonly check-upgrade": []byte("Repositories loaded.\n")}}
+			src := &nativetest.FakeSource{Commands: map[string][]byte{"dnf5 --cacheonly check-upgrade": []byte("Repositories loaded.\n")}}
 			p, err := plan.Build(plan.Inputs{Resolved: s.Resolved, Root: s.Checkout.Definitions(), Facts: f, Applied: applied, Source: src})
 			if err != nil {
 				t.Fatal(err)

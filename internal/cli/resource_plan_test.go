@@ -8,14 +8,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/native/nativetest"
 	"github.com/Furyfree/nimbus/internal/plan"
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
 func TestPlanShowsSystemFileDiffAndNativeUnitChanges(t *testing.T) {
 	p := &plan.Plan{Machine: "vm", Complete: true, Operations: []plan.Operation{
-		{ID: "file:/etc/example", Kind: plan.KindFile, Action: plan.ActionRepair, Summary: "repair /etc/example", File: &plan.FileChange{Target: "/etc/example", Before: facts.SystemFile{Exists: true, Content: []byte("before\n")}, After: facts.SystemFile{Exists: true, Content: []byte("after"), Owner: "root", Group: "root", Mode: "0644"}}},
+		{ID: "file:/etc/example", Kind: plan.KindFile, Action: plan.ActionRepair, Summary: "repair /etc/example", File: &plan.FileChange{Target: "/etc/example", Before: inspect.SystemFile{Exists: true, Content: []byte("before\n")}, After: inspect.SystemFile{Exists: true, Content: []byte("after"), Owner: "root", Group: "root", Mode: "0644"}}},
 		{ID: "service:greetd.service", Kind: plan.KindService, Action: plan.ActionRepair, Summary: "configure greetd.service", Steps: []plan.Step{{Description: "enable unit", Argv: []string{"systemctl", "enable", "--", "greetd.service"}, Privileged: true}}},
 	}}
 	out := string(renderPlan(p, false, false))
@@ -74,7 +75,7 @@ func TestSyncResourceRetirementReportsSessionRequirements(t *testing.T) {
 					src.Commands[tc.command] = nil
 				}
 				withSource(t, handoffOutputSource{Source: src, afterStream: func(name string, args []string) {
-					if facts.Key(name, args...) != tc.command {
+					if nativetest.Key(name, args...) != tc.command {
 						t.Fatalf("unexpected mutation: %s %v", name, args)
 					}
 					if tc.provider == plan.KindGroup {

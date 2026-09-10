@@ -1,6 +1,8 @@
 package definitions
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestResourcesRejectAmbiguousAndExecutableInput(t *testing.T) {
 	for _, comp := range []*Component{
@@ -17,12 +19,12 @@ func TestResourcesRejectAmbiguousAndExecutableInput(t *testing.T) {
 		}
 	}
 }
-func TestRecoveryBoundaryIsExact(t *testing.T) {
-	if !RecoveryTarget("/usr/local/lib/nimbus/recovery/hyprland.lua") {
+func TestLegacyRecoveryBoundaryIsExact(t *testing.T) {
+	if !LegacyRecoveryTarget("/usr/local/lib/nimbus/recovery/hyprland.lua") {
 		t.Fatal("missing recovery target")
 	}
 	for _, target := range []string{"/usr/bin/sh", "/usr/share/wayland-sessions/foreign.desktop", "/etc/recovery"} {
-		if RecoveryTarget(target) {
+		if LegacyRecoveryTarget(target) {
 			t.Fatalf("accepted %s", target)
 		}
 	}

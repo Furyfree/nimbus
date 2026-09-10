@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
 )
 
 func keyDrift(r definitions.Repository, fingerprints []string, keyError string) string {
@@ -20,7 +20,7 @@ func keyDrift(r definitions.Repository, fingerprints []string, keyError string) 
 }
 
 // RepositoryKeyDrift compares the active local key material to the pin.
-func RepositoryKeyDrift(id string, r definitions.Repository, have facts.Repository) string {
+func RepositoryKeyDrift(id string, r definitions.Repository, have inspect.Repository) string {
 	if have.GPGKey != "file://"+KeyPath(id) {
 		return "configured signing key must use the verified local pin at " + KeyPath(id)
 	}
@@ -28,7 +28,7 @@ func RepositoryKeyDrift(id string, r definitions.Repository, have facts.Reposito
 }
 
 // FlatpakKeyDrift also requires signature checking on the existing remote.
-func FlatpakKeyDrift(r definitions.Repository, have facts.FlatpakRemote) string {
+func FlatpakKeyDrift(r definitions.Repository, have inspect.FlatpakRemote) string {
 	if !have.GPGVerify {
 		return "GPG verification is disabled or unknown"
 	}

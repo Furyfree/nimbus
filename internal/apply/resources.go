@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
 	"github.com/Furyfree/nimbus/internal/plan"
 	"github.com/Furyfree/nimbus/internal/state"
 )
@@ -33,7 +33,7 @@ func (ex *executor) systemResource(op plan.Operation) ([]state.Receipt, []string
 			if op.Resource == nil {
 				return nil, nil, fmt.Errorf("greeter directory preflight is missing")
 			}
-			before, err := facts.ObserveDirectory(ex.opts.Source, op.Resource.Name)
+			before, err := inspect.ObserveDirectory(ex.opts.Source, op.Resource.Name)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -46,7 +46,7 @@ func (ex *executor) systemResource(op plan.Operation) ([]state.Receipt, []string
 			return nil, nil, err
 		}
 		if op.ID == "trigger:noctalia-state-directory" {
-			have, err := facts.ObserveDirectory(ex.opts.Source, op.Resource.Name)
+			have, err := inspect.ObserveDirectory(ex.opts.Source, op.Resource.Name)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -79,7 +79,7 @@ func (ex *executor) systemResource(op plan.Operation) ([]state.Receipt, []string
 		return nil, nil, fmt.Errorf("resource changed after approval: %w", err)
 	}
 	if op.Kind == plan.KindService && op.Action == plan.ActionRetire {
-		have, err := facts.ObserveService(ex.opts.Source, change.Name)
+		have, err := inspect.ObserveService(ex.opts.Source, change.Name)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -105,7 +105,7 @@ func (ex *executor) systemResource(op plan.Operation) ([]state.Receipt, []string
 	receipt.Logout = op.Kind == plan.KindGroup && change.Before != change.After
 	receipt.Reboot = op.Kind == plan.KindTarget && change.Before != change.After
 	if op.Kind == plan.KindService && change.Name == "greetd.service" && change.Enabled != nil && *change.Enabled && change.Running == nil {
-		var before facts.Service
+		var before inspect.Service
 		if json.Unmarshal([]byte(change.Before), &before) == nil && before.Enabled != "enabled" && before.Active != "active" {
 			receipt.Reboot = true
 		}
@@ -121,12 +121,12 @@ func (ex *executor) verifyResource(op plan.Operation, after bool) error {
 	}
 	switch op.Kind {
 	case plan.KindService:
-		have, err := facts.ObserveService(ex.opts.Source, c.Name)
+		have, err := inspect.ObserveService(ex.opts.Source, c.Name)
 		if err != nil {
 			return err
 		}
 		if !after {
-			var before facts.Service
+			var before inspect.Service
 			if json.Unmarshal([]byte(want), &before) != nil {
 				return fmt.Errorf("invalid prior unit state")
 			}
@@ -154,7 +154,7 @@ func (ex *executor) verifyResource(op plan.Operation, after bool) error {
 			return fmt.Errorf("unit activity is %s", have.Active)
 		}
 	case plan.KindGroup:
-		have, err := facts.ObserveMembership(ex.opts.Source, c.User, c.Name)
+		have, err := inspect.ObserveMembership(ex.opts.Source, c.User, c.Name)
 		if err != nil {
 			return err
 		}
@@ -186,7 +186,7 @@ func (ex *executor) systemFile(op plan.Operation) (receipts []state.Receipt, rem
 	if c == nil {
 		return nil, nil, fmt.Errorf("file payload is missing")
 	}
-	have, err := facts.ObserveFile(ex.opts.Source, c.Target)
+	have, err := inspect.ObserveFile(ex.opts.Source, c.Target)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -237,7 +237,7 @@ func (ex *executor) systemFile(op plan.Operation) (receipts []state.Receipt, rem
 			}
 		}
 	}
-	have, err = facts.ObserveFile(ex.opts.Source, c.Target)
+	have, err = inspect.ObserveFile(ex.opts.Source, c.Target)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -34,6 +34,9 @@ class StageTests(unittest.TestCase):
             (source / "internal").mkdir()
             (source / "internal/new.go").write_text("package example\n")
             (source / "internal/token.secret").write_text("private\n")
+            (source / "tests/integration").mkdir(parents=True)
+            (source / "tests/integration/new_test.go").write_text("package integration\n")
+            (source / "tests/integration/token.secret").write_text("private\n")
             (source / "private.txt").write_text("private\n")
             (source / ".git/private").write_text("private\n")
             dest = Path(work) / "candidate"
@@ -41,8 +44,11 @@ class StageTests(unittest.TestCase):
             self.assertEqual(stage.run("git", "rev-parse", "HEAD", cwd=dest), head)
             self.assertEqual((dest / "nimbus.toml").read_text(), "uncommitted\n")
             self.assertTrue((dest / "internal/new.go").exists())
+            self.assertEqual((dest / "tests/integration/new_test.go").read_text(),
+                             "package integration\n")
             self.assertIn("M nimbus.toml", stage.run("git", "status", "--short", cwd=dest))
-            for rel in (".git/private", "private.txt", "internal/token.secret"):
+            for rel in (".git/private", "private.txt", "internal/token.secret",
+                        "tests/integration/token.secret"):
                 self.assertFalse((dest / rel).exists())
             self.assertEqual((source / ".git/private").read_text(), "private\n")
 

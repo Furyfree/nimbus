@@ -6,17 +6,18 @@ import (
 	"testing"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/native/nativetest"
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
-func identityBuilder(packages []facts.Package, desired []definitions.ResolvedPackage, receipts map[string]state.Receipt) (*builder, *facts.FakeSource) {
-	src := &facts.FakeSource{Commands: map[string][]byte{}, Failures: map[string]string{}}
-	return &builder{in: Inputs{Resolved: &definitions.Resolved{Packages: desired}, Facts: &facts.Facts{Packages: facts.Section[[]facts.Package]{Value: packages}}, Applied: &state.Applied{Receipts: receipts}, Source: src}, ready: map[string]bool{}}, src
+func identityBuilder(packages []inspect.Package, desired []definitions.ResolvedPackage, receipts map[string]state.Receipt) (*builder, *nativetest.FakeSource) {
+	src := &nativetest.FakeSource{Commands: map[string][]byte{}, Failures: map[string]string{}}
+	return &builder{in: Inputs{Resolved: &definitions.Resolved{Packages: desired}, Facts: &inspect.Facts{Packages: inspect.Section[[]inspect.Package]{Value: packages}}, Applied: &state.Applied{Receipts: receipts}, Source: src}, ready: map[string]bool{}}, src
 }
 
 func TestQualifiedPackageConvergesAndOwnsOnlyItsArchitecture(t *testing.T) {
-	pkgs := []facts.Package{{Name: "driver-libs", Arch: "x86_64", Version: "1", Release: "1"}, {Name: "driver-libs", Arch: "i686", Version: "1", Release: "1"}}
+	pkgs := []inspect.Package{{Name: "driver-libs", Arch: "x86_64", Version: "1", Release: "1"}, {Name: "driver-libs", Arch: "i686", Version: "1", Release: "1"}}
 	selected := []definitions.ResolvedPackage{{Name: "driver-libs.i686", Prefix: "dnf", Canonical: "dnf:driver-libs.i686"}}
 	b, src := identityBuilder(pkgs, selected, nil)
 	ops := b.packages()
@@ -29,7 +30,7 @@ func TestQualifiedPackageConvergesAndOwnsOnlyItsArchitecture(t *testing.T) {
 		t.Fatalf("repeat: %+v", ops)
 	}
 	b.in.Resolved.Packages = nil
-	src.Commands[facts.Key("dnf5", "--assumeno", "--cacheonly", "remove", "--no-autoremove", "driver-libs.i686")] = previewText([]TxPackage{{Name: "driver-libs", Arch: "i686", EVR: "1-1", Section: "removing", Repository: "@System"}})
+	src.Commands[nativetest.Key("dnf5", "--assumeno", "--cacheonly", "remove", "--no-autoremove", "driver-libs.i686")] = previewText([]TxPackage{{Name: "driver-libs", Arch: "i686", EVR: "1-1", Section: "removing", Repository: "@System"}})
 	ops = b.ownedRemovals()
 	if len(ops) != 1 || ops[0].Blocked != "" || strings.Join(ops[0].Steps[0].Argv, " ") != "dnf5 -y remove --no-autoremove driver-libs.i686" {
 		t.Fatalf("removal: %+v", ops)
@@ -38,7 +39,7 @@ func TestQualifiedPackageConvergesAndOwnsOnlyItsArchitecture(t *testing.T) {
 
 func TestLegacyMultilibOwnershipBlocksRemovalAndMigration(t *testing.T) {
 	id := "package:dnf:driver-libs"
-	b, _ := identityBuilder([]facts.Package{{Name: "driver-libs", Arch: "x86_64"}, {Name: "driver-libs", Arch: "i686"}}, nil, map[string]state.Receipt{id: {Resource: id, Provider: "dnf"}})
+	b, _ := identityBuilder([]inspect.Package{{Name: "driver-libs", Arch: "x86_64"}, {Name: "driver-libs", Arch: "i686"}}, nil, map[string]state.Receipt{id: {Resource: id, Provider: "dnf"}})
 	ops := b.ownedRemovals()
 	if len(ops) != 1 || !strings.Contains(ops[0].Blocked, "architecture") {
 		t.Fatalf("ambiguous legacy removal: %+v", ops)
@@ -56,12 +57,12 @@ func TestLegacyMultilibOwnershipBlocksRemovalAndMigration(t *testing.T) {
 
 func TestProvideReceiptConvergesAndRemovesNativePackage(t *testing.T) {
 	id := "package:dnf:virtual-tool"
-	b, src := identityBuilder([]facts.Package{{Name: "actual-tool", Arch: "x86_64"}}, []definitions.ResolvedPackage{{Name: "virtual-tool", Prefix: "dnf", Canonical: "dnf:virtual-tool"}}, map[string]state.Receipt{id: {Resource: id, Provider: "dnf", Package: "actual-tool.x86_64"}})
+	b, src := identityBuilder([]inspect.Package{{Name: "actual-tool", Arch: "x86_64"}}, []definitions.ResolvedPackage{{Name: "virtual-tool", Prefix: "dnf", Canonical: "dnf:virtual-tool"}}, map[string]state.Receipt{id: {Resource: id, Provider: "dnf", Package: "actual-tool.x86_64"}})
 	if ops := b.packages(); len(ops) != 1 || ops[0].Action != ActionKeep {
 		t.Fatalf("provide repeated install: %+v", ops)
 	}
 	b.in.Resolved.Packages = nil
-	src.Commands[facts.Key("dnf5", "--assumeno", "--cacheonly", "remove", "--no-autoremove", "actual-tool.x86_64")] = previewText([]TxPackage{{Name: "actual-tool", Arch: "x86_64", EVR: "1-1", Section: "removing", Repository: "@System"}})
+	src.Commands[nativetest.Key("dnf5", "--assumeno", "--cacheonly", "remove", "--no-autoremove", "actual-tool.x86_64")] = previewText([]TxPackage{{Name: "actual-tool", Arch: "x86_64", EVR: "1-1", Section: "removing", Repository: "@System"}})
 	ops := b.ownedRemovals()
 	if len(ops) != 1 || ops[0].Blocked != "" || ops[0].Steps[0].Argv[4] != "actual-tool.x86_64" {
 		t.Fatalf("provide removal: %+v", ops)
@@ -78,7 +79,7 @@ func TestAbsentRetirementBindsNativeIdentity(t *testing.T) {
 		{"flatpak:org.example.App", "flatpak", "", "org.example.App"},
 	} {
 		t.Run(tc.id, func(t *testing.T) {
-			b, _ := identityBuilder([]facts.Package{{Name: "driver-libs", Arch: "x86_64"}}, nil,
+			b, _ := identityBuilder([]inspect.Package{{Name: "driver-libs", Arch: "x86_64"}}, nil,
 				map[string]state.Receipt{tc.id: {Schema: state.ReceiptSchema, Resource: tc.id, Provider: tc.provider, Package: tc.recorded, Operation: ActionInstall, Verified: true}})
 			p, err := Build(b.in)
 			if err != nil || !p.Complete || len(p.Operations) != 1 {

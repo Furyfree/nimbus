@@ -35,8 +35,6 @@ users, distributions, or providers.
   mutation that neither the plan nor the closing report shows is a bug.
 - **receipt** records one verified operation. A failed operation never gets a
   successful receipt.
-- **recovery point** is a Snapper snapshot pair plus Nimbus boot archives and
-  manifest. It is same-disk state, not a backup.
 
 ## What matters
 
@@ -67,12 +65,12 @@ Use Fedora and established specialist tools through their supported interfaces.
 Nimbus coordinates and verifies them; it should not obscure their transactions
 or grow weak replacements for tools that already own a lifecycle.
 
-### 4. Recovery is part of the feature
+### 4. Failure and repair
 
-A stateful or destructive capability is incomplete until ownership,
-verification, removal, failure behavior, and recovery are defined and tested.
-Unknown ownership blocks deletion. Recovery claims require a real restore
-drill, not only a successful backup or snapshot command.
+Stateful changes need defined ownership, verification, removal and failure
+behavior. Unknown ownership blocks deletion. Test the supported repair path;
+do not require a general snapshot or rollback subsystem for ordinary changes.
+Never claim restoration works without testing it.
 
 ## Start with context
 
@@ -89,31 +87,17 @@ drill, not only a successful backup or snapshot command.
 
 ## Sources of truth
 
-- `docs/SPEC.md` owns accepted product behavior, safety boundaries, and
-  invariants.
-- `docs/ARCHITECTURE.md` explains the code layout, package boundaries, and
-  the flow of a command; update it when a package is added or a boundary
-  moves.
-- `docs/DECISIONS.md` records rationale and unresolved questions.
-- `docs/SECURITY.md` owns the workstation security policy: software sources,
-  encryption, Secure Boot, SELinux, firewall, privilege, and secrets.
-- `docs/ROADMAP.md` owns implementation order, phase gates, risks, recovery,
-  and exit criteria.
-- `docs/TASKS.md` owns the current checklist, evidence, blockers, and residual
-  risk.
-- `docs/INSTALLATION.md` is the Fedora base-install operator guide.
-- `docs/PACKAGES.md` lists what Nimbus installs, by application; it feeds the
-  definitions and shrinks as they land.
-- `README.md` is the short user-facing entry point.
-- The removed `history/` tree contains superseded evidence, not active
-  requirements. Its last complete snapshot is commit
-  `c0bb8a4660732e6e9556297da2c15ba0f286ee98`.
+- `docs/SPEC.md` owns product behavior, commands, installation, system-file
+  ownership, security and the short architecture/test policy.
+- `docs/ROADMAP.md` owns implementation order, deferred scope and exit criteria.
+- `docs/TASKS.md` owns the current checklist, open decisions, evidence and risk.
+- TOML definitions own the software inventory. `system/` holds the root-owned
+  configuration and assets we change; user configuration belongs to Chezmoi.
+- `README.md` is the entry point; tool-local READMEs explain their own usage.
 
-Do not duplicate the product contract in this file. When shared behavior
-changes, update `docs/SPEC.md`, `docs/ROADMAP.md`, and `docs/TASKS.md` together
-while keeping their responsibilities distinct. Inspect removed historical
-material from the named commit without restoring it to the active tree, and
-revalidate it against the active documents before reuse.
+Keep shared contract changes consistent across SPEC, ROADMAP and TASKS without
+copying their contents into this file. Do not add separate product documents.
+Older designs are history, not active requirements; revalidate before reuse.
 
 ## Neighbouring repositories
 
@@ -127,6 +111,9 @@ revalidate it against the active documents before reuse.
   privileges.
 - `~/git/docs` is history and earlier Nimbus designs, not a source of truth.
 - `~/git/niriland` is a reference configuration. Never import it wholesale.
+- For root-owned settings, research Fedora/upstream first and compare Omarchy,
+  CachyOS-Settings or other relevant repositories as described in SPEC. Adapt
+  only justified system changes; user files remain in the dotfiles repository.
 
 ## Research tools
 

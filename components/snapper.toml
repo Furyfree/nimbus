@@ -1,9 +1,14 @@
-# Snapper creates and retires the recovery snapshots. Its configurations
-# arrive with the recovery phase.
 schema = 1
 id = "snapper"
-
-requires = []
-conflicts = []
 packages = ["snapper"]
-removes = []
+
+[[files]]
+source = "etc/snapper/config-templates/nimbus"
+owner = "root"
+group = "root"
+mode = "0644"
+
+[[services]]
+unit = "snapper-cleanup.timer"
+enabled = true
+running = true

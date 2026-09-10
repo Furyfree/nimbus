@@ -8,8 +8,8 @@ import (
 	"github.com/Furyfree/nimbus/internal/rpm"
 )
 
-// Ref is a parsed package reference. Prefix is "dnf" for a bare Fedora name,
-// "flatpak" for a Flathub application, or a repository ID from nimbus.toml.
+// Ref is a parsed package reference using a reserved provider prefix or a
+// repository ID from nimbus.toml. Bare Fedora names use "dnf".
 type Ref struct {
 	Prefix string
 	Name   string
@@ -25,7 +25,7 @@ func conflictingSources(a, b Ref) bool {
 	if a.Name == b.Name {
 		return true
 	}
-	if a.Prefix == PrefixFlatpak || a.Prefix == PrefixCargo || b.Prefix == PrefixFlatpak || b.Prefix == PrefixCargo {
+	if a.Prefix == PrefixFlatpak || b.Prefix == PrefixFlatpak {
 		return false
 	}
 	aName, aArch := rpm.SplitRequest(a.Name)
@@ -37,9 +37,6 @@ func conflictingSources(a, b Ref) bool {
 const (
 	PrefixDNF     = "dnf"
 	PrefixFlatpak = "flatpak"
-	// PrefixCargo names a crate installed as the user with cargo install,
-	// after the Rust runtime Mise provides.
-	PrefixCargo = "cargo"
 )
 
 // ValidateID checks a machine, profile, component, or repository ID: lowercase
@@ -55,7 +52,6 @@ var (
 	prefixRe    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 	rpmNameRe   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*$`)
 	flatpakIDRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*(\.[A-Za-z_][A-Za-z0-9_-]*){2,}$`)
-	crateRe     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 )
 
 // ParseRef parses one package reference. It checks the grammar only; whether
@@ -85,10 +81,6 @@ func ParseRef(raw string) (Ref, error) {
 	if prefix == PrefixFlatpak {
 		if !flatpakIDRe.MatchString(name) {
 			return Ref{}, fmt.Errorf("invalid Flatpak application ID %q", name)
-		}
-	} else if prefix == PrefixCargo {
-		if !crateRe.MatchString(name) {
-			return Ref{}, fmt.Errorf("invalid crate name %q", name)
 		}
 	} else if !rpmNameRe.MatchString(name) {
 		return Ref{}, fmt.Errorf("invalid package name %q", name)

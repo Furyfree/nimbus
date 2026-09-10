@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/inspect"
 )
 
 func TestChangedDeclaredPinRequiresKeyReconciliation(t *testing.T) {
@@ -36,18 +36,18 @@ func TestExistingFlatpakRemoteRequiresExactVerifiedTrust(t *testing.T) {
 	want := definitions.NormalizeFingerprint(c.Definitions().Repositories["flathub"].Key)
 	for _, tc := range []struct {
 		name   string
-		remote facts.FlatpakRemote
+		remote inspect.FlatpakRemote
 	}{
-		{"unknown", facts.FlatpakRemote{KeyError: "key unreadable", GPGVerify: true}},
-		{"disabled", facts.FlatpakRemote{KeyFingerprints: []string{want}}},
-		{"additional key", facts.FlatpakRemote{GPGVerify: true, KeyFingerprints: []string{want, strings.Repeat("1", 40)}}},
-		{"different key", facts.FlatpakRemote{GPGVerify: true, KeyFingerprints: []string{strings.Repeat("1", 40)}}},
+		{"unknown", inspect.FlatpakRemote{KeyError: "key unreadable", GPGVerify: true}},
+		{"disabled", inspect.FlatpakRemote{KeyFingerprints: []string{want}}},
+		{"additional key", inspect.FlatpakRemote{GPGVerify: true, KeyFingerprints: []string{want, strings.Repeat("1", 40)}}},
+		{"different key", inspect.FlatpakRemote{GPGVerify: true, KeyFingerprints: []string{strings.Repeat("1", 40)}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src, f := readyHost(t, c)
 			remote := tc.remote
 			remote.Name, remote.URL = "flathub", "https://dl.flathub.org/repo/"
-			f.Flatpak.Value.Remotes = []facts.FlatpakRemote{remote}
+			f.Flatpak.Value.Remotes = []inspect.FlatpakRemote{remote}
 			p, _ := Build(Inputs{Resolved: resolved, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src})
 			if op := find(p, "flatpak-remote:flathub"); op == nil || op.Blocked == "" {
 				t.Fatalf("unverified trust accepted: %+v", op)

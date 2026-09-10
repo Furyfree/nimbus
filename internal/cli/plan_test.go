@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
-	"github.com/Furyfree/nimbus/internal/facts"
+	"github.com/Furyfree/nimbus/internal/native/nativetest"
 	"github.com/Furyfree/nimbus/internal/plan"
 )
 
@@ -29,13 +29,13 @@ func TestPlanRendersSectionsAndReportsIncomplete(t *testing.T) {
 	root := repoRoot(t)
 	src := fixtureSource(t, root)
 	withForeignTerra(t, src)
-	src.Commands[facts.Key("dnf5", "--cacheonly", "check-upgrade")] = []byte("Repositories loaded.\n")
+	src.Commands[nativetest.Key("dnf5", "--cacheonly", "check-upgrade")] = []byte("Repositories loaded.\n")
 	withSource(t, src)
 	code, out, errOut := run(t, "sync", "-p", "--checkout", root, "--machine", "laptop")
 	if code != ExitFailure {
 		t.Fatalf("an incomplete plan must exit 1, got %d\n%s%s", code, out, errOut)
 	}
-	for _, want := range []string{"plan for laptop", "sources to prepare:", "enable repository docker", "install ", "packages (exact versions once sources are prepared):", "docker-ce", "upgrade the system (dnf5 upgrade, flatpak update)", "problems:", "repository terra is already enabled through terra.repo", "incomplete: fix the problems above"} {
+	for _, want := range []string{"plan for laptop", "sources to prepare:", "enable repository docker", "install ", "packages (exact versions once sources are prepared):", "docker-ce", "problems:", "repository terra is already enabled through terra.repo", "incomplete: fix the problems above"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("plan output lacks %q:\n%s", want, out)
 		}
@@ -81,7 +81,16 @@ func TestStatusSummarizesThePlan(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
-	if !strings.Contains(out, "machine desktop: 6 profiles, 14 components, 172 desired packages") || !strings.Contains(out, "plan incomplete") {
+	c, err := definitions.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, errs := definitions.Resolve(c, "desktop")
+	if len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	want := fmt.Sprintf("machine desktop: %d profiles, %d components, %d desired packages", len(resolved.Profiles), len(resolved.Components), len(resolved.Packages))
+	if !strings.Contains(out, want) || !strings.Contains(out, "plan incomplete") {
 		t.Fatalf("status output:\n%s", out)
 	}
 	code, out, _ = run(t, "status", "--checkout", root, "--machine", "desktop", "--json")
@@ -119,7 +128,7 @@ func TestPlanReadsTheCacheAndARunRefreshesIt(t *testing.T) {
 	root := repoRoot(t)
 	src := fixtureSource(t, root)
 	withForeignTerra(t, src)
-	src.Failures[facts.Key("dnf5", "makecache")] = "no network"
+	src.Failures[nativetest.Key("dnf5", "makecache")] = "no network"
 	withSource(t, src)
 	// Plan-only never refreshes: the failure is not even reached.
 	code, out, errOut := run(t, "sync", "-p", "--checkout", root, "--machine", "laptop")
@@ -154,10 +163,6 @@ func TestPlanReadsLikeAnInstaller(t *testing.T) {
 		{ID: "package:dnf:bash", Kind: plan.KindPackage, Action: plan.ActionAdopt, Summary: "adopt bash"},
 		{ID: "package:dnf:zsh", Kind: plan.KindPackage, Action: plan.ActionKeep, Summary: "zsh is managed"},
 		{ID: "user:mise", Kind: plan.KindUser, Action: plan.ActionInstall, Summary: "install mise from https://mise.run as the user"},
-		{ID: "user:mise:install", Kind: plan.KindUser, Action: plan.ActionInstall, Summary: "install the mise runtimes declared in ~/.config/mise/config.toml", After: plan.AfterHandoff},
-		{ID: "package:cargo:sheldon", Kind: plan.KindUser, Action: plan.ActionKeep, Summary: "crate sheldon is installed"},
-		{ID: "package:cargo:typst-cli", Kind: plan.KindUser, Action: plan.ActionInstall, Summary: "cargo install typst-cli as the user", After: "user:mise:install", Notes: []string{"cargo comes with the Rust runtime Mise installs"}},
-		{ID: "package:cargo:resvg", Kind: plan.KindUser, Action: plan.ActionInstall, Summary: "cargo install resvg as the user", After: "user:mise:install", Notes: []string{"cargo comes with the Rust runtime Mise installs"}},
 	}}
 	out := string(renderPlan(p, false, true))
 	for line := range strings.SplitSeq(out, "\n") {
@@ -173,8 +178,8 @@ func TestPlanReadsLikeAnInstaller(t *testing.T) {
 		"  upgrades needed: openssl-libs-1:3.5.8-1.fc44\n",
 		"install 1 Flatpaks: com.spotify.Client\n",
 		"note: 1 installed packages are upgraded",
-		"user tools, as the user without sudo:\n  install mise from https://mise.run as the user\n  install the mise runtimes declared in ~/.config/mise/config.toml (after the\n    Chezmoi handoff)\n  cargo install typst-cli as the user (after the mise runtimes)\n",
-		"adopt 1 already installed\n2 managed and unchanged\n",
+		"user tools, as the user without sudo:\n  install mise from https://mise.run as the user\n",
+		"adopt 1 already installed\n1 managed and unchanged\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("plan lacks %q:\n%s", want, out)
@@ -185,30 +190,12 @@ func TestPlanReadsLikeAnInstaller(t *testing.T) {
 	}
 }
 
-func TestNotesAreShownOnceAndWaitingRunsNeedNoSudo(t *testing.T) {
-	p := &plan.Plan{Machine: "vm", Complete: true, Operations: []plan.Operation{
-		{ID: "package:dnf:zsh", Kind: plan.KindPackage, Action: plan.ActionKeep},
-		{ID: "user:mise", Kind: plan.KindUser, Action: plan.ActionKeep},
-		{ID: "user:mise:install", Kind: plan.KindUser, Action: plan.ActionInstall, Summary: "install the mise runtimes", After: plan.AfterHandoff},
-		{ID: "package:cargo:sheldon", Kind: plan.KindUser, Action: plan.ActionInstall, Summary: "cargo install sheldon", After: "user:mise:install", Notes: []string{"cargo comes with the Rust runtime Mise installs"}},
-		{ID: "package:cargo:resvg", Kind: plan.KindUser, Action: plan.ActionInstall, Summary: "cargo install resvg", After: "user:mise:install", Notes: []string{"cargo comes with the Rust runtime Mise installs"}},
-	}}
-	out := string(renderPlan(p, false, false))
-	if strings.Count(out, "cargo comes with the Rust runtime") != 1 {
-		t.Fatalf("note repeated:\n%s", out)
+func TestWaitingRunsNeedNoSudo(t *testing.T) {
+	p := &plan.Plan{Operations: []plan.Operation{{Kind: plan.KindUser, Action: plan.ActionInstall, After: "packages:install"}}}
+	if runnable(p) != 0 || needsSudo(p, false, true) {
+		t.Fatal("waiting bootstrap needs no sudo")
 	}
-	if runnable(p) != 0 || needsSudo(p, true, true) {
-		t.Fatalf("a run with only waiting user steps must run nothing and prime no sudo")
-	}
-	if got := waitingLine(p); got != "3 operations wait for the Chezmoi handoff, then the mise runtimes; nothing else to run now" {
-		t.Fatalf("waiting line = %q", got)
-	}
-	// The upgrade, a first run, or any system operation still needs sudo.
-	if !needsSudo(p, false, true) || !needsSudo(p, true, false) {
+	if !needsSudo(p, true, true) || !needsSudo(p, false, false) {
 		t.Fatal("upgrade and first run need sudo")
-	}
-	p.Operations = append(p.Operations, plan.Operation{ID: "package:dnf:bat", Kind: plan.KindPackage, Action: plan.ActionAdopt})
-	if !needsSudo(p, true, true) {
-		t.Fatal("an adoption records a receipt through sudo")
 	}
 }
