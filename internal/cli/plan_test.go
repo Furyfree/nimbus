@@ -173,7 +173,7 @@ func TestMachineOverridesWithoutSelector(t *testing.T) {
 }
 
 func TestPlanReadsTheCacheAndARunRefreshesIt(t *testing.T) {
-	root := repoRoot(t)
+	root := applyEnv(t)
 	src := fixtureSource(t, root)
 	withForeignTerra(t, src)
 	src.Failures[nativetest.Key("dnf5", "makecache")] = "no network"
@@ -184,9 +184,9 @@ func TestPlanReadsTheCacheAndARunRefreshesIt(t *testing.T) {
 		t.Fatalf("sync -p: %d %q\n%s", code, errOut, out)
 	}
 	// A run refreshes first; a failed refresh is reported, not fatal.
-	code, _, errOut = run(t, "sync", "-y", "-n", "--checkout", root, "--machine", "laptop")
+	code, out, errOut = run(t, "sync", "-y", "-n", "--checkout", root, "--machine", "laptop")
 	if code != ExitFailure || !strings.Contains(errOut, "metadata not refreshed: no network") {
-		t.Fatalf("sync without network: %d %q", code, errOut)
+		t.Fatalf("sync without network: %d %q\n%s", code, errOut, out)
 	}
 }
 
