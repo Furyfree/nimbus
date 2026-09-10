@@ -122,13 +122,15 @@ See [the Fedora installation guide](INSTALLATION.md) for installer choices
 and existing disk layouts.
 
 1. Install a minimal Fedora 44 base from official media: networking, standard
-   utilities and a normal password-protected user in `wheel`; disable direct
-   root login. Add guest agents only for the test VM. Nimbus installs the
-   selected desktop and applications after first boot.
+   utilities and a normal password-protected user in `wheel`. Enable the root
+   account with a password for local use; keep root SSH access disabled. Add
+   guest agents only for the test VM. Nimbus installs the selected desktop
+   and applications after first boot.
 2. Use UEFI/GPT, Fedora GRUB, separate boot mounts and a LUKS2-encrypted Btrfs
-   system volume. Retain the passphrase. Ordinary root/home separation is the
-   intended base; no ten-subvolume snapshot layout or fixed partition sizes
-   are required by Nimbus. Existing extended layouts need not change.
+   system volume. Retain the passphrase. Follow the subvolume table in the
+   installation guide, including separate snapshot and data mounts. This is
+   the recommended operator layout, not a partition scheme Nimbus enforces.
+   Existing working layouts need not change.
 3. Review the exact target disk before partitioning. Preserve Windows data and
    its EFI loader on dual-boot machines; do not format a shared EFI partition.
    Preserve irreplaceable data independently. Keep Fedora zram; hibernation
@@ -151,10 +153,11 @@ Bootstrap obtains prerequisites, verifies the Nimbus RPM, obtains the checkout,
 refreshes the user package cache and invokes init. It does not include
 uncommitted local work. Use the separate
 [candidate guide](../tools/vm/README.md) for an unpublished VM trial. Check
-[TASKS.md](TASKS.md) before desktop installation; this simplified base still
+[TASKS.md](TASKS.md) before desktop installation; the documented base still
 needs its clean-install trial.
 
-These definitions require Nimbus 0.3.0 or newer. On an existing installation,
+These definitions require Nimbus 0.3.0 or newer; registering the guide's
+pre-created snapshot mount requires 0.3.1 or newer. On an existing installation,
 update the Nimbus RPM through DNF before updating this checkout or applying
 the matching Chezmoi Topgrade configuration. Bootstrap validates an installed
 engine but does not upgrade it automatically.
@@ -391,13 +394,13 @@ against disk loss. Keep independent copies of irreplaceable data.
 `hyprland-noctalia` selects the `snapper` component. Nimbus manages the root
 template at `/etc/snapper/config-templates/nimbus` and uses native Snapper to
 create the `nimbus` configuration and reconcile its settings. Setup requires
-a Btrfs root. On a fresh base, native Snapper creates its storage. An existing
-empty `/.snapshots` mount can be reused after approval if it is a Btrfs
-subvolume on the root filesystem, owned by root and not writable by other
-users. Nimbus rechecks its identity and emptiness, writes the marked
-configuration, preserves other Snapper registrations and verifies the result
-through native Snapper. It does not unmount, delete or recreate storage or
-edit `/etc/fstab`.
+a Btrfs root. Without pre-created storage, native Snapper creates it. An empty
+`/.snapshots` mount from the installation guide can be reused after approval
+if it is a Btrfs subvolume on the root filesystem, owned by root and not
+writable by other users. Nimbus rechecks its identity and emptiness, writes
+the marked configuration, preserves other Snapper registrations and verifies
+the result through native Snapper. It does not unmount, delete or recreate
+storage or edit `/etc/fstab`.
 
 Adoption interrupted during configuration, registration or verification can be
 retried only with the exact marked configuration and still-empty mounted
@@ -427,7 +430,8 @@ not a disk-space cap. Snapshots without the number cleanup tag are unaffected.
 remain authoritative; adjust the template in this repository to change policy.
 
 The root snapshot excludes separate filesystems and nested subvolumes, such as
-home, boot and EFI. It does not promise a bootable rollback. A restore drill
+home, boot, EFI and the guide's separate data mounts. It does not promise a
+bootable rollback. A restore drill
 remains required before documenting a supported restore procedure. Removing
 the component stops Nimbus snapshot hooks and retires its template/timer
 ownership; the native configuration and snapshots remain for manual review.
@@ -576,9 +580,10 @@ upgrade and hardware trials remain open. [TASKS.md](TASKS.md) records evidence.
 
 No custom snapshot/boot-archive manager, automatic restoration, backup service,
 Windows VM lifecycle, Home Assistant integration, TPM enrollment or UKI build
-pipeline is required for the desktop milestone. Native Snapper creates its
-snapshot subvolume on the selected Btrfs root; no custom partition layout or
-boot-archive scheme is required.
+pipeline is required for the desktop milestone. The installation guide's
+partition layout is operator-owned. Nimbus registers suitable existing
+snapshot storage or lets native Snapper create it; it does not partition
+disks or maintain a boot-archive scheme.
 
 Fedora installation, partitioning, encryption setup and Fedora major-version
 upgrades remain native operator workflows. Nimbus reports current compatibility

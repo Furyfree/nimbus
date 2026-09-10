@@ -87,10 +87,9 @@ when the installed Nimbus version supports them.
 
 Snapper remains selected by `hyprland-noctalia`. Native setup, bounded number
 retention and sync/system-upgrade hooks are implemented locally. Test initial
-setup on both a fresh root/home layout and the earlier pre-mounted empty
-`/.snapshots` layout, failure handling, cleanup and a root restore on installed
-Fedora. Update the installed engine to 0.3.1 or newer before retrying the old
-layout through the public installer.
+setup with the documented subvolume layout and without pre-created snapshot
+storage, failure handling, cleanup and a root restore on installed Fedora.
+Use engine 0.3.1 or newer for the guide's pre-mounted empty `/.snapshots`.
 The existing-mount setup and native config listing passed on the test VM;
 fresh-layout setup, snapshot pairs, retention and restoration remain open.
 Keep separate boot/EFI coverage explicit; do not claim automatic rollback.

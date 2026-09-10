@@ -1,100 +1,90 @@
-# Fedora base installation
+# Fedora installation
 
-Install Fedora first, then let Nimbus set up the workstation. Product behavior
-and commands are in [SPEC.md](SPEC.md#installation-workflow).
+Install **Fedora 44 Everything/netinstall, x86_64**, from official Fedora
+media. Boot in **UEFI** mode and keep Secure Boot enabled on hardware.
 
-## Fedora installer
+Follow the installer sections left to right, then move down.
 
-Use official Fedora 44 Everything/netinstall media for x86_64. Select a
-minimal installation with networking and standard command-line utilities:
+## 1. Keyboard
 
-~~~text
-Custom Operating System
-Standard
-Common NetworkManager Submodules
-Guest Agents                 # test VM only
-~~~
+**Danish**, then **English (US)**. Test the keys used in your passwords.
 
-Create a normal password-protected user with administrative (`wheel`) access.
-Disable direct root login and enable networking. Nimbus installs the selected
-desktop, applications and services after first boot.
+## 2. Installation Source
 
-Keep Secure Boot enabled on hardware. The disposable test VM may run without
-it; NVIDIA MOK enrollment is a separate post-install step where needed.
+Network source: **Closest mirror**. Leave additional repositories empty.
+If the source cannot load, enable networking in step 6 first.
 
-## Disk layout
+## 3. Installation Destination
 
-Check the target disk before confirming any partition changes. Use UEFI/GPT,
-Fedora GRUB and this layout:
+Choose **Advanced Custom (Blivet-GUI)** and use **GPT**.
 
-~~~text
-/boot/efi    EFI system partition, unencrypted
-/boot        separate boot filesystem, unencrypted
-LUKS2        encrypted Btrfs filesystem
-  root       mounted at /
-  home       mounted at /home
-~~~
+### Boot partitions
 
-Keep the encryption passphrase. Nimbus does not require fixed partition sizes,
-a specific filesystem label or additional subvolumes. Keep Fedora zram;
-disk-backed swap, hibernation and TPM unlock are deferred.
+Device type: **Partition**. Leave labels empty.
 
-For native Windows dual boot, preserve Windows partitions and its EFI loader.
-Do not format a shared EFI partition. Keep independent copies of irreplaceable
-data before partitioning.
+| Filesystem | Mountpoint | Size | Encrypt |
+| --- | --- | --- | --- |
+| EFI System Partition (FAT32) | `/boot/efi` | 1 GiB | No |
+| ext4 | `/boot` | 2 GiB | No |
 
-For a new installation, do not pre-create `/.snapshots`. Nimbus installs
-Snapper for `hyprland-noctalia` and lets it create the snapshot storage after
-approval. The first setup run has no before snapshot.
+### Encrypted system volume
 
-## Existing installations from the old guide
+Device type: **Btrfs Volume**. Leave **Mountpoint** empty.
 
-The [previous guide](https://github.com/Furyfree/nimbus/blob/f7cd2eaba36e0de64595f74fe778669dbe9528d2/docs/INSTALLATION.md)
-required separate subvolumes for snapshots, logs, caches, containers and other
-data. Those requirements are retired. Existing layouts can stay; do not delete
-subvolumes or reinstall Fedora just to match the simpler layout above.
+| Filesystem | Name / label | Size | Encrypt | Sector size |
+| --- | --- | --- | --- | --- |
+| btrfs | `fedora` | Remaining | Yes, LUKS2 | Automatic |
 
-Nimbus supports reusing an empty `/.snapshots` mount when it is
-a root-owned Btrfs subvolume on the same filesystem as root, with no conflicting
-Snapper configuration. Nimbus shows that reuse before approval, registers the
-storage and verifies it with native Snapper. It preserves the mount, contents
-and `/etc/fstab`. This requires Nimbus 0.3.1 or newer; the 0.3.0 engine
-refuses this layout.
+### Subvolumes
 
-Populated, foreign-owned, unreadable or ambiguous snapshot storage needs an
-explicit migration. Do not delete it merely to get past an installation error.
+Device type: **Btrfs Subvolume**, filesystem **btrfs**. Create all entries
+directly inside `fedora`, as siblings, using these names without `@` prefixes.
 
-Root snapshots exclude other subvolumes and filesystems, including `/home`,
-`/boot` and EFI. On the old layout they also exclude system Flatpaks and
-container storage. Nimbus does not take separate Flatpak snapshots or promise
-whole-system rollback. Snapshots on the same disk are not backups.
+| Name | Mountpoint | Size | Encrypt |
+| --- | --- | --- | --- |
+| `root` | `/` | Shared | Inherited |
+| `home` | `/home` | Shared | Inherited |
+| `snapshots` | `/.snapshots` | Shared | Inherited |
+| `log` | `/var/log` | Shared | Inherited |
+| `cache` | `/var/cache` | Shared | Inherited |
+| `swapfile` | `/var/swap` | Shared | Inherited |
+| `flatpak` | `/var/lib/flatpak` | Shared | Inherited |
+| `windows` | `/var/lib/nimbus/windows` | Shared | Inherited |
+| `docker` | `/var/lib/docker` | Shared | Inherited |
+| `containerd` | `/var/lib/containerd` | Shared | Inherited |
 
-## First boot and Nimbus
+## 4. Language Support
 
-Sign in as the normal user. Check networking, sudo access and the mounts:
+**English (Denmark)**.
 
-~~~sh
-lsblk -f
-findmnt -t btrfs,ext4,vfat
-~~~
+## 5. Software Selection
 
-Run:
+Base environment: **Fedora Custom Operating System**. Select only:
 
-~~~sh
-curl -fsSL https://raw.githubusercontent.com/Furyfree/nimbus/main/install.sh | bash
-~~~
+- **Standard**
+- **Common NetworkManager Submodules**
+- **Guest Agents** for a VM only
 
-Nimbus 0.3.1 or newer asks for `desktop`, `laptop` or `vm` on first use.
-With 0.3.0, use `bash -s -- --machine vm` instead of `bash`, replacing
-`vm` with the intended machine. Reruns reuse the saved selection. The installer
-shows its plan and asks before applying it. An existing Nimbus RPM must be
-updated through DNF to obtain engine fixes; updating the checkout is not enough.
+## 6. Network & Host Name
 
-For unpublished changes, use the [candidate guide](../tools/vm/README.md).
-Check [TASKS.md](TASKS.md) for remaining installation and hardware trials.
+Enable Ethernet or Wi-Fi and set the hostname.
 
-Reboot when requested and choose Hyprland through UWSM in Noctalia Greeter.
-Use `nimbus status`, `nimbus doctor` and `nimbus postinstall` to inspect the
-result. For a broken desktop, try Ctrl+Alt+F3 and repair from a TTY. A system
-that cannot boot needs Fedora rescue or installation media. There is no
-separate Nimbus recovery desktop.
+## 7. Time & Date
+
+**Europe/Copenhagen**, with network time enabled.
+
+## 8. Root Account
+
+Enable the root account and set a password. Leave root SSH access disabled.
+
+## 9. User Creation
+
+Create your normal user, require a password and select **Make this user
+administrator**.
+
+## 10. Begin Installation
+
+Review the partition changes, then choose **Begin Installation**. When done,
+reboot and remove the installation media.
+
+Continue with [Nimbus setup in README](../README.md#install).

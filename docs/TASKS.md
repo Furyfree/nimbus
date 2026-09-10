@@ -19,8 +19,11 @@ are local and have not been installed.
   Explicit machine arguments, selector reuse and separate approval remain.
 - [x] Install 0.3.1 on the existing VM layout, reuse the empty snapshot mount,
   reboot into UWSM and inspect the result.
-- [ ] Test a fresh root/home installation and native snapshot pairs, cleanup,
-  retention and restoration. Updating the checkout is not an engine upgrade.
+- [x] Restore the full installation layout in three focused tables and keep
+  filesystem labels distinct from subvolume names.
+- [ ] Test a fresh installation of the documented layout, setup without
+  pre-created snapshot storage, native snapshot pairs, cleanup, retention
+  and restoration. Updating the checkout is not an engine upgrade.
 - [x] Correct the Secure Boot test-VM exception and stale sync session notes.
 - [x] Guard LibrePods autostart on Bluetooth adapter presence in Chezmoi.
 - [x] Record the owner's VM-only `mcelog` disablement; no Nimbus workaround.
