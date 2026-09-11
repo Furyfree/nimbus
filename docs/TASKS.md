@@ -27,6 +27,21 @@ refactor and TUI.
   fallback and removal on real hardware. This scoped test precedes the TUI;
   it is separate from the later full desktop trial. No working claim yet.
 
+## NVIDIA MOK helper
+
+- [x] Add approved signing and enrollment to `postinstall nvidia-mok`, with
+  read-only preview, native password prompts and preservation of existing keys.
+- [x] Verify module signing identifiers, stop on failed builds or boot-image
+  updates, preserve pending requests and distinguish enrollment from boot proof.
+- [x] Confirm the manual native flow on the desktop: signed NVIDIA modules,
+  MOK enrollment, reboot, working RTX 3080 and Secure Boot still enabled.
+  Hyprland, Noctalia and all three portal services work after this repair.
+- [ ] Test the new Nimbus helper itself on an installation needing enrollment;
+  manual commands validate the approach, not the new implementation.
+- [ ] In Chezmoi, skip NVIDIA Settings autostart when no saved
+  `~/.nvidia-settings-rc` exists. Its failed settings restore does not mean the
+  driver failed. Keep this separate from Nimbus's signing helper.
+
 ## Installer follow-up
 
 - [x] Recover the Fedora installation guide and replace obsolete storage and

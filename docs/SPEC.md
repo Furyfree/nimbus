@@ -335,9 +335,35 @@ Post-install task IDs include `onepassword`, `fingerprint`, `nvidia-mok`,
 calls its helper's standalone install command. WoWUp is blocked until its
 helper supplies that command. Nimbus does not mark an app installed merely
 because its helper RPM exists. Opening 1Password does not prove
-sign-in. Fingerprint enrollment may run the native tool after approval. MOK,
-reboot and logout tasks provide instructions; they do not silently perform
-those actions. Listing tasks never changes the machine.
+sign-in. Fingerprint enrollment may run the native tool after approval.
+Reboot and logout tasks provide instructions. Listing tasks never changes the
+machine.
+
+`nimbus postinstall nvidia-mok` offers NVIDIA signing and MOK enrollment when
+Secure Boot and the selected, installed NVIDIA packages are confirmed.
+`--plan` shows the conditional native steps without sudo or writes. After
+approval, Nimbus uses sudo to inspect the akmods key pair, preserves existing
+keys and stops on an incomplete pair. It generates a pair with `kmodgenca -a`
+only when both files are absent. It never forces key replacement.
+
+The helper checks the four NVIDIA modules for the running kernel. Missing or
+mismatched signing identifiers trigger an `akmods` rebuild; verification must
+pass before `dracut` refreshes that kernel's boot image. Explicit setup always
+refreshes the image, even with signed modules, so a failed image update can be
+retried. Existing matching modules and trusted keys are retained. An untrusted
+certificate is submitted through `mokutil --import`; an existing request is
+preserved.
+Passwords stay in native prompts. Nimbus never reboots, disables Secure Boot
+or replaces factory Secure Boot keys. Failures stop subsequent steps and report
+what can
+be retried. No completion receipt is written.
+
+The owner completes enrollment at reboot: Enroll MOK, Continue, Yes, temporary
+password, Reboot. That screen uses a US/QWERTY keyboard. Afterwards verify
+`nvidia-smi` and `mokutil --sb-state`. A pending request is not completed
+enrollment, and a trusted certificate alone does not prove the driver works.
+Unprivileged status may remain unknown when certificate-directory permissions
+prevent inspection; approved setup performs the required elevated check.
 
 FDE auto-unlock is a planned optional post-install action, before the dashboard.
 It must inspect the existing encryption and boot setup, show the proposed

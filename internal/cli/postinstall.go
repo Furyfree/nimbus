@@ -79,7 +79,7 @@ func newPostinstall(opts *options) *cobra.Command {
 			if err := renderPostinstall(cmd.OutOrStdout(), postinstallView{Machine: before.view.Machine, Tasks: []postinstall.Task{task}}); err != nil {
 				return err
 			}
-			if preview || task.Status == postinstall.Complete || task.Status == postinstall.NotApplicable {
+			if preview || (task.Status == postinstall.Complete && task.Action == nil) || task.Status == postinstall.NotApplicable {
 				return nil
 			}
 			if task.Status == postinstall.Blocked {
@@ -121,6 +121,9 @@ func newPostinstall(opts *options) *cobra.Command {
 			}
 			if err := cmd.Context().Err(); err != nil {
 				return err
+			}
+			if task.Action.Kind == postinstall.SetupNVIDIA {
+				return postinstall.RunNVIDIAMOK(cmd.Context(), src, cmd.OutOrStdout(), cmd.ErrOrStderr())
 			}
 			runErr := src.Stream(cmd.OutOrStdout(), cmd.ErrOrStderr(), argv[0], argv[1:]...)
 			if runErr != nil {
@@ -182,6 +185,8 @@ func selectedTask(view postinstallView, id string) (postinstall.Task, error) {
 func postinstallArgv(task postinstall.Task) ([]string, error) {
 	if task.Action != nil {
 		switch {
+		case task.ID == "nvidia-mok" && (task.Status == postinstall.Unknown || task.Status == postinstall.Pending || task.Status == postinstall.Complete) && task.Action.Kind == postinstall.SetupNVIDIA && len(task.Action.Argv) == 0:
+			return nil, nil
 		case task.ID == "onepassword" && task.Status == postinstall.Unknown && task.Action.Kind == postinstall.OpenApplication && slices.Equal(task.Action.Argv, []string{"1password"}):
 			return []string{"1password"}, nil
 		case task.ID == "fingerprint" && task.Status == postinstall.Pending && task.Action.Kind == postinstall.EnrollFingerprint && slices.Equal(task.Action.Argv, []string{"fprintd-enroll"}):
@@ -209,7 +214,11 @@ func renderPostinstall(out io.Writer, view postinstallView) error {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(&b, "Native action: %s\n", strings.Join(argv, " "))
+			if task.Action.Kind == postinstall.SetupNVIDIA {
+				fmt.Fprintln(&b, "Native action: NVIDIA signing and MOK enrollment as described above.")
+			} else {
+				fmt.Fprintf(&b, "Native action: %s\n", strings.Join(argv, " "))
+			}
 		}
 		fmt.Fprintf(&b, "Verification: %s\nRecovery: %s\n", task.Verification, task.Recovery)
 	}

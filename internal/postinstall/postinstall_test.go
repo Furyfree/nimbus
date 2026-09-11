@@ -156,8 +156,8 @@ func TestMOKNativeEnrollmentStates(t *testing.T) {
 		name, output, failure string
 		want                  Status
 	}{
-		{"enrolled", mokCertificate + " is already enrolled", "", Complete},
-		{"firmware trust", mokCertificate + " is already in db", "", Complete},
+		{"enrolled driver unchecked", mokCertificate + " is already enrolled", "", Pending},
+		{"firmware trust driver unchecked", mokCertificate + " is already in db", "", Pending},
 		{"request not completion", mokCertificate + " is already in the enrollment request", "", Pending},
 		{"not enrolled", mokCertificate + " is not enrolled", "exit status 1", Pending},
 		{"unexpected success", "", "", Unknown},
@@ -169,15 +169,18 @@ func TestMOKNativeEnrollmentStates(t *testing.T) {
 			in, src := fixture("akmod-nvidia", "akmods", "mokutil")
 			in.Resolved.Components = []definitions.ResolvedComponent{{ID: "nvidia"}}
 			in.Facts.SecureBoot.Value = inspect.SecureBootEnabled
-			src.Files[mokCertificate] = []byte("certificate supplied to native validator")
+			for _, tool := range []string{"sudo", "kmodgenca", "dracut", "modinfo", "nvidia-smi"} {
+				src.Paths[tool] = "/usr/bin/" + tool
+			}
+			src.Files[mokCertificate] = mokTestCertificate(t)
 			key := nativetest.Key("mokutil", "--test-key", mokCertificate)
 			src.Commands[key] = []byte(test.output)
 			if test.failure != "" {
 				src.Failures[key] = test.failure
 			}
 			got := findTask(t, Inspect(src, in), "nvidia-mok")
-			if got.Status != test.want || got.Action != nil {
-				t.Fatalf("got %+v; want %s and instruction-only enrollment", got, test.want)
+			if got.Status != test.want || got.Action == nil || got.Action.Kind != SetupNVIDIA {
+				t.Fatalf("got %+v; want %s and explicit setup", got, test.want)
 			}
 		})
 	}
@@ -319,5 +322,44 @@ func TestForeignOrFailedReceiptsDoNotCreateRequirements(t *testing.T) {
 	}
 	if got := Inspect(src, in); len(got) != 0 {
 		t.Fatalf("invalid receipts exposed tasks: %+v", got)
+	}
+}
+
+func TestMOKReadOnlyReadinessIncludesDriver(t *testing.T) {
+	for _, mode := range []string{"working", "unsigned", "unreadable"} {
+		t.Run(mode, func(t *testing.T) {
+			in, src := fixture("akmod-nvidia", "akmods", "mokutil")
+			in.Resolved.Components = []definitions.ResolvedComponent{{ID: "nvidia"}}
+			in.Facts.SecureBoot.Value = inspect.SecureBootEnabled
+			for _, tool := range []string{"sudo", "kmodgenca", "dracut", "modinfo", "nvidia-smi"} {
+				src.Paths[tool] = "/usr/bin/" + tool
+			}
+			src.Files[mokCertificate] = mokTestCertificate(t)
+			src.Commands["mokutil --test-key "+mokCertificate] = []byte(mokCertificate + " is already enrolled")
+			src.Commands["uname -r"] = []byte("test-kernel")
+			src.Commands["nvidia-smi --query-gpu=name --format=csv,noheader"] = []byte("test GPU")
+			for _, module := range []string{"nvidia", "nvidia_modeset", "nvidia_drm", "nvidia_uvm"} {
+				src.Commands["modinfo -k test-kernel -F signer "+module] = []byte("test signer")
+				src.Commands["modinfo -k test-kernel -F sig_key "+module] = []byte("12:34")
+			}
+			want := Complete
+			if mode == "unsigned" {
+				src.Commands["modinfo -k test-kernel -F signer nvidia"] = nil
+				want = Pending
+			} else if mode == "unreadable" {
+				delete(src.Files, mokCertificate)
+				want = Unknown
+			}
+			guard := &readGuard{FakeSource: src}
+			got := findTask(t, Inspect(guard, in), "nvidia-mok")
+			if got.Status != want || got.Action == nil {
+				t.Fatalf("got %+v, want %s with explicit repair still available", got, want)
+			}
+			for _, command := range guard.commands {
+				if strings.HasPrefix(command, "sudo ") {
+					t.Fatalf("inspection escalated: %s", command)
+				}
+			}
+		})
 	}
 }
