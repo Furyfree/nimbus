@@ -244,6 +244,8 @@ func TestPostinstallRebootRemainsInstructionOnly(t *testing.T) {
 
 func TestPostinstallRejectsForgedNativeActions(t *testing.T) {
 	for _, task := range []postinstall.Task{
+		{ID: "nvidia-mok", Status: postinstall.Blocked, Action: &postinstall.Action{Kind: postinstall.SetupNVIDIA}},
+		{ID: "nvidia-mok", Status: postinstall.Pending, Action: &postinstall.Action{Kind: postinstall.SetupNVIDIA, Argv: []string{"sudo", "sh"}}},
 		{ID: "onepassword", Status: postinstall.Unknown, Action: &postinstall.Action{Kind: postinstall.OpenApplication, Argv: []string{"sh", "-c", "unexpected"}}},
 		{ID: "onepassword", Status: postinstall.Blocked, Action: &postinstall.Action{Kind: postinstall.OpenApplication, Argv: []string{"1password"}}},
 		{ID: "other", Status: postinstall.Pending, Action: &postinstall.Action{Kind: postinstall.EnrollFingerprint, Argv: []string{"fprintd-enroll"}}},
@@ -300,6 +302,82 @@ func TestPostinstallCopilotUsesNativeInstallWithoutAppReceipts(t *testing.T) {
 			afterJSON, _ := json.Marshal(after)
 			if !bytes.Equal(beforeJSON, afterJSON) {
 				t.Fatal("native action changed Nimbus receipts")
+			}
+		})
+	}
+}
+
+func TestPostinstallNVIDIAMOKApprovalBoundary(t *testing.T) {
+	for _, mode := range []string{"plan", "cancel", "nonterminal", "json", "approved", "changed ownership"} {
+		t.Run(mode, func(t *testing.T) {
+			root, src := postinstallFixture(t)
+			if err := os.WriteFile(filepath.Join(root, "profiles/common.toml"), []byte("schema=1\nid='common'\ncomponents=['nvidia']\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "components/nvidia.toml"), []byte("schema=1\nid='nvidia'\npackages=['akmod-nvidia','akmods','mokutil']\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			var receipts []state.Receipt
+			for _, name := range []string{"akmod-nvidia", "akmods", "mokutil"} {
+				key := nativetest.Key("dnf5", inspect.PackageQueryArgs...)
+				src.Commands[key] = append(src.Commands[key], []byte(name+"|0|1|1|x86_64|fedora|User\n")...)
+				receipts = append(receipts, state.Receipt{Schema: state.ReceiptSchema, Machine: "vm", Resource: "package:dnf:" + name, Provider: "dnf", Verified: true, Operation: "install", PlanDigest: "fixture"})
+			}
+			if err := state.Record(stateRoot, "fixture", &state.Stage{Schema: state.Schema, PlanDigest: "fixture", Receipts: receipts}); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"sudo", "kmodgenca", "akmods", "dracut", "mokutil", "modinfo", "nvidia-smi"} {
+				src.Paths[name] = "/usr/bin/" + name
+			}
+			src.Commands["mokutil --sb-state"] = []byte("SecureBoot enabled")
+			src.Commands["uname -r"] = []byte("test-kernel")
+			src.streamErr = errors.New("authentication stopped")
+			savedTerminal, savedApprover := postinstallTerminal, approver
+			t.Cleanup(func() { postinstallTerminal, approver = savedTerminal, savedApprover })
+			postinstallTerminal = func(io.Reader) bool { return mode != "nonterminal" }
+			approver = func(io.Reader, io.Writer, string) bool {
+				if mode == "changed ownership" {
+					if err := os.Remove(filepath.Join(stateRoot, state.ReceiptsDir, state.FileName("package:dnf:akmods"))); err != nil {
+						t.Fatal(err)
+					}
+					return true
+				}
+				return false
+			}
+			args := []string{"nvidia-mok"}
+			if mode == "plan" {
+				args = append(args, "--plan", "--yes")
+			} else if mode == "approved" {
+				args = append(args, "--yes")
+			}
+			cmd, out := postinstallCommand(root, mode == "json", args...)
+			err := cmd.Execute()
+			if (err == nil) != (mode == "plan") {
+				t.Fatalf("%v: %s", err, out)
+			}
+			if mode == "approved" {
+				if !strings.Contains(err.Error(), "authentication stopped") || !slices.Equal(src.streams, []string{"sudo --validate"}) {
+					t.Fatalf("approved setup not dispatched: %v %v", err, src.streams)
+				}
+			} else {
+				if len(src.streams) != 0 {
+					t.Fatalf("unapproved native actions: %v", src.streams)
+				}
+				for _, command := range src.reads {
+					if strings.HasPrefix(command, "sudo ") {
+						t.Fatalf("unapproved privilege escalation: %s", command)
+					}
+				}
+			}
+			if mode == "plan" {
+				for _, want := range []string{"kmodgenca -a", "akmods --force --rebuild", "dracut --force", "mokutil --import", "US/QWERTY"} {
+					if !strings.Contains(out.String(), want) {
+						t.Fatalf("preview omits %q: %s", want, out)
+					}
+				}
+			}
+			if mode == "changed ownership" && !strings.Contains(err.Error(), "changed after approval") {
+				t.Fatalf("stale ownership accepted: %v", err)
 			}
 		})
 	}

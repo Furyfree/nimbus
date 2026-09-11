@@ -1,5 +1,5 @@
-// Package tasks describes manual work using current, read-only observations.
-// It never executes the actions it returns or stores a completion receipt.
+// Package postinstall inspects setup tasks and runs their approved native actions.
+// Inspection never mutates the system or stores a completion receipt.
 package postinstall
 
 import (
@@ -28,12 +28,13 @@ const (
 	OpenApplication    ActionKind = "open-application"
 	EnrollFingerprint  ActionKind = "enroll-fingerprint"
 	InstallApplication ActionKind = "install-application"
+	SetupNVIDIA        ActionKind = "setup-nvidia"
 )
 
-// Action is a fixed native command offered for explicit user selection.
+// Action is a fixed native command or NVIDIA setup offered for explicit selection.
 type Action struct {
 	Kind ActionKind `json:"kind"`
-	Argv []string   `json:"argv"`
+	Argv []string   `json:"argv,omitempty"`
 }
 
 type Task struct {

@@ -106,6 +106,12 @@ still follows it. Until then, auto-unlock remains planned, not working.
 
 ### Remaining integration
 
+Deliver the explicit NVIDIA MOK helper and test it on an installation needing
+signing/enrollment. The manual desktop repair passed with Secure Boot enabled;
+the helper still needs its own installed trial. Preserve native prompts and
+keys, and leave reboot confirmation to the owner. The NVIDIA Settings autostart
+condition belongs in Chezmoi, separately from signing.
+
 Complete COPR application selection after verifying the actual published
 helper interfaces and package sources. Retain the Hyprland and Noctalia version
 families. Use native dependency solving rather than manually coordinating
