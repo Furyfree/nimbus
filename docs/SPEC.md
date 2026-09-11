@@ -339,14 +339,70 @@ sign-in. Fingerprint enrollment may run the native tool after approval. MOK,
 reboot and logout tasks provide instructions; they do not silently perform
 those actions. Listing tasks never changes the machine.
 
-FDE auto-unlock is a planned optional post-install action, before the dashboard.
-It must inspect the existing encryption and boot setup, show the proposed
-native enrollment and ask for approval. Preserve working passphrase access;
-provide status and enrollment-removal instructions. Unsupported setups retain
-manual unlock. Sync and upgrades must not enroll automatically. The native
-method and boot-change policy must be settled before implementation. Enrollment,
-booting, passphrase fallback and removal need real-hardware validation before
-claiming support. UKI generation and broader boot-key management stay deferred.
+### FDE auto-unlock (planned)
+
+`nimbus postinstall fde --plan` previews the setup; `nimbus postinstall fde`
+offers the next step for the detected state. This optional action prepares
+signed Unified Kernel Images (UKIs) and TPM2 unlocking for an existing LUKS2
+installation. Use a dedicated post-install helper with thin CLI integration,
+Dracut, ukify, kernel-install and systemd-cryptenroll. Nimbus owns the root
+configuration; native tools own image generation, signing and enrollment.
+
+Inspect encryption, TPM support, Secure Boot and shim validation, the actual
+boot path, UKI measurements, existing enrollment, required tools and EFI space.
+Missing observations stay unknown. Preview does not elevate, download, create
+keys or change the machine; explain any checks that need approved privileged
+inspection before setup can continue. Reject ambiguous encryption targets.
+
+| Detected boot setup | Enrollment policy |
+| --- | --- |
+| Secure Boot enabled, shim/MOK used | PCR 7 + PCR 14 + signed PCR 11 |
+| Secure Boot enabled, no shim | PCR 7 + signed PCR 11 |
+| Secure Boot disabled | Same PCR selection; explicit confirmation required |
+
+PCR 11 uses a signed policy so newly approved images can unlock without fresh
+enrollment for each kernel update. PCRs 7 and 14 bind to their observed values;
+Secure Boot trust or MOK changes can require passphrase boot and policy renewal.
+With Secure Boot disabled, PCR 7 binds to that disabled state; PCR selection
+does not replace signature enforcement. Include PCR 14 only for verified shim.
+Recommend preparing trusted boot images and drivers, then enabling Secure Boot;
+reinstallation is normally unnecessary. Unknown state is not a disabled-state
+exception. Missing TPM, LUKS2 or verified UKI support blocks enrollment.
+
+Use Yes/No confirmations, with Enter accepting the displayed default. Recommend
+continuing supported preparation; default to No for reduced-protection mode,
+removal and reboot. A general `--yes` must not accept those extra choices.
+Native tools may require authentication, a disk passphrase or a temporary MOK
+password. Nimbus must not capture those secrets or ask users to choose PCRs.
+
+The action resumes by inspecting the machine when rerun after each reboot:
+
+1. Show and approve changes. Prepare protected local signing keys, native
+   update hooks and the UKI. Offer certificate enrollment when needed, keeping
+   existing boot entries and keys. Private signing keys stay on the encrypted
+   system, outside definitions, the EFI partition, logs and receipts.
+2. Ask for a reboot into the UKI using the existing disk passphrase. Verify
+   actual boot measurements and the policy for the disk-unlock boot phase
+   before offering TPM enrollment. Coordinate NVIDIA MOK setup first.
+3. Enroll after confirmation, preserving passphrase access and unrelated slots.
+   Ask for another reboot to test unlocking. Distinguish enrollment, observed
+   boot evidence and the user's confirmation; enrollment alone is not success.
+
+Native hooks rebuild and sign UKIs for kernel/initramfs changes, including DNF
+updates run without Nimbus. Account for NVIDIA module build/signing order,
+available space and old-image cleanup. Report failures and retain a working
+image. First verify Fedora shim/GRUB integration, Windows selection and the
+older-kernel boot path; replacing the bootloader is a separate decision.
+
+Reruns reuse valid setup and report conflicts rather than duplicating keys or
+slots. Provide status and a confirmed removal path scoped to Nimbus enrollment;
+preserve unrelated enrollment and passphrase access. Policy renewal replaces
+only the identified old enrollment after verifying the replacement, including
+when Secure Boot is enabled later. Do not leave a weaker TPM enrollment as an
+unreported alternative. Never clear the TPM or wipe all TPM slots.
+Sync and upgrades do not initiate enrollment or silently change its policy.
+Boot, update, fallback and removal tests are required before claiming support;
+the [roadmap](ROADMAP.md#fde-auto-unlock-second) defines that gate.
 
 ## Preview, approval and results
 
@@ -495,14 +551,17 @@ Reject foreign ownership, path traversal and symlink escape before writes or
 deletion. Preserve approved checkout origin checks. Keep the preview, locking,
 verification and partial-failure rules above during simplification.
 
-Keep Secure Boot enabled on hardware, SELinux enforcing and firewalld active.
+Recommend Secure Boot on hardware; keep SELinux enforcing and firewalld active.
 Open only needed services and ports. Do not weaken these settings to fix an
 application. NVIDIA signing-key enrollment stays an explicit native procedure;
 doctor permits disabled Secure Boot only for the selected `vm` machine when
 native inspection confirms a virtual machine. An unreadable boot or required
 virtualization check stays unknown. This exception is not hardware acceptance.
-Nimbus does not partition,
-encrypt or re-enroll disks. Boot partitions remain outside encrypted root.
+The FDE action separately permits explicit reduced-protection enrollment when
+Secure Boot is disabled; it does not disable Secure Boot or hide the finding
+from doctor. Nimbus does not partition or initially encrypt disks. Enrollment
+and policy renewal are limited to the approved FDE action above. Boot partitions
+remain outside encrypted root.
 Docker group membership is root-equivalent and remains an explicit selection.
 
 Secrets and SSH configuration belong to 1Password and Chezmoi. Never place
@@ -603,8 +662,9 @@ session retirement, clean install, upgrade and hardware trials remain open.
 ## Out of scope
 
 No custom snapshot/boot-archive manager, automatic restoration, backup service,
-Windows VM lifecycle, Home Assistant integration, UKI build pipeline or broad
-boot-key management is required for the desktop milestone. The installation
+Windows VM lifecycle, Home Assistant integration or broad boot-key management
+is required for the desktop milestone. UKI generation and local signing needed
+for FDE auto-unlock are in scope. Custom ISO work is deferred. The installation
 guide's partition layout is operator-owned. Nimbus registers suitable existing
 snapshot storage or lets native Snapper create it; it does not partition
 disks or maintain a boot-archive scheme.
