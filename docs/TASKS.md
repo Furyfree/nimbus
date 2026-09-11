@@ -5,8 +5,10 @@ The cleanup is merged and released as
 [v0.3.0](https://github.com/Furyfree/nimbus/releases/tag/v0.3.0).
 [Version 0.3.1](https://github.com/Furyfree/nimbus/releases/tag/v0.3.1) adds
 the installation fixes below and is available in COPR.
-The 0.3.1 existing-layout VM install and login passed; the reporting fixes below
-are local and have not been installed.
+The 0.3.1 existing-layout VM install and login passed. Version 0.4.0 releases
+repository updates during sync, Zed installation, browser fallbacks and
+reporting fixes. The signed Fedora 44 COPR package is available; its new
+installation and reboot checks remain pending.
 
 ## Next: GRUB, then FDE auto-unlock
 
@@ -44,7 +46,8 @@ refactor and TUI.
 - [x] Correct the Secure Boot test-VM exception and stale sync session notes.
 - [x] Guard LibrePods autostart on Bluetooth adapter presence in Chezmoi.
 - [x] Record the owner's VM-only `mcelog` disablement; no Nimbus workaround.
-- [ ] Deliver these local reporting/config changes and verify the next login.
+- [x] Deliver the Nimbus reporting fixes in 0.4.0.
+- [ ] Verify the matching Chezmoi configuration and next login.
 
 ## Repository updates in sync
 
@@ -64,8 +67,30 @@ refactor and TUI.
 - [x] Complete local CodeRabbit review. Its JSON restriction finding was
   already enforced by the command entry point; extend the existing regression
   test to cover combined sync, including `--yes` and `--plan`.
-- [ ] Release and publish the new engine, then test repository updates,
-  Chezmoi apply, dirty-tree errors and the upgraded-engine handoff in the VM.
+- [x] Publish the new engine source as Nimbus 0.4.0.
+- [x] Verify the signed 0.4.0 COPR package and its source archive.
+- [ ] Test repository updates, Chezmoi apply, dirty-tree errors and the
+  upgraded-engine handoff in an installed system with 0.4.0.
+
+## Release 0.4.0
+
+[Release preparation](https://github.com/Furyfree/nimbus/actions/runs/34617967413)
+and [COPR publication](https://github.com/Furyfree/copr/actions/runs/34618451367)
+passed. [Build 10976629][copr-040] produced `nimbus-0.4.0-0.1.fc44.x86_64`.
+The source archive matches all 254 tagged files and executable bits at
+`dde39045b9276281fd5338aac885a27ce5a96324`. Dependencies and bundled license
+notices are unchanged from 0.3.1. Archive SHA-256:
+`a8cdf5b06bf59742d6bdaec529d625105f806299de91d5f45cbd5e8ae8c9b720`.
+
+Nimbus `just check` and `just validate`, GitHub vendored build/tests, and COPR's
+offline `just check-container` passed. Local and published SRPMs preserve the
+exact archive. RPM signatures and digests passed against only the pinned COPR
+key; the payload contains the engine and license notices, with no scriptlets.
+The extracted engine reports 0.4.0 and validates all three machines in an
+unprivileged, network-disabled Fedora container. No VM or desktop installation
+was performed during release verification. UKI/TPM auto-unlock is not included.
+
+[copr-040]: https://copr.fedorainfracloud.org/coprs/furyfree/nimbus/build/10976629/
 
 ## Completed locally
 

@@ -42,7 +42,7 @@ requirements.
 
 ## Workflow
 
-The local candidate supports:
+Nimbus 0.4.0 supports:
 
 | Task | Command |
 | --- | --- |
@@ -60,7 +60,7 @@ The local candidate supports:
 
 ## Current checkout
 
-The repository-update workflow is local and unreleased. `nimbus sync` updates
+From Nimbus 0.4.0, `nimbus sync` updates
 the Nimbus and configured Chezmoi repositories, shows the system plan, applies
 approved changes, then asks to apply Chezmoi configuration and its scripts.
 `sync --upgrade` runs Topgrade first, then starts the updated Nimbus executable
@@ -70,7 +70,7 @@ Both repositories must be clean and track an approved origin. Local edits,
 local-only commits or diverged history stop the run with the repository path
 and repair advice. Nimbus never stashes, resets or commits for you.
 Profile and system-file changes need only a checkout update; Go command
-changes, including this new workflow, need a new Nimbus RPM.
+changes need a new Nimbus RPM. The repository-update workflow requires 0.4.0.
 
 `--plan` uses local definitions without pulling or applying anything. Status,
 doctor and lists also stay read-only. JSON mutation requires `--yes`; the

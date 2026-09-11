@@ -38,7 +38,8 @@ or divergent repository errors actionable. `sync --upgrade` preflights the
 repositories, runs Topgrade first, then starts the updated engine for sync.
 Keep Topgrade configuration in Chezmoi and prevent duplicate system updates or
 recursion. Its callback remains `nimbus upgrade --system` for RPMs and system
-Flatpaks. This repository-update workflow needs a new release and COPR build.
+Flatpaks. This repository-update workflow is released in Nimbus 0.4.0;
+see TASKS for COPR delivery and installation evidence.
 Deploy the new engine before applying the matching dotfiles configuration.
 Nimbus 0.3.1 asks for a machine on first use through the minimal
 `curl ... | bash` installer and supports the earlier empty snapshot mount.
