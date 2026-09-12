@@ -21,14 +21,29 @@ is Fedora 44 on x86_64, using Hyprland and Noctalia.
 
 Nimbus bootstraps required tools, performs the first Chezmoi handoff and
 coordinates later repository updates and Chezmoi apply during sync.
-Mise and the development profile's Zed use their official user installers
-when missing. Chezmoi owns their configuration; Zed owns its application
-updates and removal through `zed --uninstall`.
+Mise and the development profile's Zed and Zeron use their official user
+installers when missing. Chezmoi owns their configuration; Zed owns its
+application updates and removal through `zed --uninstall`. Zeron owns its
+versioned application, generated user service and runtime state. Its component
+selects Fedora's WebKitGTK 4.1 and JSON-GLib browser dependencies. Chezmoi links
+the bundled launcher/icon and selects `zeron update` through Topgrade.
 It does not keep a second list of Mise tools or manage ordinary user files.
 Chezmoi works independently of Nimbus and does not install system packages or
 escalate privileges. COPR installer helpers own application-specific download,
 verification, installation and removal logic. Nimbus installs their RPMs and
 offers small initial-setup actions; it does not track downloaded app artifacts.
+
+An installer's optional `effects` list contains nonempty, single-line plain
+descriptions of additional native changes. Missing-binary operations include
+these disclosures in the approval preview and JSON plan and use medium risk.
+They are descriptions, never independently executed commands. Existing
+binaries remain untouched. Zeron's installer writes, enables and restarts
+`zeron.service` and attempts `loginctl enable-linger`, with `sudo -n` as a
+fallback. Lingering lets user services continue after logout. These effects
+must be disclosed before approval; they do not authorize unrelated changes.
+Application sign-in stays manual. Zeron's native updater owns engine restarts;
+its daemon uninstall removes the service, not application data. Nimbus keeps
+no installer receipt and does not remove native apps when deselected.
 
 ## System files and research
 
@@ -50,8 +65,10 @@ migration is supported. The generic provider must continue to reject an
 unowned existing file.
 
 Shell, editor, browser, desktop, Noctalia and per-user systemd configuration
-below the home directory belong to Chezmoi. Requiring sudo for a system change
-does not authorize writing a user's dotfiles. Nimbus's own selector, checkout
+below the home directory belong to Chezmoi. Vendor-generated service units,
+such as Zeron's native installer output, stay with that vendor's lifecycle.
+Requiring sudo for a system change does not authorize writing a user's dotfiles.
+Nimbus's own selector, checkout
 and private diagnostics are operational state, not a second user-configuration
 collection.
 
@@ -649,14 +666,15 @@ Do not replace them merely to reduce the number of files or languages.
 
 The repository-update workflow is implemented locally and needs a new engine
 release and COPR RPM before installed commands change. Existing definitions
-still require only engine 0.3.0. The hidden `sync --no-upgrade` alias remains
+now require engine 0.4.3 for installer effect disclosures. Publish that engine
+before deploying these definitions. The hidden `sync --no-upgrade` alias remains
 compatible; ordinary sync omits general software updates. Installed tests must
 cover repository updates, Chezmoi apply and the fresh-engine upgrade handoff.
 
 WoWUp's helper still needs standalone install/update commands and a published
 package source. Copilot helper publication and native app behavior also need
 verification. Nimbus no longer has custom app providers or Cargo/user-tool
-installation lists; the Mise and Zed binary bootstraps remain.
+installation lists; Mise, Zed and Zeron use native binary bootstraps.
 
 Bare `nimbus` prints help until the dashboard is built. GRUB assets are present
 but inactive; FDE auto-unlock is not implemented. These boot features come

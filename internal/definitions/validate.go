@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/Furyfree/nimbus/internal/version"
 )
@@ -336,6 +337,11 @@ func validateComponent(c *Checkout, comp *Component, errs *ErrorList) {
 		}
 		if in.Binary == "" || !cleanRelativePath(in.Binary) {
 			errs.Add(where, "installer.binary must be a clean path relative to the home directory")
+		}
+		for _, effect := range in.Effects {
+			if strings.TrimSpace(effect) == "" || strings.IndexFunc(effect, unicode.IsControl) >= 0 {
+				errs.Add(where, "installer.effects must contain nonempty single-line descriptions without control characters")
+			}
 		}
 	}
 	seen := map[string]bool{}

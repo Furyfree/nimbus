@@ -116,6 +116,25 @@ was performed during release verification. UKI/TPM auto-unlock is not included.
 [omarchy-nvidia]: https://github.com/omacom/omarchy/blob/31bd80daa4613ffdee995ac27467fce5a2990806/install/config/hardware/nvidia.sh
 [cachyos-nvidia]: https://github.com/CachyOS/CachyOS-Settings/tree/4bcb3e3bf8a0c6763dbd935d14430c60d7ff5a37
 
+### Zeron development integration, 2026-09-12
+
+- [x] Select Zeron's official missing-binary installer and Fedora browser
+  dependencies through the development profile. The existing workstation
+  installation and both dependencies are already present.
+- [x] Disclose native service creation, enablement, restart and user lingering
+  before installation. Retain native ownership of updates, removal and state;
+  preserve an existing installation without rerunning its installer.
+- [x] Prepare Chezmoi's Linux development launcher/icon links and guarded
+  `zeron update` step. Account sign-in remains an optional manual step.
+- [x] Apply and verify the launcher, icon and updater configuration locally.
+  Native desktop and GTK icon lookup pass after refreshing the user's icon
+  index; Chezmoi now owns that refresh hook. The engine remains running.
+- [x] Run Nimbus's full `just check` gate and isolated installer disclosure,
+  profile selection, native updater and asset-link regression checks.
+- [ ] Release engine 0.4.3 before deploying definitions with installer effects.
+- [ ] Exercise fresh Zeron installation and its service/linger effects in a
+  disposable Fedora VM. This work does not reinstall or update the host app.
+
 ### Desktop package and setup audit, 2026-09-12
 
 - Zathura's PDF backend was missing. The desktop profile now selects Fedora's

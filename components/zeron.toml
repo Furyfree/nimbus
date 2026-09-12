@@ -1,0 +1,18 @@
+# The native installer owns ~/.zeron/app and its generated user service.
+# Chezmoi registers the bundled desktop entry/icon and Topgrade updater.
+# Sources: https://github.com/zeronsh/zeron/blob/v0.2.61/edge/src/install.sh
+# https://github.com/zeronsh/zeron/blob/v0.2.61/docs/reference/linux-browser.md
+schema = 1
+id = "zeron"
+
+packages = ["webkit2gtk4.1", "json-glib"]
+
+[installer]
+url = "https://zeron.sh/install.sh"
+binary = ".local/bin/zeron"
+effects = [
+  "writes ~/.config/systemd/user/zeron.service and reloads the user service manager",
+  "enables and restarts zeron.service; the engine is local-only until optional sign-in",
+  "attempts loginctl enable-linger for the user, with sudo -n as fallback; user services can run after logout",
+  "preserves existing sessions and credentials; updates and daemon removal belong to Zeron",
+]

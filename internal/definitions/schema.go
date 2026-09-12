@@ -93,6 +93,9 @@ type Component struct {
 type Installer struct {
 	URL    string `toml:"url"`
 	Binary string `toml:"binary"`
+	// Effects disclose additional installer changes before approval. They
+	// describe upstream behavior, not commands Nimbus runs independently.
+	Effects []string `toml:"effects"`
 }
 
 // Detect is a hardware rule: the chassis kind, "laptop" or "desktop", or

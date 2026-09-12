@@ -41,8 +41,16 @@ func TestPlanRendersSectionsAndReportsIncomplete(t *testing.T) {
 			t.Errorf("plan output lacks %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "sudo ") || strings.Contains(out, "sha256:") {
+	if strings.Contains(out, "sha256:") {
 		t.Fatalf("the plan is for reading, not commands and digests:\n%s", out)
+	}
+	// Vendor side effects must also be visible in the ordinary approval view,
+	// including when another operation prevents this plan from proceeding.
+	preview := strings.Join(strings.Fields(out), " ")
+	for _, effect := range []string{"zeron installer:", "zeron.service", "loginctl enable-linger", "sudo -n", "after logout"} {
+		if !strings.Contains(preview, effect) {
+			t.Errorf("installer disclosure missing %q:\n%s", effect, out)
+		}
 	}
 	if strings.Contains(out, "prune ") {
 		t.Fatal("prune section shown without --prune")

@@ -10,11 +10,11 @@ import (
 func TestCandidateDefinitionsRequireCompatibleEngine(t *testing.T) {
 	saved := version.Engine
 	t.Cleanup(func() { version.Engine = saved })
-	for _, v := range []string{"0.1.1", "0.2.0", "0.2.3", "0.3.0", "0.3.1", "0.3.2", "0.4.0", "0.4.1", "0.4.2", "0.0.0-dev.candidate"} {
+	for _, v := range []string{"0.1.1", "0.2.0", "0.2.3", "0.3.0", "0.3.1", "0.3.2", "0.4.0", "0.4.1", "0.4.2", "0.4.3", "0.0.0-dev.candidate"} {
 		version.Engine = v
 		code, out, errOut := run(t, "validate", "--checkout", repoRoot(t))
-		if v != "0.4.2" && v != "0.0.0-dev.candidate" {
-			if code != ExitFailure || !strings.Contains(out+errOut, "min_engine 0.4.2 is newer") {
+		if v != "0.4.3" && v != "0.0.0-dev.candidate" {
+			if code != ExitFailure || !strings.Contains(out+errOut, "min_engine 0.4.3 is newer") {
 				t.Fatalf("old engine: %d %s %s", code, out, errOut)
 			}
 		} else if code != ExitOK {

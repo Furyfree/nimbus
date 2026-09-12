@@ -83,7 +83,7 @@ type Operation struct {
 	// Blocked explains a problem the owner must resolve. A blocked
 	// operation keeps the plan incomplete.
 	Blocked string `json:"blocked,omitempty"`
-	// Notes are observations that do not block.
+	// Notes provide observations and installer disclosures that do not block.
 	Notes []string `json:"notes,omitempty"`
 }
 

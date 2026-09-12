@@ -471,6 +471,39 @@ func TestMinimumEngine(t *testing.T) {
 	}
 }
 
+func TestInstallerEffectsArePlainDescriptions(t *testing.T) {
+	for _, tc := range []struct {
+		effect string
+		valid  bool
+	}{
+		{"enables the vendor's user service", true},
+		{"", false},
+		{"   ", false},
+		{"starts service\nwithout approval", false},
+		{"starts\rservice", false},
+		{"\x1b[2J", false},
+	} {
+		t.Run(tc.effect, func(t *testing.T) {
+			c, err := Load(writeTree(t, baseTree()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			c.Components["hardware"].Installer = &Installer{
+				URL: "https://example.invalid/install.sh", Binary: ".local/bin/example",
+				Effects: []string{tc.effect},
+			}
+			errs := Validate(c)
+			if tc.valid {
+				if len(errs) != 0 {
+					t.Fatal(errs)
+				}
+			} else {
+				requireError(t, errs, "installer.effects")
+			}
+		})
+	}
+}
+
 func TestInvalidIDsAndReservedPrefixes(t *testing.T) {
 	for _, kind := range []string{"machines", "profiles", "components"} {
 		t.Run(kind, func(t *testing.T) {

@@ -62,6 +62,12 @@ retaining initial setup and profile handoff.
 Remove unused Cargo and installer follow-up declarations; Chezmoi and Mise
 own those tools. Keep the required Mise binary bootstrap and prerequisites.
 
+The development profile also bootstraps Zeron through its official installer
+and selects its browser dependencies. Installer effect disclosures cover its
+generated user service and lingering changes before approval. Release engine
+0.4.3 before deploying those definitions. Chezmoi owns the bundled-asset links
+and native Topgrade updater; Zeron owns application and service state.
+
 Keep only helper RPM declarations and small post-install calls in Nimbus.
 COPR helpers own downloads, verification, installation, status and removal;
 Topgrade calls their explicit updates. No custom application provider is needed.
