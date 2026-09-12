@@ -664,12 +664,12 @@ Do not replace them merely to reduce the number of files or languages.
 
 ## Remaining delivery work
 
-The repository-update workflow is implemented locally and needs a new engine
-release and COPR RPM before installed commands change. Existing definitions
-now require engine 0.4.3 for installer effect disclosures. Publish that engine
-before deploying these definitions. The hidden `sync --no-upgrade` alias remains
-compatible; ordinary sync omits general software updates. Installed tests must
-cover repository updates, Chezmoi apply and the fresh-engine upgrade handoff.
+The repository-update workflow and installer effect disclosures are published
+in engine 0.4.3 and its Fedora 44 COPR RPM. Current definitions require that
+engine version; upgrade older engines before syncing these definitions.
+The hidden `sync --no-upgrade` alias remains compatible; ordinary sync omits
+general software updates. Installed tests must cover repository updates,
+Chezmoi apply and the fresh-engine upgrade handoff.
 
 WoWUp's helper still needs standalone install/update commands and a published
 package source. Copilot helper publication and native app behavior also need

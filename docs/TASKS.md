@@ -131,9 +131,35 @@ was performed during release verification. UKI/TPM auto-unlock is not included.
   index; Chezmoi now owns that refresh hook. The engine remains running.
 - [x] Run Nimbus's full `just check` gate and isolated installer disclosure,
   profile selection, native updater and asset-link regression checks.
-- [ ] Release engine 0.4.3 before deploying definitions with installer effects.
+- [x] Release engine 0.4.3 before deploying definitions with installer effects.
 - [ ] Exercise fresh Zeron installation and its service/linger effects in a
   disposable Fedora VM. This work does not reinstall or update the host app.
+
+### Version 0.4.3 release verification, 2026-09-12
+
+[Nimbus v0.4.3](https://github.com/Furyfree/nimbus/releases/tag/v0.4.3) selects
+commit `e7690ff10073296cad24fe6a6e58a6a63989fe1e`. Its source archive SHA-256 is
+`6716cd80d7092a2b7f84a50f71de02b64a7c71dfea45f24e64dec2c4e8d3fd4d`.
+All 269 tagged files and executable bits match. Module inputs and 23 vendored
+dependency notices are unchanged from 0.4.2. Local checks, CI and the offline
+vendored release build/tests passed.
+
+[COPR build 10979911](https://copr.fedorainfracloud.org/coprs/furyfree/nimbus/build/10979911/)
+published `nimbus-0.4.3-0.1.fc44.x86_64`. The complete offline packaging gate
+passed on an isolated Fedora 44 source copy; the direct host bind mount was
+blocked by SELinux, so only temporary copies received container labels.
+Both prepared and published source RPMs preserve the exact release archive
+and selected spec. The package-specific and full COPR CI gates passed.
+
+Native DNF downloaded the new RPM from the configured COPR repository. An
+isolated RPM keyring containing only Nimbus's pinned key verified signatures
+and digests. Its SHA-256 is
+`af8633a919a9a56d05f7fc0128dc9c7ce6bf73c96f37d4e09be7092509c4b7b4`.
+The payload contains only the engine and license notices, with no scriptlets
+or triggers. The extracted engine reports 0.4.3 and validates every tagged
+machine, including the laptop, in a container with networking disabled.
+Installation, login and hardware behavior remain a separate trial; this
+verification did not install the RPM or run workstation provisioning.
 
 ### Desktop package and setup audit, 2026-09-12
 

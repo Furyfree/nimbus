@@ -64,8 +64,8 @@ own those tools. Keep the required Mise binary bootstrap and prerequisites.
 
 The development profile also bootstraps Zeron through its official installer
 and selects its browser dependencies. Installer effect disclosures cover its
-generated user service and lingering changes before approval. Release engine
-0.4.3 before deploying those definitions. Chezmoi owns the bundled-asset links
+generated user service and lingering changes before approval. Engine 0.4.3 and
+its Fedora 44 COPR RPM now support those definitions. Chezmoi owns the asset links
 and native Topgrade updater; Zeron owns application and service state.
 
 Keep only helper RPM declarations and small post-install calls in Nimbus.
