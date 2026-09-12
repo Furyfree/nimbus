@@ -434,8 +434,17 @@ func TestPostinstallNoctaliaPreviewCancellationAndFailure(t *testing.T) {
 					t.Fatalf("unapproved mutation: %v", src.streams)
 				}
 			} else if mode == "success" {
-				if !slices.Equal(src.streams, []string{"noctalia msg plugins update official"}) || !strings.Contains(out.String(), "After action: noctalia-plugins: complete") {
+				want := "\u2713 All enabled Noctalia plugins have their required runtime files.\n"
+				if !slices.Equal(src.streams, []string{"noctalia msg plugins update official"}) || !strings.HasSuffix(out.String(), want) {
 					t.Fatalf("%s %v", out, src.streams)
+				}
+				// Completed selection and preview show only the result and never
+				// offer or repeat the update, even with explicit approval.
+				for _, flag := range []string{"--plan", "--yes"} {
+					complete, result := postinstallCommand(root, false, "noctalia-plugins", flag)
+					if err := complete.Execute(); err != nil || result.String() != want || len(src.streams) != 1 {
+						t.Fatalf("completed task: %v %q %v", err, result.String(), src.streams)
+					}
 				}
 			} else if !strings.Contains(out.String(), "After action: noctalia-plugins: pending") {
 				t.Fatalf("lost failure status: %s", out)

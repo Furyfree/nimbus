@@ -43,7 +43,7 @@ func noctaliaPlugins(src native.Source, in Inputs, pkg definitions.ResolvedPacka
 		return t
 	}
 	if len(missing) == 0 {
-		t.Status, t.Detail = Complete, "All effectively enabled Noctalia plugins have readable runtime files."
+		t.Status, t.Detail = Complete, "All enabled Noctalia plugins have their required runtime files."
 		return t
 	}
 	t.Status, t.Detail = Pending, "Missing runtime files for: "+strings.Join(missing, ", ")+"."

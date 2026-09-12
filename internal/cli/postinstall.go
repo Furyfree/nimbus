@@ -140,7 +140,12 @@ func newPostinstall(opts *options) *cobra.Command {
 			if checkErr != nil {
 				return errors.Join(runErr, fmt.Errorf("task selection changed during the native action: %w", checkErr))
 			}
-			_, reportErr := fmt.Fprintf(cmd.OutOrStdout(), "After action: %s: %s\n%s\nVerification: %s\n", current.ID, current.Status, current.Detail, current.Verification)
+			var reportErr error
+			if runErr == nil && current.Status == postinstall.Complete {
+				reportErr = renderPostinstall(cmd.OutOrStdout(), postinstallView{Machine: after.view.Machine, Tasks: []postinstall.Task{current}})
+			} else {
+				_, reportErr = fmt.Fprintf(cmd.OutOrStdout(), "After action: %s: %s\n%s\nVerification: %s\n", current.ID, current.Status, current.Detail, current.Verification)
+			}
 			if runErr == nil && current.Status != postinstall.Complete && task.Action.Kind == postinstall.EnrollFingerprint {
 				checkErr = errors.New("fingerprint enrollment command finished, but completion could not be verified; inspect fprintd before retrying")
 			}
@@ -229,11 +234,19 @@ func postinstallArgv(task postinstall.Task) ([]string, error) {
 
 func renderPostinstall(out io.Writer, view postinstallView) error {
 	var b bytes.Buffer
+	if len(view.Tasks) == 1 && view.Tasks[0].Status == postinstall.Complete {
+		_, err := fmt.Fprintf(out, "\u2713 %s\n", view.Tasks[0].Detail)
+		return err
+	}
 	fmt.Fprintf(&b, "Manual tasks for %s\n", view.Machine)
 	if len(view.Tasks) == 0 {
 		fmt.Fprintln(&b, "No pending tasks were identified from the selected capabilities and available observations.")
 	}
 	for _, task := range view.Tasks {
+		if task.Status == postinstall.Complete {
+			fmt.Fprintf(&b, "\n\u2713 %s\n", task.Detail)
+			continue
+		}
 		fmt.Fprintf(&b, "\n%s [%s]: %s\n%s\n", task.ID, task.Status, task.Title, task.Detail)
 		for _, instruction := range task.Instructions {
 			fmt.Fprintln(&b, instruction)

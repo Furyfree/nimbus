@@ -412,6 +412,9 @@ installed merely because its helper RPM exists. Opening 1Password does not
 prove sign-in. Fingerprint enrollment may run the native tool after approval. MOK,
 reboot and logout tasks provide instructions; they do not silently perform
 those actions. Listing tasks never changes the machine.
+Selecting a completed task shows only its verified result, without the setup
+title, action instructions or recovery guidance. Successful actions use the
+same concise completion output; unsuccessful actions retain diagnostic detail.
 
 When native Steam and ProtonPlus are selected and recorded, `proton-cachyos`
 offers `protonplus install steam-system proton-cachyos latest` after approval.

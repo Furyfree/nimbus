@@ -295,6 +295,11 @@ Chezmoi. SSH server access stays unmanaged, and the Windows VM stays deferred.
 
 ### Engine and integration work
 
+- [x] Simplify completed post-install output to its verified result. Omit setup
+  titles and action/recovery guidance for completed checks, and use the same
+  concise result after successful actions. CLI tests cover completed Noctalia
+  selection and preview without repeating its update. This presentation change
+  is unreleased; engine 0.4.5 retains the previous output.
 - [x] Add Noctalia plugin inspection and a native post-install repair for
   enabled plugins lacking runtime exports. Read the effective Noctalia config;
   preserve preview, approval, local-only inspection and native ownership.
