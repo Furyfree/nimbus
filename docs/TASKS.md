@@ -192,6 +192,30 @@ The existing definition minimum remains 0.4.3; this optional new task requires
 separate trial. Release verification did not upgrade the workstation or alter
 its Noctalia runtime state.
 
+### Version 0.4.5 release verification, 2026-09-13
+
+[Nimbus v0.4.5](https://github.com/Furyfree/nimbus/releases/tag/v0.4.5) selects
+commit `c324a94bb0d1fcf5a65d23f07301f436f7a94716`. Its source archive SHA-256 is
+`e6d09a8466f230f16bafbb46c71e6076cd2ebe2371c80aaebaeb754cd6957d3b`.
+All 271 tagged files and executable bits match. Dependencies and 23 vendored
+notices are unchanged from 0.4.4. Local checks, definition validation and the
+GitHub offline vendored build/tests passed.
+
+[COPR build 10980526](https://copr.fedorainfracloud.org/coprs/furyfree/nimbus/build/10980526/)
+published `nimbus-0.4.5-0.1.fc44.x86_64`. The complete offline Fedora packaging
+gate, full and selected-package CI, and publication workflow passed. Prepared
+and published source RPMs preserve the exact archive and spec. Binary RPM
+SHA-256 is
+`6fe32b08a05168e3e68995e388f246d65c16a042235039559616b065f5ac97e8`.
+
+Native RPM signature and digest checks passed with an isolated database
+containing only Nimbus's pinned project key. The payload contains only the
+engine and licenses, without scriptlets or triggers. The extracted engine
+reports 0.4.5, validates all three tagged machines and previews the laptop's
+Noctalia task in an unprivileged, network-disabled Fedora container. Missing
+Noctalia is correctly reported as blocked. No workstation package was
+installed; a fresh desktop repair with the released retry fix remains untested.
+
 ### Desktop package and setup audit, 2026-09-12
 
 - Zathura's PDF backend was missing. The desktop profile now selects Fedora's
@@ -288,9 +312,10 @@ Chezmoi. SSH server access stays unmanaged, and the Windows VM stays deferred.
   persistent errors and cancellation without repeating source updates.
   The new cases fail before the fix and pass afterwards. `just check` and
   `just validate` pass locally.
-- [ ] Release the verification retry fix and test a fresh plugin repair through
-  the installed engine. Local tests use fake native responses; the exact
-  transient listing from the laptop failure was not captured.
+- [x] Release the verification retry fix in engine 0.4.5 and its signed COPR RPM.
+- [ ] Test a fresh plugin repair through the installed 0.4.5 engine. Local tests
+  use fake native responses; the exact transient listing from the laptop
+  failure was not captured.
 
 - [x] Offer Tailscale operator setup when its native package is selected and
   applied. Preview the current operator, approve the exact native command,

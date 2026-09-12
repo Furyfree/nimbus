@@ -124,9 +124,9 @@ still follows it. Until then, auto-unlock remains planned, not working.
 
 ### Remaining integration
 
-The Noctalia plugin post-install repair requires engine 0.4.4. The laptop trial
+The Noctalia plugin post-install repair first appeared in 0.4.4. The laptop trial
 confirmed installation but exposed premature verification failure during the
-background update. Release the retry fix and validate missing-plugin repair
+background update. Version 0.4.5 adds retries; validate missing-plugin repair
 from a fresh desktop session through the supported command. Native Noctalia
 owns downloads; Chezmoi owns selection.
 See README for usage and TASKS for validation evidence.

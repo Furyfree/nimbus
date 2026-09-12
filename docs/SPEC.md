@@ -688,8 +688,10 @@ Do not replace them merely to reduce the number of files or languages.
 The repository-update workflow and installer effect disclosures are published
 in engine 0.4.3 and its Fedora 44 COPR RPM. Current definitions require that
 engine version; upgrade older engines before syncing these definitions.
-The Noctalia plugin repair task requires engine 0.4.4; the fresh-desktop repair
-trial remains open. The hidden `sync --no-upgrade` alias remains compatible;
+The Noctalia plugin repair task first appeared in engine 0.4.4; use 0.4.5 for
+verification retries during background updates. The laptop trial confirmed
+installation; a fresh repair with the retry fix remains to be tested.
+The hidden `sync --no-upgrade` alias remains compatible;
 ordinary sync omits general software updates. Installed tests must cover
 repository updates, Chezmoi apply and the fresh-engine upgrade handoff.
 
