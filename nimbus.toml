@@ -3,7 +3,7 @@ schema = 1
 
 [compatibility]
 fedora = ["44"]
-min_engine = "0.4.1"
+min_engine = "0.4.2"
 
 # Repositories other than Fedora. The table key is the prefix a package
 # reference uses. `key` is the fingerprint the signing key must have, and
@@ -91,6 +91,19 @@ kind = "copr"
 project = "furyfree/github-copilot-installer"
 key = "D092 00FC 4828 0155 1973 B03F 4A86 8CE1 F2B0 A28A"
 priority = 132
+
+[repositories.blesh]
+kind = "copr"
+project = "furyfree/blesh"
+key = "8A36 2F58 1B92 7DA0 8711 243A 3A98 6BFC FB9A EB0A"
+priority = 133
+
+# Select the Noctalia fork ahead of Terra; Fedora still has priority 99.
+[repositories.librepods]
+kind = "copr"
+project = "furyfree/librepods"
+key = "EDF9 0CD5 80F9 BD94 B448 E8DD C9A1 9873 1FD0 167F"
+priority = 105
 
 [repositories.flathub]
 kind = "flatpak"

@@ -518,6 +518,7 @@ func TestSelectionEditDigestSurvivesTheManifestWrite(t *testing.T) {
 	applyEnv(t)
 	root := editableCheckout(t)
 	src := fixtureSource(t, root)
+	readyRepositories(t, src, root, "blesh") // Keep Brave as the deliberate first failure.
 	answerLaptopInstall(t, src, root)
 	withSource(t, src)
 	saved := approver

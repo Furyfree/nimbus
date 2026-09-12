@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -28,17 +29,22 @@ func withForeignTerra(t *testing.T, src *nativetest.FakeSource) {
 	src.Files[filepath.Join(inspect.RepoDir, "terra.repo")] = data
 }
 
-// readyRepositories writes every declared DNF and COPR repository to the
-// fixture host as an apply round would leave it, so the next plan previews
-// its transaction instead of waiting for repository changes.
-func readyRepositories(t *testing.T, src *nativetest.FakeSource, root string) {
+// readyRepositories writes declared repositories to the fixture host as an
+// apply round would leave them, optionally restricted to the supplied IDs.
+// The next plan can preview transactions using those prepared sources.
+func readyRepositories(t *testing.T, src *nativetest.FakeSource, root string, only ...string) {
 	t.Helper()
 	c, err := definitions.Load(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for id, r := range c.Definitions().Repositories {
+		if len(only) > 0 && !slices.Contains(only, id) {
+			continue
+		}
 		if r.Kind == "flatpak" {
+			src.Commands[nativetest.Key("flatpak", "remotes", "--system", "--columns=name,url")] = []byte("flathub\thttps://dl.flathub.org/repo/\n")
+
 			src.Files[filepath.Join(inspect.FlatpakRepoPath, "config")] = []byte("[remote \"" + id + "\"]\ngpg-verify=true\n")
 			src.Commands[nativetest.Key("gpg", inspect.KeyInspectArgs(filepath.Join(inspect.FlatpakRepoPath, id+".trustedkeys.gpg"))...)] = []byte("pub:::::::::\nfpr:::::::::" + definitions.NormalizeFingerprint(r.Key) + ":\n")
 			continue
@@ -59,7 +65,6 @@ func readyRepositories(t *testing.T, src *nativetest.FakeSource, root string) {
 		src.Dirs[inspect.RepoDir] = append(src.Dirs[inspect.RepoDir], name)
 		src.Files[filepath.Join(inspect.RepoDir, name)] = b
 	}
-	src.Commands[nativetest.Key("flatpak", "remotes", "--system", "--columns=name,url")] = []byte("flathub\thttps://dl.flathub.org/repo/\n")
 }
 
 // answerLaptopInstall records a preview answer for the laptop's install

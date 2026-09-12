@@ -47,6 +47,44 @@ func runMaintenance(cmd *cobra.Command, opts *options, flags machineFlags, sf sy
 		return runSync(cmd, opts, flags, sf)
 	}
 
+	if upgrade {
+		// Reconcile new package sources and the Topgrade configuration before
+		// the upgrade callback requires them. Each sync retains its own plan,
+		// approvals, report and operation lock.
+		executable, err := syncExecutable()
+		if err != nil {
+			return fmt.Errorf("locate Nimbus before upgrade: %w", err)
+		}
+		if _, err := fmt.Fprintln(out, "Sync package sources, system setup and user configuration before upgrading software."); err != nil {
+			return err
+		}
+		if err := runMaintenance(cmd, opts, flags, sf, false); err != nil {
+			return err
+		}
+		// Preserve the selected machine and checkout across the child process.
+		s, err := loadSelected(flags)
+		if err != nil {
+			return err
+		}
+		flags = machineFlags{checkout: s.Root, machine: s.Resolved.Machine}
+		if err := runTopgrade(cmd, nil, false, flags); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(out, "Software upgrade completed. Starting a fresh Nimbus process for final sync."); err != nil {
+			return err
+		}
+		args := []string{"sync", "--checkout", flags.checkout, "--machine", flags.machine}
+		if sf.yes {
+			args = append(args, "--yes")
+		}
+		if sf.prune {
+			args = append(args, "--prune")
+		}
+		child := exec.CommandContext(cmd.Context(), executable, args...)
+		child.Stdin, child.Stdout, child.Stderr = cmd.InOrStdin(), out, cmd.ErrOrStderr()
+		return runChild(child)
+	}
+
 	result := syncResult{Executed: []string{}, Differences: []string{}}
 	var steps []runStep
 	phase := "repository preflight"
@@ -105,40 +143,7 @@ func runMaintenance(cmd *cobra.Command, opts *options, flags machineFlags, sf sy
 			return fmt.Errorf("%w\nNo system or user configuration changes were applied", err)
 		}
 	}
-	if upgrade {
-		executable, err := syncExecutable()
-		if err != nil {
-			return fmt.Errorf("locate Nimbus before upgrade: %w", err)
-		}
-		if err := lock.Release(); err != nil {
-			return err
-		}
-		lock = nil // Topgrade's system callback acquires the same operation lock.
-		phase = "software upgrade"
-		if err := runTopgrade(cmd, nil, false, flags); err != nil {
-			return err
-		}
-		steps = append(steps, runStep{Name: phase, Status: "succeeded"})
-		result.Upgraded = true
-		phase = "sync with updated engine"
-		if _, err := fmt.Fprintln(out, "Software upgrade completed. Starting a fresh Nimbus process for repository and configuration sync."); err != nil {
-			return err
-		}
-		args := []string{"sync", "--checkout", flags.checkout, "--machine", flags.machine}
-		if sf.yes {
-			args = append(args, "--yes")
-		}
-		if sf.prune {
-			args = append(args, "--prune")
-		}
-		child := exec.CommandContext(cmd.Context(), executable, args...)
-		child.Stdin, child.Stdout, child.Stderr = cmd.InOrStdin(), out, cmd.ErrOrStderr()
-		if err := runChild(child); err != nil {
-			return err
-		}
-		steps = append(steps, runStep{Name: phase, Status: "succeeded"})
-		return nil
-	}
+
 	phase = "repository update"
 	for _, repo := range repos {
 		if err := cmd.Context().Err(); err != nil {

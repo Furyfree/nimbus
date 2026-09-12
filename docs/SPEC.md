@@ -125,6 +125,10 @@ it once no remaining selection requires it. Unmanaged software is preserved
 unless explicitly included through the separate prune option. The original
 package baseline protects pre-existing packages from unmanaged pruning.
 
+ble.sh comes from the owner's verified COPR. The desktop uses the verified
+Noctalia LibrePods fork; its priority precedes Terra while retaining Fedora
+as the preferred source. Copilot keeps the existing installer-helper source.
+
 The TOML files are the software inventory, not a duplicated Markdown list.
 Browse [profiles](../profiles), [components](../components) and
 [machines](../machines). Bare package names mean Fedora; other package sources
@@ -183,10 +187,10 @@ uncommitted local work. Use the separate
 [TASKS.md](TASKS.md) before desktop installation; the documented base still
 needs its clean-install trial.
 
-These definitions require the Nimbus 0.4.1 engine for the machine
-shell field and Tailscale operator action; registering the guide's pre-created
-snapshot mount requires
-0.3.1 or newer. On an existing installation,
+These definitions require Nimbus 0.4.2 for combined sync ordering. Version
+0.4.1 introduced the machine shell field and Tailscale operator action;
+registering the guide's pre-created snapshot mount requires 0.3.1 or newer.
+On an existing installation,
 update the Nimbus RPM through DNF before updating this checkout or applying
 the matching Chezmoi Topgrade configuration. Bootstrap validates an installed
 engine but does not upgrade it automatically.
@@ -208,7 +212,7 @@ refreshes metadata.
 | `nimbus status` | Summarize drift and pending work |
 | `nimbus sync` | Update repositories, reconcile the system, apply Chezmoi |
 | `nimbus upgrade` | Update installed software through Topgrade |
-| `nimbus sync --upgrade` | Upgrade software first, then perform the full sync |
+| `nimbus sync --upgrade` | Sync setup, upgrade software, then sync again |
 | `nimbus postinstall` | List pending, blocked or unconfirmed manual tasks |
 | `nimbus postinstall TASK` | Show instructions or offer one native action |
 | `nimbus doctor` | Report health problems and possible fixes; never repair |
@@ -275,12 +279,14 @@ arguments follow `--`. System and application updates run once, and failure
 or cancellation of the system phase stops dependent work. Independent user
 steps may continue after a failure, but the final result remains unsuccessful.
 
-`sync --upgrade` checks both repositories and their fetched history first,
-then runs Topgrade using the current local definitions and configuration.
-If upgrading succeeds, it starts a fresh Nimbus process at the original
-executable path for ordinary sync. This uses the updated engine if DNF
-replaced it. A failed upgrade stops before sync. `--yes` approves the later
-system and Chezmoi stages; Topgrade and native helpers retain their prompts.
+`sync --upgrade` first performs the full repository, system and Chezmoi sync.
+This prepares newly selected package sources and update configuration before
+Topgrade requires them. Failed or declined setup stops before upgrading.
+Topgrade then upgrades installed software once. If it succeeds, a fresh Nimbus
+process at the original executable path performs the final sync, using the
+updated engine if DNF replaced it. A failed upgrade stops before that final
+sync. Each sync owns its operation lock, plan, approvals and report. `--yes`
+approves the sync stages; Topgrade and native helpers retain their prompts.
 Standalone `upgrade` does not update either repository itself.
 
 Topgrade must not call sync or recursively invoke `nimbus upgrade`. The

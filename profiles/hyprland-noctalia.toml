@@ -53,7 +53,7 @@ packages = [
   "libnotify",
   "socat",
   "terra:gpu-screen-recorder",
-  "terra:librepods",
+  "librepods:librepods",
 ]
 
 components = [

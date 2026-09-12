@@ -158,8 +158,8 @@ printf '#!/bin/sh\nprintf "NEW-ENGINE\\n"\nprintf "<%%s>\\n" "$@"\nexit 17\n' > 
 	if code != 17 || !strings.Contains(out, "NEW-ENGINE") || !strings.Contains(out, "<sync>\n<--checkout>\n<"+root+">\n<--machine>\n<vm>\n<--yes>\n<--prune>") {
 		t.Fatalf("replacement handoff: %d %s%s", code, out, errOut)
 	}
-	if len(src.calls) != 0 {
-		t.Fatalf("old engine reconciled: %v", src.calls)
+	if !slices.Equal(src.calls, []string{"chezmoi apply"}) {
+		t.Fatalf("initial sync missing or repeated: %v", src.calls)
 	}
 	lockPath, err := apply.LockPath()
 	if err != nil {
@@ -220,5 +220,43 @@ func TestSyncRejectsUnchangedChezmoiProfiles(t *testing.T) {
 	code, out, errOut := run(t, "sync", "--checkout", root, "--machine", "vm", "--yes")
 	if code != ExitFailure || !strings.Contains(out, "did not retain the requested selection") || slices.Contains(base.calls, "chezmoi apply") {
 		t.Fatalf("applied with stale selection: %d %s%s calls=%v", code, out, errOut, base.calls)
+	}
+}
+
+// Topgrade's system callback requires sources to be ready, and the user
+// configuration may add new update steps. Neither can wait until afterwards.
+func TestCombinedSyncPreparesConfigurationBeforeTopgrade(t *testing.T) {
+	for _, failSync := range []bool{false, true} {
+		t.Run(map[bool]string{false: "ordered", true: "failed-sync"}[failSync], func(t *testing.T) {
+			root, base := installerFixture(t)
+			bin := t.TempDir()
+			ready := filepath.Join(bin, "configuration-ready")
+			called := filepath.Join(bin, "topgrade-called")
+			t.Setenv("PATH", bin)
+			t.Setenv(upgradeActive, "")
+			t.Setenv("NIMBUS_TEST_READY", ready)
+			t.Setenv("NIMBUS_TEST_CALLED", called)
+			body := "#!/bin/sh\n[ -f \"$NIMBUS_TEST_READY\" ] || exit 71\nprintf yes > \"$NIMBUS_TEST_CALLED\"\nexit 23\n"
+			if err := os.WriteFile(filepath.Join(bin, "topgrade"), []byte(body), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			base.failApply = failSync
+			withSource(t, handoffOutputSource{Source: base, afterStream: func(name string, args []string) {
+				if nativetest.Key(name, args...) == "chezmoi apply" && !failSync {
+					if err := os.WriteFile(ready, []byte("ready"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}})
+			code, out, errOut := run(t, "sync", "--upgrade", "--checkout", root, "--machine", "vm", "--yes")
+			_, err := os.Stat(called)
+			if failSync {
+				if code != ExitFailure || !os.IsNotExist(err) {
+					t.Fatalf("upgrade after failed sync: %d %s%s, %v", code, out, errOut, err)
+				}
+			} else if code != 23 || err != nil {
+				t.Fatalf("upgrade ran before configuration was ready: %d %s%s, %v", code, out, errOut, err)
+			}
+		})
 	}
 }

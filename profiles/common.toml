@@ -16,6 +16,7 @@ packages = [
   # Keep both shells available; Chezmoi owns their configurations.
   "bash",
   "bash-completion",
+  "blesh:blesh",
   "zsh",
   # Shell
   "terra:starship",

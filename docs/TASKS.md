@@ -56,8 +56,9 @@ refactor and TUI.
   local work.
 - [x] Run system reconciliation from updated definitions, then offer Chezmoi
   apply and shared-profile refresh while preserving the 1Password SSH choice.
-- [x] Run Topgrade before combined sync and start a fresh engine afterwards.
+- [x] Run setup sync before Topgrade and a fresh-engine sync afterwards.
   Keep standalone upgrades and internal system reconciliation separate.
+  The 0.4.2 change supersedes 0.4.0's upgrade-first order.
 - [x] Keep previews local and read-only; document approvals, failure stages
   and the distinction between checkout updates and engine updates.
 - [x] Pass `go test ./internal/cli ./internal/checkout`, `just check` and
@@ -152,9 +153,17 @@ was performed by this audit.
   preflight; no repository fetch, system mutation or user apply ran through
   Nimbus. The later release request authorizes commits and pushes to main,
   plus COPR publication; workstation installation remains a separate step.
-- [ ] Publish/install ble.sh, the compatible LibrePods fork and the prepared
-  Copilot helper through their COPR delivery flow. They are not completed by
-  capturing configuration, and no unverified COPR source is added to Nimbus.
+- [x] Publish ble.sh (build 10978681), the compatible LibrePods fork
+  (10978678) and Copilot helper 0.3.0/app 1.1.19 (10978679). Verify the new
+  project keys and RPM signatures in isolated RPM databases, then select
+  ble.sh through common and the LibrePods fork through the desktop profile.
+- [ ] Install and exercise the published applications on the workstation.
+- [x] Implement the 0.4.2 combined-sync ordering fix. The existing 0.4.0 engine
+  needs one direct DNF upgrade to understand the current definitions. New
+  source reconciliation must precede Topgrade, followed by a fresh-engine
+  sync. `just check` and all three machine validations pass. Native DNF
+  resolution in a disposable Fedora container selects both new COPRs;
+  the transaction was declined. Workstation installation remains untested.
 
 The native XDG file extends Fedora's installed `user-dirs.defaults`; upstream
 [documents its role](https://www.freedesktop.org/wiki/Software/xdg-user-dirs/).

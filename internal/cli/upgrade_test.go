@@ -132,7 +132,7 @@ func TestSyncUpgradeComposition(t *testing.T) {
 				t.Fatalf("preview: %s; %v", out, src.reads)
 			}
 			var wantCalls []string
-			if mode == "sync" {
+			if mode == "sync" || mode == "combined" {
 				wantCalls = []string{"chezmoi apply"}
 			}
 			if !slices.Equal(src.calls, wantCalls) {

@@ -38,8 +38,10 @@ across the docs, links work, and the local checks pass.
 
 Sync updates clean Nimbus and Chezmoi repositories, reconciles the system,
 then offers Chezmoi apply. Keep previews local and read-only, and make dirty
-or divergent repository errors actionable. `sync --upgrade` preflights the
-repositories, runs Topgrade first, then starts the updated engine for sync.
+or divergent repository errors actionable. From 0.4.2, `sync --upgrade`
+reconciles repositories, system setup and user configuration before Topgrade,
+then starts the updated engine for a final sync. This prepares new sources
+before the system-upgrade callback requires them.
 Keep Topgrade configuration in Chezmoi and prevent duplicate system updates or
 recursion. Its callback remains `nimbus upgrade --system` for RPMs and system
 Flatpaks. This repository-update workflow is released in Nimbus 0.4.0;

@@ -326,6 +326,7 @@ func TestSyncIncompletePlanIsRefused(t *testing.T) {
 func TestSyncStopsAtTheFirstFailedOperation(t *testing.T) {
 	root := applyEnv(t)
 	src := fixtureSource(t, root)
+	readyRepositories(t, src, root, "blesh") // Keep Brave as the deliberate first failure.
 	answerLaptopInstall(t, src, root)
 	key := filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), "nimbus", "stage", "key-brave.asc")
 	if src.Failures == nil {
@@ -358,6 +359,7 @@ func TestSyncStopsAtTheFirstFailedOperation(t *testing.T) {
 func TestSyncJSONReportsFailureWithExitOne(t *testing.T) {
 	root := applyEnv(t)
 	src := fixtureSource(t, root)
+	readyRepositories(t, src, root, "blesh") // Keep Brave as the deliberate first failure.
 	answerLaptopInstall(t, src, root)
 	withSource(t, src)
 	code, out, _ := run(t, "sync", "-n", "--checkout", root, "--machine", "laptop", "--json", "--yes")

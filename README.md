@@ -42,7 +42,7 @@ requirements.
 
 ## Workflow
 
-Nimbus 0.4.0 supports:
+Nimbus supports:
 
 | Task | Command |
 | --- | --- |
@@ -51,7 +51,7 @@ Nimbus 0.4.0 supports:
 | Preview system changes | `nimbus sync --plan` |
 | Update definitions, system setup and user configuration | `nimbus sync` |
 | Update installed software | `nimbus upgrade` |
-| Upgrade software, then sync everything | `nimbus sync --upgrade` |
+| Sync setup, upgrade software, then sync again | `nimbus sync --upgrade` |
 | Finish manual setup | `nimbus postinstall` |
 | Diagnose a problem | `nimbus doctor` |
 | Preview user configuration | `chezmoi diff` |
@@ -73,8 +73,20 @@ using these definitions. `nimbus why login-shell` explains its selection.
 From Nimbus 0.4.0, `nimbus sync` updates
 the Nimbus and configured Chezmoi repositories, shows the system plan, applies
 approved changes, then asks to apply Chezmoi configuration and its scripts.
-`sync --upgrade` runs Topgrade first, then starts the updated Nimbus executable
-for sync. Topgrade's system callback remains `nimbus upgrade --system`.
+`sync --upgrade` first completes that sync so newly selected repositories,
+packages and Topgrade configuration are ready. It then runs Topgrade and starts
+the updated Nimbus executable for a final sync. This order requires engine
+0.4.2 or newer. Topgrade's callback remains `nimbus upgrade --system`.
+
+Common installs ble.sh from the owner's COPR; the desktop profile selects the
+Noctalia-compatible LibrePods fork from its own COPR. Copilot's helper upgrade
+queues the app installation. No separate COPR-enable or package-install
+commands are needed after the engine is current. Bash loads ble.sh in a new
+terminal; LibrePods starts at the next graphical login when Bluetooth exists.
+
+An older installed engine cannot read definitions that introduce new fields.
+For the initial transition to 0.4.2, run `sudo dnf upgrade --refresh nimbus`
+once, then use `nimbus sync --upgrade` for routine updates.
 
 Both repositories must be clean and track an approved origin. Local edits,
 local-only commits or diverged history stop the run with the repository path
