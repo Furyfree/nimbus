@@ -95,6 +95,27 @@ was performed during release verification. UKI/TPM auto-unlock is not included.
 
 ## Completed locally
 
+### NVIDIA settings-loader autostart
+
+- [x] Attach a root-owned, zero-byte systemd user-unit mask to the NVIDIA
+  component. RPM Fusion's `nvidia-settings` package owns the original XDG
+  entry; masking its generated unit preserves the package file, graphics
+  driver and manual settings application. Non-NVIDIA machines omit the mask.
+  Activation is at the next login; this change does not reload or edit the
+  live user's service manager.
+- [x] Compare the installed Fedora package with systemd's native masking
+  contract, [Omarchy's NVIDIA setup][omarchy-nvidia] and
+  [CachyOS-Settings][cachyos-nvidia]. Neither reference supplies this Fedora
+  autostart fix; no driver or performance settings were imported.
+- [x] Pass `just check`, `just validate` and the read-only desktop plan.
+  Isolated native systemd lookup recognizes the mask and restores the original
+  unit after its removal. Laptop and VM definitions omit this resource.
+- [ ] Verify installation and next-login behavior on the NVIDIA workstation.
+  The user's existing per-user mask remains independent of Nimbus ownership.
+
+[omarchy-nvidia]: https://github.com/omacom/omarchy/blob/31bd80daa4613ffdee995ac27467fce5a2990806/install/config/hardware/nvidia.sh
+[cachyos-nvidia]: https://github.com/CachyOS/CachyOS-Settings/tree/4bcb3e3bf8a0c6763dbd935d14430c60d7ff5a37
+
 ### Desktop package and setup audit, 2026-09-12
 
 - Zathura's PDF backend was missing. The desktop profile now selects Fedora's

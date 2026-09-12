@@ -15,5 +15,14 @@ packages = [
 ]
 removes = []
 
+# Mask RPM Fusion's X11 settings-loader autostart for the Wayland workstation.
+# systemd treats an empty unit file as masked. Keep this source zero bytes.
+# This system-wide user-unit policy takes effect at the next login.
+[[files]]
+source = 'etc/systemd/user/app-nvidia\x2dsettings\x2duser@autostart.service'
+owner = "root"
+group = "root"
+mode = "0644"
+
 [detect]
 display_vendor = "10de"

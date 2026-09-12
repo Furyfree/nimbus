@@ -118,6 +118,9 @@ still follows it. Until then, auto-unlock remains planned, not working.
 
 ### Remaining integration
 
+NVIDIA selections include a system-wide mask for the X11 settings-loader
+autostart. Verify its next-login behavior during the NVIDIA hardware trial.
+
 Complete COPR application selection after verifying the actual published
 helper interfaces and package sources. Retain the Hyprland and Noctalia version
 families. Use native dependency solving rather than manually coordinating

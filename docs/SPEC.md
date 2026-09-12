@@ -33,10 +33,11 @@ offers small initial-setup actions; it does not track downloaded app artifacts.
 ## System files and research
 
 Nimbus stores the root-owned system configuration we choose to change: GRUB
-inputs and theme assets, systemd system units/drop-ins, service configuration,
-udev rules and justified system settings. Sources belong under `system/`, with
-targets and activation steps declared by components. This is part of system
-drift management, not just package installation.
+inputs and theme assets, systemd system units/drop-ins, system-wide user-unit
+policy, service configuration, udev rules and justified system settings.
+Sources belong under `system/`, with targets and activation steps declared by
+components. This is part of system drift management, not just package
+installation.
 
 Use `system/root/etc/` for the existing generic `/etc` file provider. Other
 locations, such as GRUB assets under `/boot`, need an explicit supported
@@ -48,10 +49,21 @@ that path, the prepared file remains unselected until explicit ownership
 migration is supported. The generic provider must continue to reject an
 unowned existing file.
 
-Shell, editor, browser, desktop, Noctalia and systemd user configuration belong
-to Chezmoi. Requiring sudo for a system change does not authorize writing a
-user's dotfiles. Nimbus's own selector, checkout and private diagnostics are
-operational state, not a second user-configuration collection.
+Shell, editor, browser, desktop, Noctalia and per-user systemd configuration
+below the home directory belong to Chezmoi. Requiring sudo for a system change
+does not authorize writing a user's dotfiles. Nimbus's own selector, checkout
+and private diagnostics are operational state, not a second user-configuration
+collection.
+
+The NVIDIA component masks RPM Fusion's `nvidia-settings -l` login loader
+through an empty, root-owned unit file under `/etc/systemd/user`. This is a
+[native systemd mask][systemd-unit-mask] for the generated autostart unit;
+the NVIDIA driver and manual settings application remain available. It applies
+to NVIDIA selections only and takes effect at the next login. The normal file
+ownership rules govern repair and removal; existing per-user masks are separate.
+The package-owned XDG desktop entry is preserved.
+
+[systemd-unit-mask]: https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html
 
 For system-setting research, start with Fedora and the relevant upstream
 project. Compare [Omarchy](https://github.com/omacom/omarchy) and
