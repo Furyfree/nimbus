@@ -18,14 +18,49 @@ refactor and TUI.
 - [ ] Finish the minimal dark GRUB integration. Check appearance, Fedora-only
   and Windows-present menus, Fedora default, five-second timeout, older kernels
   and theme removal through actual boots.
-- [ ] Inspect the Fedora/LUKS2 boot path, TPM and Secure Boot support; choose
-  the native auto-unlock method and boot-change policy before implementation.
-- [ ] Add explicit post-install preview and approval for FDE auto-unlock,
-  preserving passphrase access, with status and enrollment-removal instructions.
-  Unsupported setups must retain manual unlock.
-- [ ] Test auto-unlock enrollment, booting, passphrase fallback, boot-change
-  fallback and removal on real hardware. This scoped test precedes the TUI;
-  it is separate from the later full desktop trial. No working claim yet.
+
+### FDE and UKI
+
+Follow the [FDE roadmap](ROADMAP.md#fde-auto-unlock-second). The agreed design
+uses signed PCR 11 with PCR 7, plus PCR 14 when shim/MOK is used. Secure Boot
+disabled requires explicit reduced-protection confirmation. ISO work waits.
+
+- [x] Specify the native-tool approach, PCR policy, prompts and reboot stages
+  in SPEC and ROADMAP. This is a design decision, not implementation evidence.
+- [ ] Arrange normal-user, key-based SSH access to the Fedora desktop for
+  read-only inspection; give the owner any privileged checks to run locally.
+- [ ] Inspect desktop boot/encryption state, EFI space and kernel/NVIDIA hooks;
+  prepare the exact native configuration and command sequence.
+- [ ] Verify Fedora 44 packages, native image-generation hooks, shim/GRUB UKI
+  boot and signature trust. Preserve Windows and older working boot entries.
+- [ ] Resolve NVIDIA module ordering, initramfs rebuilds, signing, EFI space
+  and image retention for direct DNF and Nimbus/Topgrade updates.
+- [ ] Prove passphrase boot into a signed UKI and a kernel update in a
+  disposable Fedora VM before TPM enrollment or desktop changes.
+- [ ] Add `postinstall fde` detection and read-only `--plan`; distinguish
+  unknown facts, missing tools and unsupported encryption/boot layouts.
+- [ ] Add the helper, protected local keys and root configuration with Yes/No
+  prompts; retain native authentication and explicit reboot confirmation.
+- [ ] Resume after UKI boot, verify measurements and the unlock-phase policy,
+  then enroll after confirmation without removing passphrase access.
+- [ ] Handle repeated/interrupted runs, existing slots, Secure Boot policy
+  renewal, status and confirmed removal of only Nimbus enrollment.
+- [ ] Test previews, changed facts, rejection, reduced-protection confirmation,
+  partial failure and scoped removal with isolated fixtures; run `just check`.
+- [ ] Test actual Fedora VM boot/update/fallback/removal, including Secure Boot
+  disabled and enabling it later. Record exact images and results.
+- [ ] After VM validation, arrange desktop setup with the owner present for
+  native prompts and boot selection, with passphrase and Fedora USB available.
+- [ ] Verify signed-UKI boot, auto-unlock, kernel/NVIDIA updates, passphrase
+  fallback, repeat runs and removal on laptop and RTX 3080 desktop. Verify an
+  unauthorized image cannot use the Secure Boot-enabled enrollment.
+
+Open technical checks: Fedora GRUB trust/menu integration, native update-hook
+ordering and early-boot policy verification. A bootloader replacement needs a
+separate decision. No enrollment, UKI boot or update test has passed yet for
+this feature. Hardware validation above precedes the TUI and is separate from
+the later full desktop trial. Installation, enrollment and reboots require
+separate authorization; the current work starts with repository changes.
 
 ## Installer follow-up
 
@@ -434,11 +469,11 @@ These wait for a proper installation and do not block independent local work.
 ## Deferred
 
 The [roadmap](ROADMAP.md#deferred-beyond-the-desktop-milestone) retains custom
-boot archives and automatic restoration, UKI generation, broader boot-key
-management, hibernation, Windows VM commands, Home Assistant, optional
+boot archives and automatic restoration, boot-key management beyond local UKI
+signing, custom ISO work, hibernation, Windows VM commands, Home Assistant, optional
 desktops and measured performance work. They are not desktop release gates. AI
-Usage needs no separate Nimbus implementation. FDE auto-unlock is now active
-work, not deferred.
+Usage needs no separate Nimbus implementation. FDE auto-unlock and its UKI
+generation/signing are active work, not deferred.
 
 - [ ] Revisit browser/webapp launching through UWSM; check terminal independence,
   session environment, logout cleanup and operation outside UWSM. See the

@@ -14,8 +14,8 @@ the package-owned file is supported. Chezmoi already manages the working
 per-user paths, so this does not block the engine release.
 
 1. Finish the minimal dark GRUB theme and verify booting and theme removal.
-2. Add FDE auto-unlock as an explicit post-install action, retaining passphrase
-   unlock. Verify enrollment, booting and removal on real hardware.
+2. Add signed UKIs and FDE auto-unlock as an explicit post-install action,
+   retaining passphrase unlock. Verify updates, booting and removal on hardware.
 3. Extract shared operations from the CLI, then build the Bubble Tea dashboard.
 
 This is the current priority order. GRUB and FDE auto-unlock come before the
@@ -105,22 +105,73 @@ and the EFI stub. Use a disposable VM snapshot as an independent test safeguard.
 
 ### FDE auto-unlock second
 
-Add an optional post-install action for the existing LUKS2 installation.
-First inspect Fedora's boot path, encryption, TPM and Secure Boot support;
-choose and document the native enrollment method and boot-change policy before
-implementation. Do not assume a UKI migration is required. Broad UKI generation
-and boot-key management remain deferred.
+Deliver `nimbus postinstall fde` with a read-only `--plan`, confirmation prompts
+and reruns between reboots. Follow the policy and ownership contract in
+[SPEC](SPEC.md#fde-auto-unlock-planned). UKIs and local signing needed for this
+action are now in scope; ISO generation remains deferred.
 
-The action must preview the target and changes, request approval, preserve a
-working passphrase, and report unsupported setups without weakening security.
-Provide status and instructions to remove the enrollment without losing disk
-access. Sync and upgrades must not enroll a machine automatically.
+Implement in this order:
 
-Done when enrollment, unattended unlock, passphrase fallback and removal pass
-on real hardware, including fallback after a boot change that invalidates the
-chosen policy. VM checks can prepare this work but do not close the hardware
-gate. This scoped boot test precedes the dashboard; the full workstation trial
-still follows it. Until then, auto-unlock remains planned, not working.
+1. Inspect the Fedora desktop read-only over key-based SSH using the owner's
+   normal account. Check installed packages, boot/encryption configuration,
+   EFI space and kernel/NVIDIA update hooks. Root SSH is unnecessary; provide
+   any commands requiring privilege for the owner to run locally, keeping
+   passwords in their terminal. Use the findings to prepare the exact native
+   configuration and command sequence before changing the desktop.
+2. Verify Fedora 44's Dracut, ukify and kernel-install integration in a
+   disposable Fedora VM before modifying the desktop. First boot a signed UKI
+   with the disk passphrase, then test a kernel update, then TPM enrollment.
+   Prove a
+   signed UKI can boot through Fedora shim/GRUB while retaining the existing
+   boot entry and Windows selection. Resolve kernel/NVIDIA update ordering,
+   signature trust and EFI capacity before promising automatic updates. If
+   this needs a bootloader replacement, stop for a separate decision.
+3. Add detection and a preview of the target, policy, prerequisites and changes.
+   Secure Boot-disabled enrollment is an explicitly confirmed exception, with
+   reduced protection explained. Unknown or unsupported prerequisites block
+   enrollment. Enabling Secure Boot later needs policy renewal, usually no
+   reinstall.
+4. Add one dedicated native-tool helper and thin post-install integration.
+   Prepare local keys, certificate enrollment and root configuration after
+   approval. Resume after passphrase boot into the UKI, verify measurements,
+   then offer TPM enrollment and an auto-unlock boot test.
+5. Complete native update hooks, repeat-run behavior and scoped removal. Preserve
+   working boot images, existing passphrases and unrelated enrollment. Report
+   partial failure with the next repair step; never claim automatic rollback.
+
+Keep image signing and update handling in native tools, including direct DNF
+updates. Do not introduce a workflow engine or another boot manager. Use
+Ponytail and version-specific Modern Go guidance for the bounded implementation.
+Private keys and authentication input must never enter repository definitions,
+public boot storage or logs. PCR signatures approve images; they do not prove
+an image boots correctly or provide automatic rollback protection.
+
+Validate detection, policy selection, confirmations, interrupted setup and
+removal using isolated fixtures, then run `just check`. Disposable Fedora VM
+tests cover actual enrollment, kernel updates, failure paths and the explicit
+Secure Boot-disabled mode. Do not infer hardware support from VM results.
+
+After VM validation, apply the reviewed setup on the desktop with the owner
+physically present for firmware/MOK confirmation, passphrase entry and boot
+selection. Keep the disk passphrase and a Fedora installation USB available;
+SSH cannot repair a boot failure before networking starts. Access, privileged
+changes, enrollment and reboots require separate authorization.
+
+Done when signed-UKI boot, unattended unlocking, a kernel update, passphrase
+fallback after a policy mismatch, repeat runs and removal pass on the target
+hardware. Include laptop and RTX 3080 desktop boot/driver coverage and a test
+that an unauthorized image cannot use the Secure Boot-enabled enrollment.
+The first local delivery may leave these installed tests pending, explicitly
+recorded in TASKS. This scoped hardware gate precedes the dashboard; the full
+workstation trial still follows it. Enrollment alone does not close the gate.
+
+Native reference: [ukify][ukify], [kernel-install][kernel-install] and
+[systemd-cryptenroll][cryptenroll]. These establish available mechanisms, not
+a tested Nimbus boot/update path.
+
+[ukify]: https://github.com/systemd/systemd/blob/v259/man/ukify.xml
+[kernel-install]: https://github.com/systemd/systemd/blob/v259/man/kernel-install.xml
+[cryptenroll]: https://github.com/systemd/systemd/blob/v259/man/systemd-cryptenroll.xml
 
 ### Remaining integration
 
@@ -199,7 +250,8 @@ scoped FDE auto-unlock hardware test happens earlier, as described above.
 | Work | Reason to keep it separate |
 | --- | --- |
 | Boot archives and automatic whole-system restore | Beyond native Snapper |
-| UKI generation and broader boot-key management | Separate boot design |
+| Boot-key management beyond local UKI signing | Separate boot design |
+| Custom Fedora ISO | Prove the ordinary installed system first |
 | Hibernation and disk-backed swap | Needs hardware and storage validation |
 | Windows VM setup and lifecycle | Native Windows covers the immediate need |
 | Home Assistant integration | Owner wants to understand it first |
@@ -232,6 +284,6 @@ checks, not reasons to block independent local work.
 ## Not planned
 
 Nimbus is not becoming a multi-distribution framework, fleet manager, general
-AppImage manager, backup service or custom Fedora installer image. Package
+AppImage manager, backup service or separate distribution. Package
 discovery results are input for owner review, never automatically desired
 state. Fedora major-release upgrades stay with native Fedora tools.
