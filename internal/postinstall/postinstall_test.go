@@ -151,6 +151,45 @@ func TestInstallerHelpersDoNotImplyApplicationCompletion(t *testing.T) {
 	}
 }
 
+func TestProtonCachyOSUsesNativeSetupWithoutInspectingUserData(t *testing.T) {
+	for _, mode := range []string{"ready", "no steam", "missing package", "missing receipt", "missing command", "unknown packages"} {
+		t.Run(mode, func(t *testing.T) {
+			in, src := fixture("protonplus", "steam")
+			switch mode {
+			case "no steam":
+				in.Resolved.Packages = in.Resolved.Packages[:1]
+			case "missing package":
+				in.Facts.Packages.Value = in.Facts.Packages.Value[:1]
+			case "missing receipt":
+				delete(in.Applied.Receipts, "package:dnf:steam")
+			case "missing command":
+				delete(src.Paths, "protonplus")
+			case "unknown packages":
+				in.Facts.Packages.Error = "rpm unavailable"
+			}
+			guard := &readGuard{FakeSource: src}
+			tasks := Inspect(guard, in)
+			if len(guard.commands) != 0 || len(guard.files) != 0 {
+				t.Fatalf("setup inspection accessed user data or ran commands: %v %v", guard.commands, guard.files)
+			}
+			if mode == "no steam" {
+				if len(tasks) != 0 {
+					t.Fatalf("offered Steam setup without selecting Steam: %+v", tasks)
+				}
+				return
+			}
+			task := findTask(t, tasks, "proton-cachyos")
+			if mode == "ready" {
+				if task.Status != Unknown || task.Action == nil || !slices.Equal(task.Action.Argv, []string{"protonplus", "install", "steam-system", "proton-cachyos", "latest"}) {
+					t.Fatalf("unexpected setup action or assumed runner readiness: %+v", task)
+				}
+			} else if task.Action != nil || (task.Status != Blocked && task.Status != Unknown) {
+				t.Fatalf("offered setup without prerequisites: %+v", task)
+			}
+		})
+	}
+}
+
 func TestMOKNativeEnrollmentStates(t *testing.T) {
 	for _, test := range []struct {
 		name, output, failure string

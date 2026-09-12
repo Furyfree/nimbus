@@ -138,6 +138,9 @@ func newPostinstall(opts *options) *cobra.Command {
 			if runErr == nil && current.Status != postinstall.Complete && task.Action.Kind == postinstall.EnrollFingerprint {
 				checkErr = errors.New("fingerprint enrollment command finished, but completion could not be verified; inspect fprintd before retrying")
 			}
+			if runErr == nil && current.Status != postinstall.Complete && task.Action.Kind == postinstall.SetTailscaleOperator {
+				checkErr = errors.New("Tailscale command finished, but operator permission could not be verified; inspect tailscaled before retrying")
+			}
 			return errors.Join(runErr, checkErr, reportErr)
 		},
 	}
@@ -181,12 +184,20 @@ func selectedTask(view postinstallView, id string) (postinstall.Task, error) {
 
 func postinstallArgv(task postinstall.Task) ([]string, error) {
 	if task.Action != nil {
+		if task.ID == "tailscale-operator" && task.Status == postinstall.Pending && task.Action.Kind == postinstall.SetTailscaleOperator {
+			expected := postinstall.TailscaleOperatorAction(task.Action.User)
+			if expected != nil && slices.Equal(task.Action.Argv, expected.Argv) {
+				return expected.Argv, nil
+			}
+		}
 		switch {
 		case task.ID == "onepassword" && task.Status == postinstall.Unknown && task.Action.Kind == postinstall.OpenApplication && slices.Equal(task.Action.Argv, []string{"1password"}):
 			return []string{"1password"}, nil
 		case task.ID == "fingerprint" && task.Status == postinstall.Pending && task.Action.Kind == postinstall.EnrollFingerprint && slices.Equal(task.Action.Argv, []string{"fprintd-enroll"}):
 			return []string{"fprintd-enroll"}, nil
 		case task.ID == "copilot" && task.Status == postinstall.Unknown && task.Action.Kind == postinstall.InstallApplication && slices.Equal(task.Action.Argv, []string{"sudo", "--", "/usr/bin/github-copilot-installer", "install"}):
+			return slices.Clone(task.Action.Argv), nil
+		case task.ID == "proton-cachyos" && task.Status == postinstall.Unknown && task.Action.Kind == postinstall.InstallApplication && slices.Equal(task.Action.Argv, []string{"protonplus", "install", "steam-system", "proton-cachyos", "latest"}):
 			return slices.Clone(task.Action.Argv), nil
 		}
 	}

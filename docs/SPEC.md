@@ -42,6 +42,11 @@ Use `system/root/etc/` for the existing generic `/etc` file provider. Other
 locations, such as GRUB assets under `/boot`, need an explicit supported
 installation/removal path; they are not arbitrary file-copy destinations.
 Prefer native configuration drop-ins over replacing package-owned files.
+The prepared XDG user-directory defaults extend the native Fedora file with
+Projects, Screenshots, Wallpapers and Recordings. Because Fedora already owns
+that path, the prepared file remains unselected until explicit ownership
+migration is supported. The generic provider must continue to reject an
+unowned existing file.
 
 Shell, editor, browser, desktop, Noctalia and systemd user configuration belong
 to Chezmoi. Requiring sudo for a system change does not authorize writing a
@@ -75,7 +80,7 @@ does not audit application source or test every installed application's UI.
 | Location | Contents |
 | --- | --- |
 | `nimbus.toml` | Compatibility, repositories and DNF settings |
-| `machines/ID.toml` | Profiles, components, extra packages and constraints |
+| `machines/ID.toml` | Shell, profiles, components, packages and constraints |
 | `profiles/` | User-facing bundles of packages and components |
 | `components/` | Capabilities, dependencies and owned system resources |
 | `system/root/etc/` | Sources for generic managed files below `/etc` |
@@ -86,6 +91,22 @@ The selector holds no desired package or configuration state. Definitions are
 strict, versioned TOML. Invalid references, conflicts and dependency cycles
 fail validation. Hardware detection proposes selections during init; it does
 not silently change an existing machine later.
+
+The optional machine field `shell = "bash"` or `shell = "zsh"` selects the
+invoking user's default login shell, with `machine:shell` provenance. Common
+installs both shells; Chezmoi keeps both configurations. New manifests choose
+Bash. Package exclusions cannot remove the chosen shell. The plan shows the
+old and new shell and `usermod --shell PATH -- USER`, after package setup.
+Read-only inspection uses `getent --service=files passwd USER`, restricting
+this feature to the non-root local invoking account. Changes require the
+normal plan approval, an executable shell listed in `/etc/shells`, and the
+same observed account UID and shell immediately before execution. Re-read
+the local account afterwards; a failed command or verification never gets
+a successful receipt. Drift is repaired through the next approved sync.
+`/bin` and `/usr/bin` spellings of the same supported shell do not cause a
+change. Log out and back in to use a changed default; running shells remain.
+Removing the field retires verified ownership for that account while keeping
+its current login shell. It does not restore an older shell or remove packages.
 
 Desired state comes from definitions, observed state from native inspection,
 and applied state from verified operations. Unknown inspection results are
@@ -113,9 +134,11 @@ inventories, including AI Usage and webapp desktop entries.
 ChatGPT uses its official DNF repository. Voxtype is packaged in the owner's
 COPR. Copilot uses the official RPM and WoWUp CurseForge the official AppImage,
 both through COPR installer helpers. Updating the helper RPM alone does not
-update the downloaded app. Initial setup invokes the helper; Topgrade invokes
-its update command. App status and uninstall belong to the helper. Removing
-the helper RPM leaves the app installed; uninstall the app first if wanted.
+prove that the downloaded app is installed. Copilot helper 0.3.0 and newer
+queues a separate app installation job after DNF, using its pinned release;
+earlier versions need the explicit post-install action. Topgrade invokes the
+helper's update command. App status and uninstall belong to the helper.
+Removing the helper RPM leaves the app installed; uninstall the app first.
 Nimbus retains old app receipts without using them to remove applications.
 See [Security](#security) for the download exceptions.
 
@@ -160,8 +183,10 @@ uncommitted local work. Use the separate
 [TASKS.md](TASKS.md) before desktop installation; the documented base still
 needs its clean-install trial.
 
-These definitions require Nimbus 0.3.0 or newer; registering the guide's
-pre-created snapshot mount requires 0.3.1 or newer. On an existing installation,
+These definitions require the Nimbus 0.4.1 engine for the machine
+shell field and Tailscale operator action; registering the guide's pre-created
+snapshot mount requires
+0.3.1 or newer. On an existing installation,
 update the Nimbus RPM through DNF before updating this checkout or applying
 the matching Chezmoi Topgrade configuration. Bootstrap validates an installed
 engine but does not upgrade it automatically.
@@ -229,6 +254,20 @@ everything absent from the definitions.
 Reboot and logout notes in a plan describe actual planned system changes.
 Unchanged or merely adopted resources do not repeat them. `postinstall` reports
 requirements still outstanding from earlier changes.
+
+When native Tailscale is selected, `postinstall tailscale-operator` offers
+local operator permission for the invoking non-root user. Require an installed
+package with a valid receipt and readable daemon preferences. Preview the
+current and requested operator and `sudo -- /usr/bin/tailscale set
+--operator=USER`; recheck after approval, then verify the requested operator
+after execution. A failed or ineffective command never counts as complete.
+Only the operator is retained from the local preference response; other
+network and account preferences are not rendered, hashed or stored.
+Sign-in, connection state and other settings remain unchanged. Unknown daemon
+state offers no action. An already matching operator needs no command.
+This is an explicit post-install action, not a sync resource: Tailscale owns
+the preference and package deselection does not reset it. Revoke it through
+`sudo tailscale set --operator=` or explicitly choose another operator.
 
 Upgrade uses Chezmoi-owned Topgrade configuration. Updating that configuration
 changes the chosen native update steps without editing Go. Extra Topgrade
@@ -331,13 +370,20 @@ or extra confirmation. Chezmoi owns webapp desktop entries. Use native
 `xdg-terminal-exec` for terminal desktop entries rather than another wrapper.
 
 Post-install task IDs include `onepassword`, `fingerprint`, `nvidia-mok`,
-`copilot`, `wowup`, `reboot` and `logout`, when relevant to the machine. Copilot
-calls its helper's standalone install command. WoWUp is blocked until its
-helper supplies that command. Nimbus does not mark an app installed merely
-because its helper RPM exists. Opening 1Password does not prove
-sign-in. Fingerprint enrollment may run the native tool after approval. MOK,
+`copilot`, `wowup`, `proton-cachyos`, `reboot` and `logout`, when relevant to the
+machine. Copilot calls its helper's standalone install command. WoWUp is
+blocked until its helper supplies that command. Nimbus does not mark an app
+installed merely because its helper RPM exists. Opening 1Password does not
+prove sign-in. Fingerprint enrollment may run the native tool after approval. MOK,
 reboot and logout tasks provide instructions; they do not silently perform
 those actions. Listing tasks never changes the machine.
+
+When native Steam and ProtonPlus are selected and recorded, `proton-cachyos`
+offers `protonplus install steam-system proton-cachyos latest` after approval.
+Steam must have been started once to create its user directories. ProtonPlus
+owns runner downloads, updates and removal; Nimbus neither queries releases
+during inspection nor records runner completion from an exit code. This is a
+post-install action, not an automatic download during init or sync.
 
 FDE auto-unlock is a planned optional post-install action, before the dashboard.
 It must inspect the existing encryption and boot setup, show the proposed

@@ -94,6 +94,95 @@ was performed during release verification. UKI/TPM auto-unlock is not included.
 
 ## Completed locally
 
+### Desktop package and setup audit, 2026-09-12
+
+- Zathura's PDF backend was missing. The desktop profile now selects Fedora's
+  `zathura-pdf-poppler`, matching the installed 2026.07.18 core. The package
+  supplies `libpdf-poppler.so` and its PDF desktop handler. The owner installed
+  2026.07.18-1.fc44; Zathura detects it, native MIME queries select its handler,
+  and an isolated viewer opened a sample PDF. Chezmoi keeps Brave as the
+  fallback when the plugin is absent. Archive handling stays with Nautilus.
+- Native DNF history identifies two manual application/package installs:
+  OpenLogi and power-profiles-daemon. OpenLogi is no longer installed at the
+  closing inventory. Power-profiles-daemon is installed and is now selected
+  by the common power-management component; delivering that component still
+  requires the pending engine/definition release and sync.
+- Baseline packages, Nimbus receipts and native install reasons account for
+  the other inspected packages. RPM Fusion release packages come from
+  bootstrap; the NVIDIA kernel module comes from akmods. Those are not new
+  manual application requirements. The three installed Flatpak applications
+  are already in the selected definitions.
+- Bash history records manual SSH server enablement. The owner explicitly
+  chose to leave SSH server access unmanaged; do not declare its service.
+- The connected speakers are Logitech G560, USB `046d:0a78`. They are absent
+  from [OpenLogi's supported list](https://openlogi.org/docs/supported-devices).
+  Do not add OpenLogi for a speaker-only requirement without supported
+  hardware evidence.
+- Files bookmarks, hidden-file preferences, wallpaper shortcuts and Fastmail
+  account metadata belong to Chezmoi. AI Usage installation belongs to its
+  existing native Mise declarations. Personal sign-ins belong to the apps;
+  the dotfiles README owns the first-login checklist.
+- The owner deferred the new Dockur Windows 11 VM. No VM or guest storage was
+  created. Keep it separate from the pending Nimbus release.
+
+This audit is a local observation, not a claim that the unreleased engine has
+applied its pending resources. DNF history and Bash history are incomplete
+records of possible out-of-band work and were not copied into the repository.
+The closing `just check` gate passes. No system package or service mutation
+was performed by this audit.
+
+### Final desktop capture and sync, 2026-09-12
+
+- [x] Reconcile completed desktop preferences into Chezmoi: window behavior,
+  monitor-local workspaces, shortcuts, Noctalia, Ghostty, Zed, Files, MIME
+  defaults, launcher visibility, wallpapers and project links. Account secrets
+  and generated state remain local; the dotfiles checklist owns its evidence.
+- [x] Add the four requested native XDG defaults under
+  `system/root/etc/xdg/user-dirs.defaults`: Projects, Screenshots, Wallpapers
+  and Recordings. Fedora's installed 0.18 updater creates all four correctly
+  in an isolated home. Preserve the standard Fedora defaults too.
+- [ ] Resolve explicit ownership migration for the existing package-owned
+  `/etc/xdg/user-dirs.defaults` before selecting the prepared file resource.
+  The file is unselected for 0.4.1: the planner correctly blocks replacement
+  without a Nimbus receipt.
+  `files accept` requires prior ownership and cannot adopt this file. Chezmoi
+  already manages the working per-user paths and creates their folders.
+- [ ] Complete system reconciliation after the unreleased engine and local
+  changes are ready for delivery. The requested sync stopped at dirty-repo
+  preflight; no repository fetch, system mutation or user apply ran through
+  Nimbus. The later release request authorizes commits and pushes to main,
+  plus COPR publication; workstation installation remains a separate step.
+- [ ] Publish/install ble.sh, the compatible LibrePods fork and the prepared
+  Copilot helper through their COPR delivery flow. They are not completed by
+  capturing configuration, and no unverified COPR source is added to Nimbus.
+
+The native XDG file extends Fedora's installed `user-dirs.defaults`; upstream
+[documents its role](https://www.freedesktop.org/wiki/Software/xdg-user-dirs/).
+A comparison with
+[CachyOS-Settings](https://github.com/CachyOS/CachyOS-Settings)
+did not justify extra system policy. Existing user overrides remain owned by
+Chezmoi. SSH server access stays unmanaged, and the Windows VM stays deferred.
+
+### Engine and integration work
+
+- [x] Offer Tailscale operator setup when its native package is selected and
+  applied. Preview the current operator, approve the exact native command,
+  recheck stale state and verify completion. Keep unrelated preferences private.
+  Fake-native tests cover read-only listing, cancellation, failed commands,
+  ineffective commands, retries, convergence and explicit revocation.
+  `go test ./internal/postinstall ./internal/cli`, `just check` and
+  `just validate` pass locally.
+- [ ] Publish and test Tailscale operator setup in disposable Fedora; no live
+  operator change has been run by this implementation.
+- [x] Install Bash and Zsh through common; use the optional machine `shell`
+  field for the invoking local user's default login shell. Preview the native
+  change, verify UID/shell before and after it, and report the required login.
+  Keep both configurations in Chezmoi. Removing the field relinquishes
+  ownership without changing the account's current shell.
+  Local `just check` and `just validate` pass; fake-native tests cover repair,
+  unchanged state, failed verification, changed UID and ownership retirement.
+- [ ] Publish the 0.4.1 engine before applying the shell-bearing definitions;
+  verify login-shell selection, switching and repair in disposable Fedora.
 - [x] Consolidate product docs into SPEC, TASKS and ROADMAP.
 - [x] Separate sync and upgrades; add `sync --upgrade` and the narrow
   `upgrade --system` callback for Topgrade.
@@ -103,6 +192,9 @@ was performed during release verification. UKI/TPM auto-unlock is not included.
 - [x] Remove custom Copilot/WoWUp providers and exclusive tests. Preserve old
   application receipts without automatically removing applications.
 - [x] Add Copilot's native post-install action and Topgrade updater.
+- [x] Offer Proton-CachyOS Latest setup through ProtonPlus after explicit
+  post-install approval, with native Steam and package receipts required.
+- [ ] Validate ProtonPlus initial download and retry on disposable Fedora.
 - [x] Remove unused Cargo and installer follow-up lifecycles; keep Mise bootstrap.
 - [x] Remove graphical recovery and the old layout inspection.
   Retain ownership-checked retirement of the old session files.

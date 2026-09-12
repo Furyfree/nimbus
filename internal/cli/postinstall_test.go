@@ -248,6 +248,8 @@ func TestPostinstallRejectsForgedNativeActions(t *testing.T) {
 		{ID: "onepassword", Status: postinstall.Blocked, Action: &postinstall.Action{Kind: postinstall.OpenApplication, Argv: []string{"1password"}}},
 		{ID: "other", Status: postinstall.Pending, Action: &postinstall.Action{Kind: postinstall.EnrollFingerprint, Argv: []string{"fprintd-enroll"}}},
 		{ID: "copilot", Status: postinstall.Unknown, Action: &postinstall.Action{Kind: postinstall.InstallApplication, Argv: []string{"sudo", "--", "/tmp/github-copilot-installer", "install"}}},
+		{ID: "proton-cachyos", Status: postinstall.Unknown, Action: &postinstall.Action{Kind: postinstall.InstallApplication, Argv: []string{"protonplus", "update", "all"}}},
+		{ID: "proton-cachyos", Status: postinstall.Blocked, Action: &postinstall.Action{Kind: postinstall.InstallApplication, Argv: []string{"protonplus", "install", "steam-system", "proton-cachyos", "latest"}}},
 	} {
 		if _, err := postinstallArgv(task); err == nil {
 			t.Fatalf("untyped action accepted: %+v", task)
@@ -300,6 +302,67 @@ func TestPostinstallCopilotUsesNativeInstallWithoutAppReceipts(t *testing.T) {
 			afterJSON, _ := json.Marshal(after)
 			if !bytes.Equal(beforeJSON, afterJSON) {
 				t.Fatal("native action changed Nimbus receipts")
+			}
+		})
+	}
+}
+
+func TestPostinstallProtonCachyOSPreservesApprovalAndNativeOwnership(t *testing.T) {
+	for _, mode := range []string{"preview", "cancel", "install", "failure"} {
+		t.Run(mode, func(t *testing.T) {
+			root, src := postinstallFixture(t)
+			if err := os.WriteFile(filepath.Join(root, "profiles/common.toml"), []byte("schema=1\nid='common'\npackages=['terra:protonplus','rpmfusion-nonfree:steam']\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			key := nativetest.Key("dnf5", inspect.PackageQueryArgs...)
+			for _, pkg := range []struct{ name, prefix string }{{"protonplus", "terra"}, {"steam", "rpmfusion-nonfree"}} {
+				src.Commands[key] = append(src.Commands[key], []byte(pkg.name+"|0|1.0|1|x86_64|"+pkg.prefix+"|User\n")...)
+				src.Paths[pkg.name] = "/usr/bin/" + pkg.name
+				r := state.Receipt{Schema: state.ReceiptSchema, Machine: "vm", Resource: "package:" + pkg.prefix + ":" + pkg.name, Provider: "dnf", Verified: true, Operation: "install", PlanDigest: "fixture"}
+				if err := state.Record(stateRoot, "fixture", &state.Stage{Schema: state.Schema, PlanDigest: "fixture", Receipts: []state.Receipt{r}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, err := state.Read(stateRoot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := []string{"proton-cachyos", "--yes"}
+			if mode == "preview" {
+				args = append(args, "--plan")
+			} else if mode == "cancel" {
+				args = []string{"proton-cachyos"}
+				savedTerminal, savedApprover := postinstallTerminal, approver
+				t.Cleanup(func() { postinstallTerminal, approver = savedTerminal, savedApprover })
+				postinstallTerminal = func(io.Reader) bool { return true }
+				approver = func(io.Reader, io.Writer, string) bool { return false }
+			} else if mode == "failure" {
+				src.streamErr = errors.New("ProtonPlus download failed")
+			}
+			cmd, out := postinstallCommand(root, false, args...)
+			err = cmd.Execute()
+			if (err != nil) != (mode == "cancel" || mode == "failure") {
+				t.Fatalf("%v: %s", err, out)
+			}
+			want := "protonplus install steam-system proton-cachyos latest"
+			if !strings.Contains(out.String(), "Native action: "+want) {
+				t.Fatalf("missing action preview: %s", out)
+			}
+			if mode == "preview" || mode == "cancel" {
+				if len(src.streams) != 0 {
+					t.Fatalf("unapproved download: %v", src.streams)
+				}
+			} else if !slices.Equal(src.streams, []string{want}) || !strings.Contains(out.String(), "After action: proton-cachyos: unknown") {
+				t.Fatalf("native command or unknown completion lost: %s %v", out, src.streams)
+			}
+			after, err := state.Read(stateRoot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			beforeJSON, _ := json.Marshal(before)
+			afterJSON, _ := json.Marshal(after)
+			if !bytes.Equal(beforeJSON, afterJSON) {
+				t.Fatal("ProtonPlus action changed Nimbus receipts")
 			}
 		})
 	}

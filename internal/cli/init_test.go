@@ -525,7 +525,7 @@ func TestInitDescribesANewMachineFromTheHardware(t *testing.T) {
 		t.Fatalf("dotfiles prompt = %q", asked)
 	}
 	manifest := strings.ReplaceAll(out, "\n+", "\n")
-	for _, want := range []string{"# mybox: HP EliteBook X G1a", "hardware = 'HP EliteBook X G1a 14 inch Notebook Next Gen AI PC'", "'common',\n  'development',\n  'hyprland-noctalia'", "'amd-graphics',\n  'laptop-power'", "[dotfiles]\nrepo = 'https://github.com/Furyfree/dotfiles.git'"} {
+	for _, want := range []string{"# mybox: HP EliteBook X G1a", "hardware = 'HP EliteBook X G1a 14 inch Notebook Next Gen AI PC'", "shell = 'bash'", "'common',\n  'development',\n  'hyprland-noctalia'", "'amd-graphics',\n  'laptop-power'", "[dotfiles]\nrepo = 'https://github.com/Furyfree/dotfiles.git'"} {
 		if !strings.Contains(manifest, want) {
 			t.Errorf("manifest lacks %q:\n%s", want, manifest)
 		}

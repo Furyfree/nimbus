@@ -78,6 +78,18 @@ func (ex *executor) systemResource(op plan.Operation) ([]state.Receipt, []string
 	if err := ex.verifyResource(op, false); err != nil {
 		return nil, nil, fmt.Errorf("resource changed after approval: %w", err)
 	}
+	if op.Kind == plan.KindShell {
+		if op.Action == plan.ActionRetire {
+			return nil, []string{op.ID}, nil
+		}
+		var desired inspect.LoginShell
+		if err := json.Unmarshal([]byte(change.After), &desired); err != nil {
+			return nil, nil, fmt.Errorf("invalid login-shell payload: %w", err)
+		}
+		if err := inspect.CheckLoginShell(ex.opts.Source, desired.Shell); err != nil {
+			return nil, nil, err
+		}
+	}
 	if op.Kind == plan.KindService && op.Action == plan.ActionRetire {
 		have, err := inspect.ObserveService(ex.opts.Source, change.Name)
 		if err != nil {
@@ -102,7 +114,7 @@ func (ex *executor) systemResource(op plan.Operation) ([]state.Receipt, []string
 		return nil, []string{op.ID}, nil
 	}
 	receipt := ex.receipt(op, op.Kind, change.Previous, change.After, "native state matches the approved resource")
-	receipt.Logout = op.Kind == plan.KindGroup && change.Before != change.After
+	receipt.Logout = (op.Kind == plan.KindGroup || op.Kind == plan.KindShell) && change.Before != change.After
 	receipt.Reboot = op.Kind == plan.KindTarget && change.Before != change.After
 	if op.Kind == plan.KindService && change.Name == "greetd.service" && change.Enabled != nil && *change.Enabled && change.Running == nil {
 		var before inspect.Service
@@ -120,6 +132,18 @@ func (ex *executor) verifyResource(op plan.Operation, after bool) error {
 		want = c.After
 	}
 	switch op.Kind {
+	case plan.KindShell:
+		var expected inspect.LoginShell
+		if err := json.Unmarshal([]byte(want), &expected); err != nil {
+			return fmt.Errorf("invalid login-shell state: %w", err)
+		}
+		have, err := inspect.ObserveLoginShell(ex.opts.Source, c.User)
+		if err != nil {
+			return err
+		}
+		if have != expected {
+			return fmt.Errorf("local account identity or login shell differs from approved state")
+		}
 	case plan.KindService:
 		have, err := inspect.ObserveService(ex.opts.Source, c.Name)
 		if err != nil {

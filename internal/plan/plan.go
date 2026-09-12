@@ -20,6 +20,7 @@ const (
 	KindFile          = "system-file"
 	KindService       = "service"
 	KindGroup         = "group"
+	KindShell         = "login-shell"
 	KindTarget        = "default-target"
 	KindTrigger       = "trigger"
 	KindDNFConfig     = "dnf-config"

@@ -11,6 +11,7 @@ import (
 // Resolved is the deterministic desired graph of one machine.
 type Resolved struct {
 	Machine       string              `json:"machine"`
+	Shell         string              `json:"shell,omitempty"`
 	Profiles      []string            `json:"profiles"`
 	Components    []ResolvedComponent `json:"components"`
 	Packages      []ResolvedPackage   `json:"packages"`
@@ -153,6 +154,9 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 	for _, raw := range m.Packages {
 		addPkg(raw, "machine")
 	}
+	if m.Shell != "" {
+		addPkg(m.Shell, "machine:shell")
+	}
 	for _, name := range slices.Sorted(maps.Keys(byName)) {
 		if len(byName[name]) > 1 {
 			errs.Add(where, "package %q is selected from more than one repository: %s", name, strings.Join(slices.Sorted(maps.Keys(byName[name])), ", "))
@@ -196,6 +200,8 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 		for _, p := range rp.Paths {
 			if p == "machine" {
 				blocked = "is listed in this manifest's packages; remove it there instead"
+			} else if p == "machine:shell" {
+				blocked = "is selected by this manifest's shell; change shell instead"
 			} else if cid, ok := strings.CutPrefix(p, "component:"); ok && required[cid] {
 				blocked = "belongs to component " + cid + ", which another selected component requires"
 			}
@@ -244,7 +250,7 @@ func Resolve(c *Checkout, machineID string) (*Resolved, ErrorList) {
 		}
 	}
 
-	r := &Resolved{Machine: m.ID, Profiles: slices.Clone(m.Profiles)}
+	r := &Resolved{Machine: m.ID, Shell: m.Shell, Profiles: slices.Clone(m.Profiles)}
 	for _, cid := range slices.Sorted(maps.Keys(compPaths)) {
 		paths := slices.Clone(compPaths[cid])
 		slices.Sort(paths)

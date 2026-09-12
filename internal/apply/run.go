@@ -132,7 +132,7 @@ func Run(p *plan.Plan, opts Options) *Result {
 		}
 		if op.Resource != nil && op.Resource.Before != op.Resource.After {
 			r.Reboot = r.Reboot || op.Kind == plan.KindTarget
-			r.Logout = r.Logout || op.Kind == plan.KindGroup
+			r.Logout = r.Logout || op.Kind == plan.KindGroup || op.Kind == plan.KindShell
 		}
 		for _, receipt := range receipts {
 			r.Reboot = r.Reboot || receipt.Reboot
@@ -201,7 +201,7 @@ func (ex *executor) execute(op plan.Operation) (receipts []state.Receipt, remove
 	switch {
 	case (op.Kind == plan.KindRepository || op.Kind == plan.KindFlatpakRemote) && (op.Action == plan.ActionRemove || op.Action == plan.ActionRetire):
 		return ex.sourceRetirement(op)
-	case op.Kind == plan.KindFile || op.Kind == plan.KindService || op.Kind == plan.KindGroup || op.Kind == plan.KindTarget || op.Kind == plan.KindTrigger:
+	case op.Kind == plan.KindFile || op.Kind == plan.KindService || op.Kind == plan.KindGroup || op.Kind == plan.KindShell || op.Kind == plan.KindTarget || op.Kind == plan.KindTrigger:
 		return ex.systemResource(op)
 	case op.Kind == plan.KindUser:
 		return nil, nil, ex.userTool(op)

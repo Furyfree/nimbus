@@ -34,6 +34,7 @@ func repository(t *testing.T) (*definitions.Checkout, *definitions.Resolved) {
 		t.Fatal(errs)
 	}
 	// These package-provider tests isolate resources covered by resources_test.go.
+	r.Shell = ""
 	r.Components = slices.DeleteFunc(r.Components, func(c definitions.ResolvedComponent) bool { return c.ID == "snapper" })
 	r.Files = nil
 	r.Constraints = nil

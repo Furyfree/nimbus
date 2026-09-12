@@ -60,6 +60,16 @@ Nimbus 0.4.0 supports:
 
 ## Current checkout
 
+Each machine manifest selects the invoking user's default login shell with
+`shell = "bash"` or `shell = "zsh"`. Both shells are common packages, and
+Chezmoi keeps both configurations. All tracked and newly created manifests
+choose Bash initially. Change the field and preview with `nimbus sync --plan`
+before syncing. The plan shows the old and new shell and the native `usermod`
+command; an approved change takes effect after logout and login. Removing
+the field stops managing the preference and keeps the current login shell.
+The field requires the 0.4.1 engine; update the Nimbus RPM before
+using these definitions. `nimbus why login-shell` explains its selection.
+
 From Nimbus 0.4.0, `nimbus sync` updates
 the Nimbus and configured Chezmoi repositories, shows the system plan, applies
 approved changes, then asks to apply Chezmoi configuration and its scripts.
@@ -84,6 +94,24 @@ install/update commands in its COPR helper before integration can finish.
 Repair uses TTY; old owned graphical recovery files retire on sync. The
 Hyprland/Noctalia profile uses Snapper around system changes with six-snapshot
 retention. See [snapshot behavior and limits](docs/SPEC.md#snapper).
+
+With native Steam and ProtonPlus selected, `nimbus postinstall proton-cachyos`
+offers the Proton-CachyOS Latest download. Start Steam once first. ProtonPlus
+owns installation and rolling updates; init and sync do not download runners
+automatically. This action requires engine 0.4.1 or newer.
+
+With Tailscale selected and installed, `nimbus postinstall tailscale-operator`
+offers permission for the invoking user to manage it through the CLI or
+Noctalia. It previews `sudo -- /usr/bin/tailscale set --operator=USER`, then
+verifies the daemon's operator preference. Use `--plan` to inspect only.
+Sign-in remains manual. This action also requires engine 0.4.1 or newer.
+
+User preferences and account setup belong to the
+[dotfiles first-login checklist](https://github.com/Furyfree/dotfiles#first-login-and-setup-ownership).
+Chezmoi installs declared Mise tools after applying their configuration,
+including AI Usage and the agent CLIs. Nimbus does not keep another tool list
+or inspect their credentials. Native application sign-in remains separate
+from system installation and local Tailscale operator permission.
 
 Use the installed command's `--help` to check its available options. Local
 candidate features are not proof of a published COPR release. See

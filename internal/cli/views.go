@@ -271,6 +271,9 @@ type whyResult struct {
 
 func explain(s *selected, resource string) (*whyResult, error) {
 	r := s.Resolved
+	if r.Shell != "" && (resource == "login-shell" || resource == "login-shell:<user>") {
+		return &whyResult{Kind: plan.KindShell, ID: "login-shell:<user>", Paths: []string{"machine:shell"}}, nil
+	}
 	owned := func(kind, id, component string) *whyResult {
 		paths := []string{"component:" + component}
 		for _, c := range r.Components {

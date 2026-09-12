@@ -260,7 +260,7 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 
 func isSystemResource(kind string) bool {
 	switch kind {
-	case plan.KindFile, plan.KindService, plan.KindGroup, plan.KindTarget, plan.KindTrigger:
+	case plan.KindFile, plan.KindService, plan.KindGroup, plan.KindShell, plan.KindTarget, plan.KindTrigger:
 		return true
 	}
 	return false

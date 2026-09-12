@@ -17,6 +17,61 @@ func TestBaseTreeIsValid(t *testing.T) {
 	}
 }
 
+func TestMachineShellSelection(t *testing.T) {
+	for _, shell := range []string{"", "bash", "zsh"} {
+		t.Run("shell="+shell, func(t *testing.T) {
+			tree := baseTree()
+			if shell != "" {
+				tree["machines/one.toml"] += "shell = \"" + shell + "\"\n"
+			}
+			c, err := Load(writeTree(t, tree))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if errs := Validate(c); len(errs) > 0 {
+				t.Fatal(errs)
+			}
+			r, errs := Resolve(c, "one")
+			if len(errs) > 0 {
+				t.Fatal(errs)
+			}
+			for _, name := range []string{"bash", "zsh"} {
+				i := slices.IndexFunc(r.Packages, func(p ResolvedPackage) bool { return p.Name == name })
+				if name != shell {
+					if i >= 0 {
+						t.Fatalf("unselected shell %s resolved: %+v", name, r.Packages[i])
+					}
+					continue
+				}
+				if i < 0 || r.Packages[i].Canonical != "dnf:"+shell || !slices.Equal(r.Packages[i].Paths, []string{"machine:shell"}) {
+					t.Fatalf("missing Fedora shell and provenance: %+v", r.Packages)
+				}
+			}
+			if shell == "" {
+				return
+			}
+			// Explicit selection shares one package, and exclusions cannot undo
+			// the shell choice even if another selection also supplies it.
+			c.Machines["one"].Packages = append(c.Machines["one"].Packages, shell)
+			r, errs = Resolve(c, "one")
+			if len(errs) > 0 {
+				t.Fatal(errs)
+			}
+			var selected []ResolvedPackage
+			for _, p := range r.Packages {
+				if p.Name == shell {
+					selected = append(selected, p)
+				}
+			}
+			if len(selected) != 1 || !slices.Equal(selected[0].Paths, []string{"machine", "machine:shell"}) {
+				t.Fatalf("duplicate shell selection: %+v", selected)
+			}
+			c.Machines["one"].PackageExclusions = []string{shell}
+			requireError(t, Validate(c), "change shell instead")
+		})
+	}
+}
+
 func TestRepositoryDefinitionsValidate(t *testing.T) {
 	c, err := Load(filepath.Join("..", ".."))
 	if err != nil {
@@ -120,6 +175,17 @@ func TestInvalidTrees(t *testing.T) {
 		mutate func(map[string]string)
 		want   string
 	}{
+		{"unsupported shell", func(f map[string]string) {
+			f["machines/one.toml"] += "shell = \"fish\"\n"
+		}, "shell must be bash or zsh"},
+		{"shell from conflicting repository", func(f map[string]string) {
+			f["machines/one.toml"] += "shell = \"zsh\"\n"
+			f["profiles/extra.toml"] = strings.Replace(f["profiles/extra.toml"], `packages = []`, `packages = ["terra:zsh"]`, 1)
+		}, "more than one repository"},
+		{"removed shell is also selected", func(f map[string]string) {
+			f["machines/one.toml"] += "shell = \"bash\"\n"
+			f["components/hardware.toml"] += "removes = [\"bash\"]\n"
+		}, "also selected"},
 		{"missing common", func(f map[string]string) {
 			f["machines/one.toml"] = strings.Replace(f["machines/one.toml"], `["common", "extra"]`, `["extra"]`, 1)
 		}, `profiles must include "common"`},

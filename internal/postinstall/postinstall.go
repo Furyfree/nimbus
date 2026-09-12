@@ -25,15 +25,17 @@ const (
 type ActionKind string
 
 const (
-	OpenApplication    ActionKind = "open-application"
-	EnrollFingerprint  ActionKind = "enroll-fingerprint"
-	InstallApplication ActionKind = "install-application"
+	OpenApplication      ActionKind = "open-application"
+	EnrollFingerprint    ActionKind = "enroll-fingerprint"
+	InstallApplication   ActionKind = "install-application"
+	SetTailscaleOperator ActionKind = "set-tailscale-operator"
 )
 
 // Action is a fixed native command offered for explicit user selection.
 type Action struct {
 	Kind ActionKind `json:"kind"`
 	Argv []string   `json:"argv"`
+	User string     `json:"user,omitempty"`
 }
 
 type Task struct {
@@ -71,8 +73,17 @@ func Inspect(src native.Source, in Inputs) []Task {
 			result = append(result, onePassword(src, in, pkg))
 		case pkg.Name == "fprintd" && pkg.Prefix == "dnf":
 			result = append(result, fingerprint(src, in, pkg))
+		case pkg.Name == "tailscale" && pkg.Prefix != "flatpak":
+			result = append(result, tailscaleOperator(src, in, pkg))
 		case pkg.Name == "github-copilot-installer" || pkg.Name == "wowup-cf-installer":
 			result = append(result, installerHelper(src, in, pkg))
+		case pkg.Name == "protonplus":
+			for _, steam := range in.Resolved.Packages {
+				if steam.Name == "steam" && steam.Prefix != "flatpak" {
+					result = append(result, protonCachyOS(src, in, pkg, steam))
+					break
+				}
+			}
 		}
 	}
 	if slices.ContainsFunc(in.Resolved.Components, func(c definitions.ResolvedComponent) bool { return c.ID == "nvidia" }) {
@@ -81,6 +92,33 @@ func Inspect(src native.Source, in Inputs) []Task {
 	result = append(result, sessionTasks(src, in)...)
 	slices.SortFunc(result, func(a, b Task) int { return strings.Compare(a.ID, b.ID) })
 	return result
+}
+
+func protonCachyOS(src native.Source, in Inputs, proton, steam definitions.ResolvedPackage) Task {
+	t := Task{
+		ID: "proton-cachyos", Owner: "package:" + proton.Canonical,
+		Title: "Install Proton-CachyOS Latest for Steam", Status: Unknown,
+		Detail:        "ProtonPlus owns the compatibility tool and its rolling updates. Package presence does not prove that a runner is installed or current.",
+		Prerequisites: []string{"Start native Steam once to create its user directories, then close running games."},
+		Instructions: []string{
+			"Install the rolling Latest entry through ProtonPlus. Restart Steam afterwards to make the compatibility tool available.",
+			"For an existing Latest installation, use protonplus update steam-system proton-cachyos. ProtonPlus preferences control background updates.",
+		},
+		Verification: "Use protonplus list steam-system and check ProtonPlus for updates. Nimbus does not query remote releases or read Steam account data during inspection.",
+		Recovery:     "Use ProtonPlus to retry a failed download or remove the compatibility tool. Nimbus does not remove Steam data or runner files.",
+	}
+	for _, pkg := range []definitions.ResolvedPackage{proton, steam} {
+		if status, detail := packageReady(in, pkg); status != Complete {
+			t.Status, t.Detail = status, detail
+			return t
+		}
+	}
+	if _, err := src.LookPath("protonplus"); err != nil {
+		t.Status, t.Detail = Blocked, "ProtonPlus is unavailable; repair the selected package with nimbus sync."
+		return t
+	}
+	t.Action = &Action{Kind: InstallApplication, Argv: []string{"protonplus", "install", "steam-system", "proton-cachyos", "latest"}}
+	return t
 }
 
 func installerHelper(src native.Source, in Inputs, pkg definitions.ResolvedPackage) Task {
@@ -105,7 +143,7 @@ func installerHelper(src native.Source, in Inputs, pkg definitions.ResolvedPacka
 		t.Detail = "The WoWUp COPR helper needs a standalone install command before Nimbus can offer initial installation."
 		t.Instructions = []string{"The current helper exposes prepare/apply only. Complete the standalone install flow in COPR; Nimbus will not manage application artifacts."}
 	} else {
-		t.Instructions = append(t.Instructions, "The helper downloads the latest stable release and asks DNF to install it. Native prompts remain enabled.")
+		t.Instructions = append(t.Instructions, "The helper selects and verifies the application release, then asks DNF to install it. Native prompts remain enabled.")
 		t.Action = &Action{Kind: InstallApplication, Argv: []string{"sudo", "--", helper, "install"}}
 	}
 	return t

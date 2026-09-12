@@ -16,6 +16,8 @@ packages = [
   "obs-studio",
   "pinta",
   "zathura",
+  # Zathura's core needs a format plugin to read PDFs.
+  "zathura-pdf-poppler",
   "libreoffice",
   "gnome-disk-utility",
   "flatseal",

@@ -45,7 +45,9 @@ type Machine struct {
 	ID     string `toml:"id"`
 	// Hardware is a substring of the DMI product or board name that
 	// identifies this machine, so init can propose it on that hardware.
-	Hardware           string            `toml:"hardware,omitempty"`
+	Hardware string `toml:"hardware,omitempty"`
+	// Shell selects the invoking user's default login shell.
+	Shell              string            `toml:"shell,omitempty"`
 	Profiles           []string          `toml:"profiles"`
 	Components         []string          `toml:"components"`
 	Packages           []string          `toml:"packages"`

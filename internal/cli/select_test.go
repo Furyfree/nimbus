@@ -216,14 +216,14 @@ func TestWriteManifestCleansTemporaryFileOnRenameFailure(t *testing.T) {
 
 func TestRenderManifestIsCanonicalAndKeepsComments(t *testing.T) {
 	existing := []byte("# Laptop.\n# Second line.\nschema = 1\nid = \"laptop\"\nprofiles = [\"common\"]\n")
-	m := &definitions.Machine{Schema: 1, ID: "laptop", Profiles: []string{"common", "development"}, Components: []string{"amd-graphics"},
+	m := &definitions.Machine{Schema: 1, ID: "laptop", Shell: "zsh", Profiles: []string{"common", "development"}, Components: []string{"amd-graphics"},
 		Packages: []string{"gimp"}, Dotfiles: &definitions.Dotfiles{Repo: "https://example.invalid/dotfiles.git"}}
 	data, err := renderManifest(existing, m)
 	if err != nil {
 		t.Fatal(err)
 	}
 	out := string(data)
-	want := "# Laptop.\n# Second line.\nschema = 1\nid = 'laptop'\nprofiles = [\n  'common',\n  'development'\n]\ncomponents = [\n  'amd-graphics'\n]\npackages = [\n  'gimp'\n]\npackage_exclusions = []\n\n[dotfiles]\nrepo = 'https://example.invalid/dotfiles.git'"
+	want := "# Laptop.\n# Second line.\nschema = 1\nid = 'laptop'\nshell = 'zsh'\nprofiles = [\n  'common',\n  'development'\n]\ncomponents = [\n  'amd-graphics'\n]\npackages = [\n  'gimp'\n]\npackage_exclusions = []\n\n[dotfiles]\nrepo = 'https://example.invalid/dotfiles.git'"
 	if out != want {
 		t.Fatalf("rendered:\n%s\nwant:\n%s", out, want)
 	}
@@ -234,7 +234,7 @@ func TestRenderManifestIsCanonicalAndKeepsComments(t *testing.T) {
 	if err := decoder.Decode(&back); err != nil {
 		t.Fatalf("decode rendered manifest: %v", err)
 	}
-	if back.Schema != m.Schema || back.ID != m.ID || back.Hardware != m.Hardware ||
+	if back.Schema != m.Schema || back.ID != m.ID || back.Hardware != m.Hardware || back.Shell != m.Shell ||
 		!slices.Equal(back.Profiles, m.Profiles) || !slices.Equal(back.Components, m.Components) ||
 		!slices.Equal(back.Packages, m.Packages) || !slices.Equal(back.PackageExclusions, m.PackageExclusions) ||
 		back.Dotfiles == nil || *back.Dotfiles != *m.Dotfiles {

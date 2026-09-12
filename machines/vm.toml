@@ -2,6 +2,7 @@
 # hardware component; Mesa comes in directly for the Hyprland session.
 schema = 1
 id = "vm"
+shell = "bash"
 
 profiles = [
   "common",

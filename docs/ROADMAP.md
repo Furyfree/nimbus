@@ -9,6 +9,10 @@ Existing local code is a candidate, not proof that the new contract is shipped.
 
 ## Next steps
 
+The prepared XDG defaults file remains unselected until explicit adoption of
+the package-owned file is supported. Chezmoi already manages the working
+per-user paths, so this does not block the engine release.
+
 1. Finish the minimal dark GRUB theme and verify booting and theme removal.
 2. Add FDE auto-unlock as an explicit post-install action, retaining passphrase
    unlock. Verify enrollment, booting and removal on real hardware.
@@ -40,6 +44,9 @@ Keep Topgrade configuration in Chezmoi and prevent duplicate system updates or
 recursion. Its callback remains `nimbus upgrade --system` for RPMs and system
 Flatpaks. This repository-update workflow is released in Nimbus 0.4.0;
 see TASKS for COPR delivery and installation evidence.
+The machine shell field requires engine 0.4.1 or newer; it chooses the default
+login shell while common installs both Bash and Zsh and Chezmoi retains both
+configurations.
 Deploy the new engine before applying the matching dotfiles configuration.
 Nimbus 0.3.1 asks for a machine on first use through the minimal
 `curl ... | bash` installer and supports the earlier empty snapshot mount.
@@ -56,6 +63,9 @@ own those tools. Keep the required Mise binary bootstrap and prerequisites.
 Keep only helper RPM declarations and small post-install calls in Nimbus.
 COPR helpers own downloads, verification, installation, status and removal;
 Topgrade calls their explicit updates. No custom application provider is needed.
+Tailscale operator setup uses the same explicit post-install approval flow,
+with native preference verification and a documented revocation command.
+Validate this new action in disposable Fedora before claiming host coverage.
 WoWUp requires a standalone install/update interface in COPR before integration
 can finish. Uninstalling a helper alone does not remove its application.
 
@@ -119,6 +129,10 @@ with Omarchy and CachyOS-Settings using the research rules in SPEC. Record the
 source and reason for an accepted change; do not import user configuration.
 Finish post-install task behavior and enable the waiting Chezmoi launchers only
 when the installed Nimbus version supports them.
+
+The `proton-cachyos` post-install action delegates native Steam runner setup to
+ProtonPlus. Validate its download and retry on disposable Fedora; unit tests
+cover selection, prerequisites and the absence of user-data or network reads.
 
 Snapper remains selected by `hyprland-noctalia`. Native setup, bounded number
 retention and sync/system-upgrade hooks are implemented locally. Test initial

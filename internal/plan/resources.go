@@ -150,6 +150,7 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 		}
 		ops = append(ops, op)
 	}
+	ops = append(ops, b.loginShell(pendingPackages)...)
 	if target := b.in.Resolved.DefaultTarget; target != "" {
 		id := "default-target"
 		selected[id] = true

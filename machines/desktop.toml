@@ -1,6 +1,7 @@
 # MSI Z690 desktop: Intel integrated graphics plus NVIDIA RTX 3080.
 schema = 1
 id = "desktop"
+shell = "bash"
 hardware = "Z690"
 
 profiles = [

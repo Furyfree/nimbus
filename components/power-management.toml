@@ -1,0 +1,19 @@
+# Shared power profiles and battery reporting, including desktop peripherals.
+# Keep the existing power-profiles-daemon provider; do not add tuned-ppd too.
+# https://docs.noctalia.dev/noctalia/control-center/#power
+schema = 1
+id = "power-management"
+
+requires = []
+conflicts = []
+packages = [
+  "power-profiles-daemon",
+  "upower",
+]
+removes = []
+
+# UPower is activated through D-Bus by desktop clients.
+[[services]]
+unit = "power-profiles-daemon.service"
+enabled = true
+running = true

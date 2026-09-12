@@ -381,6 +381,9 @@ func validateComponent(c *Checkout, comp *Component, errs *ErrorList) {
 
 func validateMachine(c *Checkout, m *Machine, errs *ErrorList) {
 	where := "machines/" + m.ID + ".toml"
+	if m.Shell != "" && m.Shell != "bash" && m.Shell != "zsh" {
+		errs.Add(where, "shell must be bash or zsh when set")
+	}
 	if err := ValidateID(m.ID); err != nil {
 		errs.Add(where, "id: %v", err)
 	}
