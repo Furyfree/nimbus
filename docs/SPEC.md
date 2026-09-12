@@ -420,6 +420,24 @@ owns runner downloads, updates and removal; Nimbus neither queries releases
 during inspection nor records runner completion from an exit code. This is a
 post-install action, not an automatic download during init or sync.
 
+When Noctalia is selected and recorded, `noctalia-plugins` inspects its native
+full effective configuration and local IPC plugin listing. Enabled intent and
+cached catalogs do not establish installation: verify matching runtime
+manifests and readable entry scripts. Unknown config, unavailable IPC or
+incompatible plugins or uninitialized source catalogs remain unknown, with no
+offered mutation. Inspection
+never fetches plugins and never retains or renders unrelated exported settings.
+
+After approval, the task uses native source-update commands for sources with
+enabled plugins missing runtime files. These may also update already-installed
+plugins from those sources. Noctalia owns downloads and live registry/bar
+refresh. Wait up to two minutes for the missing runtime exports;
+report incomplete verification as failure, preserving native partial results
+for retry. No second plugin catalog, managed runtime files or completion
+receipts are created. Run this action inside the desktop session after Chezmoi
+apply; init and sync do not start a desktop or silently download plugins.
+Installation verification does not claim account readiness or widget behavior.
+
 FDE auto-unlock is a planned optional post-install action, before the dashboard.
 It must inspect the existing encryption and boot setup, show the proposed
 native enrollment and ask for approval. Preserve working passphrase access;

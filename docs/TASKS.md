@@ -240,6 +240,16 @@ Chezmoi. SSH server access stays unmanaged, and the Windows VM stays deferred.
 
 ### Engine and integration work
 
+- [x] Add Noctalia plugin inspection and a native post-install repair for
+  enabled plugins lacking runtime exports. Read the effective Noctalia config;
+  preserve preview, approval, local-only inspection and native ownership.
+  Fake-native tests cover source batching, partial results, timeout, retry,
+  cancellation, stale approval and convergence. A read-only native preview
+  recognizes the current desktop exports as complete.
+- [ ] Publish the engine and test the Noctalia task on the fresh laptop through
+  normal Nimbus/Chezmoi commands. No laptop repairs or runtime changes were
+  performed while implementing this task.
+
 - [x] Offer Tailscale operator setup when its native package is selected and
   applied. Preview the current operator, approve the exact native command,
   recheck stale state and verify completion. Keep unrelated preferences private.

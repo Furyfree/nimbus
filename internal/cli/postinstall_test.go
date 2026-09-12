@@ -26,6 +26,7 @@ type postinstallSource struct {
 	*nativetest.FakeSource
 	reads, streams, files []string
 	streamErr             error
+	onStream              func(string)
 }
 
 func (s *postinstallSource) Run(name string, args ...string) ([]byte, error) {
@@ -35,6 +36,9 @@ func (s *postinstallSource) Run(name string, args ...string) ([]byte, error) {
 
 func (s *postinstallSource) Stream(_, _ io.Writer, name string, args ...string) error {
 	s.streams = append(s.streams, nativetest.Key(name, args...))
+	if s.onStream != nil {
+		s.onStream(nativetest.Key(name, args...))
+	}
 	return s.streamErr
 }
 
@@ -363,6 +367,87 @@ func TestPostinstallProtonCachyOSPreservesApprovalAndNativeOwnership(t *testing.
 			afterJSON, _ := json.Marshal(after)
 			if !bytes.Equal(beforeJSON, afterJSON) {
 				t.Fatal("ProtonPlus action changed Nimbus receipts")
+			}
+		})
+	}
+}
+
+func TestPostinstallNoctaliaPreviewCancellationAndFailure(t *testing.T) {
+	for _, mode := range []string{"preview", "cancel", "stale", "failure", "success"} {
+		t.Run(mode, func(t *testing.T) {
+			root, src := postinstallFixture(t)
+			t.Setenv("XDG_STATE_HOME", t.TempDir())
+			if err := os.WriteFile(filepath.Join(root, "profiles/common.toml"), []byte("schema=1\nid='common'\npackages=['noctalia']\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			key := nativetest.Key("dnf5", inspect.PackageQueryArgs...)
+			src.Commands[key] = append(src.Commands[key], []byte("noctalia|0|5.0.1|1|x86_64|fedora|User\n")...)
+			src.Paths["noctalia"] = "/usr/bin/noctalia"
+			src.Commands["noctalia config export full"] = []byte("[plugins]\nenabled=['noctalia/timer']\n[[plugins.source]]\nname='official'\nkind='git'\nenabled=true\n")
+			src.Commands["noctalia msg plugins list"] = []byte("noctalia/timer [official] 1.2.1 enabled\n")
+			r := state.Receipt{Schema: state.ReceiptSchema, Machine: "vm", Resource: "package:dnf:noctalia", Provider: "dnf", Verified: true, Operation: "install", PlanDigest: "fixture"}
+			if err := state.Record(stateRoot, "fixture", &state.Stage{Schema: state.Schema, PlanDigest: "fixture", Receipts: []state.Receipt{r}}); err != nil {
+				t.Fatal(err)
+			}
+			before, err := state.Read(stateRoot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := []string{"noctalia-plugins", "--yes"}
+			if mode == "preview" {
+				args = append(args, "--plan")
+			} else if mode == "cancel" || mode == "stale" {
+				args = []string{"noctalia-plugins"}
+				savedTerminal, savedApprover := postinstallTerminal, approver
+				t.Cleanup(func() { postinstallTerminal, approver = savedTerminal, savedApprover })
+				postinstallTerminal = func(io.Reader) bool { return true }
+				approver = func(io.Reader, io.Writer, string) bool {
+					if mode == "stale" {
+						src.Commands["noctalia config export full"] = []byte("[plugins]\nenabled=[]")
+						return true
+					}
+					return false
+				}
+			} else if mode == "failure" {
+				src.streamErr = errors.New("native export failed")
+			} else {
+				src.onStream = func(key string) {
+					if key == "noctalia msg plugins update official" {
+						path := filepath.Join(os.Getenv("XDG_STATE_HOME"), "noctalia/plugins/materialized/official/timer")
+						src.Files[filepath.Join(path, "plugin.toml")] = []byte("id='noctalia/timer'\n[[widget]]\nentry='bar.luau'\n")
+						src.Files[filepath.Join(path, "bar.luau")] = []byte("return {}")
+					}
+				}
+			}
+			cmd, out := postinstallCommand(root, false, args...)
+			err = cmd.Execute()
+			if (err != nil) != (mode == "cancel" || mode == "stale" || mode == "failure") {
+				t.Fatalf("%v: %s", err, out)
+			}
+			for _, want := range []string{"Native action: noctalia msg plugins update official"} {
+				if !strings.Contains(out.String(), want) {
+					t.Fatalf("missing preview: %s", out)
+				}
+			}
+			if mode == "preview" || mode == "cancel" || mode == "stale" {
+				if len(src.streams) != 0 {
+					t.Fatalf("unapproved mutation: %v", src.streams)
+				}
+			} else if mode == "success" {
+				if !slices.Equal(src.streams, []string{"noctalia msg plugins update official"}) || !strings.Contains(out.String(), "After action: noctalia-plugins: complete") {
+					t.Fatalf("%s %v", out, src.streams)
+				}
+			} else if !strings.Contains(out.String(), "After action: noctalia-plugins: pending") {
+				t.Fatalf("lost failure status: %s", out)
+			}
+			after, err := state.Read(stateRoot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			beforeJSON, _ := json.Marshal(before)
+			afterJSON, _ := json.Marshal(after)
+			if !bytes.Equal(beforeJSON, afterJSON) {
+				t.Fatal("plugin action changed receipts")
 			}
 		})
 	}

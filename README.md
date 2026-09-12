@@ -112,6 +112,21 @@ offers the Proton-CachyOS Latest download. Start Steam once first. ProtonPlus
 owns installation and rolling updates; init and sync do not download runners
 automatically. This action requires engine 0.4.1 or newer.
 
+With Noctalia selected and installed, `nimbus postinstall noctalia-plugins`
+checks the effective enabled selection against the running shell's local
+catalog and exported runtime files. Run it in the desktop session after
+Chezmoi apply. Affected sources are updated through native
+`noctalia msg plugins update SOURCE` commands. Noctalia exports their enabled
+plugins and refreshes the live registry and bar; already-installed plugins from
+those sources may also update. Uninitialized source catalogs remain unknown:
+let Noctalia initialize its sources at desktop startup, then retry.
+Nimbus waits up to two minutes for readable manifests and entry scripts;
+queued background work alone is not success. Retry after a failed download.
+Plugin selections, sources, bar aliases and overrides remain owned by
+Chezmoi/Noctalia; Nimbus stores no plugin list or completion receipt. A complete
+task proves runtime files are present, not account readiness or widget behavior.
+This task is implemented in the checkout and awaits engine publication.
+
 With Tailscale selected and installed, `nimbus postinstall tailscale-operator`
 offers permission for the invoking user to manage it through the CLI or
 Noctalia. It previews `sudo -- /usr/bin/tailscale set --operator=USER`, then

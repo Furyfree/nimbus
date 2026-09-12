@@ -88,7 +88,7 @@ func newPostinstall(opts *options) *cobra.Command {
 			if task.Action == nil {
 				return nil
 			}
-			argv, err := postinstallArgv(task)
+			commands, err := postinstallCommands(task)
 			if err != nil {
 				return err
 			}
@@ -122,7 +122,13 @@ func newPostinstall(opts *options) *cobra.Command {
 			if err := cmd.Context().Err(); err != nil {
 				return err
 			}
-			runErr := src.Stream(cmd.OutOrStdout(), cmd.ErrOrStderr(), argv[0], argv[1:]...)
+			var runErr error
+			if task.Action.Kind == postinstall.SyncNoctaliaPlugins {
+				runErr = postinstall.RunNoctaliaPlugins(cmd.Context(), src, cmd.OutOrStdout(), cmd.ErrOrStderr(), task)
+			} else {
+				argv := commands[0]
+				runErr = src.Stream(cmd.OutOrStdout(), cmd.ErrOrStderr(), argv[0], argv[1:]...)
+			}
 			if runErr != nil {
 				runErr = fmt.Errorf("postinstall %s action failed: %w", task.ID, runErr)
 			}
@@ -140,6 +146,9 @@ func newPostinstall(opts *options) *cobra.Command {
 			}
 			if runErr == nil && current.Status != postinstall.Complete && task.Action.Kind == postinstall.SetTailscaleOperator {
 				checkErr = errors.New("Tailscale command finished, but operator permission could not be verified; inspect tailscaled before retrying")
+			}
+			if runErr == nil && current.Status != postinstall.Complete && task.Action.Kind == postinstall.SyncNoctaliaPlugins {
+				checkErr = errors.New("Noctalia plugin installation could not be verified; retry the task")
 			}
 			return errors.Join(runErr, checkErr, reportErr)
 		},
@@ -182,6 +191,20 @@ func selectedTask(view postinstallView, id string) (postinstall.Task, error) {
 	return postinstall.Task{}, usageError{fmt.Errorf("task %q is not selected or applicable to this machine", id)}
 }
 
+func postinstallCommands(task postinstall.Task) ([][]string, error) {
+	if task.Action != nil && task.Action.Kind == postinstall.SyncNoctaliaPlugins {
+		return postinstall.NoctaliaCommands(task)
+	}
+	if task.Action != nil && len(task.Action.Commands) != 0 {
+		return nil, errors.New("unexpected native command list")
+	}
+	argv, err := postinstallArgv(task)
+	if err != nil {
+		return nil, err
+	}
+	return [][]string{argv}, nil
+}
+
 func postinstallArgv(task postinstall.Task) ([]string, error) {
 	if task.Action != nil {
 		if task.ID == "tailscale-operator" && task.Status == postinstall.Pending && task.Action.Kind == postinstall.SetTailscaleOperator {
@@ -216,11 +239,13 @@ func renderPostinstall(out io.Writer, view postinstallView) error {
 			fmt.Fprintln(&b, instruction)
 		}
 		if task.Action != nil {
-			argv, err := postinstallArgv(task)
+			commands, err := postinstallCommands(task)
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(&b, "Native action: %s\n", strings.Join(argv, " "))
+			for _, argv := range commands {
+				fmt.Fprintf(&b, "Native action: %s\n", strings.Join(argv, " "))
+			}
 		}
 		fmt.Fprintf(&b, "Verification: %s\nRecovery: %s\n", task.Verification, task.Recovery)
 	}

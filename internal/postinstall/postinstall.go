@@ -1,5 +1,5 @@
-// Package tasks describes manual work using current, read-only observations.
-// It never executes the actions it returns or stores a completion receipt.
+// Package postinstall inspects manual setup with read-only observations.
+// Native action runners require caller approval and never store completion receipts.
 package postinstall
 
 import (
@@ -29,13 +29,16 @@ const (
 	EnrollFingerprint    ActionKind = "enroll-fingerprint"
 	InstallApplication   ActionKind = "install-application"
 	SetTailscaleOperator ActionKind = "set-tailscale-operator"
+	SyncNoctaliaPlugins  ActionKind = "sync-noctalia-plugins"
 )
 
-// Action is a fixed native command offered for explicit user selection.
+// Action describes native commands offered for explicit user selection.
+// Argv is used for a single command; Commands is the Noctalia source workflow.
 type Action struct {
-	Kind ActionKind `json:"kind"`
-	Argv []string   `json:"argv"`
-	User string     `json:"user,omitempty"`
+	Kind     ActionKind `json:"kind"`
+	Argv     []string   `json:"argv,omitempty"`
+	Commands [][]string `json:"commands,omitempty"`
+	User     string     `json:"user,omitempty"`
 }
 
 type Task struct {
@@ -77,6 +80,8 @@ func Inspect(src native.Source, in Inputs) []Task {
 			result = append(result, tailscaleOperator(src, in, pkg))
 		case pkg.Name == "github-copilot-installer" || pkg.Name == "wowup-cf-installer":
 			result = append(result, installerHelper(src, in, pkg))
+		case pkg.Name == "noctalia" && pkg.Prefix != "flatpak":
+			result = append(result, noctaliaPlugins(src, in, pkg))
 		case pkg.Name == "protonplus":
 			for _, steam := range in.Resolved.Packages {
 				if steam.Name == "steam" && steam.Prefix != "flatpak" {
