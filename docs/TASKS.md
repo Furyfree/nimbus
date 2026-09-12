@@ -278,9 +278,19 @@ Chezmoi. SSH server access stays unmanaged, and the Windows VM stays deferred.
   cancellation, stale approval and convergence. A read-only native preview
   recognizes the current desktop exports as complete.
 - [x] Publish the plugin repair task in engine 0.4.4 and its signed COPR RPM.
-- [ ] Test the Noctalia task on the fresh laptop through normal Nimbus/Chezmoi
-  commands. No laptop repairs or runtime changes were performed during
-  implementation or release verification.
+- [x] Test the Noctalia task on the fresh laptop through normal Nimbus/Chezmoi
+  commands. The user's 0.4.4 run installed the plugins, but verification exited
+  early on an unrecognized listing during the background update. A later
+  read-only plan confirmed all enabled runtime exports were complete.
+- [x] Retry post-action Noctalia verification within the existing two-minute
+  window, preserving the latest diagnostic at timeout. Regression tests cover
+  transient listing and IPC errors, missing exports after catalog recovery,
+  persistent errors and cancellation without repeating source updates.
+  The new cases fail before the fix and pass afterwards. `just check` and
+  `just validate` pass locally.
+- [ ] Release the verification retry fix and test a fresh plugin repair through
+  the installed engine. Local tests use fake native responses; the exact
+  transient listing from the laptop failure was not captured.
 
 - [x] Offer Tailscale operator setup when its native package is selected and
   applied. Preview the current operator, approve the exact native command,

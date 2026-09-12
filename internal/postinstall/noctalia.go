@@ -225,22 +225,28 @@ func RunNoctaliaPlugins(ctx context.Context, src native.Source, out, errOut io.W
 	defer cancel()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
+	lastProblem := "No verification result is available."
 	for {
 		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("Noctalia plugin verification incomplete; retry the task: %w", err)
+			return fmt.Errorf("Noctalia plugin verification incomplete: %s Retry the task: %w", lastProblem, err)
 		}
 		missing, _, err := missingNoctaliaPlugins(src)
 		if err != nil {
-			return err
-		}
-		if len(missing) == 0 {
-			break
+			// Source updates run in the background. An unreadable intermediate
+			// result is not completion or proof that the update failed. Retry
+			// only verification, retaining its sanitized error for the deadline.
+			lastProblem = err.Error()
+		} else if len(missing) == 0 {
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("Noctalia plugin verification interrupted: %w", err)
+			}
+			return nil
+		} else {
+			lastProblem = fmt.Sprintf("Noctalia runtime files still missing for %s.", strings.Join(missing, ", "))
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("Noctalia runtime files still missing for %s; retry the task: %w", strings.Join(missing, ", "), ctx.Err())
 		case <-ticker.C:
 		}
 	}
-	return nil
 }

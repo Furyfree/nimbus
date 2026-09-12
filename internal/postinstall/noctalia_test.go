@@ -1,6 +1,7 @@
 package postinstall
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/Furyfree/nimbus/internal/native/nativetest"
@@ -114,6 +116,14 @@ type exportingNoctalia struct {
 	streams []string
 	export  bool
 	fail    string
+	listing func() ([]byte, error)
+}
+
+func (s *exportingNoctalia) Run(name string, args ...string) ([]byte, error) {
+	if s.listing != nil && nativetest.Key(name, args...) == "noctalia msg plugins list" {
+		return s.listing()
+	}
+	return s.FakeSource.Run(name, args...)
 }
 
 func (s *exportingNoctalia) Stream(_, _ io.Writer, name string, args ...string) error {
@@ -163,6 +173,72 @@ func TestNoctaliaExportVerificationAndRetry(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+		})
+	}
+}
+
+func TestNoctaliaWaitsForBackgroundUpdate(t *testing.T) {
+	for _, mode := range []string{"malformed listing", "empty catalog", "IPC unavailable", "persistent error", "still missing", "cancel while waiting"} {
+		t.Run(mode, func(t *testing.T) {
+			in, src, root := noctaliaFixture(t)
+			task := findTask(t, Inspect(src, in), "noctalia-plugins")
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				live := &exportingNoctalia{FakeSource: src, root: root}
+				probes := 0
+				live.listing = func() ([]byte, error) {
+					probes++
+					if mode == "cancel while waiting" && probes == 2 {
+						cancel()
+					}
+					if probes == 1 || mode == "persistent error" || mode == "cancel while waiting" {
+						switch mode {
+						case "empty catalog":
+							return []byte("(no plugins)\n"), nil
+						case "IPC unavailable":
+							return nil, errors.New("do-not-render")
+						default:
+							return []byte("do-not-render"), nil
+						}
+					}
+					// A valid catalog alone is insufficient: exports arrive later.
+					if probes >= 3 && mode != "still missing" {
+						installTimer(src, root)
+					}
+					return src.Commands["noctalia msg plugins list"], nil
+				}
+				var output bytes.Buffer
+				start := time.Now()
+				err := RunNoctaliaPlugins(ctx, live, &output, &output, task)
+				switch mode {
+				case "persistent error", "still missing":
+					if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) != 2*time.Minute {
+						t.Fatalf("did not wait until the verification deadline: %v (%v)", err, time.Since(start))
+					}
+					want := "unrecognized plugin listing"
+					if mode == "still missing" {
+						want = "runtime files still missing for noctalia/timer"
+					}
+					if !strings.Contains(err.Error(), want) {
+						t.Fatalf("lost latest verification problem: %v", err)
+					}
+				case "cancel while waiting":
+					if !errors.Is(err, context.Canceled) || probes != 2 {
+						t.Fatalf("did not stop on cancellation: %v (%d probes)", err, probes)
+					}
+				default:
+					if err != nil || probes != 3 {
+						t.Fatalf("did not verify the completed export: %v (%d probes)", err, probes)
+					}
+				}
+				if strings.Contains(output.String(), "do-not-render") || (err != nil && strings.Contains(err.Error(), "do-not-render")) {
+					t.Fatal("leaked native output")
+				}
+				if !slices.Equal(live.streams, []string{"noctalia msg plugins update official"}) {
+					t.Fatalf("retried a mutation: %v", live.streams)
+				}
+			})
 		})
 	}
 }

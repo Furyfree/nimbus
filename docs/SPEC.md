@@ -431,11 +431,14 @@ never fetches plugins and never retains or renders unrelated exported settings.
 After approval, the task uses native source-update commands for sources with
 enabled plugins missing runtime files. These may also update already-installed
 plugins from those sources. Noctalia owns downloads and live registry/bar
-refresh. Wait up to two minutes for the missing runtime exports;
-report incomplete verification as failure, preserving native partial results
-for retry. No second plugin catalog, managed runtime files or completion
-receipts are created. Run this action inside the desktop session after Chezmoi
-apply; init and sync do not start a desktop or silently download plugins.
+refresh. Wait up to two minutes for the missing runtime exports, retrying
+unreadable or incomplete verification results while the update settles.
+Retries only inspect state; they never repeat source-update commands. At the
+deadline, report the latest verification problem as failure, preserving native
+partial results for retry. No second plugin catalog, managed runtime files or
+completion receipts are created. Run this action inside the desktop session
+after Chezmoi apply; init and sync do not start a desktop or silently download
+plugins.
 Installation verification does not claim account readiness or widget behavior.
 
 FDE auto-unlock is a planned optional post-install action, before the dashboard.

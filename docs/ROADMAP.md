@@ -124,9 +124,11 @@ still follows it. Until then, auto-unlock remains planned, not working.
 
 ### Remaining integration
 
-The Noctalia plugin post-install repair requires engine 0.4.4. Validate
-missing-plugin repair from a fresh desktop session through the supported
-command. Native Noctalia owns downloads; Chezmoi owns selection.
+The Noctalia plugin post-install repair requires engine 0.4.4. The laptop trial
+confirmed installation but exposed premature verification failure during the
+background update. Release the retry fix and validate missing-plugin repair
+from a fresh desktop session through the supported command. Native Noctalia
+owns downloads; Chezmoi owns selection.
 See README for usage and TASKS for validation evidence.
 
 NVIDIA selections include a system-wide mask for the X11 settings-loader
