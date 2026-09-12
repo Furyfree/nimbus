@@ -125,7 +125,7 @@ queued background work alone is not success. Retry after a failed download.
 Plugin selections, sources, bar aliases and overrides remain owned by
 Chezmoi/Noctalia; Nimbus stores no plugin list or completion receipt. A complete
 task proves runtime files are present, not account readiness or widget behavior.
-This task is implemented in the checkout and awaits engine publication.
+This task requires engine 0.4.4 or newer.
 
 With Tailscale selected and installed, `nimbus postinstall tailscale-operator`
 offers permission for the invoking user to manage it through the CLI or

@@ -161,6 +161,37 @@ machine, including the laptop, in a container with networking disabled.
 Installation, login and hardware behavior remain a separate trial; this
 verification did not install the RPM or run workstation provisioning.
 
+### Version 0.4.4 release verification, 2026-09-13
+
+[Nimbus v0.4.4](https://github.com/Furyfree/nimbus/releases/tag/v0.4.4) selects
+commit `c8c0f6137e841eaca718150ff7be5af196e77074`. Its source archive SHA-256 is
+`06c3fed54492fa9a41a1985e10ab96a4e1d547d182b86b3180ed8c9758f5176c`.
+All 271 tagged files and executable bits match. Module inputs and
+23 vendored notices are unchanged from 0.4.3. Local checks, definition
+validation and GitHub's offline vendored build/tests passed.
+
+[COPR build 10980508](https://copr.fedorainfracloud.org/coprs/furyfree/nimbus/build/10980508/)
+published `nimbus-0.4.4-0.1.fc44.x86_64`. The full offline packaging gate passed
+in a temporary Fedora 44 source copy. An initial concurrent-container label
+conflict was resolved by running the check sequentially. The full and selected
+package GitHub checks and publication workflow passed. Both local and COPR
+source RPMs preserve the exact release archive and selected spec.
+
+The downloaded RPM's SHA-256 is
+`b396c202e3fec01348b1f3898954bbb832e72bbc32a6054e13b05654333e6022`.
+Native RPM verification with an isolated keyring containing only Nimbus's
+pinned key passed both signatures and digests. The payload contains only the
+engine and license notices, without scriptlets or triggers. In an unprivileged,
+network-disabled Fedora container, the extracted engine reports 0.4.4,
+validates all three tagged machines and recognizes the laptop's
+`noctalia-plugins --plan` task. It correctly reports the uninstalled Noctalia
+package as blocked, without attempting repair.
+
+The existing definition minimum remains 0.4.3; this optional new task requires
+0.4.4. Package installation and actual fresh-desktop plugin repair remain a
+separate trial. Release verification did not upgrade the workstation or alter
+its Noctalia runtime state.
+
 ### Desktop package and setup audit, 2026-09-12
 
 - Zathura's PDF backend was missing. The desktop profile now selects Fedora's
@@ -246,9 +277,10 @@ Chezmoi. SSH server access stays unmanaged, and the Windows VM stays deferred.
   Fake-native tests cover source batching, partial results, timeout, retry,
   cancellation, stale approval and convergence. A read-only native preview
   recognizes the current desktop exports as complete.
-- [ ] Publish the engine and test the Noctalia task on the fresh laptop through
-  normal Nimbus/Chezmoi commands. No laptop repairs or runtime changes were
-  performed while implementing this task.
+- [x] Publish the plugin repair task in engine 0.4.4 and its signed COPR RPM.
+- [ ] Test the Noctalia task on the fresh laptop through normal Nimbus/Chezmoi
+  commands. No laptop repairs or runtime changes were performed during
+  implementation or release verification.
 
 - [x] Offer Tailscale operator setup when its native package is selected and
   applied. Preview the current operator, approve the exact native command,

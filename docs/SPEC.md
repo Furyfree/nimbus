@@ -685,9 +685,10 @@ Do not replace them merely to reduce the number of files or languages.
 The repository-update workflow and installer effect disclosures are published
 in engine 0.4.3 and its Fedora 44 COPR RPM. Current definitions require that
 engine version; upgrade older engines before syncing these definitions.
-The hidden `sync --no-upgrade` alias remains compatible; ordinary sync omits
-general software updates. Installed tests must cover repository updates,
-Chezmoi apply and the fresh-engine upgrade handoff.
+The Noctalia plugin repair task requires engine 0.4.4; the fresh-desktop repair
+trial remains open. The hidden `sync --no-upgrade` alias remains compatible;
+ordinary sync omits general software updates. Installed tests must cover
+repository updates, Chezmoi apply and the fresh-engine upgrade handoff.
 
 WoWUp's helper still needs standalone install/update commands and a published
 package source. Copilot helper publication and native app behavior also need
