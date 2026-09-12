@@ -47,7 +47,7 @@ installations. Fedora is the default; native Windows remains selectable.
 A test installation should not replace the main Fedora boot files.
 
 Linux encryption, signed UKIs and TPM auto-unlock follow the existing
-[FDE plan](SPEC.md#fde-auto-unlock-planned). This storage plan does not change
+[FDE plan](ROADMAP.md#fde-auto-unlock-second). This storage plan does not change
 the enrollment policy or authorize repartitioning or installation.
 
 The NAS is the backup destination. Set up ongoing backups for important files
