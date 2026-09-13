@@ -33,6 +33,41 @@ publication is tracked in TASKS.
 The acceptance marks below record automated and disposable RPM validation;
 full graphical installation and real-account checks remain explicitly separate.
 
+### Approved completion and output follow-up
+
+The follow-up to the 0.5.0 operator trial makes verify-only completion useful for
+existing setup. This supersedes the manual-acknowledgment-only behavior described
+in the original proposal below. Supported completion commands confirm manual
+prerequisites, verify native configuration and record success without applying
+files. The normal 1Password workflow also avoids applying matching files. MOK
+permission failures offer explicit read-only privileged verification, while
+routine inspection remains unprivileged and preserves uncertainty.
+The subsequent operator trial established that CLI sign-in was needed despite
+correct GUI settings, and that mokutil reports enrollment with exit 1. The
+follow-up adds explicit native sign-in recovery and fixes enrollment parsing;
+terminal handling is not a demonstrated cause of the original CLI failure.
+A successful privileged MOK check now appears as "Previously verified" when
+ordinary status cannot reread the certificate. The final report treats this as
+a notice; observed native failures continue to take precedence.
+
+The approved color pass shares terminal styling across text commands and help,
+using the terminal palette and explicit status labels. Redirected text and JSON
+stay plain; native progress and input retain their terminal connection. Nimbus
+styling stays out of installer logs. The checklist shortens successful checks
+and separates the sudo recheck command; help retains verification limits and
+JSON retains native details. The presentation pass strengthens palette colors,
+wraps terminal prose, cleans up Doctor, orders upgrade previews by execution
+and aligns historical MOK preview wording with status. Automated checks use
+fixtures and temporary
+terminals; visual review remains with the owner.
+
+Maintenance output groups unchanged ownership refreshes, shows only actual
+replan changes and separates verification problems from setup work. Empty native
+system upgrades skip transactions and snapshots after fresh checks. Usage is in
+[README](../README.md#guided-setup); the implemented contract is in
+[SPEC](SPEC.md#everyday-commands), with evidence in
+[TASKS](TASKS.md#completion-and-output-follow-up-2026-09-13).
+
 ### Required work at a glance
 
 Each item below is a required part of the proposal, with its own detailed

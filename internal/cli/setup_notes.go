@@ -87,7 +87,7 @@ func displayNotes(out io.Writer, notes []setupNote) error {
 	var b bytes.Buffer
 	fmt.Fprintln(&b, "\nSetup notes:")
 	for _, n := range notes {
-		fmt.Fprintf(&b, "  %s\n", n.Text)
+		fmt.Fprintf(&b, "  - %s\n", n.Text)
 	}
 	fmt.Fprintln(&b, "View all guidance: nimbus setup-notes")
 	_, err := b.WriteTo(out)

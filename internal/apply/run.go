@@ -20,6 +20,7 @@ import (
 // Options are everything the executor needs beyond the plan. Every side
 // effect goes through one of these so tests replace them.
 type Options struct {
+	Compact        bool
 	Context        context.Context
 	Constraints    []definitions.PackageConstraint
 	UpgradePreview *plan.Transaction
@@ -99,6 +100,7 @@ func Run(p *plan.Plan, opts Options) *Result {
 		return r
 	}
 	var deferredFileRemovals []string
+	adoptedProgress := false
 	for _, op := range p.Operations {
 		if err := opts.canceled(); err != nil {
 			r.Failed, r.Error = op.ID, err.Error()
@@ -111,7 +113,25 @@ func Run(p *plan.Plan, opts Options) *Result {
 		if op.Action == plan.ActionKeep {
 			continue
 		}
-		if _, err := fmt.Fprintf(ex.opts.Out, "-> %s\n", op.Summary); err != nil {
+		summary := op.Summary
+		if opts.Compact && op.Kind == plan.KindFile && op.Action == plan.ActionAdopt {
+			summary = ""
+			if !adoptedProgress {
+				count := 0
+				for _, candidate := range p.Operations {
+					if candidate.Kind == plan.KindFile && candidate.Action == plan.ActionAdopt && candidate.After == "" {
+						count++
+					}
+				}
+				summary = fmt.Sprintf("refresh ownership records for %d matching files", count)
+				adoptedProgress = true
+			}
+		}
+		var progressErr error
+		if summary != "" || !(opts.Compact && op.Kind == plan.KindFile && op.Action == plan.ActionAdopt) {
+			_, progressErr = fmt.Fprintf(ex.opts.Out, "-> %s\n", summary)
+		}
+		if err := progressErr; err != nil {
 			r.Failed, r.Error = op.ID, "write operation progress: "+err.Error()
 			r.Failures = append(r.Failures, Failure{ID: op.ID, Error: r.Error})
 			return r

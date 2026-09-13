@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Furyfree/nimbus/internal/output"
 )
 
 func TestLoggedOutputArrivesBeforeExit(t *testing.T) {
@@ -63,7 +65,9 @@ func TestLoggedTTYChild(t *testing.T) {
 	}
 	defer log.Close()
 	body := `test -t 0 && test -t 1 || exit 91; stty -echo; printf 'READY\n'; read answer; test "$answer" = 'synthetic-private-answer' || exit 92; stty size; printf 'WAITING\n'; sleep 20`
-	err = (ExecSource{}).StreamLogged(os.Stdout, os.Stderr, log, "sh", "-c", body)
+	stdout := output.ColorWriter(os.Stdout, func() bool { return true })
+	stderr := output.ColorWriter(os.Stderr, func() bool { return true })
+	err = (ExecSource{}).StreamLogged(stdout, stderr, log, "sh", "-c", body)
 	if err == nil {
 		t.Fatal("interruption did not terminate child")
 	}

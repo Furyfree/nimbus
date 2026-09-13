@@ -135,7 +135,7 @@ func TestDoctorOnRepositoryCheckout(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("exit %d\n%s%s", code, out, errOut)
 	}
-	if !strings.Contains(out, "pass    platform: fedora 44 on x86_64") || !strings.Contains(out, "0 failed, 0 unknown, 10 checks") {
+	if !strings.Contains(out, "pass    platform: fedora 44 on x86_64") || !strings.Contains(out, "10 checks passed.") {
 		t.Fatalf("output:\n%s", out)
 	}
 	code, out, _ = run(t, "doctor", "--checkout", root, "--json")

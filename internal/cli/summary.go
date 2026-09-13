@@ -40,19 +40,21 @@ func renderRunSummary(out io.Writer, command string, steps []runStep) error {
 }
 
 type syncResult struct {
-	Tasks       []postinstall.Task `json:"pending_tasks,omitempty"`
-	Notices     []string           `json:"notices,omitempty"`
-	Notes       []setupNote        `json:"setup_notes,omitempty"`
-	Digest      string             `json:"digest"`
-	Executed    []string           `json:"executed"`
-	Differences []string           `json:"differences"`
-	Upgraded    bool               `json:"upgraded"`
-	Reboot      bool               `json:"reboot_required,omitzero"`
-	Logout      bool               `json:"logout_required,omitzero"`
-	Failed      string             `json:"failed,omitempty"`
-	Error       string             `json:"error,omitempty"`
-	Steps       []runStep          `json:"steps"`
-	Failures    []apply.Failure    `json:"failures,omitempty"`
+	OperationLabels map[string]string  `json:"operation_labels,omitempty"`
+	MatchingFiles   []string           `json:"matching_files,omitempty"`
+	Tasks           []postinstall.Task `json:"pending_tasks,omitempty"`
+	Notices         []string           `json:"notices,omitempty"`
+	Notes           []setupNote        `json:"setup_notes,omitempty"`
+	Digest          string             `json:"digest"`
+	Executed        []string           `json:"executed"`
+	Differences     []string           `json:"differences"`
+	Upgraded        bool               `json:"upgraded"`
+	Reboot          bool               `json:"reboot_required,omitzero"`
+	Logout          bool               `json:"logout_required,omitzero"`
+	Failed          string             `json:"failed,omitempty"`
+	Error           string             `json:"error,omitempty"`
+	Steps           []runStep          `json:"steps"`
+	Failures        []apply.Failure    `json:"failures,omitempty"`
 }
 
 func (result *syncResult) finish(phase string, retErr error, currentPlan *plan.Plan) {
@@ -97,7 +99,7 @@ func (result *syncResult) render(out io.Writer, systemUpgrade bool) error {
 
 func (result *syncResult) renderNamed(out io.Writer, name string) error {
 	var summary bytes.Buffer
-	_ = renderRunSummary(&summary, name, result.Steps)
+	_ = renderRunSummary(&summary, name, result.conciseSteps())
 	if len(result.Differences) > 0 {
 		fmt.Fprintln(&summary, "differences from the plan:")
 		for _, d := range result.Differences {

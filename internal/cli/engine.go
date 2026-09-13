@@ -13,6 +13,7 @@ import (
 	"github.com/Furyfree/nimbus/internal/apply"
 	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/native"
+	"github.com/Furyfree/nimbus/internal/output"
 	"github.com/Furyfree/nimbus/internal/selector"
 	"github.com/spf13/cobra"
 )
@@ -166,7 +167,7 @@ func enginePreflight(cmd *cobra.Command, src native.Source, flags machineFlags, 
 	lock = nil
 	child := exec.CommandContext(cmd.Context(), executable, args...)
 	child.Env = append(os.Environ(), engineRestart+"="+candidate)
-	child.Stdin, child.Stdout, child.Stderr = cmd.InOrStdin(), out, cmd.ErrOrStderr()
+	child.Stdin, child.Stdout, child.Stderr = cmd.InOrStdin(), output.Native(out), output.Native(cmd.ErrOrStderr())
 	return candidate, true, runChild(child)
 }
 

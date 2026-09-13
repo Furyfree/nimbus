@@ -137,7 +137,7 @@ func TestAccountPicturePreviewApprovalVerificationAndRetry(t *testing.T) {
 				}
 				src.Commands[accountPropertyPrefix+"IconFile"] = []byte(`{"type":"s","data":""}`)
 				cmd, out = postinstallCommand(root, false, "account-picture", "--plan")
-				if err := cmd.Execute(); err != nil || !strings.Contains(out.String(), "account-picture [pending]") || len(src.streams) != count {
+				if err := cmd.Execute(); err != nil || !strings.Contains(out.String(), "account-picture [Pending]") || len(src.streams) != count {
 					t.Fatalf("revocation status: %v %s", err, out)
 				}
 			}

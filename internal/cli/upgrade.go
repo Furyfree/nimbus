@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 
+	"github.com/Furyfree/nimbus/internal/output"
 	"github.com/spf13/cobra"
 
 	"github.com/Furyfree/nimbus/internal/plan"
@@ -71,12 +73,12 @@ func runTopgrade(cmd *cobra.Command, args []string, preview bool, flags machineF
 		return errors.New("recursive upgrade refused: configure Topgrade's Nimbus system step as nimbus upgrade --system")
 	}
 	if preview {
-		_, err := fmt.Fprintf(cmd.OutOrStdout(), "Run Topgrade with its user configuration: %q\nTopgrade selects its native update steps and prompts. Their transactions are determined when they run.\nIts Nimbus system callback takes root snapshots and cleans up when Snapper is selected.\n", append([]string{"topgrade"}, args...))
+		_, err := fmt.Fprintf(cmd.OutOrStdout(), "Run Topgrade with its user configuration:\n  $ %s\nNative steps determine their updates when executed.\n", strings.Join(append([]string{"topgrade"}, args...), " "))
 		return err
 	}
 	child := exec.CommandContext(cmd.Context(), "topgrade", args...)
 	child.Env = append(os.Environ(), upgradeActive+"=1", "NIMBUS_UPGRADE_CHECKOUT="+flags.checkout, "NIMBUS_UPGRADE_MACHINE="+flags.machine)
-	child.Stdin, child.Stdout, child.Stderr = cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr()
+	child.Stdin, child.Stdout, child.Stderr = cmd.InOrStdin(), output.Native(cmd.OutOrStdout()), output.Native(cmd.ErrOrStderr())
 	return runChild(child)
 }
 

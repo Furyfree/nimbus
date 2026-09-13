@@ -60,6 +60,9 @@ func passwordTargets(ssh bool) []string {
 	}
 	return paths
 }
+
+var errPasswordNotSignedIn = errors.New("1Password CLI account is not signed in; run op signin, then retry verification")
+
 func passwordPrerequisites(src native.Source, out io.Writer, ssh bool) error {
 	if _, err := src.LookPath("op"); err != nil {
 		return errors.New("1Password CLI is missing; install the selected prerequisites with nimbus sync")
@@ -70,7 +73,10 @@ func passwordPrerequisites(src native.Source, out io.Writer, ssh bool) error {
 	// This check is permitted only inside the explicit guided flow, never status,
 	// plan, automatic reporting or an unattended --yes confirmation.
 	if _, err := src.Run("op", "whoami", "--format=json"); err != nil {
-		return errors.New("1Password CLI access failed; unlock the desktop app and enable CLI integration, then retry")
+		if strings.Contains(err.Error(), "account is not signed in") {
+			return errPasswordNotSignedIn
+		}
+		return errors.New("1Password CLI access could not be verified; run op whoami directly for the native diagnostic, then retry")
 	}
 	if ssh {
 		if _, err := src.LookPath("/opt/1Password/op-ssh-sign"); err != nil {
@@ -84,6 +90,36 @@ func passwordPrerequisites(src native.Source, out io.Writer, ssh bool) error {
 		}
 	}
 	return nil
+}
+
+// Only an explicitly selected task offers sign-in. Shared init checks and
+// routine inspection must not start this recovery flow implicitly.
+func passwordTaskPrerequisites(cmd *cobra.Command, src native.Source, ssh, yes bool) error {
+	err := passwordPrerequisites(src, cmd.OutOrStdout(), ssh)
+	if !errors.Is(err, errPasswordNotSignedIn) {
+		return err
+	}
+	if _, err := fmt.Fprintln(cmd.OutOrStdout(), "The CLI account is not signed in. Run op signin to authorize it through 1Password, then retry verification.\nNative action: op signin (sign-in output is discarded; native prompts are not logged)"); err != nil {
+		return err
+	}
+	if !yes {
+		if !postinstallTerminal(cmd.InOrStdin()) {
+			return errors.New("CLI sign-in requires a terminal or explicit --yes; run op signin and retry this task")
+		}
+		if !approver(cmd.InOrStdin(), cmd.OutOrStdout(), "") {
+			return errors.New("CLI sign-in declined; GUI confirmation is saved and verification remains incomplete")
+		}
+	}
+	if err := cmd.Context().Err(); err != nil {
+		return err
+	}
+	// Stream preserves native input and account-selection prompts. Never expose
+	// stdout: manual CLI authentication can return session material there.
+	if err := src.Stream(io.Discard, cmd.ErrOrStderr(), "op", "signin"); err != nil {
+		return errors.New("1Password CLI sign-in failed or was canceled; completion was not recorded; retry this task after signing in")
+	}
+	// Sign-in exit status alone does not establish account or agent readiness.
+	return passwordPrerequisites(src, cmd.OutOrStdout(), ssh)
 }
 func passwordFingerprint(src native.Source, ssh bool) (string, error) {
 	h := sha256.New()
@@ -99,7 +135,7 @@ func passwordFingerprint(src native.Source, ssh bool) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func runOnePassword(cmd *cobra.Command, src native.Source, before *postinstallSnapshot, t postinstall.Task, yes bool) error {
+func runOnePassword(cmd *cobra.Command, src native.Source, before *postinstallSnapshot, t postinstall.Task, yes, verifyOnly bool) error {
 	if t.Status == postinstall.Blocked {
 		return errors.New(t.Detail)
 	}
@@ -110,7 +146,7 @@ func runOnePassword(cmd *cobra.Command, src native.Source, before *postinstallSn
 	if !selection.ManagedByNimbus || selection.Machine != before.view.Machine {
 		return errors.New("Chezmoi belongs to another selection; run nimbus init")
 	}
-	if t.Status == postinstall.Complete {
+	if t.Status == postinstall.Complete && !verifyOnly {
 		return renderPostinstall(cmd.OutOrStdout(), postinstallView{Machine: before.view.Machine, Tasks: []postinstall.Task{t}})
 	}
 	message := "Open 1Password, sign in and unlock it. Enable Integrate with 1Password CLI in Settings > Developer.\nSkip manual SSH/Git file edits; Nimbus will apply the selected integration through Chezmoi."
@@ -119,6 +155,11 @@ func runOnePassword(cmd *cobra.Command, src native.Source, before *postinstallSn
 	} else {
 		message += "\nSSH integration is not selected; this task will not configure it. Opt in through Chezmoi's Enable 1Password SSH integration setting when wanted."
 	}
+	if verifyOnly {
+		message = strings.ReplaceAll(message, "Nimbus will apply the selected integration through Chezmoi.", "this command only verifies existing integration.")
+		message += "\nVerify existing setup only; no configuration will be applied."
+	}
+	message += "\nVerification may request 1Password authorization. Account and key output stays private."
 	if !passwordConfirmed(before.view.Machine, selection.OnePasswordSSH) {
 		if err := confirmManual(cmd, message+"\nReady to check prerequisites and continue?"); err != nil {
 			return err
@@ -127,9 +168,16 @@ func runOnePassword(cmd *cobra.Command, src native.Source, before *postinstallSn
 			return err
 		}
 	} else {
-		if _, err := fmt.Fprintln(cmd.OutOrStdout(), message+"\nManual prerequisites were confirmed on this machine; checking them again."); err != nil {
+		message = "GUI prerequisites were confirmed on this machine. Verification may request 1Password authorization; account and key output stays private."
+		if verifyOnly {
+			message += "\nVerify existing setup only; no configuration will be applied."
+		}
+		if _, err := fmt.Fprintln(cmd.OutOrStdout(), message); err != nil {
 			return err
 		}
+	}
+	if _, err := fmt.Fprintln(cmd.OutOrStdout(), "GUI prerequisites confirmed. Verifying selected integration..."); err != nil {
+		return err
 	}
 	freshBefore, err := inspectPostinstall(src, machineFlags{checkout: before.selected.Root, machine: before.view.Machine})
 	if err != nil {
@@ -139,11 +187,31 @@ func runOnePassword(cmd *cobra.Command, src native.Source, before *postinstallSn
 	if err != nil || currentTask.Status == postinstall.Blocked || freshBefore.nativeDigest != before.nativeDigest {
 		return errors.New("postinstall ownership or definitions changed after approval; retry the task")
 	}
-	if err := passwordPrerequisites(src, cmd.OutOrStdout(), selection.OnePasswordSSH); err != nil {
+	if err := passwordTaskPrerequisites(cmd, src, selection.OnePasswordSSH, yes); err != nil {
 		return err
 	}
 	targets := passwordTargets(selection.OnePasswordSSH)
-	if len(targets) > 0 {
+	verifiedFingerprint := ""
+	if !verifyOnly && len(targets) > 0 {
+		existing, readErr := passwordFingerprint(src, selection.OnePasswordSSH)
+		if readErr == nil {
+			if _, verifyErr := src.Run("chezmoi", append([]string{"verify", "--exclude=scripts", "--"}, targets...)...); verifyErr == nil {
+				verifyOnly, verifiedFingerprint = true, existing
+			}
+		}
+	}
+	if verifyOnly && verifiedFingerprint == "" {
+		verifiedFingerprint, err = passwordFingerprint(src, selection.OnePasswordSSH)
+		if err != nil {
+			return fmt.Errorf("existing integration is incomplete; no configuration was applied. Run nimbus postinstall onepassword: %w", err)
+		}
+		if len(targets) > 0 {
+			if _, err := src.Run("chezmoi", append([]string{"verify", "--exclude=scripts", "--"}, targets...)...); err != nil {
+				return errors.New("GUI confirmation saved, but existing integration could not be verified; no configuration was applied. Run nimbus postinstall onepassword to review and repair it")
+			}
+		}
+	}
+	if len(targets) > 0 && !verifyOnly {
 		if _, err := fmt.Fprintln(cmd.OutOrStdout(), "Reviewing only selected SSH/Git files. This preview can contain private host configuration; it is never logged."); err != nil {
 			return err
 		}
@@ -191,13 +259,20 @@ func runOnePassword(cmd *cobra.Command, src native.Source, before *postinstallSn
 		if _, err := src.Run("chezmoi", append([]string{"verify", "--exclude=scripts", "--"}, targets...)...); err != nil {
 			return errors.New("selected Chezmoi integration does not verify; task remains pending")
 		}
-		if err := passwordPrerequisites(src, cmd.OutOrStdout(), true); err != nil {
+		if err := passwordTaskPrerequisites(cmd, src, true, yes); err != nil {
 			return err
 		}
+	}
+	freshSelection, err := passwordSelection(src)
+	if err != nil || freshSelection.Machine != selection.Machine || freshSelection.OnePasswordSSH != selection.OnePasswordSSH || !freshSelection.ManagedByNimbus {
+		return errors.New("Chezmoi selection changed during verification; retry the task")
 	}
 	fingerprint, err := passwordFingerprint(src, selection.OnePasswordSSH)
 	if err != nil {
 		return err
+	}
+	if verifyOnly && fingerprint != verifiedFingerprint {
+		return errors.New("integration changed during verification; retry without recording completion")
 	}
 	store, err := userstate.Default()
 	if err != nil {
@@ -221,6 +296,10 @@ func enrichPostinstall(src native.Source, s *selected, view *postinstallView) er
 	}
 	for i := range view.Tasks {
 		t := &view.Tasks[i]
+		if t.ID == "nvidia-mok" && t.VerificationNeedsRoot && evidence.Has(view.Machine, t.ID+".complete", 1, "verified") {
+			t.PreviouslyVerified = true
+			t.Detail = "Enrollment verified earlier; current check requires sudo. Recheck: nimbus postinstall nvidia-mok (requests sudo)."
+		}
 		if t.ID != "onepassword" || t.Action == nil {
 			continue
 		}
@@ -250,7 +329,7 @@ func enrichPostinstall(src native.Source, s *selected, view *postinstallView) er
 		if !evidence.Has(view.Machine, t.ID+".manual", passwordManualRevision(selection.OnePasswordSSH), "confirmed") {
 			continue
 		}
-		t.Detail = "GUI prerequisites confirmed; run the guided task to apply and verify selected integration."
+		t.Detail = "GUI prerequisites confirmed; selected integration still needs verification. Run this task or use --mark-done for existing setup."
 		if !evidence.Has(view.Machine, t.ID+".complete", 1, "verified") {
 			continue
 		}

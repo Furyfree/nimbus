@@ -375,6 +375,12 @@ transaction uses `--setopt=cacheonly=metadata`, so it cannot
 silently refresh to different metadata during execution. Plan-only commands use
 the existing unprivileged cache, disclose that limitation, and never authenticate
 or refresh. Native solver changes and actual differences remain reported.
+Before upgrade approval and snapshots, inspect the full cached DNF transaction,
+including dependencies and obsoletes, and fresh update refs from every system
+Flatpak remote when Flatpak updates are selected. An empty RPM upgrade list
+alone does not establish a no-op. If both have no work, report current and skip
+the native transactions and snapshot pair. Inspection failure stops execution;
+unknown state never counts as current.
 
 Topgrade must not call sync or recursively invoke `nimbus upgrade`. The
 callback is `nimbus upgrade --system`. It updates RPMs and system Flatpaks and
@@ -385,6 +391,13 @@ install missing selected apps, edit files or reconcile services. Other drift
 remains for sync. Explicit checkout/machine overrides pass through the wrapper
 to this callback. Upgrading software must not silently change machine
 selections.
+
+Routine execution groups matching-file receipt refreshes without hiding content
+changes. Full plan inspection retains individual paths and metadata. Replans
+show only changes to outstanding operations; resolved dependencies and unchanged
+policy notes are not differences. The closing report groups successful receipt
+refreshes and snapshot results, retaining individual failures and skipped work.
+Pending/blocked setup and problems verifying native state have separate lists.
 
 ## Setup guidance, local state and reports
 
@@ -432,6 +445,34 @@ known Noctalia GUI overrides that disable managed lockscreen widgets without
 modifying preferences. An unavailable check is reported, never treated as proof
 of a matching effective desktop. File checks do not certify visual or hardware
 behavior. Native Topgrade summaries are not rewritten as Nimbus output.
+
+The postinstall checklist uses concise descriptions for verified tasks and puts
+historical MOK verification's sudo recheck command on a separate indented line.
+Task help explains verification limits. Native details remain in JSON and task
+previews; pending, blocked and failed checks retain their full explanations.
+Historical MOK previews describe the approved read-only sudo recheck, rather
+than asking for enrollment again. Native JSON status remains unknown.
+
+Nimbus text output uses shared bright terminal-palette colors for status labels,
+commands, help, plans and reports. Success is green, pending work and notices
+are yellow, failures are red, and actions and historical verification are cyan.
+Headings, statuses and outcome totals are bold; secondary metadata is dimmed.
+Selected entries and resource explanations receive the same emphasis. Labels
+remain explicit;
+color is never the only way to identify a result. Each output stream enables
+styling only when it is a terminal, `TERM` is not `dumb`, and `NO_COLOR` is empty.
+Redirected text, JSON and Nimbus installer logs receive no added ANSI styling.
+Native tools retain their original terminal writers and their own output.
+Complete text lines wrap to the current terminal width, with indented
+continuations and bullets for setup notes. Redirected text and logs retain
+their line structure. Partial prompts and progress writes are emitted
+immediately without waiting for a newline.
+
+Doctor removes duplicate resource prefixes and indents multiline observations;
+its closing summary distinguishes passed, failed and unknown checks. Preview
+output follows execution order: engine check/update, system sync and Chezmoi,
+then Topgrade. Unchanged plans omit recurring snapshot/source policy prose;
+help documents it, while relevant planned actions and warnings stay visible.
 
 ## Software selection
 
@@ -520,16 +561,31 @@ Guided tasks show prerequisites, request explicit confirmation where required,
 preview native actions, acquire the operation lock and recheck before execution.
 They verify native results and record successful completion automatically. Exit
 zero alone is insufficient. Existing verified tasks need no repeated native
-action. `--mark-done` acknowledges only supported manual prerequisites; it never
-executes automation or overrides required checks. `--reset` clears the selected
-machine's manual and completion evidence without undoing configuration.
+action. Supported `--mark-done` tasks confirm manual prerequisites and verify
+existing setup, recording completion only after all required checks pass. They
+never install or apply configuration. Failed checks explain what remains and
+point to the guided task. `--reset` clears the selected machine's manual and
+completion evidence without undoing configuration.
 
 1Password guides sign-in/unlock and desktop CLI integration, plus its SSH agent
 when already selected. It tells the user to skip manual SSH/Git file edits.
 Manual readiness requires terminal confirmation; `--yes` cannot supply it.
-The guided task checks CLI access without displaying account output, previews
-only selected Chezmoi SSH/public-selector/agent/Git targets, approves and applies
-those targets with scripts excluded, then verifies files and agent readiness.
+The guided task checks CLI access without displaying account output. After GUI
+confirmation, the specific native error "account is not signed in" offers a
+previewed `op signin`, approved interactively or with `--yes`. Native terminal
+input and stderr prompts remain available, with stdout discarded and no sign-in
+transcript. Recheck authentication once after sign-in; cancellation, other errors
+and an account that remains signed out stop completion. An authenticated session
+skips sign-in. Shared init prerequisites report sign-in advice without starting
+this postinstall recovery flow. Status and previews never authenticate.
+
+The task then verifies selected Chezmoi SSH/public-selector/agent/Git targets;
+matching files need no apply. Otherwise it previews, approves and applies only those
+targets with scripts excluded, then verifies files and agent readiness.
+Verify-only completion checks the file fingerprint before and after verification
+and rechecks the selection. GUI acknowledgment persists after a failed check so
+retry can address the remaining failure. The `1password` alias selects this task;
+unknown task names receive task suggestions even when followed by task flags.
 SSH remains explicitly opt-in. It never creates replacement keys or tests remote
 authentication or account-side signing registration. Native inspection checks
 required packages, CLI availability and the current local configuration;
@@ -540,7 +596,28 @@ Copilot uses its helper's read-only status and standalone install command.
 ProtonPlus lists native Steam runners before and after installation. These
 native results override old completion evidence. WoWUp remains blocked until
 its helper supplies standalone installation. Fingerprints and MOK retain native
-checks; MOK enrollment still requires the firmware procedure.
+checks; MOK enrollment still requires the firmware procedure. MOK inspection
+distinguishes missing, empty, permission-denied and other unreadable certificate
+states. Only an explicit task may offer approved read-only sudo verification of
+the fixed public certificate and its enrollment; no enrollment or permission
+changes are performed. Status/help/plan never authenticate. Stored verification
+is displayed as "Previously verified" when a permission-protected certificate
+prevents rechecking. Final reports put this historical result in notices, outside
+pending setup and verification problems. JSON retains the native `unknown`
+status and adds `previously_verified: true`; this is evidence of an earlier check,
+not current verification. Missing, unenrolled or otherwise failed native checks
+retain their normal status, and explicit verification clears the historical
+presentation before checking again.
+Enrollment checks use `--ignore-keyring --test-key` to bypass the kernel-keyring
+shortcut, which does not establish MOK/firmware enrollment. For the supported
+mokutil 0.7.2 behavior, an exact enrolled/trusted result with exit 1 is complete;
+an exact not-enrolled result with exit 0 or a pending request with exit 1 remains
+pending. Denylisted keys are blocked. Unexpected output or exit status remains
+unknown. The certificate path must match, and process errors retain their typed
+exit status through the native runner. This follows the native
+[mokutil test-key implementation][mok-test-key].
+
+[mok-test-key]: https://github.com/lcp/mokutil/blob/0.7.2/src/mokutil.c#L1448
 
 When native Steam and ProtonPlus are selected and recorded, `proton-cachyos`
 offers `protonplus install steam-system proton-cachyos latest` after approval.

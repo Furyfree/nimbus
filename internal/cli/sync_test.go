@@ -206,6 +206,7 @@ func TestSyncStopsWhenReplannedOutputFails(t *testing.T) {
 					if err := record(digest, st); err != nil {
 						return err
 					}
+					src.Commands["dnf5 --assumeno --cacheonly install demo"] = []byte("Repositories loaded.\nPackage Arch Version Repository Size\nInstalling:\n demo x86_64 2-1 fedora 1 KiB\n\nTransaction Summary:\n")
 					out.after = 0
 					return nil
 				}
@@ -457,7 +458,7 @@ func TestSyncShowsNewlyResolvedErasureBeforeExecuting(t *testing.T) {
 	code, out, errOut := run(t, "sync", "--checkout", root, "--machine", "vm", "-n", "-y")
 	// The fake rejects the eventual package mutation; the post-preparation plan
 	// must already have exposed the newly resolved removal and retained its note.
-	if code != ExitFailure || !strings.Contains(out, "updated plan after completed operations:") || !strings.Contains(out, "unexpected-app") || !strings.Contains(out, "replanned packages:install:") {
+	if code != ExitFailure || !strings.Contains(out, "Changes to the remaining plan:") || !strings.Contains(out, "unexpected-app") || !strings.Contains(out, "updated plan: install 1 packages") {
 		t.Fatalf("unseen replan: %d %s%s", code, out, errOut)
 	}
 	if strings.Index(out, "unexpected-app") > strings.Index(out, "$ sudo dnf5 -y install demo") {

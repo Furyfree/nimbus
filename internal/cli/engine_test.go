@@ -122,15 +122,15 @@ func TestManualConfirmationCannotBeAssumed(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if slices.Contains(src.reads, "op whoami --format=json") {
-		t.Fatal("acknowledgment authenticated")
+	if !slices.Contains(src.reads, "op whoami --format=json") {
+		t.Fatal("explicit completion did not verify CLI access")
 	}
 	snapshot, err := inspectPostinstall(src, machineFlags{checkout: root, machine: "vm"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	task, err := selectedTask(snapshot.view, "onepassword")
-	if err != nil || task.Status == "complete" {
+	if err != nil || task.Status != "complete" {
 		t.Fatal(task, err)
 	}
 	cmd, _ = postinstallCommand(root, false, "onepassword", "--yes")

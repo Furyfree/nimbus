@@ -1,10 +1,13 @@
 package native
 
 import (
+	"bytes"
 	"errors"
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/Furyfree/nimbus/internal/output"
 )
 
 func TestExecSourceReturnsOutputOnFailure(t *testing.T) {
@@ -17,6 +20,16 @@ func TestExecSourceReturnsOutputOnFailure(t *testing.T) {
 	}
 	if _, err := (ExecSource{}).Run("sh", "-c", "echo bad >&2; exit 1"); err == nil || !strings.Contains(err.Error(), "bad") {
 		t.Fatalf("stderr missing from error: %v", err)
+	}
+}
+
+func TestNativeProgressBypassesNimbusColors(t *testing.T) {
+	var out, errOut bytes.Buffer
+	stdout := output.ColorWriter(&out, func() bool { return true })
+	stderr := output.ColorWriter(&errOut, func() bool { return true })
+	err := (ExecSource{}).Stream(stdout, stderr, "sh", "-c", "printf 'failed native output\\n'; printf 'warning native error\\n' >&2")
+	if err != nil || out.String() != "failed native output\n" || errOut.String() != "warning native error\n" {
+		t.Fatal(err, out.String(), errOut.String())
 	}
 }
 

@@ -47,18 +47,20 @@ type Action struct {
 }
 
 type Task struct {
-	ID            string   `json:"id"`
-	Owner         string   `json:"owner"`
-	Title         string   `json:"title"`
-	Status        Status   `json:"status"`
-	Detail        string   `json:"detail"`
-	Prerequisites []string `json:"prerequisites,omitempty"`
-	Instructions  []string `json:"instructions"`
-	Verification  string   `json:"verification"`
-	Recovery      string   `json:"recovery"`
-	Action        *Action  `json:"action,omitempty"`
-	Reboot        bool     `json:"reboot,omitzero"`
-	Logout        bool     `json:"logout,omitzero"`
+	PreviouslyVerified    bool     `json:"previously_verified,omitzero"`
+	VerificationNeedsRoot bool     `json:"verification_needs_root,omitzero"`
+	ID                    string   `json:"id"`
+	Owner                 string   `json:"owner"`
+	Title                 string   `json:"title"`
+	Status                Status   `json:"status"`
+	Detail                string   `json:"detail"`
+	Prerequisites         []string `json:"prerequisites,omitempty"`
+	Instructions          []string `json:"instructions"`
+	Verification          string   `json:"verification"`
+	Recovery              string   `json:"recovery"`
+	Action                *Action  `json:"action,omitempty"`
+	Reboot                bool     `json:"reboot,omitzero"`
+	Logout                bool     `json:"logout,omitzero"`
 }
 
 type Inputs struct {

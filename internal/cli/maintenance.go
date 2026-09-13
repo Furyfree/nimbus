@@ -35,15 +35,23 @@ func runMaintenance(cmd *cobra.Command, opts *options, flags machineFlags, sf sy
 		out = cmd.ErrOrStderr()
 	}
 	if sf.plan {
+		engine := "1. Request sudo and refresh the Nimbus RPM check; stop if a newer engine is available."
 		if upgrade {
-			if err := runTopgrade(cmd, nil, true, flags); err != nil {
-				return err
-			}
+			engine = "1. Request sudo, refresh and upgrade Nimbus if needed; restart into the updated engine."
 		}
-		if _, err := fmt.Fprintln(out, "Preview uses local definitions. Execution first requests sudo and refreshes the Nimbus RPM check. It then updates clean repositories, reconciles the system and applies Chezmoi once after approval."); err != nil {
+		if _, err := fmt.Fprintf(out, "Preview only (cached metadata):\n%s\n2. Update repositories, reconcile the system, then apply Chezmoi once.\n\n", engine); err != nil {
 			return err
 		}
-		return runSync(cmd, opts, flags, sf)
+		if err := runSync(cmd, opts, flags, sf); err != nil {
+			return err
+		}
+		if upgrade {
+			if _, err := fmt.Fprintln(out, "\n3. Run software updates:"); err != nil {
+				return err
+			}
+			return runTopgrade(cmd, nil, true, flags)
+		}
+		return nil
 	}
 
 	flags, err := maintenanceSelection(flags)

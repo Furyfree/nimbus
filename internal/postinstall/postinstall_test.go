@@ -195,24 +195,31 @@ func TestProtonCachyOSUsesNativeSetupWithoutInspectingUserData(t *testing.T) {
 func TestMOKNativeEnrollmentStates(t *testing.T) {
 	for _, test := range []struct {
 		name, output, failure string
+		code                  int
 		want                  Status
 	}{
-		{"enrolled", mokCertificate + " is already enrolled", "", Complete},
-		{"firmware trust", mokCertificate + " is already in db", "", Complete},
-		{"request not completion", mokCertificate + " is already in the enrollment request", "", Pending},
-		{"not enrolled", mokCertificate + " is not enrolled", "exit status 1", Pending},
-		{"unexpected success", "", "", Unknown},
-		{"native error", "", "cannot read EFI variables", Unknown},
-		{"contradictory error", mokCertificate + " is already enrolled", "failed", Unknown},
-		{"foreign certificate", "/tmp/other.der is already enrolled", "", Unknown},
+		{"enrolled", MOKCertificate + " is already enrolled", "", 1, Complete},
+		{"firmware trust", MOKCertificate + " is already in db", "", 1, Complete},
+		{"request not completion", MOKCertificate + " is already in the enrollment request", "", 1, Pending},
+		{"not enrolled", MOKCertificate + " is not enrolled", "", 0, Pending},
+		{"blocked firmware", MOKCertificate + " is blocked in dbx", "", 1, Blocked},
+		{"blocked MOK", MOKCertificate + " is blocked in MokListX", "", 1, Blocked},
+		{"unexpected success", "", "", 0, Unknown},
+		{"native error", "", "cannot read EFI variables", 0, Unknown},
+		{"contradictory error", MOKCertificate + " is already enrolled", "failed", 0, Unknown},
+		{"wrong enrolled exit", MOKCertificate + " is already enrolled", "", 0, Unknown},
+		{"wrong not enrolled exit", MOKCertificate + " is not enrolled", "", 1, Unknown},
+		{"unexpected exit", MOKCertificate + " is already enrolled", "", 255, Unknown},
+		{"foreign certificate", "/tmp/other.der is already enrolled", "", 1, Unknown},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			in, src := fixture("akmod-nvidia", "akmods", "mokutil")
 			in.Resolved.Components = []definitions.ResolvedComponent{{ID: "nvidia"}}
 			in.Facts.SecureBoot.Value = inspect.SecureBootEnabled
-			src.Files[mokCertificate] = []byte("certificate supplied to native validator")
-			key := nativetest.Key("mokutil", "--test-key", mokCertificate)
+			src.Files[MOKCertificate] = []byte("certificate supplied to native validator")
+			key := nativetest.Key("mokutil", "--ignore-keyring", "--test-key", MOKCertificate)
 			src.Commands[key] = []byte(test.output)
+			src.ExitCodes = map[string]int{key: test.code}
 			if test.failure != "" {
 				src.Failures[key] = test.failure
 			}

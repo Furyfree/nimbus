@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"slices"
+	"strings"
 
 	"github.com/Furyfree/nimbus/internal/native"
 	"github.com/Furyfree/nimbus/internal/postinstall"
@@ -27,11 +27,36 @@ var taskDescriptions = []struct{ id, title, help string }{
 
 func newPostinstall(opts *options) *cobra.Command {
 	cmd := &cobra.Command{Use: "postinstall", Short: "Guided setup tasks and machine-specific status", Long: "Choose a task for guided setup or status for a compact checklist. Help and previews never launch apps, request authentication or write state.", Args: noArgs, RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() }}
+	cmd.SuggestionsMinimumDistance = 2
+	cmd.Args = func(c *cobra.Command, args []string) error {
+		if len(args) != 0 {
+			return unknownPostinstallTask(c, args[0])
+		}
+		return nil
+	}
+	cmd.SetFlagErrorFunc(func(c *cobra.Command, err error) error {
+		if c == cmd && len(c.Flags().Args()) > 0 {
+			return unknownPostinstallTask(c, c.Flags().Args()[0])
+		}
+		return usageError{err}
+	})
 	var flags machineFlags
 	addMachineFlags(&flags, cmd.PersistentFlags())
 	for _, spec := range taskDescriptions {
-		child := postinstallExecutor(opts, &flags)
+		child := postinstallExecutor(opts, &flags, spec.id)
 		child.Use, child.Short, child.Long = spec.id, spec.title, spec.help
+		if child.Flags().Lookup("mark-done") != nil {
+			child.Long += "\n\nUse --mark-done for existing setup: verify and record completion without installation or configuration changes."
+		}
+		if spec.id == "onepassword" {
+			child.Long += "\nVerification may request 1Password authorization. If the CLI account is not signed in, the task offers op signin and retries verification. Account and key output remains private.\nStatus checks confirmed GUI prerequisites and local configuration. It does not inspect current vault unlock, remote SSH access or signing-key registration."
+		}
+		if spec.id == "nvidia-mok" {
+			child.Long += "\nIf the certificate is permission-protected, this task previews and offers a read-only administrator check. Status and --plan never request sudo.\nPreviously verified means enrollment was verified earlier but cannot currently be rechecked without sudo. Enrollment alone does not prove the NVIDIA driver loads."
+		}
+		if spec.id == "onepassword" {
+			child.Aliases = []string{"1password"}
+		}
 		execute := child.RunE
 		child.Args = noArgs
 
@@ -67,13 +92,57 @@ func renderPostinstallStatus(out io.Writer, view postinstallView) error {
 		if t.Status == postinstall.NotApplicable {
 			continue
 		}
-		status := map[postinstall.Status]string{postinstall.Complete: "Verified", postinstall.Pending: "Pending", postinstall.Unknown: "Unable to check", postinstall.Blocked: "Blocked"}[t.Status]
-		if _, err := fmt.Fprintf(out, "  %-20s %-16s %s\n", t.ID, status, t.Detail); err != nil {
+		status := postinstallStatusLabel(t)
+		if _, err := fmt.Fprintf(out, "  %-20s %-19s %s\n", t.ID, status, postinstallStatusDetail(t)); err != nil {
 			return err
+		}
+		if t.PreviouslyVerified && t.Status == postinstall.Unknown && t.VerificationNeedsRoot {
+			if _, err := fmt.Fprintln(out, "    Recheck: nimbus postinstall nvidia-mok (requests sudo)"); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
+
+func postinstallStatusLabel(task postinstall.Task) string {
+	if task.PreviouslyVerified && task.Status == postinstall.Unknown && task.VerificationNeedsRoot {
+		return "Previously verified"
+	}
+	return map[postinstall.Status]string{postinstall.Complete: "Verified", postinstall.Pending: "Pending", postinstall.Unknown: "Unable to check", postinstall.Blocked: "Blocked", postinstall.NotApplicable: "Not applicable"}[task.Status]
+}
+
+// Compact successful checks for the checklist only. Native details remain in
+// JSON and task previews; never replace a pending or failed check's explanation.
+func postinstallStatusDetail(task postinstall.Task) string {
+	if task.PreviouslyVerified && task.Status == postinstall.Unknown && task.VerificationNeedsRoot {
+		return "Recheck requires sudo."
+	}
+	if task.Status != postinstall.Complete {
+		return task.Detail
+	}
+	switch task.ID {
+	case "account-picture":
+		return "Matches managed picture."
+	case "copilot":
+		return "Application installed."
+	case "hyprland-plugins":
+		return "ScrollOverview built and loaded."
+	case "noctalia-plugins":
+		return "Enabled plugin files present."
+	case "nvidia-mok":
+		return "Certificate enrolled or trusted."
+	case "onepassword":
+		return "GUI and local integration checked."
+	case "proton-cachyos":
+		return "Latest runner installed."
+	case "tailscale-operator":
+		return "Local operator configured."
+	default:
+		return task.Detail
+	}
+}
+
 func confirmManual(cmd *cobra.Command, message string) error {
 	if _, err := fmt.Fprintln(cmd.OutOrStdout(), message); err != nil {
 		return err
@@ -108,34 +177,32 @@ func resetTask(machine, id string) error {
 	}
 	return store.Update("postinstall", machine, nil, []string{id + ".manual", id + ".complete"})
 }
-func acknowledgeTask(cmd *cobra.Command, src native.Source, before *postinstallSnapshot, t postinstall.Task) error {
-	if !slices.Contains([]string{"onepassword", "proton-cachyos", "nvidia-mok"}, t.ID) {
-		return errors.New("this task is verified automatically and has no manual acknowledgment")
+func unknownPostinstallTask(cmd *cobra.Command, name string) error {
+	message := fmt.Sprintf("unknown setup task %q", name)
+	// Cobra computes edit distance against canonical names, not aliases.
+	suggestedName := name
+	if strings.HasPrefix(name, "1") {
+		suggestedName = "one" + strings.TrimPrefix(name, "1")
 	}
-	if t.Status == postinstall.Blocked {
-		return errors.New(t.Detail)
+	if suggestions := cmd.SuggestionsFor(suggestedName); len(suggestions) > 0 {
+		message += "; did you mean " + strings.Join(suggestions, " or ") + "?"
 	}
-	if err := confirmManual(cmd, "Confirm only the manual prerequisites described in this task's help. Required setup and verification still run through the guided task."); err != nil {
+	return usageError{errors.New(message)}
+}
+
+// markExistingTask never invokes a task's installation or repair action.
+func markExistingTask(cmd *cobra.Command, src native.Source, before *postinstallSnapshot, t postinstall.Task, yes bool) error {
+	switch t.ID {
+	case "onepassword":
+		return runOnePassword(cmd, src, before, t, yes, true)
+	case "nvidia-mok":
+		return runMOKVerification(cmd, src, before, t, yes)
+	}
+	if t.Status != postinstall.Complete {
+		return fmt.Errorf("existing setup was not verified: %s; run nimbus postinstall %s for guided setup", t.Detail, t.ID)
+	}
+	if err := recordTask(before.view.Machine, t.ID+".complete", "verified"); err != nil {
 		return err
 	}
-	if t.ID == "onepassword" {
-		selection, err := passwordSelection(src)
-		if err != nil {
-			return err
-		}
-		if err := confirmPasswordState(before.view.Machine, selection.OnePasswordSSH); err != nil {
-			return err
-		}
-	} else if err := recordTask(before.view.Machine, t.ID+".manual", "confirmed"); err != nil {
-		return err
-	}
-	fresh, err := inspectPostinstall(src, machineFlags{checkout: before.selected.Root, machine: before.view.Machine})
-	if err != nil {
-		return err
-	}
-	current, err := selectedTask(fresh.view, t.ID)
-	if err != nil {
-		return err
-	}
-	return renderPostinstallStatus(cmd.OutOrStdout(), postinstallView{Machine: before.view.Machine, Tasks: []postinstall.Task{current}})
+	return renderPostinstallStatus(cmd.OutOrStdout(), postinstallView{Machine: before.view.Machine, Tasks: []postinstall.Task{t}})
 }

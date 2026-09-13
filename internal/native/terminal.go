@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Furyfree/nimbus/internal/output"
+
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 )
@@ -18,6 +20,7 @@ import (
 // StreamLogged attaches a native pseudo-terminal when interactive output must
 // also be logged. Only output is copied; terminal input is never recorded.
 func (ExecSource) StreamLogged(stdout, stderr io.Writer, log io.Writer, name string, args ...string) error {
+	stdout, stderr = output.Native(stdout), output.Native(stderr)
 	outFile, outOK := stdout.(*os.File)
 	errFile, errOK := stderr.(*os.File)
 	if !term.IsTerminal(int(os.Stdin.Fd())) || !outOK || !errOK || !term.IsTerminal(int(outFile.Fd())) || !term.IsTerminal(int(errFile.Fd())) {

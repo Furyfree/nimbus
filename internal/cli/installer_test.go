@@ -98,7 +98,7 @@ type installerSource struct {
 
 func (s *installerSource) Run(name string, args ...string) ([]byte, error) {
 	s.reads = append(s.reads, nativetest.Key(name, args...))
-	if name == "sudo" && len(args) > 1 && args[0] == "dnf5" && slices.Contains(args, "--cacheonly") && !slices.Contains(args, "upgrade") && !slices.Contains(args, "--repo=nimbus-engine") {
+	if name == "sudo" && len(args) > 1 && args[0] == "dnf5" && slices.Contains(args, "--cacheonly") && !slices.Contains(args, "--repo=nimbus-engine") {
 		return s.FakeSource.Run("dnf5", args[1:]...)
 	}
 	return s.FakeSource.Run(name, args...)
@@ -160,6 +160,7 @@ func installerFixture(t *testing.T) (string, *installerSource) {
 	src.Commands["dnf5 makecache"] = nil
 	src.Commands["dnf5 --cacheonly check-upgrade"] = []byte("Repositories loaded.\n")
 	src.Commands["sudo dnf5 --setopt=cacheonly=metadata -y upgrade"] = nil
+	src.Commands["dnf5 --cacheonly --assumeno upgrade"] = []byte("Repositories loaded.\nPackage Arch Version Repository Size\nUpgrading:\n demo x86_64 2-1 fedora 1 KiB\n\nTransaction Summary:\n")
 	src.Commands["chezmoi init --promptString Machine=vm --promptBool ManagedByNimbus=true --promptMultichoice Profiles=common --promptBool Enable 1Password SSH integration=false -- https://github.com/Furyfree/dotfiles.git"] = nil
 	src.Commands["chezmoi apply"] = nil
 	src.Commands["chezmoi source-path"] = []byte(home)

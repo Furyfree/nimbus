@@ -14,11 +14,12 @@ import (
 // FakeSource replays recorded output. Anything not recorded is an error, so
 // a test cannot silently reach the real system.
 type FakeSource struct {
-	Commands map[string][]byte // key: name and args joined by single spaces
-	Failures map[string]string // key as above; value is the error message
-	Files    map[string][]byte
-	Dirs     map[string][]string
-	Paths    map[string]string // command name to resolved path
+	Commands  map[string][]byte // key: name and args joined by single spaces
+	Failures  map[string]string // key as above; value is the error message
+	ExitCodes map[string]int    // optional native exit statuses, including expected nonzero results
+	Files     map[string][]byte
+	Dirs      map[string][]string
+	Paths     map[string]string // command name to resolved path
 }
 
 // ErrNotRecorded marks a read the fixture does not cover.
@@ -36,12 +37,20 @@ func (f *FakeSource) Run(name string, args ...string) ([]byte, error) {
 	if msg, ok := f.Failures[key]; ok {
 		return f.Commands[key], errors.New(msg)
 	}
+	if code := f.ExitCodes[key]; code != 0 {
+		return f.Commands[key], exitStatus(code)
+	}
 	out, ok := f.Commands[key]
 	if !ok {
 		return nil, fmt.Errorf("%s: %w", key, ErrNotRecorded)
 	}
 	return out, nil
 }
+
+type exitStatus int
+
+func (e exitStatus) Error() string { return fmt.Sprintf("exit status %d", e) }
+func (e exitStatus) ExitCode() int { return int(e) }
 
 // Stream replays a recorded command; the fixture has no output to show.
 func (f *FakeSource) Stream(_, _ io.Writer, name string, args ...string) error {

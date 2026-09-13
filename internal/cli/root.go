@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/Furyfree/nimbus/internal/output"
 	"github.com/Furyfree/nimbus/internal/version"
 )
 
@@ -44,7 +45,7 @@ type EnvelopeError struct {
 
 func writeJSON(w io.Writer, data, errs any) error {
 	env := Envelope{Engine: version.Engine, OutputSchema: version.OutputSchema, Data: data, Errors: errs}
-	enc := json.NewEncoder(w)
+	enc := json.NewEncoder(output.Native(w))
 	enc.SetIndent("", "  ")
 	return enc.Encode(env)
 }
@@ -105,8 +106,16 @@ func newRoot() (*cobra.Command, *options) {
 
 // New builds the command tree.
 func New() *cobra.Command {
-	root, _ := newRoot()
+	root, opts := newRoot()
+	root.SetOut(coloredOutput(os.Stdout, opts))
+	root.SetErr(coloredOutput(os.Stderr, opts))
 	return root
+}
+
+var terminalColors = output.ColorEnabled
+
+func coloredOutput(w io.Writer, opts *options) io.Writer {
+	return output.ColorWriter(w, func() bool { return !opts.json && terminalColors(w) })
 }
 
 // Execute runs the tree and returns the process exit code. Usage errors exit
@@ -114,6 +123,7 @@ func New() *cobra.Command {
 // Delegated Topgrade failures retain their native exit status.
 func Execute(args []string, stdout, stderr io.Writer) int {
 	root, opts := newRoot()
+	stdout, stderr = coloredOutput(stdout, opts), coloredOutput(stderr, opts)
 	root.SetArgs(args)
 	root.SetOut(stdout)
 	root.SetErr(stderr)

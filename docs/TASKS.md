@@ -10,6 +10,82 @@ repository updates during sync, Zed installation, browser fallbacks and
 reporting fixes. The signed Fedora 44 COPR package is available; its new
 installation and reboot checks remain pending.
 
+## Completion and output follow-up, 2026-09-13
+
+Release preparation: the owner approved Nimbus 0.5.1, commits to main and COPR
+publication. This patch includes verify-only setup, corrected MOK inspection,
+1Password sign-in recovery, no-op upgrade handling and clearer terminal output.
+Definitions remain compatible with engine 0.5.0. Local checks and read-only
+operator previews passed; publication evidence follows after the signed build.
+No live system upgrade, vault authorization or laptop change is part of release
+preparation.
+
+- [x] Verify existing setup through supported completion commands without
+  installing or applying configuration. Preserve explicit GUI acknowledgment,
+  SSH opt-in, native verification and resettable local evidence.
+- [x] Avoid applying already matching 1Password configuration. Add its numeric
+  alias and task suggestions for misspelled names followed by task flags.
+- [x] Distinguish MOK certificate failures. Offer narrow read-only privileged
+  verification only in an explicitly approved task; status never authenticates
+  or hides failed inspection behind stored evidence.
+- [x] Group matching ownership refreshes and successful snapshot results; show
+  only actual replan changes and separate verification problems from setup.
+- [x] Check full DNF transactions and fresh system Flatpak update refs; skip
+  empty transactions and snapshots, and fail when inspection is inconclusive.
+- [x] Pass `just check`, `just validate` for all three machines, and race tests
+  for CLI, postinstall and local state. Regressions cover existing 1Password
+  files, failed checks, MOK permission failures, authentication boundaries,
+  no-op upgrades and output failures.
+- [x] Pass the network-disabled signed-RPM drill: stale metadata refresh,
+  engine-first refusal, signed upgrade/restart, preserved selection and later
+  failure reporting. Real Flatpak update/no-op behavior remains fixture-tested.
+- [x] Leave Chezmoi unchanged. Secret-skipping read-only checks show no file
+  diff; verification passes with scripts excluded. Full verification reports
+  the five existing after-apply scripts, which were not executed.
+- [x] Owner confirmed GUI prerequisites and native CLI behavior. Direct
+  sign-in resolved the unsigned-in CLI account; the existing verify-only task
+  then completed successfully without changing integration files.
+- [x] Owner confirmed native MOK enrollment with exit 1, both with and without
+  the kernel-keyring shortcut. Earlier fixture tests assumed the wrong exits.
+- [x] Add approved sign-in recovery for the specific unsigned-in CLI error,
+  retry verification once and shorten instructions after GUI confirmation.
+  Correct MOK exit semantics and bypass the separate kernel-keyring shortcut.
+- [x] Pass `just check`, `just validate` and race tests for CLI, postinstall
+  and native execution after these corrections. Production-runner subprocess
+  tests cover MOK's nonzero enrolled result and other exit/output combinations,
+  plus sign-in stdin, visible prompts and discarded account/session stdout.
+  Guided-task tests cover sign-in success, decline, cancellation, failed retry,
+  existing authentication and completion evidence.
+- [x] Owner verified enrollment through the corrected MOK task and recorded
+  completion. Ordinary status still could not read the protected certificate.
+- [x] Label that historical result "Previously verified" and report it as a
+  notice with the command to request a sudo recheck. Preserve native unknown
+  status in JSON and retain fresh failures.
+- [x] Add shared terminal-palette styling to text commands and help, with plain
+  redirected output and JSON, automatic terminal detection and `NO_COLOR`.
+  Preserve immediate prompts, native terminal writers and plain installer logs.
+- [x] Pass `just check`, `just validate` for all three machines, and race tests
+  for output, CLI and native execution after the color pass. Tests cover every
+  public command's help, terminal detection, opt-out, JSON, immediate prompts,
+  output errors, log separation, native progress, resizing and cancellation.
+- [x] Shorten verified checklist descriptions and indent the MOK sudo recheck
+  command on its own line. Keep verification limits in help, full detail in
+  JSON/previews, and failure reasons in the checklist. Fixture tests cover
+  80-column rows, native unknown state and help without authentication.
+- [x] Strengthen terminal-palette emphasis and complete selection, explanation,
+  preview and outcome styling. Wrap terminal lines with indented continuations
+  and bulleted setup notes. Keep native streams, logs and JSON separate.
+- [x] Remove duplicate Doctor resource prefixes, indent multiline observations,
+  and summarize checks. Order upgrade previews by execution, shorten recurring
+  unchanged-plan prose, and use historical MOK wording in task previews.
+- [x] Pass focused output/CLI tests and race tests for output, CLI and native
+  execution. Terminal tests cover 40/120 columns and color opt-out; fixtures
+  cover Doctor formatting, MOK history and preview order. Definition validation
+  passes for desktop, laptop and VM.
+- [ ] Owner reviews terminal colors and retests guided sign-in recovery.
+  No live authentication, workstation mutation, release or laptop changes are
+  part of automated validation.
+
 ## ScrollOverview post-install setup, 2026-09-13
 
 - [x] Select matching COPR `hyprland-devel` through the shared

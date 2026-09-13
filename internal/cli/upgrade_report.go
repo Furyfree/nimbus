@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -55,6 +56,11 @@ func runMaintenanceUpgrade(cmd *cobra.Command, flags machineFlags, result *syncR
 			return errors.Join(runErr, fmt.Errorf("invalid system update report: %w", err))
 		}
 		result.Steps = append(result.Steps, system.Steps...)
+		for _, notice := range system.Notices {
+			if !slices.Contains(result.Notices, notice) {
+				result.Notices = append(result.Notices, notice)
+			}
+		}
 		result.Differences = append(result.Differences, system.Differences...)
 		result.Failures = append(result.Failures, system.Failures...)
 		result.Executed = append(result.Executed, system.Executed...)

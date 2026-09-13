@@ -3,7 +3,6 @@ package cli
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -37,7 +36,7 @@ func newSync(opts *options) *cobra.Command {
 	var upgrade, noUpgrade bool
 	cmd := &cobra.Command{
 		Use: "sync", Short: "Make the system match the definitions",
-		Long: "Update the Nimbus and Chezmoi repositories, reconcile system changes, then apply user configuration. Use --upgrade to update Nimbus first, sync once, then run Topgrade. --plan uses local definitions without updating repositories. --json controls output only; mutation still requires --yes.",
+		Long: "Update the Nimbus and Chezmoi repositories, reconcile system changes, then apply user configuration. Use --upgrade to update Nimbus first, sync once, then run Topgrade. --plan uses local definitions without updating repositories. --json controls output only; mutation still requires --yes.\nWith Snapper selected, system changes receive before/after snapshots and native number cleanup; previews and unchanged sync create none. After package transactions, Nimbus reconciles duplicate providers of declared base URLs through DNF overrides, preserving vendor files and keys and verifying declared sources.",
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if upgrade && noUpgrade {
@@ -151,6 +150,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	}
 	currentPlan = p
 	result.Digest = p.Digest
+	result.collectPlanNotices(p)
 	if !sf.plan && (p.Checkout.Origin == "" || p.Checkout.Commit == "") {
 		return errors.New("checkout origin and commit could not be inspected; sync requires an inspectable Git clone")
 	}
@@ -180,11 +180,29 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	}
 	if !p.Complete {
 		if !opts.json {
-			if _, err := out.Write(renderPlan(p, sf.prune, sf.systemUpgrade)); err != nil {
+			if _, err := out.Write(renderExecutionPlan(p, sf.prune, sf.systemUpgrade)); err != nil {
 				return fmt.Errorf("show plan: %w", err)
 			}
 		}
 		return errors.New("the plan has problems; see above")
+	}
+	if sf.systemUpgrade {
+		var pending bool
+		err := native.Activity(execOut, "check system updates", func() error {
+			var checkErr error
+			pending, checkErr = systemUpdatesPending(src, s.Checkout.Definitions())
+			return checkErr
+		})
+		if err != nil {
+			return err
+		}
+		if !pending {
+			result.Steps = append(result.Steps, runStep{Name: "system updates", Status: "current", Detail: "no DNF or selected system Flatpak updates"})
+			if !opts.json {
+				_, err = fmt.Fprintln(out, "System software is current; no transaction or snapshots needed.")
+			}
+			return err
+		}
 	}
 	if nothingToRun(p) && !sf.systemUpgrade {
 		if opts.json {
@@ -201,7 +219,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			}
 			return nil
 		}
-		if _, err := out.Write(renderPlan(p, sf.prune, false)); err != nil {
+		if _, err := out.Write(renderExecutionPlan(p, sf.prune, false)); err != nil {
 			return fmt.Errorf("show plan: %w", err)
 		}
 		if _, err := fmt.Fprintln(out, "\n"+waitingLine(p)); err != nil {
@@ -213,7 +231,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	// host that names the packages; DNF prints the exact transaction as it
 	// starts, and the report at the end names what differed.
 	if !opts.json {
-		if _, err := out.Write(renderPlan(p, sf.prune, sf.systemUpgrade)); err != nil {
+		if _, err := out.Write(renderExecutionPlan(p, sf.prune, sf.systemUpgrade)); err != nil {
 			return fmt.Errorf("show plan: %w", err)
 		}
 	}
@@ -344,6 +362,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 		}
 		return apply.Options{
 			Context:     ctx,
+			Compact:     true,
 			Constraints: s.Resolved.Constraints,
 			Source:      src, Fetch: newFetcher(), Record: newRecorder(src, stage), Keys: apply.ExtractKeysWithRPM2Archive(src),
 			Stage: stage, Checkout: s.Checkout, Root: s.Checkout.Definitions(), FirstApply: !applied.Present,
@@ -358,6 +377,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	// Sources first, so the transactions that follow resolve against them;
 	// then whatever the plan holds, in passes until nothing waits.
 	phase = "apply"
+	lastShown := p
 	for pass := 0; !sf.systemUpgrade && pass < 4; pass++ {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -368,14 +388,15 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			}
 			currentPlan = p
 			if !p.Complete {
-				if _, err := execOut.Write(renderPlan(p, sf.prune, false)); err != nil {
+				if _, err := execOut.Write(renderExecutionPlan(p, sf.prune, false)); err != nil {
 					return fmt.Errorf("show updated plan: %w", err)
 				}
 				return errors.New("the plan has problems; see above")
 			}
-			if err := showReplanned(execOut, p, sf.prune, &result); err != nil {
+			if err := showReplanned(execOut, lastShown, p, sf.prune, &result); err != nil {
 				return err
 			}
+			lastShown = p
 			if nothingToRun(p) {
 				break
 			}
@@ -383,6 +404,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 		currentPlan = p
 		prep := sourceOperations(p)
 		if len(prep) > 0 {
+			result.rememberOperations(p)
 			r := apply.Run(&plan.Plan{Machine: p.Machine, Definitions: p.Definitions, Checkout: p.Checkout, Complete: true, Digest: p.Digest, Operations: prep}, options(p))
 			result.Reboot = result.Reboot || r.Reboot
 			result.Logout = result.Logout || r.Logout
@@ -406,17 +428,18 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			}
 			currentPlan = p
 			if !p.Complete {
-				if _, err := execOut.Write(renderPlan(p, sf.prune, false)); err != nil {
+				if _, err := execOut.Write(renderExecutionPlan(p, sf.prune, false)); err != nil {
 					return fmt.Errorf("show updated plan: %w", err)
 				}
 				return errors.New("the plan has problems; see above")
 			}
 		}
 		if len(prep) > 0 {
-			if err := showReplanned(execOut, p, sf.prune, &result); err != nil {
+			if err := showReplanned(execOut, lastShown, p, sf.prune, &result); err != nil {
 				return err
 			}
 		}
+		lastShown = p
 		currentPlan = p
 		executable := *p
 		executable.Operations = slices.Clone(p.Operations)
@@ -425,6 +448,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 				executable.Operations[i].Action = plan.ActionKeep
 			}
 		}
+		result.rememberOperations(p)
 		r := apply.Run(&executable, options(p))
 		result.Reboot = result.Reboot || r.Reboot
 		result.Logout = result.Logout || r.Logout
@@ -639,22 +663,4 @@ func onlyUserFailures(r *apply.Result, p *plan.Plan) bool {
 	return !slices.ContainsFunc(r.Failures, func(failure apply.Failure) bool {
 		return !slices.ContainsFunc(p.Operations, func(op plan.Operation) bool { return op.ID == failure.ID && op.Kind == plan.KindUser })
 	})
-}
-
-func showReplanned(out io.Writer, p *plan.Plan, prune bool, result *syncResult) error {
-	if _, err := fmt.Fprintln(out, "updated plan after completed operations:"); err != nil {
-		return fmt.Errorf("show updated plan: %w", err)
-	}
-	if _, err := out.Write(renderPlan(p, prune, false)); err != nil {
-		return fmt.Errorf("show updated plan: %w", err)
-	}
-	for _, op := range p.Operations {
-		for _, note := range op.Notes {
-			message := "replanned " + op.ID + ": " + note
-			if !slices.Contains(result.Differences, message) {
-				result.Differences = append(result.Differences, message)
-			}
-		}
-	}
-	return nil
 }

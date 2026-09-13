@@ -39,7 +39,7 @@ type postinstallSnapshot struct {
 	nativeDigest string
 }
 
-func postinstallExecutor(opts *options, flags *machineFlags) *cobra.Command {
+func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cobra.Command {
 	var yes, preview, markDone, reset bool
 	cmd := &cobra.Command{
 		Use: "postinstall [TASK]", Short: "Inspect manual setup tasks or select one native action",
@@ -83,10 +83,13 @@ func postinstallExecutor(opts *options, flags *machineFlags) *cobra.Command {
 				return err
 			}
 			if markDone {
-				return acknowledgeTask(cmd, src, before, task)
+				return markExistingTask(cmd, src, before, task, yes)
 			}
 			if task.ID == "onepassword" && !preview {
-				return runOnePassword(cmd, src, before, task, yes)
+				return runOnePassword(cmd, src, before, task, yes, false)
+			}
+			if task.ID == "nvidia-mok" && !preview {
+				return runMOKVerification(cmd, src, before, task, yes)
 			}
 			if err := renderPostinstall(cmd.OutOrStdout(), postinstallView{Machine: before.view.Machine, Tasks: []postinstall.Task{task}}); err != nil {
 				return err
@@ -183,9 +186,15 @@ func postinstallExecutor(opts *options, flags *machineFlags) *cobra.Command {
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "approve the selected native action after its preview")
 	cmd.Flags().BoolVarP(&preview, "plan", "p", false, "show the selected task without running its action")
-	cmd.Flags().BoolVar(&markDone, "mark-done", false, "acknowledge manual prerequisites; never bypass native verification")
+	if slices.Contains([]string{"onepassword", "nvidia-mok", "proton-cachyos"}, taskID) {
+		cmd.Flags().BoolVar(&markDone, "mark-done", false, "verify existing setup and record completion without applying configuration")
+	}
 	cmd.Flags().BoolVar(&reset, "reset", false, "reset this machine's acknowledgment without changing configuration")
-	cmd.MarkFlagsMutuallyExclusive("plan", "mark-done", "reset")
+	if cmd.Flags().Lookup("mark-done") != nil {
+		cmd.MarkFlagsMutuallyExclusive("plan", "mark-done", "reset")
+	} else {
+		cmd.MarkFlagsMutuallyExclusive("plan", "reset")
+	}
 	return cmd
 }
 
@@ -283,7 +292,7 @@ func renderPostinstall(out io.Writer, view postinstallView) error {
 		_, err := fmt.Fprintf(out, "\u2713 %s\n", view.Tasks[0].Detail)
 		return err
 	}
-	fmt.Fprintf(&b, "Manual tasks for %s\n", view.Machine)
+	fmt.Fprintf(&b, "Setup for %s:\n", view.Machine)
 	if len(view.Tasks) == 0 {
 		fmt.Fprintln(&b, "No pending tasks were identified from the selected capabilities and available observations.")
 	}
@@ -292,7 +301,22 @@ func renderPostinstall(out io.Writer, view postinstallView) error {
 			fmt.Fprintf(&b, "\n\u2713 %s\n", task.Detail)
 			continue
 		}
-		fmt.Fprintf(&b, "\n%s [%s]: %s\n%s\n", task.ID, task.Status, task.Title, task.Detail)
+		if task.ID == "nvidia-mok" && task.Status == postinstall.Unknown {
+			fmt.Fprintf(&b, "\n%s [%s]: Verify NVIDIA signing-key enrollment\n", task.ID, postinstallStatusLabel(task))
+			if task.PreviouslyVerified && task.VerificationNeedsRoot {
+				fmt.Fprintln(&b, "Enrollment was verified earlier; a fresh check requires sudo.")
+			} else {
+				fmt.Fprintln(&b, task.Detail)
+			}
+			if task.VerificationNeedsRoot {
+				fmt.Fprintln(&b, "  Recheck: nimbus postinstall nvidia-mok (requests sudo)")
+				fmt.Fprintln(&b, "The task offers read-only certificate and enrollment checks after approval.")
+			}
+			fmt.Fprintln(&b, "Establish enrollment status before considering enrollment changes.")
+			fmt.Fprintln(&b, "No keys are generated or enrolled. Driver loading is not verified.")
+			continue
+		}
+		fmt.Fprintf(&b, "\n%s [%s]: %s\n%s\n", task.ID, postinstallStatusLabel(task), task.Title, task.Detail)
 		for _, prerequisite := range task.Prerequisites {
 			fmt.Fprintf(&b, "Prerequisite: %s\n", prerequisite)
 		}

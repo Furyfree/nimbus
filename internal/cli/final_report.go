@@ -25,6 +25,10 @@ func inspectFinal(src native.Source, s *selected, result *syncResult, notes bool
 			if t.Status == postinstall.Complete || t.Status == postinstall.NotApplicable {
 				continue
 			}
+			if t.PreviouslyVerified && t.Status == postinstall.Unknown && t.VerificationNeedsRoot {
+				result.Notices = append(result.Notices, t.ID+": Previously verified. "+t.Detail)
+				continue
+			}
 			if t.ID == "reboot" || t.ID == "logout" {
 				result.Notices = append(result.Notices, t.ID+": "+t.Detail)
 				continue
@@ -68,16 +72,28 @@ func renderFinalDetails(out io.Writer, result *syncResult) error {
 			return err
 		}
 	}
-	if len(result.Tasks) > 0 {
-		if _, err := fmt.Fprintln(out, "\nRemaining setup:"); err != nil {
-			return err
-		}
-		for _, t := range result.Tasks {
-			if _, err := fmt.Fprintf(out, "  %s: %s\n    nimbus postinstall %s\n", t.ID, t.Detail, t.ID); err != nil {
+	for _, group := range []struct {
+		title   string
+		problem bool
+	}{{"Remaining setup", false}, {"Verification problems", true}} {
+		shown := false
+		for _, task := range result.Tasks {
+			problem := task.Status == postinstall.Unknown || task.VerificationNeedsRoot
+			if problem != group.problem {
+				continue
+			}
+			if !shown {
+				if _, err := fmt.Fprintf(out, "\n%s:\n", group.title); err != nil {
+					return err
+				}
+				shown = true
+			}
+			if _, err := fmt.Fprintf(out, "  %s: %s\n    nimbus postinstall %s\n", task.ID, task.Detail, task.ID); err != nil {
 				return err
 			}
 		}
 	}
+
 	for _, notice := range result.Notices {
 		if _, err := fmt.Fprintln(out, "Notice: "+notice); err != nil {
 			return err

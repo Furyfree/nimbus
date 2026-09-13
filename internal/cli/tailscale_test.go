@@ -117,7 +117,7 @@ func TestTailscaleOperatorPreviewApprovalVerificationAndRetry(t *testing.T) {
 				}
 				src.Commands["/usr/bin/tailscale debug prefs"] = []byte(`{"WantRunning":false}`)
 				cmd, out = postinstallCommand(root, false, "tailscale-operator", "--plan")
-				if err := cmd.Execute(); err != nil || !strings.Contains(out.String(), "tailscale-operator [pending]") || len(src.streams) != count {
+				if err := cmd.Execute(); err != nil || !strings.Contains(out.String(), "tailscale-operator [Pending]") || len(src.streams) != count {
 					t.Fatalf("revocation status: %v %s", err, out)
 				}
 			}

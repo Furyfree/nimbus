@@ -60,6 +60,18 @@ Nimbus supports:
 | Apply user configuration | `chezmoi apply` |
 | Fetch and apply dotfiles updates | `chezmoi update` |
 
+Nimbus highlights important text with bold, bright terminal colors: green for
+success,
+yellow for pending work and notices, red for failures, and cyan for actions and
+previously verified results. Headings and outcome totals stand out; secondary
+metadata is subdued. Text wraps to your terminal width with indented
+continuations, and setup notes use bullets.
+Pipes, redirected output and JSON stay plain. Set `NO_COLOR=1` to disable colors,
+for example `NO_COLOR=1 nimbus status`. Native tools retain their own output;
+Nimbus styling is excluded from installer logs. Doctor prints each resource
+name once and closes with a check summary. Upgrade previews show the engine
+step first, system sync next and Topgrade last.
+
 ## Guided setup
 
 ~~~sh
@@ -71,17 +83,46 @@ nimbus postinstall onepassword
 nimbus setup-notes
 ~~~
 
-Bare postinstall and its help list task commands. Status is a compact checklist;
+Bare postinstall and its help list task commands. Status uses short verified
+descriptions; task help explains verification limits and JSON retains full
+inspection details. Sudo recheck commands appear on their own indented line.
+Status is a compact checklist;
 reboot and logout appear as notices. Each task previews native changes and checks
 completion. `--yes` approves automation, never manual GUI readiness. Successful
-work is recorded automatically. `--mark-done` acknowledges supported manual
-prerequisites only; `--reset` clears that task's local evidence without undoing
-configuration. Neither can turn missing native setup into a completed task.
+work is recorded automatically. For supported tasks, `--mark-done` confirms
+manual prerequisites and verifies existing setup without installing or applying
+configuration. Completion is recorded only when verification passes. `--reset`
+clears that task's local evidence without undoing configuration.
 
-The 1Password task guides GUI prerequisites, then applies the selected SSH/Git
-integration through Chezmoi and verifies it. Skip manual SSH/Git file edits.
+The 1Password task guides GUI prerequisites and verifies the selected SSH/Git
+integration. Matching configuration needs no apply; changes use a Chezmoi preview
+and approval. Skip manual SSH/Git file edits.
 SSH remains explicitly opt-in through Chezmoi or init's `--onepassword-ssh`.
 Remote SSH access and signing-key registration are separate checks.
+
+For setup you already completed:
+
+~~~sh
+nimbus postinstall onepassword --mark-done
+nimbus postinstall nvidia-mok --mark-done
+~~~
+
+`1password` is also accepted as an alias for `onepassword`. Explicit 1Password
+verification may request authorization through 1Password. After GUI confirmation,
+if the CLI reports that the account is not signed in, Nimbus offers `op signin`
+and retries verification. Already authenticated sessions skip sign-in. This also
+works with `--mark-done` and does not apply configuration files. Sign-in stdout
+is discarded; native prompts stay in your terminal and are not logged.
+
+MOK verification may
+offer read-only sudo commands when the public certificate cannot be read as your
+user; it never enrolls a key. Missing certificates remain blocked. Status never
+requests authentication. When a previously verified certificate requires sudo to
+recheck, status labels it "Previously verified" and final reports show a notice.
+Both show `nimbus postinstall nvidia-mok` to request the sudo check. Run that
+command as your normal user so completion stays in your own local state.
+Missing certificates or observed enrollment failures still appear as setup or
+verification problems.
 
 Nimbus owns the complete catalog in `setup-notes.json` at the checkout root;
 viewing it does not require Chezmoi. Init shows setup notes together. Later syncs
@@ -113,6 +154,14 @@ executable, syncs configuration once, and runs Topgrade once. Its callback stays
 `nimbus upgrade --system`; there is no second configuration apply. Explicit
 system upgrades use refreshed metadata for both preview and execution. One final
 Nimbus report lists changes, failures, remaining setup and session notices.
+Before starting an upgrade transaction, Nimbus checks the full DNF transaction
+and fresh system Flatpak update metadata. When both are current, it skips the
+transaction and its snapshots. Failed checks stop the upgrade.
+
+Routine output groups matching-file ownership refreshes and snapshot results.
+Replanning shows only changes to remaining operations; informational notices
+stay separate from differences. Native transaction progress and errors remain
+visible. Use `sync --plan` for the complete local plan, including matching paths.
 
 Common installs ble.sh from the owner's COPR; the desktop profile selects the
 Noctalia-compatible LibrePods fork from its own COPR. Copilot's helper upgrade
@@ -264,6 +313,7 @@ Each directory is one package; files inside it group related code by topic.
 | Package | Job |
 | --- | --- |
 | `cli` | Commands, prompts, orchestration and output |
+| `output` | Shared terminal styling; native writer preservation |
 | `definitions` | Load and resolve the TOML selections |
 | `inspect` | Read installed state together or by package/source family |
 | `native` | Execute commands and access files; callers decide what is allowed |

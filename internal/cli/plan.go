@@ -27,6 +27,12 @@ const planWidth = 80
 // update list is plan's information; apply passes listUpdates false and
 // gets one line.
 func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
+	return renderPlanView(p, prune, listUpdates, false)
+}
+func renderExecutionPlan(p *plan.Plan, prune, listUpdates bool) []byte {
+	return renderPlanView(p, prune, listUpdates, true)
+}
+func renderPlanView(p *plan.Plan, prune, listUpdates, compact bool) []byte {
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "plan for %s", p.Machine)
 	if p.Checkout.Commit != "" {
@@ -44,7 +50,9 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 		case p.Snapshots.Setup:
 			fmt.Fprintln(&b, "Snapper: initialize root snapshots after this first sync. This setup run has no before snapshot.")
 		default:
-			fmt.Fprintln(&b, "Snapper: before/after root snapshots for system changes, then native number cleanup; no snapshots for previews or unchanged sync.")
+			if systemChanges(p) || listUpdates {
+				fmt.Fprintln(&b, "Snapper: snapshot system changes and apply configured retention.")
+			}
 		}
 		if storage := p.Snapshots.Reuse; storage != nil {
 			fmt.Fprintln(&b, "Snapper: reuse the empty mounted /.snapshots subvolume.")
@@ -56,15 +64,15 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 			fmt.Fprintf(&b, "Snapper settings: %s\n", strings.Join(changes, ", "))
 		}
 	}
-	if p.RepositoryReconciliation != "" {
-		fmt.Fprintf(&b, "%s\n", p.RepositoryReconciliation)
+	if p.RepositoryReconciliation != "" && (systemChanges(p) || listUpdates) {
+		fmt.Fprintln(&b, "After package changes: reconcile duplicate package sources.")
 	}
 
 	var sources, problems, notes, userTools []string
 	var resources []plan.Operation
 	var installTx *plan.Operation
 	var pendingNames, flatpaks, removals []string
-	adopted, kept := 0, 0
+	adopted, kept, matchingFiles := 0, 0, 0
 	noted := map[string]bool{}
 	for i := range p.Operations {
 		op := &p.Operations[i]
@@ -75,6 +83,9 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 		// The same note from several operations, such as every crate
 		// waiting for the Rust runtime, is shown once.
 		for _, n := range op.Notes {
+			if compact && op.Action == plan.ActionKeep && plan.IsConstraintOperation(*op) {
+				continue
+			}
 			if !noted[n] {
 				noted[n] = true
 				notes = append(notes, n)
@@ -85,6 +96,10 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 			kept++
 			continue
 		case plan.ActionAdopt:
+			if compact && op.Kind == plan.KindFile {
+				matchingFiles++
+				continue
+			}
 			adopted++
 			if isSystemResource(op.Kind) {
 				resources = append(resources, *op)
@@ -228,6 +243,9 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 	}
 	if adopted+kept > 0 {
 		b.WriteString("\n")
+	}
+	if matchingFiles > 0 {
+		fmt.Fprintf(&b, "Refresh ownership records for %d matching files; contents unchanged (paths: sync --plan).\n", matchingFiles)
 	}
 	if adopted > 0 {
 		fmt.Fprintf(&b, "adopt %d already installed\n", adopted)
