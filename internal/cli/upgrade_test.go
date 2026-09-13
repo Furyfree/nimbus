@@ -151,7 +151,7 @@ func TestSystemUpgradeDoesNotReconcileUnrelatedDrift(t *testing.T) {
 	t.Setenv("NIMBUS_UPGRADE_CHECKOUT", root)
 	t.Setenv("NIMBUS_UPGRADE_MACHINE", "vm")
 	code, out, errOut := run(t, "upgrade", "--system", "--yes")
-	if code != ExitOK || !slices.Equal(src.calls, []string{"sudo dnf5 -y upgrade"}) {
+	if code != ExitOK || !slices.Equal(src.calls, []string{"sudo dnf5 --setopt=cacheonly=metadata -y upgrade"}) {
 		t.Fatalf("%d: %s%s; %v", code, out, errOut, src.calls)
 	}
 	if strings.Contains(out, "install missing") {

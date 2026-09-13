@@ -51,12 +51,45 @@ Nimbus supports:
 | Preview system changes | `nimbus sync --plan` |
 | Update definitions, system setup and user configuration | `nimbus sync` |
 | Update installed software | `nimbus upgrade` |
-| Sync setup, upgrade software, then sync again | `nimbus sync --upgrade` |
-| Finish manual setup | `nimbus postinstall` |
+| Update Nimbus, sync once, then upgrade software | `nimbus sync --upgrade` |
+| List setup commands | `nimbus postinstall --help` |
+| Check remaining setup | `nimbus postinstall status` |
+| Review setup guidance | `nimbus setup-notes` |
 | Diagnose a problem | `nimbus doctor` |
 | Preview user configuration | `chezmoi diff` |
 | Apply user configuration | `chezmoi apply` |
 | Fetch and apply dotfiles updates | `chezmoi update` |
+
+## Guided setup
+
+~~~sh
+nimbus postinstall
+nimbus postinstall status
+nimbus postinstall onepassword --help
+nimbus postinstall onepassword --plan
+nimbus postinstall onepassword
+nimbus setup-notes
+~~~
+
+Bare postinstall and its help list task commands. Status is a compact checklist;
+reboot and logout appear as notices. Each task previews native changes and checks
+completion. `--yes` approves automation, never manual GUI readiness. Successful
+work is recorded automatically. `--mark-done` acknowledges supported manual
+prerequisites only; `--reset` clears that task's local evidence without undoing
+configuration. Neither can turn missing native setup into a completed task.
+
+The 1Password task guides GUI prerequisites, then applies the selected SSH/Git
+integration through Chezmoi and verifies it. Skip manual SSH/Git file edits.
+SSH remains explicitly opt-in through Chezmoi or init's `--onepassword-ssh`.
+Remote SSH access and signing-key registration are separate checks.
+
+Nimbus owns the complete catalog in `setup-notes.json` at the checkout root;
+viewing it does not require Chezmoi. Init shows setup notes together. Later syncs
+show only new or revised guidance;
+`setup-notes` always shows all applicable notes without changing state. Display
+history and task evidence are separate private files under
+`${XDG_STATE_HOME:-~/.local/state}/nimbus/`, scoped by machine and never synced.
+Status rechecks native configuration, so old completion cannot hide missing files.
 
 ## Current checkout
 
@@ -70,13 +103,16 @@ the field stops managing the preference and keeps the current login shell.
 The field requires the 0.4.1 engine; update the Nimbus RPM before
 using these definitions. `nimbus why login-shell` explains its selection.
 
-From Nimbus 0.4.0, `nimbus sync` updates
-the Nimbus and configured Chezmoi repositories, shows the system plan, applies
-approved changes, then asks to apply Chezmoi configuration and its scripts.
-`sync --upgrade` first completes that sync so newly selected repositories,
-packages and Topgrade configuration are ready. It then runs Topgrade and starts
-the updated Nimbus executable for a final sync. This order requires engine
-0.4.2 or newer. Topgrade's callback remains `nimbus upgrade --system`.
+The maintenance workflow requires Nimbus 0.5.0 or newer. Both sync forms
+request sudo first and check fresh Nimbus RPM metadata before fetching either
+repository. Plain `sync` stops when an engine update is available and directs
+you to `sync --upgrade`. Failed checks stop clearly.
+
+`sync --upgrade` upgrades Nimbus first when needed, verifies and restarts the
+executable, syncs configuration once, and runs Topgrade once. Its callback stays
+`nimbus upgrade --system`; there is no second configuration apply. Explicit
+system upgrades use refreshed metadata for both preview and execution. One final
+Nimbus report lists changes, failures, remaining setup and session notices.
 
 Common installs ble.sh from the owner's COPR; the desktop profile selects the
 Noctalia-compatible LibrePods fork from its own COPR. Copilot's helper upgrade
@@ -84,9 +120,9 @@ queues the app installation. No separate COPR-enable or package-install
 commands are needed after the engine is current. Bash loads ble.sh in a new
 terminal; LibrePods starts at the next graphical login when Bluetooth exists.
 
-An older installed engine cannot read definitions that introduce new fields.
-For the initial transition to 0.4.2, run `sudo dnf upgrade --refresh nimbus`
-once, then use `nimbus sync --upgrade` for routine updates.
+Older releases may need a one-time `sudo dnf upgrade --refresh nimbus` to obtain
+this workflow once published. After that transition, `nimbus sync --upgrade`
+owns the fresh engine check and update; no recurring manual DNF command is needed.
 
 Both repositories must be clean and track an approved origin. Local edits,
 local-only commits or diverged history stop the run with the repository path
@@ -123,8 +159,9 @@ let Noctalia initialize its sources at desktop startup, then retry.
 Nimbus waits up to two minutes for readable manifests and entry scripts;
 queued background work alone is not success. Retry after a failed download.
 Plugin selections, sources, bar aliases and overrides remain owned by
-Chezmoi/Noctalia; Nimbus stores no plugin list or completion receipt. A complete
-task proves runtime files are present, not account readiness or widget behavior.
+Chezmoi/Noctalia; Nimbus stores no plugin list or privileged completion receipt.
+A complete task proves runtime files are present, not account readiness or widget
+behavior.
 Use engine 0.4.5 or newer so verification retries while background updates
 settle. The task first appeared in 0.4.4.
 
@@ -149,7 +186,7 @@ readiness rather than checking remote releases on every run. Use `hyprpm update`
 for routine plugin updates. For removal, first set `enabled = []` in the
 Chezmoi selection, then use `hyprpm disable yayuuu/scrolloverview` or
 `hyprpm remove yayuuu/hyprland-scroll-overview`. Nimbus does not remove plugins
-when they are deselected or write a completion receipt.
+when they are deselected or write a privileged completion receipt.
 
 The `hyprland-noctalia` profile selects a minimal greeter appearance from
 `/etc/noctalia/greeter.toml`: Inter, no logo or theme selector, power controls
@@ -182,7 +219,7 @@ to inspect only. The task calls AccountsService's `SetIconFile` through
 bytes with the source. Matching pictures need no action; a missing or invalid
 source blocks setup. AccountsService owns its copy and the greeter reads it
 next time it starts. Re-run after changing the source, or replace/clear it in
-your desktop's account settings. No completion receipt or automatic wallpaper
+your desktop's account settings. No privileged completion receipt or automatic wallpaper
 processing is added. This task requires engine 0.4.6 or newer.
 
 With Tailscale selected and installed, `nimbus postinstall tailscale-operator`
@@ -263,3 +300,21 @@ VM; see the [candidate guide](tools/vm/README.md).
 The product docs are SPEC, TASKS and ROADMAP; TOML files own the package list.
 Releases and COPR publication are separate manual actions, described in the
 [release guide](tools/release/README.md).
+
+## Test an unpublished maintenance candidate
+
+Run the local gates, then the signed-RPM regression in disposable Fedora:
+
+~~~sh
+just check
+just validate
+python3 -I -B tools/vm/maintenance/run.py
+~~~
+
+The last command builds a local Docker image and two test RPMs, then uses a
+network-disabled container with an ephemeral signing key and package source.
+It leaves the developer's packages, repositories and desktop untouched. It tests
+stale-cache detection, signed engine replacement, restart, argument preservation
+and reporting after a later failure. Docker images/build cache remain local;
+no artifacts are published. Full init/login and real GUI setup still need a
+[disposable VM trial](tools/vm/README.md).

@@ -68,9 +68,8 @@ Shell, editor, browser, desktop, Noctalia and per-user systemd configuration
 below the home directory belong to Chezmoi. Vendor-generated service units,
 such as Zeron's native installer output, stay with that vendor's lifecycle.
 Requiring sudo for a system change does not authorize writing a user's dotfiles.
-Nimbus's own selector, checkout
-and private diagnostics are operational state, not a second user-configuration
-collection.
+Nimbus's selector, checkout, private diagnostics, note display history and setup
+evidence are operational state, not a second user-configuration collection.
 
 The NVIDIA component masks RPM Fusion's `nvidia-settings -l` login loader
 through an empty, root-owned unit file under `/etc/systemd/user`. This is a
@@ -129,6 +128,7 @@ does not audit application source or test every installed application's UI.
 | `system/root/etc/` | Sources for generic managed files below `/etc` |
 | `~/.config/nimbus/config.toml` | Checkout, machine ID and approved origin |
 | `/var/lib/nimbus` | Applied-state records and package baseline |
+| `$XDG_STATE_HOME/nimbus/` | Private note history and setup evidence |
 
 The selector holds no desired package or configuration state. Definitions are
 strict, versioned TOML. Invalid references, conflicts and dependency cycles
@@ -255,9 +255,11 @@ refreshes metadata.
 | `nimbus status` | Summarize drift and pending work |
 | `nimbus sync` | Update repositories, reconcile the system, apply Chezmoi |
 | `nimbus upgrade` | Update installed software through Topgrade |
-| `nimbus sync --upgrade` | Sync setup, upgrade software, then sync again |
-| `nimbus postinstall` | List pending, blocked or unconfirmed manual tasks |
-| `nimbus postinstall TASK` | Show instructions or offer one native action |
+| `nimbus sync --upgrade` | Update Nimbus, sync once, then run Topgrade |
+| `nimbus postinstall` | Show task commands and help |
+| `nimbus postinstall status` | Compact machine-specific setup checklist |
+| `nimbus setup-notes` | Display all applicable guidance, read-only |
+| `nimbus postinstall TASK` | Guide setup and verify completion |
 | `nimbus doctor` | Report health problems and possible fixes; never repair |
 
 Init reuses the trusted selector or asks for a tracked machine on first use.
@@ -271,17 +273,23 @@ Optional 1Password SSH integration is an explicit opt-in.
 
 Ordinary sync follows this order:
 
-1. Check the Nimbus checkout and the machine's configured Chezmoi source
-   repository before system or user-configuration changes. Both must be clean,
-   on an attached branch tracking their approved `origin`, with no local-only
-   commits. Missing Chezmoi initialization requires `nimbus init`.
-2. Fetch both repositories and require fast-forward history. Update to the
-   checked commits without stashing, resetting or overwriting local files,
-   including ignored files. Reload and validate the updated definitions.
-3. Inspect the system, show its plan and apply after approval.
-4. Ask separately before running `chezmoi apply`, including its configured
-   scripts and tools. Refresh changed shared profile IDs while preserving
-   the existing 1Password SSH choice. `--yes` approves both apply stages.
+1. Resolve selector/argument identity without decoding definitions. Validate the
+   platform and request sudo credentials. Authentication does not approve a
+   transaction.
+2. Refresh the configured `nimbus-engine` RPM repository in the privileged DNF
+   cache. DNF identifies upgrades using RPM ordering and configured exclusions.
+   A failed refresh or query stops the run. If a newer RPM exists, stop before
+   either Git fetch and direct the user to `sync --upgrade`.
+3. Check both approved repositories for clean, attached, tracking branches
+   without local-only commits. Fetch both and require fast-forward history.
+   Update without stashing, resetting or overwriting local or ignored files.
+4. Reload definitions, inspect the system, preview changes and apply only after
+   approval. No-op reconciliation creates no system snapshots.
+5. Ask before applying Chezmoi once, including its scripts and tools. Refresh
+   shared profile IDs while preserving the explicit 1Password SSH choice.
+   `--yes` approves automated apply stages, never manual GUI confirmations.
+6. Inspect remaining setup and effective configuration, display new or revised
+   guidance, and produce one final report. This inspection does not apply again.
 
 The Chezmoi stage uses the source already fetched; it does not run
 `chezmoi update` and fetch a second revision. A machine without a dotfiles
@@ -325,7 +333,7 @@ image content rather than paths, since AccountsService owns its stored copy.
 Bind approval to the source and current icon hashes; re-inspect before the
 fixed `SetIconFile` call through busctl with native authorization enabled.
 Verify the saved bytes after execution; failed or ineffective calls do not
-complete the task. Store no completion receipt and never write the daemon's
+complete the task. Store no privileged resource receipt and never write the daemon's
 files directly. Missing source blocks setup; unknown account state offers no
 action. Package deselection leaves the account preference in place. See
 [README](../README.md) for the dotfiles handoff, command and
@@ -341,15 +349,32 @@ arguments follow `--`. System and application updates run once, and failure
 or cancellation of the system phase stops dependent work. Independent user
 steps may continue after a failure, but the final result remains unsuccessful.
 
-`sync --upgrade` first performs the full repository, system and Chezmoi sync.
-This prepares newly selected package sources and update configuration before
-Topgrade requires them. Failed or declined setup stops before upgrading.
-Topgrade then upgrades installed software once. If it succeeds, a fresh Nimbus
-process at the original executable path performs the final sync, using the
-updated engine if DNF replaced it. A failed upgrade stops before that final
-sync. Each sync owns its operation lock, plan, approvals and report. `--yes`
-approves the sync stages; Topgrade and native helpers retain their prompts.
-Standalone `upgrade` does not update either repository itself.
+`sync --upgrade` performs the same fresh engine check first. When an update
+exists, show the engine transaction and disclose dependencies; DNF retains its
+native transaction prompt unless `--yes` was supplied. Restrict the requested
+Nimbus package to `nimbus-engine`, require its effective enabled/signature/TLS
+settings, retain native dependency
+sources, and never enable testing or permit erasing to satisfy an update.
+Verify the installed RPM and replacement executable version, release the engine
+operation lock, and restart at the RPM-owned executable path. Preserve machine,
+checkout, upgrade, approval and prune arguments. A second available update during
+restart stops with retry advice instead of looping.
+
+The updated process performs one configuration sync and one Topgrade run. There
+is no second Git fetch or Chezmoi apply. A failed engine update or sync skips
+later phases. The Topgrade callback uses a private temporary report to return
+system changes and failures to the parent. The parent combines these with the
+configuration result; native Topgrade output remains visible. Unresolved native
+failures retain unsuccessful exit status. Standalone `upgrade` still delegates
+to Topgrade without fetching repositories.
+
+Explicit system upgrades refresh all enabled repositories with unavailable
+sources treated as errors. Cached planning queries and the transaction use the
+same privileged cache. Package downloads remain enabled. The approved
+transaction uses `--setopt=cacheonly=metadata`, so it cannot
+silently refresh to different metadata during execution. Plan-only commands use
+the existing unprivileged cache, disclose that limitation, and never authenticate
+or refresh. Native solver changes and actual differences remain reported.
 
 Topgrade must not call sync or recursively invoke `nimbus upgrade`. The
 callback is `nimbus upgrade --system`. It updates RPMs and system Flatpaks and
@@ -360,6 +385,53 @@ install missing selected apps, edit files or reconcile services. Other drift
 remains for sync. Explicit checkout/machine overrides pass through the wrapper
 to this callback. Upgrading software must not silently change machine
 selections.
+
+## Setup guidance, local state and reports
+
+Nimbus owns the schema-1 `setup-notes.json` catalog at its checkout root and
+reads it directly from the selected checkout. No Chezmoi installation, external
+command or catalog handoff is required. Profile filters select applicable notes;
+`requires_dotfiles` limits configuration guidance to machines declaring dotfiles.
+IDs and revisions stay stable when catalog storage changes; revisions change
+when required user action changes. The explicit command displays applicable
+notes without changing display history or task completion.
+Init shows applicable notes together; subsequent successful syncs show only
+unseen revisions. Only successfully written output consumes a note revision.
+Failed runs preserve unseen guidance for retry.
+
+The independent local store uses `$XDG_STATE_HOME/nimbus`, falling back to
+`~/.local/state/nimbus`. `setup-notes.json` records displayed revisions;
+`postinstall.json` records manual confirmations and verified completion evidence.
+Schema-1 records are scoped by selected machine and contain IDs, revisions,
+timestamps and evidence sources. The 1Password completion record also holds a
+digest of verified local files and the SSH selection, never their contents.
+Enabling SSH requires a new confirmation of its additional GUI prerequisites.
+Changes invalidate that evidence without contacting the vault during status.
+Files are private, atomically replaced and protected against concurrent writers;
+corrupt or unreadable state is reported and preserved. Help, status and previews
+never create it. Missing state means unseen guidance and unconfirmed manual
+steps; native checks can already recognize completed automatic setup. Native
+state always takes precedence over stored completion. User state is never
+managed by Chezmoi or committed, and is separate from `/var/lib/nimbus` receipts.
+
+Init retains installation logging and prerequisite ordering. Selected 1Password
+access is checked before secret-backed rendering; failure preserves selection
+and completed installation work for retry. Public native output is streamed
+through a pseudo-terminal when interactive logging requires it, retaining
+resizing, cancellation and terminal restoration. The Mise component supplies
+Fedora's `util-linux-script` for Chezmoi's native tool-log relay. Authentication
+input and
+secret-capable Chezmoi output stay outside transcripts. Quiet logged inspection
+and repository fetches report elapsed time. No progress percentage is invented.
+Direct init retains its compatible-definition validation before installation;
+it does not silently upgrade itself or fetch repositories.
+
+One closing report distinguishes completed changes, failed and skipped phases,
+remaining guided tasks, new guidance and session activation notices. It includes
+known Noctalia GUI overrides that disable managed lockscreen widgets without
+modifying preferences. An unavailable check is reported, never treated as proof
+of a matching effective desktop. File checks do not certify visual or hardware
+behavior. Native Topgrade summaries are not rewritten as Nimbus output.
 
 ## Software selection
 
@@ -437,17 +509,38 @@ and do not install browsers or write their configuration. They need no plan
 or extra confirmation. Chezmoi owns webapp desktop entries. Use native
 `xdg-terminal-exec` for terminal desktop entries rather than another wrapper.
 
-Post-install task IDs include `onepassword`, `fingerprint`, `nvidia-mok`,
-`copilot`, `wowup`, `proton-cachyos`, `reboot` and `logout`, when relevant to the
-machine. Copilot calls its helper's standalone install command. WoWUp is
-blocked until its helper supplies that command. Nimbus does not mark an app
-installed merely because its helper RPM exists. Opening 1Password does not
-prove sign-in. Fingerprint enrollment may run the native tool after approval. MOK,
-reboot and logout tasks provide instructions; they do not silently perform
-those actions. Listing tasks never changes the machine.
-Selecting a completed task shows only its verified result, without the setup
-title, action instructions or recovery guidance. Successful actions use the
-same concise completion output; unsuccessful actions retain diagnostic detail.
+Both bare `postinstall` and `postinstall --help` show task commands without
+inspection. Each named task has its own help and `--plan`; `postinstall status`
+shows applicable tasks and session notices. JSON is read-only: status and task
+previews are supported, execution is not. Reboot/logout remain notices rather
+than commands. Inspection reports Pending, Verified, Blocked or Unable to check
+with a specific reason.
+
+Guided tasks show prerequisites, request explicit confirmation where required,
+preview native actions, acquire the operation lock and recheck before execution.
+They verify native results and record successful completion automatically. Exit
+zero alone is insufficient. Existing verified tasks need no repeated native
+action. `--mark-done` acknowledges only supported manual prerequisites; it never
+executes automation or overrides required checks. `--reset` clears the selected
+machine's manual and completion evidence without undoing configuration.
+
+1Password guides sign-in/unlock and desktop CLI integration, plus its SSH agent
+when already selected. It tells the user to skip manual SSH/Git file edits.
+Manual readiness requires terminal confirmation; `--yes` cannot supply it.
+The guided task checks CLI access without displaying account output, previews
+only selected Chezmoi SSH/public-selector/agent/Git targets, approves and applies
+those targets with scripts excluded, then verifies files and agent readiness.
+SSH remains explicitly opt-in. It never creates replacement keys or tests remote
+authentication or account-side signing registration. Native inspection checks
+required packages, CLI availability and the current local configuration;
+status never opens the vault. It explicitly distinguishes previously confirmed
+GUI readiness from current unlock state, which it does not inspect.
+
+Copilot uses its helper's read-only status and standalone install command.
+ProtonPlus lists native Steam runners before and after installation. These
+native results override old completion evidence. WoWUp remains blocked until
+its helper supplies standalone installation. Fingerprints and MOK retain native
+checks; MOK enrollment still requires the firmware procedure.
 
 When native Steam and ProtonPlus are selected and recorded, `proton-cachyos`
 offers `protonplus install steam-system proton-cachyos latest` after approval.
@@ -472,7 +565,7 @@ unreadable or incomplete verification results while the update settles.
 Retries only inspect state; they never repeat source-update commands. At the
 deadline, report the latest verification problem as failure, preserving native
 partial results for retry. No second plugin catalog, managed runtime files or
-completion receipts are created. Run this action inside the desktop session
+privileged completion receipts are created. Run this action inside the desktop session
 after Chezmoi apply; init and sync do not start a desktop or silently download
 plugins.
 Installation verification does not claim account readiness or widget behavior.
@@ -502,7 +595,7 @@ before continuing, including builds whose native command returned zero.
 Failure retains HyprPM's partial state for retry. Completion requires build,
 enablement, live loading and applied overview configuration; appearance still
 needs user testing. No automatic setup during sync, custom plugin copies,
-cache edits or completion receipts. Native disable/remove owns removal.
+cache edits or privileged completion receipts. Native disable/remove owns removal.
 
 FDE auto-unlock is a planned optional post-install action, before the dashboard.
 It must inspect the existing encryption and boot setup, show the proposed
@@ -550,8 +643,9 @@ back does not promise package downgrades or reversal of every side effect.
 
 Human output is the default. Structured Nimbus data uses a versioned JSON
 format. Launchers and delegated terminal output need not support JSON.
-Post-install JSON lists tasks only. Ordinary exit codes are 0 for success, 1
-for failure and 2 for invalid usage; delegated upgrades preserve native failure
+Post-install JSON inspects status or a task preview only. Ordinary exit codes
+are 0 for success, 1 for failure and 2 for invalid usage; delegated upgrades
+preserve native failure
 status. Authentication and secret-bearing output must not enter logs.
 
 ## Desktop and recovery
@@ -683,9 +777,10 @@ The CLI follows this flow; the future TUI must reuse the same operations:
 load definitions -> inspect -> plan -> approve -> recheck -> apply -> report
 ~~~
 
-Public sync first checks and updates repositories through `checkout`, then
-uses this system flow and offers Chezmoi apply. The upgrade wrapper runs
-Topgrade before starting sync in a fresh executable.
+Public sync refreshes and checks the installed engine before reading
+definitions or fetching repositories, then uses this system flow and offers
+Chezmoi apply. Combined upgrade
+restarts after an engine replacement, syncs once, and finishes with Topgrade.
 
 `internal/definitions` resolves desired state, `inspect` reads native state,
 `plan` compares them, `apply` executes native operations, and `state` records

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -41,58 +40,44 @@ func runMaintenance(cmd *cobra.Command, opts *options, flags machineFlags, sf sy
 				return err
 			}
 		}
-		if _, err := fmt.Fprintln(out, "Preview uses local definitions. A normal sync updates clean Nimbus and Chezmoi repositories first, then reconciles the system and offers to apply Chezmoi configuration and its scripts."); err != nil {
+		if _, err := fmt.Fprintln(out, "Preview uses local definitions. Execution first requests sudo and refreshes the Nimbus RPM check. It then updates clean repositories, reconciles the system and applies Chezmoi once after approval."); err != nil {
 			return err
 		}
 		return runSync(cmd, opts, flags, sf)
 	}
 
-	if upgrade {
-		// Reconcile new package sources and the Topgrade configuration before
-		// the upgrade callback requires them. Each sync retains its own plan,
-		// approvals, report and operation lock.
-		executable, err := syncExecutable()
-		if err != nil {
-			return fmt.Errorf("locate Nimbus before upgrade: %w", err)
-		}
-		if _, err := fmt.Fprintln(out, "Sync package sources, system setup and user configuration before upgrading software."); err != nil {
-			return err
-		}
-		if err := runMaintenance(cmd, opts, flags, sf, false); err != nil {
-			return err
-		}
-		// Preserve the selected machine and checkout across the child process.
-		s, err := loadSelected(flags)
-		if err != nil {
-			return err
-		}
-		flags = machineFlags{checkout: s.Root, machine: s.Resolved.Machine}
-		if err := runTopgrade(cmd, nil, false, flags); err != nil {
-			return err
-		}
-		if _, err := fmt.Fprintln(out, "Software upgrade completed. Starting a fresh Nimbus process for final sync."); err != nil {
-			return err
-		}
-		args := []string{"sync", "--checkout", flags.checkout, "--machine", flags.machine}
-		if sf.yes {
-			args = append(args, "--yes")
-		}
-		if sf.prune {
-			args = append(args, "--prune")
-		}
-		child := exec.CommandContext(cmd.Context(), executable, args...)
-		child.Stdin, child.Stdout, child.Stderr = cmd.InOrStdin(), out, cmd.ErrOrStderr()
-		return runChild(child)
+	flags, err := maintenanceSelection(flags)
+	if err != nil {
+		return err
 	}
-
+	src := newSource()
+	if err := inspect.CheckPlatform(src, []string{"44"}); err != nil {
+		return err
+	}
+	stopSudo, err := sudoKeepalive(src, out, cmd.ErrOrStderr())
+	if err != nil {
+		return err
+	}
+	defer stopSudo()
 	result := syncResult{Executed: []string{}, Differences: []string{}}
 	var steps []runStep
-	phase := "repository preflight"
+	var restarted bool
+	phase := "Nimbus update"
+	var finalSelection *selected
 	defer func() {
+		if restarted {
+			return
+		}
 		result.Steps = append(steps, result.Steps...)
 		if retErr != nil && result.Error == "" {
 			result.Failed, result.Error = phase, retErr.Error()
 			result.Steps = append(result.Steps, runStep{Name: phase, Status: "failed", Detail: result.Error})
+		}
+		if retErr != nil {
+			skippedMaintenance(&result, phase, upgrade)
+		}
+		if finalSelection != nil {
+			inspectFinal(src, finalSelection, &result, retErr == nil, false)
 		}
 		var err error
 		if opts.json {
@@ -100,18 +85,32 @@ func runMaintenance(cmd *cobra.Command, opts *options, flags machineFlags, sf sy
 		} else {
 			err = result.render(out, false)
 		}
+		if err == nil && finalSelection != nil {
+			err = rememberNotes(finalSelection.Resolved.Machine, result.Notes)
+		}
 		if err != nil {
 			retErr = errors.Join(retErr, err)
 		} else if retErr != nil && !isNativeExit(retErr) {
 			retErr = reported{}
 		}
 	}()
+	engine, restarted, err := enginePreflight(cmd, src, flags, sf, upgrade)
+	if restarted || err != nil {
+		return err
+	}
+	status := "current"
+	if os.Getenv(engineRestart) != "" {
+		status = "updated"
+	}
+	steps = append(steps, runStep{Name: "Nimbus", Status: status, Detail: engine})
+	phase = "repository preflight"
+
 	s, err := loadSelected(flags)
 	if err != nil {
 		return err
 	}
 	flags = machineFlags{checkout: s.Root, machine: s.Resolved.Machine}
-	src := newSource()
+	finalSelection = s
 	if err := inspect.CheckPlatform(src, s.Checkout.Definitions().Compatibility.Fedora); err != nil {
 		return err
 	}
@@ -132,14 +131,11 @@ func runMaintenance(cmd *cobra.Command, opts *options, flags machineFlags, sf sy
 	if err != nil {
 		return fmt.Errorf("%w\nNo system or user configuration changes were applied", err)
 	}
-	if _, err := fmt.Fprintln(out, "Update the clean repositories by fast-forward only; never stash, reset or overwrite local changes."); err != nil {
-		return err
-	}
 	for _, repo := range repos {
 		if err := cmd.Context().Err(); err != nil {
 			return err
 		}
-		if err := repo.Prepare(src); err != nil {
+		if err := native.Activity(out, "fetch "+repo.Name, func() error { return repo.Prepare(src) }); err != nil {
 			return fmt.Errorf("%w\nNo system or user configuration changes were applied", err)
 		}
 	}
@@ -162,6 +158,7 @@ func runMaintenance(cmd *cobra.Command, opts *options, flags machineFlags, sf sy
 	if err != nil {
 		return fmt.Errorf("repositories updated, but definitions could not be loaded: %w\nUpdate the Nimbus RPM if a newer engine is required; no system or user configuration changes were applied", err)
 	}
+	finalSelection = s
 	freshRepos, err := maintenanceRepositories(src, s)
 	if err != nil {
 		return err
@@ -179,32 +176,44 @@ func runMaintenance(cmd *cobra.Command, opts *options, flags machineFlags, sf sy
 	if err := runSyncWith(cmd, opts, flags, sf, lock); err != nil {
 		return err
 	}
-	if len(repos) == 1 {
-		return nil
-	}
-	phase = "Chezmoi apply"
-	if _, err := fmt.Fprintln(out, "System sync completed. Apply the updated Chezmoi configuration and its declared scripts/tools?"); err != nil {
-		return err
-	}
-	if !sf.yes && !approver(cmd.InOrStdin(), out, "") {
-		return errors.New("system sync completed; Chezmoi apply was declined. Run nimbus sync again when ready")
-	}
-	if err := cmd.Context().Err(); err != nil {
-		return err
-	}
-	// Check again after the system phase and its approval prompts.
-	for _, repo := range freshRepos {
-		if err := repo.Check(src); err != nil {
+	if len(repos) > 1 {
+		phase = "Chezmoi apply"
+		if _, err := fmt.Fprintln(out, "System sync completed. Apply the updated Chezmoi configuration and its declared scripts/tools?"); err != nil {
+			return err
+		}
+		if !sf.yes && !approver(cmd.InOrStdin(), out, "") {
+			return errors.New("system sync completed; Chezmoi apply was declined. Run nimbus sync again when ready")
+		}
+		if err := cmd.Context().Err(); err != nil {
+			return err
+		}
+		// Check again after the system phase and its approval prompts.
+		for _, repo := range freshRepos {
+			if err := repo.Check(src); err != nil {
+				return fmt.Errorf("system sync completed; Chezmoi was not applied: %w", err)
+			}
+		}
+		if _, err := maintenanceRepositories(src, s); err != nil {
 			return fmt.Errorf("system sync completed; Chezmoi was not applied: %w", err)
 		}
+		if err := applyMaintenanceDotfiles(src, out, s); err != nil {
+			return fmt.Errorf("system sync completed, but Chezmoi apply failed; user configuration may be partly updated. Fix the Chezmoi error and run nimbus sync again: %w", err)
+		}
+		result.Steps = append(result.Steps, runStep{Name: phase, Status: "succeeded"})
 	}
-	if _, err := maintenanceRepositories(src, s); err != nil {
-		return fmt.Errorf("system sync completed; Chezmoi was not applied: %w", err)
+	// Release the system lock before Topgrade's separate system callback.
+	if err := lock.Release(); err != nil {
+		return err
 	}
-	if err := applyMaintenanceDotfiles(src, out, s); err != nil {
-		return fmt.Errorf("system sync completed, but Chezmoi apply failed; user configuration may be partly updated. Fix the Chezmoi error and run nimbus sync again: %w", err)
+	lock = nil
+	if upgrade {
+		phase = "software updates"
+		if err := runMaintenanceUpgrade(cmd, flags, &result); err != nil {
+			return err
+		}
+		result.Steps = append(result.Steps, runStep{Name: phase, Status: "succeeded"})
 	}
-	result.Steps = append(result.Steps, runStep{Name: phase, Status: "succeeded"})
+	phase = "final inspection"
 	return nil
 }
 

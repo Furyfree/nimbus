@@ -341,6 +341,11 @@ Chezmoi. SSH server access stays unmanaged, and the Windows VM stays deferred.
 
 ### Engine and integration work
 
+- [x] Implement the approved
+  [maintenance/setup proposal](ROADMAP.md#review-draft-maintenance-and-setup-workflows),
+  including independent local note/task state and consolidated final reporting.
+  Candidate validation and remaining operator trials are recorded below.
+
 - [x] Enable native greeter auto-sync through Chezmoi and refresh the desktop
   wallpaper. On 2026-09-13, the effective setting is true and the native sync
   helper completed with exit status 0 through run0. No login session was ended.
@@ -620,3 +625,67 @@ opt-in Neovim downloads and opt-in Zathura GUI checks. Isolated Chezmoi
 managed/status/diff pass; verify reports expected drift against an empty home.
 No apply was run. The startup guard is exercised with zero, one and multiple
 Bluetooth adapters; the next real login remains untested.
+
+## Maintenance and setup candidate, 2026-09-13
+
+- [x] Engine check/update precedes definitions and Git fetches. Fresh root DNF
+  metadata, enabled trusted source checks, native RPM ordering and replacement
+  verification fail closed. Restart preserves selection and flags. Configuration
+  sync and Topgrade run once, with the system callback's report merged at the end.
+- [x] Init keeps visible native progress with logging, checks selected secret
+  prerequisites before rendering, and reports partial work, differences, notes
+  and remaining setup together. Bootstrap still validates the obtained engine
+  before init; direct init retains compatibility rejection, without self-update.
+- [x] Named postinstall help/status/plan, guided confirmations, verification,
+  reset and manual acknowledgment. Complete 1Password flow applies only selected
+  Chezmoi SSH/Git targets and rechecks them. SSH opt-in changes require renewed
+  GUI confirmation; read-only inspection never authenticates to 1Password.
+- [x] Private atomic per-machine state separates displayed note revisions from
+  task acknowledgments and verified completion. Missing, corrupt, concurrent,
+  reset and changed-native-state cases are covered. Chezmoi remains standalone.
+- [x] Nimbus `just check`, `just validate`, and focused Go race checks pass.
+  Real terminal subprocesses verify incremental logged output, hidden-input
+  privacy, resizing, cancellation and restoration. No host sudo or 1Password
+  operation was invoked.
+- [x] Disposable network-disabled Fedora verifies signed fresh RPM installation,
+  an update hidden by a still-valid seven-day root cache, plain-sync refusal,
+  replacement/restart with explicit selection, and completed-engine reporting
+  after incompatible definitions stop later work. The repeatable test lives
+  under `tools/vm/maintenance`; usage is in the README.
+- [x] Chezmoi `just check`: 147 tests pass with three optional skips
+  (Niri unavailable, opt-in Neovim downloads and Zathura GUI). Secret-skipping
+  managed/status/diff/verify checks run without applying. The five always-run
+  hooks remain the expected status/verify differences; no managed file drift.
+- [ ] Run full fresh init/login and repeated maintenance on a disposable Fedora
+  VM using the candidate. Fixtures exercise init handoff/retry; RPM and terminal
+  drills do not establish end-to-end desktop installation or snapshot recovery.
+- [ ] After local review, exercise actual GUI confirmation, vault authorization,
+  SSH/signing configuration and postinstall retry. Remote login, signing-key
+  registration and physical-device setup remain manual verification.
+- [ ] Test the released RPM on the laptop only after separate authorization.
+  No laptop edits or live apply occurred during implementation.
+
+Effective-configuration reporting currently recognizes Noctalia's lockscreen
+widget disable override; it is not a general desktop preference comparison.
+Native task inspectors remain authoritative. Session/reboot notices cover
+Nimbus's managed activation requirements, not a guarantee that every vendor
+application has restarted. Passwordless greeter sync remains deferred.
+
+Owner smoke-test follow-up: Session notices now
+separate login-shell changes from group changes: current groups are checked
+directly, and a later boot clears other recorded session activation requirements.
+An uninspected session start remains explicitly unknown. Regressions cover mixed
+receipt cases. Matching file adoptions after unrelated
+definition changes refresh receipts; they do not rewrite matching file bytes.
+
+Owner clarification: setup notes belong entirely to Nimbus. The schema-1
+catalog now lives at the Nimbus checkout root and is loaded without invoking
+Chezmoi or Git. All seven notes share this catalog, with unchanged IDs/revisions
+and explicit dotfiles applicability. Chezmoi's catalog, reader and catalog test
+are removed. Nimbus tests cover the shipped catalog, revision delivery and
+operation without Chezmoi, including missing-catalog errors.
+
+Release preparation targets Nimbus 0.5.0, with the matching minimum engine in
+these definitions. Commit, push, GitHub release and COPR publication are now
+authorized. Full graphical init/login, hardware and real-account trials remain
+open; publication does not close those gates.

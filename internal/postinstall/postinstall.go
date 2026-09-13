@@ -3,6 +3,7 @@
 package postinstall
 
 import (
+	"regexp"
 	"slices"
 	"strings"
 
@@ -130,6 +131,23 @@ func protonCachyOS(src native.Source, in Inputs, proton, steam definitions.Resol
 		t.Status, t.Detail = Blocked, "ProtonPlus is unavailable; repair the selected package with nimbus sync."
 		return t
 	}
+	output, err := src.Run("protonplus", "list", "steam-system")
+	if err != nil {
+		t.Detail = "ProtonPlus could not inspect Steam runners; start Steam once, then inspect protonplus list steam-system."
+		return t
+	}
+	listing := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(string(output), "")
+	if !strings.HasPrefix(listing, "Installed runners for Steam:\n") {
+		t.Detail = "Unrecognized ProtonPlus runner listing; inspect protonplus list steam-system."
+		return t
+	}
+	for line := range strings.SplitSeq(listing, "\n") {
+		if strings.TrimSpace(line) == "Proton-CachyOS Latest" {
+			t.Status, t.Detail = Complete, "ProtonPlus lists Proton-CachyOS Latest for native Steam."
+			return t
+		}
+	}
+	t.Status, t.Detail = Pending, "Proton-CachyOS Latest is not installed for native Steam."
 	t.Action = &Action{Kind: InstallApplication, Argv: []string{"protonplus", "install", "steam-system", "proton-cachyos", "latest"}}
 	return t
 }
@@ -156,6 +174,30 @@ func installerHelper(src native.Source, in Inputs, pkg definitions.ResolvedPacka
 		t.Detail = "The WoWUp COPR helper needs a standalone install command before Nimbus can offer initial installation."
 		t.Instructions = []string{"The current helper exposes prepare/apply only. Complete the standalone install flow in COPR; Nimbus will not manage application artifacts."}
 	} else {
+		output, err := src.Run(helper, "status")
+		if err != nil {
+			t.Detail = "The installer helper could not inspect application state; inspect its native status."
+			return t
+		}
+		found := false
+		for line := range strings.SplitSeq(string(output), "\n") {
+			if value, ok := strings.CutPrefix(line, "Installed GitHub Copilot: "); ok {
+				found = true
+				if value != "not installed" && regexp.MustCompile(`^[0-9][A-Za-z0-9.+~^-]*$`).MatchString(value) {
+					t.Status, t.Detail = Complete, "GitHub Copilot "+value+" is installed."
+					return t
+				}
+				if value != "not installed" {
+					t.Detail = "Unrecognized Copilot installation identity."
+					return t
+				}
+			}
+		}
+		if !found {
+			t.Detail = "Installer helper returned no recognized application status."
+			return t
+		}
+		t.Status, t.Detail = Pending, "GitHub Copilot is not installed."
 		t.Instructions = append(t.Instructions, "The helper selects and verifies the application release, then asks DNF to install it. Native prompts remain enabled.")
 		t.Action = &Action{Kind: InstallApplication, Argv: []string{"sudo", "--", helper, "install"}}
 	}

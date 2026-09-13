@@ -29,7 +29,7 @@ func Upgrade(opts Options, root definitions.Root) *Result {
 		r.Failures = append(r.Failures, Failure{ID: r.Failed, Error: r.Error})
 		return r
 	}
-	installed, err := ex.packageTransaction([]string{"dnf5", "-y", "upgrade"}, opts.UpgradePreview)
+	installed, err := ex.packageTransaction([]string{"dnf5", "--setopt=cacheonly=metadata", "-y", "upgrade"}, opts.UpgradePreview)
 	if err == nil {
 		for _, c := range opts.Constraints {
 			found := false

@@ -15,7 +15,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Furyfree/nimbus/internal/apply"
 	"github.com/Furyfree/nimbus/internal/inspect"
 	"github.com/Furyfree/nimbus/internal/native/nativetest"
 	"github.com/Furyfree/nimbus/internal/postinstall"
@@ -54,6 +53,9 @@ func postinstallFixture(t *testing.T) (string, *postinstallSource) {
 	key := nativetest.Key("dnf5", inspect.PackageQueryArgs...)
 	src.Commands[key] = append(src.Commands[key], []byte("1password|0|8.10.1|1|x86_64|onepassword|User\n")...)
 	src.Paths["1password"] = "/usr/bin/1password"
+	src.Paths["op"] = "/usr/bin/op"
+	src.Commands[nativetest.Key("chezmoi", inspect.ChezmoiDataArgs...)] = []byte(`{"Machine":"vm","ManagedByNimbus":true,"Profiles":["common"]}`)
+	src.Commands["op whoami --format=json"] = []byte("{}")
 	r := state.Receipt{Schema: state.ReceiptSchema, Machine: "vm", Resource: "package:onepassword:1password", Provider: "dnf", Package: "1password.x86_64", Verified: true, Operation: "install", PlanDigest: "fixture", Timestamp: time.Unix(100, 0)}
 	if err := state.Record(stateRoot, "fixture", &state.Stage{Schema: state.Schema, PlanDigest: "fixture", Receipts: []state.Receipt{r}}); err != nil {
 		t.Fatal(err)
@@ -78,14 +80,14 @@ func TestPostinstallListingStaysReadOnlyAndAvoidsUserData(t *testing.T) {
 		t.Run(map[bool]string{false: "text", true: "json"}[jsonOutput], func(t *testing.T) {
 			root, src := postinstallFixture(t)
 			t.Setenv("XDG_RUNTIME_DIR", "")
-			cmd, out := postinstallCommand(root, jsonOutput)
+			cmd, out := postinstallCommand(root, jsonOutput, "status")
 			if err := cmd.Execute(); err != nil {
 				t.Fatal(err)
 			}
 			if len(src.streams) != 0 {
 				t.Fatalf("listing executed %v", src.streams)
 			}
-			allowed := []string{"uname -m", nativetest.Key("dnf5", inspect.PackageQueryArgs...), "id -un"}
+			allowed := []string{"uname -m", nativetest.Key("dnf5", inspect.PackageQueryArgs...), "id -un", nativetest.Key("chezmoi", inspect.ChezmoiDataArgs...)}
 			for _, command := range src.reads {
 				if !slices.Contains(allowed, command) {
 					t.Fatalf("unnecessary inspection: %s", command)
@@ -102,10 +104,10 @@ func TestPostinstallListingStaysReadOnlyAndAvoidsUserData(t *testing.T) {
 					t.Fatal(err)
 				}
 				i := slices.IndexFunc(envelope.Data.Tasks, func(task postinstall.Task) bool { return task.ID == "onepassword" })
-				if i < 0 || envelope.Data.Tasks[i].Status != postinstall.Unknown {
+				if i < 0 || envelope.Data.Tasks[i].Status != postinstall.Pending {
 					t.Fatalf("sign-in readiness was misreported: %s", out)
 				}
-			} else if !strings.Contains(out.String(), "onepassword [unknown]") || !strings.Contains(out.String(), "Native action: 1password") {
+			} else if !strings.Contains(out.String(), "onepassword") || !strings.Contains(out.String(), "Pending") {
 				t.Fatalf("missing status or direct action: %s", out)
 			}
 		})
@@ -186,52 +188,6 @@ func TestPostinstallRechecksOwnershipAndDefinitionsAfterApproval(t *testing.T) {
 	}
 }
 
-func TestPostinstallActionDoesNotConvertExitZeroToAccountReadiness(t *testing.T) {
-	root, src := postinstallFixture(t)
-	path := filepath.Join(stateRoot, state.ReceiptsDir, state.FileName("package:onepassword:1password"))
-	before, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cmd, out := postinstallCommand(root, false, "onepassword", "--yes")
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(src.streams, []string{"1password"}) || !strings.Contains(out.String(), "After action: onepassword: unknown") {
-		t.Fatalf("native success became signed-in state: %s actions=%v", out, src.streams)
-	}
-	after, err := os.ReadFile(path)
-	if err != nil || !bytes.Equal(before, after) {
-		t.Fatalf("postinstall wrote a completion receipt: %v", err)
-	}
-}
-
-func TestPostinstallLockAndNativeFailure(t *testing.T) {
-	for _, locked := range []bool{false, true} {
-		root, src := postinstallFixture(t)
-		src.streamErr = errors.New("native launch failed")
-		if locked {
-			path, err := apply.LockPath()
-			if err != nil {
-				t.Fatal(err)
-			}
-			lock, err := apply.Acquire(path, apply.LockInfo{Command: "other"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = lock.Release() })
-		}
-		cmd, out := postinstallCommand(root, false, "onepassword", "--yes")
-		err := cmd.Execute()
-		if err == nil || (len(src.streams) == 0) != locked {
-			t.Fatalf("locked=%t: %v streams=%v", locked, err, src.streams)
-		}
-		if !locked && (!strings.Contains(err.Error(), "native launch failed") || !strings.Contains(out.String(), "After action: onepassword: unknown")) {
-			t.Fatalf("native failure/current status lost: %v %s", err, out)
-		}
-	}
-}
-
 func TestPostinstallRebootRemainsInstructionOnly(t *testing.T) {
 	root, src := postinstallFixture(t)
 	r := state.Receipt{Schema: state.ReceiptSchema, Machine: "vm", Resource: "target:default", Provider: "target", Verified: true, Reboot: true, Operation: "install", PlanDigest: "fixture", Timestamp: time.Unix(100, 0)}
@@ -240,8 +196,8 @@ func TestPostinstallRebootRemainsInstructionOnly(t *testing.T) {
 	}
 	src.Files["/proc/stat"] = []byte("btime 50\n")
 	t.Setenv("XDG_RUNTIME_DIR", "")
-	cmd, out := postinstallCommand(root, false, "reboot", "--yes")
-	if err := cmd.Execute(); err != nil || len(src.streams) != 0 || !strings.Contains(out.String(), "reboot [pending]") {
+	cmd, out := postinstallCommand(root, false, "status")
+	if err := cmd.Execute(); err != nil || len(src.streams) != 0 || !strings.Contains(out.String(), "Notice: reboot:") {
 		t.Fatalf("instruction-only task mutated: %v %s streams=%v", err, out, src.streams)
 	}
 }
@@ -271,6 +227,12 @@ func TestPostinstallCopilotUsesNativeInstallWithoutAppReceipts(t *testing.T) {
 			key := nativetest.Key("dnf5", inspect.PackageQueryArgs...)
 			src.Commands[key] = append(src.Commands[key], []byte("github-copilot-installer|0|0.2.0|1|x86_64|copilot-installer|User\n")...)
 			src.Paths["/usr/bin/github-copilot-installer"] = "/usr/bin/github-copilot-installer"
+			src.Commands["/usr/bin/github-copilot-installer status"] = []byte("Installed GitHub Copilot: not installed\n")
+			src.onStream = func(string) {
+				if mode == "install" {
+					src.Commands["/usr/bin/github-copilot-installer status"] = []byte("Installed GitHub Copilot: 1.2.3-1\n")
+				}
+			}
 			r := state.Receipt{Schema: state.ReceiptSchema, Machine: "vm", Resource: "package:copilot-installer:github-copilot-installer", Provider: "dnf", Verified: true, Operation: "install", PlanDigest: "fixture"}
 			if err := state.Record(stateRoot, "fixture", &state.Stage{Schema: state.Schema, PlanDigest: "fixture", Receipts: []state.Receipt{r}}); err != nil {
 				t.Fatal(err)
@@ -295,7 +257,7 @@ func TestPostinstallCopilotUsesNativeInstallWithoutAppReceipts(t *testing.T) {
 				if len(src.streams) != 0 || !strings.Contains(out.String(), "Native action: sudo -- /usr/bin/github-copilot-installer install") {
 					t.Fatalf("preview executed or hid action: %s %v", out, src.streams)
 				}
-			} else if !slices.Equal(src.streams, []string{"sudo -- /usr/bin/github-copilot-installer install"}) || !strings.Contains(out.String(), "After action: copilot: unknown") {
+			} else if !slices.Equal(src.streams, []string{"sudo -- /usr/bin/github-copilot-installer install"}) || (mode == "install" && !strings.Contains(out.String(), "1.2.3-1 is installed")) {
 				t.Fatalf("helper prompts or ownership boundary lost: %s %v", out, src.streams)
 			}
 			after, err := state.Read(stateRoot)
@@ -315,6 +277,16 @@ func TestPostinstallProtonCachyOSPreservesApprovalAndNativeOwnership(t *testing.
 	for _, mode := range []string{"preview", "cancel", "install", "failure"} {
 		t.Run(mode, func(t *testing.T) {
 			root, src := postinstallFixture(t)
+			src.Commands["protonplus list steam-system"] = []byte("Installed runners for Steam:\nNo runners installed\n")
+			src.onStream = func(string) {
+				if mode == "install" {
+					src.Commands["protonplus list steam-system"] = []byte("Installed runners for Steam:\n  Proton-CachyOS Latest\n")
+				}
+			}
+			oldTerminal, oldApprover := postinstallTerminal, approver
+			t.Cleanup(func() { postinstallTerminal, approver = oldTerminal, oldApprover })
+			postinstallTerminal = func(io.Reader) bool { return true }
+			approver = func(io.Reader, io.Writer, string) bool { return mode != "cancel" }
 			if err := os.WriteFile(filepath.Join(root, "profiles/common.toml"), []byte("schema=1\nid='common'\npackages=['terra:protonplus','rpmfusion-nonfree:steam']\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -356,7 +328,7 @@ func TestPostinstallProtonCachyOSPreservesApprovalAndNativeOwnership(t *testing.
 				if len(src.streams) != 0 {
 					t.Fatalf("unapproved download: %v", src.streams)
 				}
-			} else if !slices.Equal(src.streams, []string{want}) || !strings.Contains(out.String(), "After action: proton-cachyos: unknown") {
+			} else if !slices.Equal(src.streams, []string{want}) || (mode == "install" && !strings.Contains(out.String(), "ProtonPlus lists")) {
 				t.Fatalf("native command or unknown completion lost: %s %v", out, src.streams)
 			}
 			after, err := state.Read(stateRoot)

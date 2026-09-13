@@ -52,6 +52,14 @@ func fixtureSource(t *testing.T, root string) *nativetest.FakeSource {
 		Dirs:  map[string][]string{inspect.RepoDir: {"fedora.repo"}},
 		Paths: map[string]string{},
 	}
+	src.Files[filepath.Join(root, "setup-notes.json")] = []byte(`{"schema":1,"notes":[{"id":"nimbus.postinstall","revision":1,"text":"Review remaining setup with nimbus postinstall status."}]}`)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	src.Commands[nativetest.Key("rpm", engineInstalledArgs...)] = []byte("nimbus-0:0.4.6-1.fc44.x86_64")
+	src.Commands[nativetest.Key("sudo", engineConfigArgs...)] = []byte("======== \"nimbus-engine\" repository configuration: ========\nenabled = 1\npkg_gpgcheck = 1\nsslverify = 1\n")
+	src.Commands[nativetest.Key("sudo", engineRefreshArgs...)] = nil
+	src.Commands[nativetest.Key("sudo", engineQueryArgs...)] = nil
+	src.Commands["sudo dnf5 --refresh --setopt=*.skip_if_unavailable=0 makecache"] = nil
+	src.Commands["dnf5 makecache"] = nil
 	src.Files[filepath.Join(inspect.RepoDir, "fedora.repo")] = read(filepath.Join("yum.repos.d", "fedora.repo"))
 	if root != "" {
 		answerMaintenanceRepository(src, root, "https://github.com/Furyfree/nimbus.git")

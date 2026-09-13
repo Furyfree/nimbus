@@ -80,7 +80,7 @@ func TestSyncResourceRetirementReportsSessionRequirements(t *testing.T) {
 					src.Commands[tc.command] = nil
 				}
 				withSource(t, handoffOutputSource{Source: src, afterStream: func(name string, args []string) {
-					if name == "chezmoi" && slices.Equal(args, []string{"apply"}) {
+					if slices.Contains(args, "makecache") || (name == "chezmoi" && slices.Equal(args, []string{"apply"})) {
 						return
 					}
 					if nativetest.Key(name, args...) != tc.command {
@@ -124,7 +124,7 @@ func TestSyncResourceRetirementReportsSessionRequirements(t *testing.T) {
 					}
 				} else {
 					_, summary, ok := strings.Cut(out, "\nsync summary:\n")
-					if !ok || !strings.Contains(summary, tc.id) || strings.Contains(summary, "Log out and log in again") != tc.logout || strings.Contains(summary, "Reboot required") != tc.reboot {
+					if !ok || !strings.Contains(summary, tc.id) || strings.Contains(summary, "Log out and back in") != tc.logout || strings.Contains(summary, "Reboot required") != tc.reboot {
 						t.Errorf("retirement closing report missing or incorrect: %s", out)
 					}
 				}

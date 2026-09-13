@@ -278,7 +278,7 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	src = installSource{src, log, oldErr}
 	stageStarted := time.Now()
 	steps := []runStep{{Name: "selection", Status: "skipped"}, {Name: "system installation", Status: "skipped"}, {Name: "dotfiles and tools", Status: "skipped"}}
-	notes := &setupNoteWriter{out: oldOut}
+	var systemResult syncResult
 	active := 0
 	defer func() {
 		if retErr != nil && steps[active].Status != "failed" {
@@ -289,7 +289,13 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 		}
 		steps[active].DurationMS = time.Since(stageStarted).Milliseconds()
 		log.event("stage end name=%s status=%s elapsed_ms=%d", steps[active].Name, steps[active].Status, steps[active].DurationMS)
-		if err := errors.Join(renderRunSummary(out, "init", steps), notes.render(out)); err != nil {
+		systemResult.Steps = append(steps, systemResult.Steps...)
+		inspectFinal(newSource(), trial, &systemResult, retErr == nil, true)
+		err := systemResult.renderNamed(oldOut, "init")
+		if err == nil {
+			err = rememberNotes(machine, systemResult.Notes)
+		}
+		if err != nil {
 			if errors.Is(retErr, reported{}) {
 				retErr = err
 			} else {
@@ -360,7 +366,7 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	stageStarted = time.Now()
 	active = 1
 	flags := machineFlags{checkout: root, machine: machine}
-	if err := runSyncWith(cmd, opts, flags, syncFlags{yes: true, definitionsDigest: c.Digest(), approvedDigest: p.Digest, approvedCheckout: &p.Checkout}, lock); err != nil {
+	if err := runSyncWith(cmd, opts, flags, syncFlags{result: &systemResult, yes: true, definitionsDigest: c.Digest(), approvedDigest: p.Digest, approvedCheckout: &p.Checkout}, lock); err != nil {
 		for i := 2; i < len(steps); i++ {
 			steps[i].Detail = "system installation did not complete"
 		}
@@ -379,7 +385,7 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	stageStarted = time.Now()
 	active = 2
 	if m.Dotfiles != nil {
-		if err := chezmoiHandoff(src, notes, machine, r.Profiles, m.Dotfiles, f.onePasswordSSH); err != nil {
+		if err := chezmoiHandoff(src, oldOut, machine, r.Profiles, m.Dotfiles, f.onePasswordSSH); err != nil {
 			return err
 		}
 		steps[2].Status = "succeeded"

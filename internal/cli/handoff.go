@@ -86,8 +86,13 @@ func chezmoiHandoff(src native.Source, out io.Writer, machine string, profiles [
 	if onePasswordSSH && !selection.OnePasswordSSH {
 		return fmt.Errorf("the existing Chezmoi configuration has 1Password SSH disabled; enable it explicitly with: %s", doctor.ChezmoiRefresh(machine, profiles, true))
 	}
-	if _, err := fmt.Fprintf(out, "Setup note: To change your Chezmoi answers, run: %s\n", doctor.ChezmoiRefresh(machine, profiles, selection.OnePasswordSSH)); err != nil {
-		return err
+	if selection.OnePasswordSSH {
+		if _, err := fmt.Fprintln(out, "Before secret-backed rendering: unlock 1Password, enable desktop CLI integration and its SSH agent. Skip manual SSH/Git file edits; Chezmoi owns those files."); err != nil {
+			return err
+		}
+		if err := passwordPrerequisites(src, out, true); err != nil {
+			return err
+		}
 	}
 	if _, err := fmt.Fprintln(out, "-> apply user configuration and install its declared tools\n   $ chezmoi apply"); err != nil {
 		return err

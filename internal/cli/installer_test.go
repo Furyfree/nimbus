@@ -98,11 +98,17 @@ type installerSource struct {
 
 func (s *installerSource) Run(name string, args ...string) ([]byte, error) {
 	s.reads = append(s.reads, nativetest.Key(name, args...))
+	if name == "sudo" && len(args) > 1 && args[0] == "dnf5" && slices.Contains(args, "--cacheonly") && !slices.Contains(args, "upgrade") && !slices.Contains(args, "--repo=nimbus-engine") {
+		return s.FakeSource.Run("dnf5", args[1:]...)
+	}
 	return s.FakeSource.Run(name, args...)
 }
 
 func (s *installerSource) Stream(out, errOut io.Writer, name string, args ...string) error {
 	key := nativetest.Key(name, args...)
+	if strings.Contains(key, "makecache") {
+		return s.FakeSource.Stream(out, errOut, name, args...)
+	}
 	s.calls = append(s.calls, key)
 	path, err := apply.LockPath()
 	if err != nil {
@@ -153,7 +159,7 @@ func installerFixture(t *testing.T) (string, *installerSource) {
 	src.Paths["chezmoi"] = "/usr/bin/chezmoi"
 	src.Commands["dnf5 makecache"] = nil
 	src.Commands["dnf5 --cacheonly check-upgrade"] = []byte("Repositories loaded.\n")
-	src.Commands["sudo dnf5 -y upgrade"] = nil
+	src.Commands["sudo dnf5 --setopt=cacheonly=metadata -y upgrade"] = nil
 	src.Commands["chezmoi init --promptString Machine=vm --promptBool ManagedByNimbus=true --promptMultichoice Profiles=common --promptBool Enable 1Password SSH integration=false -- https://github.com/Furyfree/dotfiles.git"] = nil
 	src.Commands["chezmoi apply"] = nil
 	src.Commands["chezmoi source-path"] = []byte(home)
@@ -281,7 +287,7 @@ func TestInitDelegatesMiseToolsToChezmoiAndRetriesFailure(t *testing.T) {
 		t.Fatalf("%d %s%s", code, out, errOut)
 	}
 	footer := out[strings.Index(out, "init summary:"):]
-	if !strings.Contains(footer, "Setup notes:") || !strings.Contains(footer, "Sign in to 1Password.") || strings.Contains(footer, "Compiling a crate") {
+	if strings.Contains(footer, "Sign in to 1Password.") || strings.Contains(footer, "Compiling a crate") {
 		t.Fatalf("setup instructions lost or compiler output repeated: %s", footer)
 	}
 	delete(src.Failures, "chezmoi apply")
@@ -290,7 +296,7 @@ func TestInitDelegatesMiseToolsToChezmoiAndRetriesFailure(t *testing.T) {
 	if code != ExitOK || !strings.Contains(out, "succeeded  dotfiles and tools") || strings.Contains(out, "remaining Nimbus user tools") {
 		t.Fatalf("%d %s%s", code, out, errOut)
 	}
-	if strings.Count(out, "Sign in to 1Password.") != 2 || strings.LastIndex(out, "Setup notes:") < strings.Index(out, "init summary:") {
+	if strings.Count(out, "Sign in to 1Password.") != 1 || strings.LastIndex(out, "Setup notes:") < strings.Index(out, "init summary:") {
 		t.Fatalf("successful init did not repeat its setup notes last: %s", out)
 	}
 	count := 0

@@ -37,7 +37,7 @@ func newSync(opts *options) *cobra.Command {
 	var upgrade, noUpgrade bool
 	cmd := &cobra.Command{
 		Use: "sync", Short: "Make the system match the definitions",
-		Long: "Update the Nimbus and Chezmoi repositories, reconcile system changes, then apply user configuration. Use --upgrade to reconcile setup, upgrade software, then sync with the updated engine. --plan uses local definitions without updating repositories. --json controls output only; mutation still requires --yes.",
+		Long: "Update the Nimbus and Chezmoi repositories, reconcile system changes, then apply user configuration. Use --upgrade to update Nimbus first, sync once, then run Topgrade. --plan uses local definitions without updating repositories. --json controls output only; mutation still requires --yes.",
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if upgrade && noUpgrade {
@@ -55,7 +55,7 @@ func newSync(opts *options) *cobra.Command {
 	addMachineFlags(&flags, cmd.Flags())
 	cmd.Flags().BoolVarP(&sf.plan, "plan", "p", false, "show the plan and change nothing")
 	cmd.Flags().BoolVarP(&sf.yes, "yes", "y", false, "approve the displayed changes")
-	cmd.Flags().BoolVar(&upgrade, "upgrade", false, "sync setup, run Topgrade, then sync with the updated engine")
+	cmd.Flags().BoolVar(&upgrade, "upgrade", false, "update Nimbus first, sync once, then run Topgrade")
 	cmd.Flags().BoolVarP(&noUpgrade, "no-upgrade", "n", false, "compatibility alias; sync already omits general updates")
 	_ = cmd.Flags().MarkHidden("no-upgrade")
 	cmd.Flags().BoolVarP(&sf.prune, "prune", "r", false, "also remove the unmanaged packages the plan lists")
@@ -128,11 +128,18 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	}
 	// Execution refreshes native metadata; previews only read the cache.
 	if !sf.plan && sf.approvedDigest == "" {
-		if _, err := src.Run("dnf5", "makecache"); err != nil {
-			if _, writeErr := fmt.Fprintf(errOut, "metadata not refreshed: %v\n", err); writeErr != nil {
-				return errors.Join(err, writeErr)
+		if sf.systemUpgrade {
+			stop, err := sudoKeepalive(src, execOut, errOut)
+			if err != nil {
+				return err
 			}
-			result.Steps = append(result.Steps, runStep{Name: "metadata refresh", Status: "warning", Detail: err.Error() + "; using cached metadata"})
+			defer stop()
+			if err := src.Stream(execOut, errOut, "sudo", "dnf5", "--refresh", "--setopt=*.skip_if_unavailable=0", "makecache"); err != nil {
+				return fmt.Errorf("system update metadata refresh failed: %w", err)
+			}
+			src = native.PrivilegedCache{Source: src}
+		} else if _, err := src.Run("dnf5", "makecache"); err != nil {
+			return fmt.Errorf("metadata refresh failed: %w", err)
 		}
 	}
 	p, _, err := planWithState(s, src, sf.prune)

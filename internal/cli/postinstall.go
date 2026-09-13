@@ -33,14 +33,14 @@ type postinstallView struct {
 }
 
 type postinstallSnapshot struct {
-	selected *selected
-	view     postinstallView
-	digest   string
+	selected     *selected
+	view         postinstallView
+	digest       string
+	nativeDigest string
 }
 
-func newPostinstall(opts *options) *cobra.Command {
-	var flags machineFlags
-	var yes, preview bool
+func postinstallExecutor(opts *options, flags *machineFlags) *cobra.Command {
+	var yes, preview, markDone, reset bool
 	cmd := &cobra.Command{
 		Use: "postinstall [TASK]", Short: "Inspect manual setup tasks or select one native action",
 		Long: "List pending, blocked, and unknown manual tasks without changing the system. Select a task ID to see its instructions or approve its fixed native action. JSON lists tasks without selecting or executing one.",
@@ -51,46 +51,69 @@ func newPostinstall(opts *options) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if opts.json && (len(args) != 0 || yes) {
+			if opts.json && (yes || markDone || reset || (len(args) != 0 && !preview)) {
 				return usageError{errors.New("postinstall --json lists tasks only; it cannot select or approve an action")}
 			}
 			if yes && len(args) == 0 {
 				return usageError{errors.New("postinstall --yes requires one task ID")}
 			}
 			src := newSource()
-			before, err := inspectPostinstall(src, flags)
+			before, err := inspectPostinstall(src, *flags)
 			if err != nil {
 				return err
 			}
 			if len(args) == 0 {
-				pending := before.view
-				pending.Tasks = slices.DeleteFunc(slices.Clone(pending.Tasks), func(t postinstall.Task) bool {
-					return t.Status == postinstall.Complete || t.Status == postinstall.NotApplicable
-				})
 				if opts.json {
-					return writeJSON(cmd.OutOrStdout(), pending, nil)
+					return writeJSON(cmd.OutOrStdout(), before.view, nil)
 				}
-				return renderPostinstall(cmd.OutOrStdout(), pending)
+				return renderPostinstallStatus(cmd.OutOrStdout(), before.view)
 			}
 			task, err := selectedTask(before.view, args[0])
 			if err != nil {
 				return err
 			}
+			if opts.json {
+				return writeJSON(cmd.OutOrStdout(), postinstallView{Machine: before.view.Machine, Tasks: []postinstall.Task{task}}, nil)
+			}
+			if reset {
+				if err := resetTask(before.view.Machine, task.ID); err != nil {
+					return err
+				}
+				_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s acknowledgment reset for %s. Native configuration will still be inspected.\n", task.ID, before.view.Machine)
+				return err
+			}
+			if markDone {
+				return acknowledgeTask(cmd, src, before, task)
+			}
+			if task.ID == "onepassword" && !preview {
+				return runOnePassword(cmd, src, before, task, yes)
+			}
 			if err := renderPostinstall(cmd.OutOrStdout(), postinstallView{Machine: before.view.Machine, Tasks: []postinstall.Task{task}}); err != nil {
 				return err
 			}
-			if preview || task.Status == postinstall.Complete || task.Status == postinstall.NotApplicable {
+			if preview || task.Status == postinstall.NotApplicable {
 				return nil
+			}
+			if task.Status == postinstall.Complete {
+				return recordTask(before.view.Machine, task.ID+".complete", "verified")
 			}
 			if task.Status == postinstall.Blocked {
 				return errors.New(task.Detail)
 			}
 			if task.Action == nil {
-				return nil
+				return fmt.Errorf("%s is incomplete: %s", task.ID, task.Detail)
 			}
 			commands, err := postinstallCommands(task)
 			if err != nil {
 				return err
+			}
+			if task.ID == "proton-cachyos" && !taskConfirmed(before.view.Machine, task.ID) {
+				if err := confirmManual(cmd, "Start Steam once and close all running games. Ready to continue?"); err != nil {
+					return err
+				}
+				if err := recordTask(before.view.Machine, task.ID+".manual", "confirmed"); err != nil {
+					return err
+				}
 			}
 			if !yes {
 				if !postinstallTerminal(cmd.InOrStdin()) {
@@ -109,7 +132,7 @@ func newPostinstall(opts *options) *cobra.Command {
 				return err
 			}
 			defer func() { _ = lock.Release() }()
-			fresh, err := inspectPostinstall(src, flags)
+			fresh, err := inspectPostinstall(src, *flags)
 			if err != nil {
 				return err
 			}
@@ -134,7 +157,7 @@ func newPostinstall(opts *options) *cobra.Command {
 			if runErr != nil {
 				runErr = fmt.Errorf("postinstall %s action failed: %w", task.ID, runErr)
 			}
-			after, checkErr := inspectPostinstall(src, flags)
+			after, checkErr := inspectPostinstall(src, *flags)
 			if checkErr != nil {
 				return errors.Join(runErr, fmt.Errorf("action finished but task status could not be checked: %w", checkErr))
 			}
@@ -148,27 +171,21 @@ func newPostinstall(opts *options) *cobra.Command {
 			} else {
 				_, reportErr = fmt.Fprintf(cmd.OutOrStdout(), "After action: %s: %s\n%s\nVerification: %s\n", current.ID, current.Status, current.Detail, current.Verification)
 			}
-			if runErr == nil && current.Status != postinstall.Complete && task.Action.Kind == postinstall.EnrollFingerprint {
-				checkErr = errors.New("fingerprint enrollment command finished, but completion could not be verified; inspect fprintd before retrying")
+			if runErr == nil && current.Status != postinstall.Complete {
+				checkErr = fmt.Errorf("%s action finished but completion could not be verified: %s", task.ID, current.Detail)
 			}
-			if runErr == nil && current.Status != postinstall.Complete && task.Action.Kind == postinstall.SetTailscaleOperator {
-				checkErr = errors.New("Tailscale command finished, but operator permission could not be verified; inspect tailscaled before retrying")
+			if runErr == nil && checkErr == nil {
+				checkErr = recordTask(before.view.Machine, task.ID+".complete", "verified")
 			}
-			if runErr == nil && current.Status != postinstall.Complete && task.Action.Kind == postinstall.SetAccountPicture {
-				checkErr = errors.New("AccountsService command finished, but the account picture could not be verified; inspect account settings before retrying")
-			}
-			if runErr == nil && current.Status != postinstall.Complete && task.Action.Kind == postinstall.SyncNoctaliaPlugins {
-				checkErr = errors.New("Noctalia plugin installation could not be verified; retry the task")
-			}
-			if runErr == nil && current.Status != postinstall.Complete && task.Action.Kind == postinstall.SyncHyprlandPlugins {
-				checkErr = errors.New("Hyprland plugin installation could not be verified; retry the task")
-			}
+
 			return errors.Join(runErr, checkErr, reportErr)
 		},
 	}
-	addMachineFlags(&flags, cmd.Flags())
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "approve the selected native action after its preview")
 	cmd.Flags().BoolVarP(&preview, "plan", "p", false, "show the selected task without running its action")
+	cmd.Flags().BoolVar(&markDone, "mark-done", false, "acknowledge manual prerequisites; never bypass native verification")
+	cmd.Flags().BoolVar(&reset, "reset", false, "reset this machine's acknowledgment without changing configuration")
+	cmd.MarkFlagsMutuallyExclusive("plan", "mark-done", "reset")
 	return cmd
 }
 
@@ -183,6 +200,9 @@ func inspectPostinstall(src native.Source, flags machineFlags) (*postinstallSnap
 	}
 	f := inspect.InspectTasks(src)
 	view := postinstallView{Machine: s.Resolved.Machine, Tasks: postinstall.Inspect(src, postinstall.Inputs{Resolved: s.Resolved, Facts: *f, Applied: *applied})}
+	if err := enrichPostinstall(src, s, &view); err != nil {
+		return nil, err
+	}
 	data, err := json.Marshal(struct {
 		Root, Definitions string
 		View              postinstallView
@@ -192,7 +212,15 @@ func inspectPostinstall(src native.Source, flags machineFlags) (*postinstallSnap
 	if err != nil {
 		return nil, err
 	}
-	return &postinstallSnapshot{selected: s, view: view, digest: fmt.Sprintf("sha256:%x", sha256.Sum256(data))}, nil
+	nativeData, err := json.Marshal(struct {
+		Root, Definitions string
+		Facts             *inspect.Facts
+		Applied           *state.Applied
+	}{s.Root, s.Checkout.Digest(), f, applied})
+	if err != nil {
+		return nil, err
+	}
+	return &postinstallSnapshot{selected: s, view: view, nativeDigest: fmt.Sprintf("sha256:%x", sha256.Sum256(nativeData)), digest: fmt.Sprintf("sha256:%x", sha256.Sum256(data))}, nil
 }
 
 func selectedTask(view postinstallView, id string) (postinstall.Task, error) {
@@ -240,9 +268,9 @@ func postinstallArgv(task postinstall.Task) ([]string, error) {
 			return []string{"1password"}, nil
 		case task.ID == "fingerprint" && task.Status == postinstall.Pending && task.Action.Kind == postinstall.EnrollFingerprint && slices.Equal(task.Action.Argv, []string{"fprintd-enroll"}):
 			return []string{"fprintd-enroll"}, nil
-		case task.ID == "copilot" && task.Status == postinstall.Unknown && task.Action.Kind == postinstall.InstallApplication && slices.Equal(task.Action.Argv, []string{"sudo", "--", "/usr/bin/github-copilot-installer", "install"}):
+		case task.ID == "copilot" && task.Status == postinstall.Pending && task.Action.Kind == postinstall.InstallApplication && slices.Equal(task.Action.Argv, []string{"sudo", "--", "/usr/bin/github-copilot-installer", "install"}):
 			return slices.Clone(task.Action.Argv), nil
-		case task.ID == "proton-cachyos" && task.Status == postinstall.Unknown && task.Action.Kind == postinstall.InstallApplication && slices.Equal(task.Action.Argv, []string{"protonplus", "install", "steam-system", "proton-cachyos", "latest"}):
+		case task.ID == "proton-cachyos" && task.Status == postinstall.Pending && task.Action.Kind == postinstall.InstallApplication && slices.Equal(task.Action.Argv, []string{"protonplus", "install", "steam-system", "proton-cachyos", "latest"}):
 			return slices.Clone(task.Action.Argv), nil
 		}
 	}
@@ -265,6 +293,9 @@ func renderPostinstall(out io.Writer, view postinstallView) error {
 			continue
 		}
 		fmt.Fprintf(&b, "\n%s [%s]: %s\n%s\n", task.ID, task.Status, task.Title, task.Detail)
+		for _, prerequisite := range task.Prerequisites {
+			fmt.Fprintf(&b, "Prerequisite: %s\n", prerequisite)
+		}
 		for _, instruction := range task.Instructions {
 			fmt.Fprintln(&b, instruction)
 		}

@@ -42,6 +42,12 @@ func newUpgrade(opts *options) *cobra.Command {
 				if len(args) != 0 {
 					return usageError{errors.New("--system does not accept Topgrade arguments")}
 				}
+				if path := os.Getenv(maintenanceReport); path != "" && os.Getenv(upgradeActive) != "" && !sf.plan {
+					var result syncResult
+					sf.result = &result
+					err := runSync(cmd, opts, flags, sf)
+					return errors.Join(err, writeUpgradeReport(path, &result))
+				}
 				return runSync(cmd, opts, flags, sf)
 			}
 			if sf.yes {

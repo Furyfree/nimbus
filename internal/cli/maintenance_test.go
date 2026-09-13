@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Furyfree/nimbus/internal/apply"
 	"github.com/Furyfree/nimbus/internal/inspect"
 	"github.com/Furyfree/nimbus/internal/native"
 	"github.com/Furyfree/nimbus/internal/native/nativetest"
@@ -113,7 +112,7 @@ func TestMaintenanceStagesAndFailures(t *testing.T) {
 			}
 			if strings.HasPrefix(mode, "dirty ") || mode == "preview" {
 				if slices.ContainsFunc(src.events, func(s string) bool {
-					return strings.Contains(s, " fetch ") || strings.Contains(s, " merge --ff-only") || strings.HasPrefix(s, "sudo ")
+					return strings.Contains(s, " fetch ") || strings.Contains(s, " merge --ff-only") || (mode == "preview" && strings.HasPrefix(s, "sudo "))
 				}) {
 					t.Fatalf("preflight/preview mutated: %v", src.events)
 				}
@@ -132,45 +131,6 @@ func TestMaintenanceStagesAndFailures(t *testing.T) {
 				t.Fatal(out)
 			}
 		})
-	}
-}
-
-func TestCombinedSyncStartsReplacementEngine(t *testing.T) {
-	root, src := installerFixture(t)
-	bin := t.TempDir()
-	executable := filepath.Join(bin, "nimbus")
-	if err := os.WriteFile(executable, []byte("#!/bin/sh\nexit 99\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	old := syncExecutable
-	syncExecutable = func() (string, error) { return executable, nil }
-	t.Cleanup(func() { syncExecutable = old })
-	t.Setenv("PATH", bin)
-	t.Setenv("NIMBUS_TEST_EXECUTABLE", executable)
-	t.Setenv(upgradeActive, "")
-	body := `#!/bin/sh
-printf '#!/bin/sh\nprintf "NEW-ENGINE\\n"\nprintf "<%%s>\\n" "$@"\nexit 17\n' > "$NIMBUS_TEST_EXECUTABLE"
-`
-	if err := os.WriteFile(filepath.Join(bin, "topgrade"), []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	code, out, errOut := run(t, "sync", "--upgrade", "--checkout", root, "--machine", "vm", "--yes", "--prune")
-	if code != 17 || !strings.Contains(out, "NEW-ENGINE") || !strings.Contains(out, "<sync>\n<--checkout>\n<"+root+">\n<--machine>\n<vm>\n<--yes>\n<--prune>") {
-		t.Fatalf("replacement handoff: %d %s%s", code, out, errOut)
-	}
-	if !slices.Equal(src.calls, []string{"chezmoi apply"}) {
-		t.Fatalf("initial sync missing or repeated: %v", src.calls)
-	}
-	lockPath, err := apply.LockPath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	lock, err := apply.Acquire(lockPath, apply.LockInfo{})
-	if err != nil {
-		t.Fatal("lock leaked: ", err)
-	}
-	if err := lock.Release(); err != nil {
-		t.Fatal(err)
 	}
 }
 

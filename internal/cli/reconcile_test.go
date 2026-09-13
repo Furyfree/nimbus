@@ -26,8 +26,18 @@ type reconcileSource struct {
 	fail         bool
 }
 
+func (s *reconcileSource) Run(name string, args ...string) ([]byte, error) {
+	if name == "sudo" && len(args) > 1 && args[0] == "dnf5" && slices.Contains(args, "--cacheonly") && !slices.Contains(args, "--repo=nimbus-engine") {
+		return s.FakeSource.Run("dnf5", args[1:]...)
+	}
+	return s.FakeSource.Run(name, args...)
+}
+
 func (s *reconcileSource) Stream(_, _ io.Writer, name string, args ...string) error {
 	call := nativetest.Key(name, args...)
+	if slices.Contains(args, "makecache") {
+		return s.FakeSource.Stream(io.Discard, io.Discard, name, args...)
+	}
 	s.calls = append(s.calls, call)
 	if name != "sudo" || len(args) != 4 || strings.Join(args[:3], " ") != "dnf5 config-manager setopt" {
 		return fmt.Errorf("unexpected mutation: %s", call)
@@ -164,12 +174,12 @@ func (s *transactionReconcileSource) Stream(out, errOut io.Writer, name string, 
 		s.calls = append(s.calls, call)
 		return nil
 	}
-	if call != "sudo dnf5 -y install demo" && call != "sudo dnf5 -y upgrade" {
+	if call != "sudo dnf5 -y install demo" && call != "sudo dnf5 --setopt=cacheonly=metadata -y upgrade" {
 		return s.reconcileSource.Stream(out, errOut, name, args...)
 	}
 	s.calls = append(s.calls, call)
 	host := "vendor-install"
-	if call == "sudo dnf5 -y upgrade" {
+	if call == "sudo dnf5 --setopt=cacheonly=metadata -y upgrade" {
 		if !slices.Contains(s.calls, "sudo dnf5 config-manager setopt vendor-install.enabled=0") {
 			return errors.New("upgrade started while install-created duplicate remained enabled")
 		}
@@ -207,7 +217,7 @@ func TestSyncReconcilesInstallAndUpgradeCreatedRepositories(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("sync failed: %d %s%s calls=%v", code, out, errOut, src.calls)
 	}
-	if slices.Contains(src.calls, "sudo dnf5 -y upgrade") {
+	if slices.Contains(src.calls, "sudo dnf5 --setopt=cacheonly=metadata -y upgrade") {
 		t.Fatal("sync upgraded the system")
 	}
 	code, out, errOut = run(t, "upgrade", "--system", "--checkout", root, "--machine", "vm", "-y")
@@ -218,7 +228,7 @@ func TestSyncReconcilesInstallAndUpgradeCreatedRepositories(t *testing.T) {
 		"sudo dnf5 -y install demo",
 		"sudo dnf5 config-manager setopt vendor-install.enabled=0",
 		"chezmoi apply",
-		"sudo dnf5 -y upgrade",
+		"sudo dnf5 --setopt=cacheonly=metadata -y upgrade",
 		"sudo dnf5 config-manager setopt vendor-upgrade.enabled=0",
 	}
 	if strings.Join(src.calls, "\n") != strings.Join(want, "\n") {

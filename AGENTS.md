@@ -102,9 +102,14 @@ Older designs are history, not active requirements; revalidate before reuse.
 
 ## Neighbouring repositories
 
-- `~/git/dotfiles` is the Chezmoi source state. It owns everything below
-  `$HOME` except the selector, works without Nimbus on Linux, macOS, and
-  Windows, and gates only Nimbus-calling targets on `managed_by_nimbus`. Its
+Nimbus owns its setup-note catalog and commands. Read guidance from the selected
+Nimbus checkout; do not add a Chezmoi catalog handoff or standalone note reader.
+
+- `~/.local/share/chezmoi` is the Chezmoi source state. It owns intentional user
+  configuration below `$HOME`; Nimbus retains its selector, checkout, private
+  diagnostics and local setup evidence under `$XDG_STATE_HOME/nimbus`. Chezmoi
+  works without Nimbus on Linux, macOS and Windows, and gates only
+  Nimbus-calling targets on `managed_by_nimbus`. Its
   `PROFILES.md` owns the handoff prompt keys. Do not add a machine manifest,
   system package list, or component graph there. Chezmoi owns the native Mise
   configuration, including its Cargo tool list, and invokes `mise install`

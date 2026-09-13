@@ -48,7 +48,7 @@ def snapshot(source, target):
     # untracked files, build output, or ignored runtime state at the root.
     paths += subprocess.check_output(
         ["git", "ls-files", "-z", "--others", "--exclude-standard", "--",
-         "nimbus.toml", "machines", "profiles", "components", "system",
+         "nimbus.toml", "setup-notes.json", "machines", "profiles", "components", "system",
          "cmd", "internal", "tests", "tools", "docs"], cwd=source
     ).split(b"\0")
     for raw in sorted(set(paths) - {b""}):

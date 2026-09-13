@@ -88,7 +88,7 @@ func TestUpgradeRunsTheNativeUpdatersWithVisibleOutput(t *testing.T) {
 	if result := Upgrade(opts, opts.Root); result.Error != "" {
 		t.Fatal(result.Error)
 	}
-	if !src.ran("sudo dnf5 -y upgrade") || src.ran("sudo flatpak update") {
+	if !src.ran("sudo dnf5 --setopt=cacheonly=metadata -y upgrade") || src.ran("sudo flatpak update") {
 		t.Fatalf("without flatpak on PATH only DNF upgrades:\n%s", strings.Join(src.log, "\n"))
 	}
 	src.Paths["flatpak"] = "/usr/bin/flatpak"
@@ -98,7 +98,7 @@ func TestUpgradeRunsTheNativeUpdatersWithVisibleOutput(t *testing.T) {
 	if !src.ran("sudo flatpak update --system --noninteractive") {
 		t.Fatalf("flatpak update missing:\n%s", strings.Join(src.log, "\n"))
 	}
-	src.fail["sudo dnf5 -y upgrade"] = "exit status 1"
+	src.fail["sudo dnf5 --setopt=cacheonly=metadata -y upgrade"] = "exit status 1"
 	if result := Upgrade(opts, opts.Root); result.Error == "" {
 		t.Fatal("a failed dnf5 upgrade was not reported")
 	}

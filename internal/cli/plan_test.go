@@ -191,9 +191,9 @@ func TestPlanReadsTheCacheAndARunRefreshesIt(t *testing.T) {
 	if code != ExitFailure || strings.Contains(errOut, "metadata") || !strings.Contains(out, "from the local metadata cache") {
 		t.Fatalf("sync -p: %d %q\n%s", code, errOut, out)
 	}
-	// A run refreshes first; a failed refresh is reported, not fatal.
+	// A run refreshes first; a failed refresh stops the run.
 	code, out, errOut = run(t, "sync", "-y", "-n", "--checkout", root, "--machine", "laptop")
-	if code != ExitFailure || !strings.Contains(errOut, "metadata not refreshed: no network") {
+	if code != ExitFailure || !strings.Contains(out+errOut, "metadata refresh failed: no network") {
 		t.Fatalf("sync without network: %d %q\n%s", code, errOut, out)
 	}
 }

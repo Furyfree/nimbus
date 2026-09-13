@@ -126,13 +126,14 @@ func TestInstallerHelpersDoNotImplyApplicationCompletion(t *testing.T) {
 			in, src := fixture(name)
 			helper := "/usr/bin/" + name
 			src.Paths[helper] = helper
+			src.Commands[helper+" status"] = []byte("Installed GitHub Copilot: not installed\n")
 			guard := &readGuard{FakeSource: src}
 			got := Inspect(guard, in)
-			if len(got) != 1 || len(guard.commands) != 0 || len(guard.files) != 0 {
+			if len(got) != 1 || (name == "github-copilot-installer" && !slices.Equal(guard.commands, []string{helper + " status"})) || len(guard.files) != 0 {
 				t.Fatalf("unexpected helper inspection: tasks=%+v commands=%v files=%v", got, guard.commands, guard.files)
 			}
 			if name == "github-copilot-installer" {
-				if got[0].Status != Unknown || got[0].Action == nil || !slices.Equal(got[0].Action.Argv, []string{"sudo", "--", helper, "install"}) {
+				if got[0].Status != Pending || got[0].Action == nil || !slices.Equal(got[0].Action.Argv, []string{"sudo", "--", helper, "install"}) {
 					t.Fatalf("helper installation became application completion: %+v", got[0])
 				}
 			} else if got[0].Status != Blocked || got[0].Action != nil || !strings.Contains(got[0].Detail, "standalone install") {
@@ -155,6 +156,7 @@ func TestProtonCachyOSUsesNativeSetupWithoutInspectingUserData(t *testing.T) {
 	for _, mode := range []string{"ready", "no steam", "missing package", "missing receipt", "missing command", "unknown packages"} {
 		t.Run(mode, func(t *testing.T) {
 			in, src := fixture("protonplus", "steam")
+			src.Commands["protonplus list steam-system"] = []byte("Installed runners for Steam:\nNo runners installed\n")
 			switch mode {
 			case "no steam":
 				in.Resolved.Packages = in.Resolved.Packages[:1]
@@ -169,7 +171,7 @@ func TestProtonCachyOSUsesNativeSetupWithoutInspectingUserData(t *testing.T) {
 			}
 			guard := &readGuard{FakeSource: src}
 			tasks := Inspect(guard, in)
-			if len(guard.commands) != 0 || len(guard.files) != 0 {
+			if (len(guard.commands) > 0 && !slices.Equal(guard.commands, []string{"protonplus list steam-system"})) || len(guard.files) != 0 {
 				t.Fatalf("setup inspection accessed user data or ran commands: %v %v", guard.commands, guard.files)
 			}
 			if mode == "no steam" {
@@ -180,7 +182,7 @@ func TestProtonCachyOSUsesNativeSetupWithoutInspectingUserData(t *testing.T) {
 			}
 			task := findTask(t, tasks, "proton-cachyos")
 			if mode == "ready" {
-				if task.Status != Unknown || task.Action == nil || !slices.Equal(task.Action.Argv, []string{"protonplus", "install", "steam-system", "proton-cachyos", "latest"}) {
+				if task.Status != Pending || task.Action == nil || !slices.Equal(task.Action.Argv, []string{"protonplus", "install", "steam-system", "proton-cachyos", "latest"}) {
 					t.Fatalf("unexpected setup action or assumed runner readiness: %+v", task)
 				}
 			} else if task.Action != nil || (task.Status != Blocked && task.Status != Unknown) {
@@ -358,5 +360,31 @@ func TestForeignOrFailedReceiptsDoNotCreateRequirements(t *testing.T) {
 	}
 	if got := Inspect(src, in); len(got) != 0 {
 		t.Fatalf("invalid receipts exposed tasks: %+v", got)
+	}
+}
+
+func TestLogoutSeparatesShellChangesFromGroups(t *testing.T) {
+	for _, tc := range []struct {
+		name, boot string
+		want       Status
+	}{
+		{"later boot", "btime 200\n", Complete},
+		{"session not inspected", "btime 50\n", Unknown},
+		{"boot unavailable", "", Unknown},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in, src := fixture()
+			group := receipt("group:docker:tester", "group")
+			group.Logout, group.Intended = true, "true"
+			shell := receipt("login-shell:tester", "login-shell")
+			shell.Logout, shell.Operation, shell.Timestamp = true, "repair", time.Unix(100, 0)
+			in.Applied.Receipts[group.Resource], in.Applied.Receipts[shell.Resource] = group, shell
+			src.Commands["id -nG"], src.Commands["id -nG -- tester"] = []byte("tester docker"), []byte("tester docker")
+			src.Files["/proc/stat"] = []byte(tc.boot)
+			got := findTask(t, Inspect(src, in), "logout")
+			if got.Status != tc.want || strings.Contains(got.Detail, "group membership could not") {
+				t.Fatalf("%+v", got)
+			}
+		})
 	}
 }
