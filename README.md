@@ -128,6 +128,58 @@ task proves runtime files are present, not account readiness or widget behavior.
 Use engine 0.4.5 or newer so verification retries while background updates
 settle. The task first appeared in 0.4.4.
 
+With Hyprland's development package selected and recorded, run
+`nimbus postinstall hyprland-plugins --plan` to inspect ScrollOverview setup,
+then `nimbus postinstall hyprland-plugins` to approve it. Apply Chezmoi first:
+`~/.config/hypr/plugins.toml` supplies schema 1 and
+`enabled = ["scrolloverview"]`. Run inside the active Hyprland session as your
+normal user; HyprPM keeps its native trust and administrator prompts.
+This task requires engine 0.4.6 or newer.
+
+Nimbus shows only the missing build/install/enable/load steps. A completed
+setup is a no-op. If installed and running Hyprland differ, log out and back
+in before retrying. HyprPM owns downloads, builds and its privileged cache;
+updates may rebuild other registered plugins and reload their enabled set.
+Failed builds retain native state for retry. Nimbus verifies the build and
+live plugin before reporting success, then reloads Lua configuration. Init,
+sync and Chezmoi apply do not silently install plugins.
+
+The current task supports Hyprland 0.56 and ScrollOverview. It repairs local
+readiness rather than checking remote releases on every run. Use `hyprpm update`
+for routine plugin updates. For removal, first set `enabled = []` in the
+Chezmoi selection, then use `hyprpm disable yayuuu/scrolloverview` or
+`hyprpm remove yayuuu/hyprland-scroll-overview`. Nimbus does not remove plugins
+when they are deselected or write a completion receipt.
+
+The `hyprland-noctalia` profile selects a minimal greeter appearance from
+`/etc/noctalia/greeter.toml`: Inter, no logo or theme selector, power controls
+at bottom-right, and the Synced color scheme. The selected personal machines
+use `pby` as the default account. The greetd systemd drop-in exposes that file
+read-only at `/var/lib/noctalia-greeter/greeter.toml` inside the service's mount
+namespace. Nimbus manages the two `/etc` files; it does not replace Noctalia's
+`sync.toml`, wallpaper files or other runtime state. There is no blur or
+wallpaper-generation pipeline.
+
+Use `nimbus sync --plan` to review, then `nimbus sync` to apply after approval.
+Reboot when ready to activate a new greetd mount namespace. A simple logout or
+daemon-reload does not refresh the bind mount after an atomic file replacement;
+Nimbus never restarts the active display manager. Existing standalone greeter
+configuration outside the service namespace stays untouched. Removing this
+integration follows the existing console-only desktop retirement path and
+retains Noctalia runtime state. Noctalia's Sync Now remains a separate native
+action for wallpaper and colors; automatic sync is not enabled by these files.
+
+With AccountsService selected and installed, `nimbus postinstall account-picture`
+registers `~/.config/noctalia/assets/profile-picture.jpg` for the invoking user.
+Apply the Chezmoi image first and run from your desktop session. Use `--plan`
+to inspect only. The task calls AccountsService's `SetIconFile` through
+`busctl`, preserving native authorization, and compares the resulting icon
+bytes with the source. Matching pictures need no action; a missing or invalid
+source blocks setup. AccountsService owns its copy and the greeter reads it
+next time it starts. Re-run after changing the source, or replace/clear it in
+your desktop's account settings. No completion receipt or automatic wallpaper
+processing is added. This task requires engine 0.4.6 or newer.
+
 With Tailscale selected and installed, `nimbus postinstall tailscale-operator`
 offers permission for the invoking user to manage it through the CLI or
 Noctalia. It previews `sudo -- /usr/bin/tailscale set --operator=USER`, then

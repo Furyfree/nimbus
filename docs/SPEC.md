@@ -92,6 +92,20 @@ record pending work in TASKS. Keep required attribution when adapting code.
 Do not import a repository's configuration bundle, user files or performance
 tweaks wholesale. These references do not add new package sources or defaults.
 
+The Hyprland session component owns `/etc/noctalia/greeter.toml` and exposes
+only that file through greetd's `BindReadOnlyPaths` setting at the greeter's
+required declarative path. The service keeps its normal writable runtime
+state directory for native sync. This uses systemd's documented per-unit
+[bind mount](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html#BindPaths=)
+without extending Nimbus's file provider beyond `/etc`. Systemd handles the
+mount lifecycle; stopping the service removes its namespace, not the retained
+host runtime files. New appearance or mount definitions require a new greetd
+namespace after reboot and are reported in the plan. Unchanged adoption does
+not request another reboot. No display-manager restart is automatic. The
+[README](../README.md) documents activation, scope and account setup. The
+[upstream greeter configuration](https://docs.noctalia.dev/greeter/configuration/)
+keeps declarative appearance separate from mutable sync state.
+
 ## What Nimbus manages
 
 - Selected RPMs and system Flatpaks, their declared sources and constraints.
@@ -302,6 +316,25 @@ This is an explicit post-install action, not a sync resource: Tailscale owns
 the preference and package deselection does not reset it. Revoke it through
 `sudo tailscale set --operator=` or explicitly choose another operator.
 
+When AccountsService is selected, the account-picture post-install task
+registers the Chezmoi-supplied JPEG for the invoking non-root user. Require a
+verified package receipt, readable valid source and a running service that
+confirms the account identity. Inspection reads only the user name and icon
+path through non-activating, non-authorizing D-Bus property requests. Compare
+image content rather than paths, since AccountsService owns its stored copy.
+Bind approval to the source and current icon hashes; re-inspect before the
+fixed `SetIconFile` call through busctl with native authorization enabled.
+Verify the saved bytes after execution; failed or ineffective calls do not
+complete the task. Store no completion receipt and never write the daemon's
+files directly. Missing source blocks setup; unknown account state offers no
+action. Package deselection leaves the account preference in place. See
+[README](../README.md) for the dotfiles handoff, command and
+recovery; no image-generation or wallpaper-sync lifecycle is introduced.
+The native contract is AccountsService's
+[SetIconFile API](https://gitlab.freedesktop.org/accountsservice/accountsservice/-/blob/23.13.9/data/org.freedesktop.Accounts.User.xml);
+[Noctalia documents](https://docs.noctalia.dev/greeter/sync/) its independent
+AccountsService avatar lookup. No additional system policy is needed.
+
 Upgrade uses Chezmoi-owned Topgrade configuration. Updating that configuration
 changes the chosen native update steps without editing Go. Extra Topgrade
 arguments follow `--`. System and application updates run once, and failure
@@ -443,6 +476,33 @@ completion receipts are created. Run this action inside the desktop session
 after Chezmoi apply; init and sync do not start a desktop or silently download
 plugins.
 Installation verification does not claim account readiness or widget behavior.
+
+When Hyprland development headers are selected and recorded, the
+`hyprland-plugins` task reads Chezmoi's strict schema-1 selection at
+`~/.config/hypr/plugins.toml`. The supported selection is empty or
+`enabled = ["scrolloverview"]`. This is user intent, not native installed
+state. Missing or unknown input offers no mutation. Empty selection preserves
+existing plugins and does not offer automatic removal.
+
+For Hyprland 0.56, inspect the invoking user's `/var/cache/hyprpm/<user>` state,
+header marker, build result and binary, installed/running ABI, and live plugin
+list and configured option. Never run `hyprpm list` during inspection: it can
+initialize privileged state. Require the active session and matching ABI;
+an upgraded but still-running compositor requires a new login. Unknown cache
+formats, foreign repository collisions and unreadable state stop setup.
+
+After approval and the normal locked reinspection, execute only the planned
+native HyprPM update/add/enable/reload stages and Hyprland config reload.
+The supported ScrollOverview upstream is fixed in the engine; user input does
+not supply arbitrary commands. Rebuild failed or missing binaries with native
+forced update; this bypasses the up-to-date optimization, not ABI validation.
+Disclose that update/reload can affect other registered plugins. Preserve
+native trust and sudo authorization; never run HyprPM as root. Verify each stage
+before continuing, including builds whose native command returned zero.
+Failure retains HyprPM's partial state for retry. Completion requires build,
+enablement, live loading and applied overview configuration; appearance still
+needs user testing. No automatic setup during sync, custom plugin copies,
+cache edits or completion receipts. Native disable/remove owns removal.
 
 FDE auto-unlock is a planned optional post-install action, before the dashboard.
 It must inspect the existing encryption and boot setup, show the proposed

@@ -3,7 +3,7 @@
 schema = 1
 id = "hyprland-session"
 
-requires = []
+requires = ["hyprland-plugin-build"]
 conflicts = []
 packages = [
   "hyprland-copr:hyprland",
@@ -67,6 +67,12 @@ triggers = ["noctalia-state-directory"]
 
 [[files]]
 source = "etc/xdg/xdg-desktop-portal/hyprland-portals.conf"
+owner = "root"
+group = "root"
+mode = "0644"
+
+[[files]]
+source = "etc/noctalia/greeter.toml"
 owner = "root"
 group = "root"
 mode = "0644"

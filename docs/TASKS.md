@@ -10,6 +10,27 @@ repository updates during sync, Zed installation, browser fallbacks and
 reporting fixes. The signed Fedora 44 COPR package is available; its new
 installation and reboot checks remain pending.
 
+## ScrollOverview post-install setup, 2026-09-13
+
+- [x] Select matching COPR `hyprland-devel` through the shared
+  `hyprland-plugin-build` component. Its RPM requirements supply the build
+  tools and libraries; Chezmoi owns plugin selection, settings and shortcut.
+- [x] Confirm the user's local native installation: ScrollOverview is loaded
+  on Hyprland 0.56.2 and Super+O works. The user completed authentication and
+  installation after the initial failed dependency attempt.
+- [x] Implement explicit `hyprland-plugins` setup with read-only inspection,
+  preview, approval, ABI checks, native stage verification and retry.
+  No privileged Chezmoi hook, custom cache writes or completion receipt.
+- [x] Pass `just check`, all three machine definition checks and Chezmoi
+  Hyprland profile/Lua/native-config tests. The read-only inspector reports
+  complete against the live desktop cache and proposed selection, without
+  applying it. The normal CLI preview requests the unapplied selection file.
+  Tests cover fresh setup, partial failure/retry, native no-effect results,
+  stale approval, foreign cache state, missing IPC and completed no-op.
+- [ ] Test a fresh laptop installation through the new task after release.
+  Local installation predates the task; fixture tests do not prove a fresh
+  download/build on the laptop. Usage lives in README.
+
 ## Next: GRUB, then FDE auto-unlock
 
 Follow the [priority order](ROADMAP.md#next-steps) before the shared-operation
@@ -294,6 +315,26 @@ did not justify extra system policy. Existing user overrides remain owned by
 Chezmoi. SSH server access stays unmanaged, and the Windows VM stays deferred.
 
 ### Engine and integration work
+
+- [x] Promote the tested minimal greeter appearance into the Hyprland session
+  component. Keep canonical configuration in `/etc` and expose that one file
+  read-only through systemd; preserve native runtime state and defer activation
+  to reboot. Chezmoi owns the matching lockscreen and account image.
+- [ ] Check the promoted systemd greeter mount after an approved sync and reboot.
+  The earlier local appearance preview did not exercise this deployment path.
+
+- [x] Add account-picture registration through AccountsService after the
+  Chezmoi image is available. Use the invoking user's native permission check,
+  read-only non-activating inspection, source/current content checks across
+  approval, and post-action verification without a completion receipt.
+  Fake-native tests cover missing/damaged images, unknown account state,
+  cancellation, stale approval, failed/ineffective saves, retry and convergence.
+  `just check` and `just validate` pass. On 2026-09-13 the local candidate
+  registered the desktop owner's picture through native authorization, verified
+  the stored bytes and reported complete on a second run. The greeter
+  appearance still needs the owner's next-login check.
+- [ ] Publish the account-picture task in a new engine release. This change
+  does not release Nimbus or alter greeter wallpaper behavior.
 
 - [x] Simplify completed post-install output to its verified result. Omit setup
   titles and action/recovery guidance for completed checks, and use the same

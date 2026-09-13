@@ -105,6 +105,12 @@ func resolveResources(c *Checkout, r *Resolved, errs *ErrorList) {
 	})
 }
 
+// GreeterAppearanceTarget identifies files whose changes require a new greetd
+// mount namespace. Restarting the active display manager is never automatic.
+func GreeterAppearanceTarget(target string) bool {
+	return target == "/etc/noctalia/greeter.toml" || target == "/etc/systemd/system/greetd.service.d/nimbus.conf"
+}
+
 // LegacyRecoveryTarget permits cleanup of the two retired session files.
 // No definition can select these targets for a new installation.
 func LegacyRecoveryTarget(target string) bool {

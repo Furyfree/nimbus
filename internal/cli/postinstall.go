@@ -125,6 +125,8 @@ func newPostinstall(opts *options) *cobra.Command {
 			var runErr error
 			if task.Action.Kind == postinstall.SyncNoctaliaPlugins {
 				runErr = postinstall.RunNoctaliaPlugins(cmd.Context(), src, cmd.OutOrStdout(), cmd.ErrOrStderr(), task)
+			} else if task.Action.Kind == postinstall.SyncHyprlandPlugins {
+				runErr = postinstall.RunHyprlandPlugins(cmd.Context(), src, cmd.OutOrStdout(), cmd.ErrOrStderr(), task)
 			} else {
 				argv := commands[0]
 				runErr = src.Stream(cmd.OutOrStdout(), cmd.ErrOrStderr(), argv[0], argv[1:]...)
@@ -152,8 +154,14 @@ func newPostinstall(opts *options) *cobra.Command {
 			if runErr == nil && current.Status != postinstall.Complete && task.Action.Kind == postinstall.SetTailscaleOperator {
 				checkErr = errors.New("Tailscale command finished, but operator permission could not be verified; inspect tailscaled before retrying")
 			}
+			if runErr == nil && current.Status != postinstall.Complete && task.Action.Kind == postinstall.SetAccountPicture {
+				checkErr = errors.New("AccountsService command finished, but the account picture could not be verified; inspect account settings before retrying")
+			}
 			if runErr == nil && current.Status != postinstall.Complete && task.Action.Kind == postinstall.SyncNoctaliaPlugins {
 				checkErr = errors.New("Noctalia plugin installation could not be verified; retry the task")
+			}
+			if runErr == nil && current.Status != postinstall.Complete && task.Action.Kind == postinstall.SyncHyprlandPlugins {
+				checkErr = errors.New("Hyprland plugin installation could not be verified; retry the task")
 			}
 			return errors.Join(runErr, checkErr, reportErr)
 		},
@@ -197,6 +205,9 @@ func selectedTask(view postinstallView, id string) (postinstall.Task, error) {
 }
 
 func postinstallCommands(task postinstall.Task) ([][]string, error) {
+	if task.Action != nil && task.Action.Kind == postinstall.SyncHyprlandPlugins {
+		return postinstall.HyprlandCommands(task)
+	}
 	if task.Action != nil && task.Action.Kind == postinstall.SyncNoctaliaPlugins {
 		return postinstall.NoctaliaCommands(task)
 	}
@@ -212,6 +223,12 @@ func postinstallCommands(task postinstall.Task) ([][]string, error) {
 
 func postinstallArgv(task postinstall.Task) ([]string, error) {
 	if task.Action != nil {
+		if task.ID == "account-picture" && task.Status == postinstall.Pending && task.Action.Kind == postinstall.SetAccountPicture && task.Action.Picture != nil {
+			expected := postinstall.AccountPictureAction(task.Action.User, *task.Action.Picture)
+			if expected != nil && slices.Equal(task.Action.Argv, expected.Argv) {
+				return expected.Argv, nil
+			}
+		}
 		if task.ID == "tailscale-operator" && task.Status == postinstall.Pending && task.Action.Kind == postinstall.SetTailscaleOperator {
 			expected := postinstall.TailscaleOperatorAction(task.Action.User)
 			if expected != nil && slices.Equal(task.Action.Argv, expected.Argv) {

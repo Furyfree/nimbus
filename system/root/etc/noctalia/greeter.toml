@@ -1,0 +1,12 @@
+# Declarative appearance; Noctalia retains its separate sync.toml and wallpapers.
+[appearance]
+scheme = "Synced"
+password_style = "default"
+hide_logo = true
+power_buttons_position = "bottom-right"
+scheme_selector_position = "hidden"
+font_family = "Inter"
+
+# The owner's account on the selected personal machines.
+[user]
+default = "pby"

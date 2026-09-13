@@ -601,3 +601,19 @@ func TestRetiredRecoveryFilesRequireUnchangedOwnership(t *testing.T) {
 		})
 	}
 }
+
+func TestGreeterAppearanceChangeExplainsDeferredActivation(t *testing.T) {
+	for _, target := range []string{"/etc/noctalia/greeter.toml", "/etc/systemd/system/greetd.service.d/nimbus.conf", "/etc/other.conf"} {
+		b, _ := resourceBuilder()
+		b.in.Resolved.Files = []definitions.ResolvedFile{{Target: target, Content: []byte("new"), Owner: "root", Group: "root", Mode: "0644"}}
+		op := b.systemResources(nil)[0]
+		if op.Blocked != "" || strings.Contains(strings.Join(op.Notes, " "), "after reboot") != definitions.GreeterAppearanceTarget(target) {
+			t.Fatalf("activation plan: %+v", op)
+		}
+		for _, step := range op.Steps {
+			if strings.Contains(strings.Join(step.Argv, " "), "restart") {
+				t.Fatal("restarts display manager")
+			}
+		}
+	}
+}

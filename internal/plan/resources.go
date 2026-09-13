@@ -101,6 +101,9 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 		if op.Action != ActionKeep && op.Action != ActionAdopt {
 			op.Steps = []Step{{Description: "atomically install the reviewed file and restore its SELinux label", Argv: []string{"nimbus", "internal", "system-file", "--plan", "<plan-digest>", "--payload", "<approved-file-change>"}, Privileged: true}, {Description: "restore SELinux file context", Argv: []string{"restorecon", "--", file.Target}, Privileged: true}}
 		}
+		if definitions.GreeterAppearanceTarget(file.Target) && (op.Action == ActionInstall || op.Action == ActionRepair || op.File.ActivationChanged) {
+			op.Notes = append(op.Notes, "Use the new greeter configuration after reboot; Nimbus does not restart the active display manager.")
+		}
 		if pendingPackages != "" {
 			op.After = pendingPackages
 		}

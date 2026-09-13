@@ -274,6 +274,7 @@ func (ex *executor) systemFile(op plan.Operation) (receipts []state.Receipt, rem
 	data, _ := json.Marshal(c.After)
 	receipt := ex.receipt(op, plan.KindFile, c.Previous, string(data), "regular file content, ownership and mode match")
 	receipt.Triggers = c.Triggers
+	receipt.Reboot = definitions.GreeterAppearanceTarget(c.Target) && (op.Action != plan.ActionAdopt || c.ActivationChanged)
 	receipt.ChangedAt = c.ChangedAt
 	if op.Action != plan.ActionAdopt || c.ActivationChanged {
 		receipt.ChangedAt = receipt.Timestamp

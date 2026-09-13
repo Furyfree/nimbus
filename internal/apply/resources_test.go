@@ -777,3 +777,21 @@ func TestGreeterFileRetirementReloadsUnitsWithoutRecreatingStateDirectory(t *tes
 		t.Fatalf("creation command ran on removal: %s", src.commands[i])
 	}
 }
+
+func TestGreeterAppearanceAdoptionOnlyRequestsRebootForChangedActivation(t *testing.T) {
+	for _, changed := range []bool{false, true} {
+		src := fileCommands()
+		target := "/etc/noctalia/greeter.toml"
+		have := inspect.SystemFile{Exists: true, Content: []byte("same"), Owner: "root", Group: "root", Mode: "0644"}
+		src.Dirs["/etc"] = []string{"noctalia"}
+		src.Dirs["/etc/noctalia"] = []string{"greeter.toml"}
+		src.Commands[nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", "/etc/noctalia")] = []byte("directory|root|root|755|1")
+		src.Commands[nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", target)] = []byte("regular file|root|root|644|1")
+		src.Files[target] = have.Content
+		op := plan.Operation{ID: "file:" + target, Kind: plan.KindFile, Action: plan.ActionAdopt, File: &plan.FileChange{Target: target, Before: have, After: have, ChangedAt: time.Unix(5, 0), ActivationChanged: changed}}
+		receipts, _, err := resourceExecutor(src).systemFile(op)
+		if err != nil || len(receipts) != 1 || receipts[0].Reboot != changed || src.mutated {
+			t.Fatalf("adoption: %+v %v", receipts, err)
+		}
+	}
+}

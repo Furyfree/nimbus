@@ -30,15 +30,19 @@ const (
 	InstallApplication   ActionKind = "install-application"
 	SetTailscaleOperator ActionKind = "set-tailscale-operator"
 	SyncNoctaliaPlugins  ActionKind = "sync-noctalia-plugins"
+	SyncHyprlandPlugins  ActionKind = "sync-hyprland-plugins"
+	SetAccountPicture    ActionKind = "set-account-picture"
 )
 
 // Action describes native commands offered for explicit user selection.
-// Argv is used for a single command; Commands is the Noctalia source workflow.
+// Argv is used for a single command; Commands is an ordered native workflow.
 type Action struct {
-	Kind     ActionKind `json:"kind"`
-	Argv     []string   `json:"argv,omitempty"`
-	Commands [][]string `json:"commands,omitempty"`
-	User     string     `json:"user,omitempty"`
+	Hyprland *HyprlandSetup  `json:"hyprland,omitempty"`
+	Kind     ActionKind      `json:"kind"`
+	Argv     []string        `json:"argv,omitempty"`
+	Commands [][]string      `json:"commands,omitempty"`
+	User     string          `json:"user,omitempty"`
+	Picture  *AccountPicture `json:"picture,omitempty"`
 }
 
 type Task struct {
@@ -82,6 +86,10 @@ func Inspect(src native.Source, in Inputs) []Task {
 			result = append(result, installerHelper(src, in, pkg))
 		case pkg.Name == "noctalia" && pkg.Prefix != "flatpak":
 			result = append(result, noctaliaPlugins(src, in, pkg))
+		case pkg.Name == "hyprland-devel" && pkg.Prefix != "flatpak":
+			result = append(result, hyprlandPlugins(src, in, pkg))
+		case pkg.Name == "accountsservice" && pkg.Prefix != "flatpak":
+			result = append(result, accountPicture(src, in, pkg))
 		case pkg.Name == "protonplus":
 			for _, steam := range in.Resolved.Packages {
 				if steam.Name == "steam" && steam.Prefix != "flatpak" {

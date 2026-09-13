@@ -74,6 +74,11 @@ Topgrade calls their explicit updates. No custom application provider is needed.
 Tailscale operator setup uses the same explicit post-install approval flow,
 with native preference verification and a documented revocation command.
 Validate this new action in disposable Fedora before claiming host coverage.
+Account-picture registration uses AccountsService after the Chezmoi image is
+available. The task requires engine 0.4.6 or newer; delivery and native
+validation evidence are tracked in TASKS.
+The matching greeter appearance is prepared in the Hyprland session component;
+activation of its read-only systemd mount still needs a sync/reboot trial.
 WoWUp requires a standalone install/update interface in COPR before integration
 can finish. Uninstalling a helper alone does not remove its application.
 
@@ -130,6 +135,12 @@ background update. Version 0.4.5 adds retries; validate missing-plugin repair
 from a fresh desktop session through the supported command. Native Noctalia
 owns downloads; Chezmoi owns selection.
 See README for usage and TASKS for validation evidence.
+
+The Hyprland plugin post-install task requires engine 0.4.6 or newer.
+Chezmoi selects ScrollOverview; Nimbus supplies matching development packages
+and coordinates native HyprPM setup after approval. Validate a fresh laptop
+installation through the task before closing its hardware gate. See README
+for usage and TASKS for evidence.
 
 NVIDIA selections include a system-wide mask for the X11 settings-loader
 autostart. Verify its next-login behavior during the NVIDIA hardware trial.
