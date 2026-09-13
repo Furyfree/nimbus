@@ -689,3 +689,29 @@ Release preparation targets Nimbus 0.5.0, with the matching minimum engine in
 these definitions. Commit, push, GitHub release and COPR publication are now
 authorized. Full graphical init/login, hardware and real-account trials remain
 open; publication does not close those gates.
+
+Release evidence, 2026-09-13: [Nimbus v0.5.0][maintenance-release] is published
+from commit `a3ec141c5578ebd26d61e61e458568157d0446b1`. Chezmoi commit
+`7aa5957` and COPR recipe commit `96e71d7` are pushed to main. All three
+repositories' GitHub checks passed, as did the release workflow's Go 1.26.7
+offline vendored build/tests. The archive matches all 296 tagged regular files
+and executable modes; its 754 vendored files and 23 notices are unchanged.
+Archive SHA-256:
+`2722499273598eb23f5f1bef2768d295c05254400750a1eb52ea1236ca63ca6b`.
+
+The complete offline Fedora packaging gate and an actual source-RPM rebuild
+pass. The first extra rebuild used an anonymous container UID and failed
+current-user fixture checks; repeating with a normal unprivileged build account
+passes without source or test changes. Prepared and COPR-published source RPMs
+contain the exact archive and reviewed spec.
+
+[COPR build 10981938][maintenance-copr] is submitted through the
+[publication workflow][maintenance-publish]. At handoff it is waiting for
+Copr DistGit source import; the public import queue also contains dozens of
+other waiting builds. The hosted workflow continues automatically. The signed
+binary RPM is not yet available: signature/payload verification and an extracted
+binary smoke test remain pending. No desktop or laptop package update was run.
+
+[maintenance-release]: https://github.com/Furyfree/nimbus/releases/tag/v0.5.0
+[maintenance-copr]: https://copr.fedorainfracloud.org/coprs/furyfree/nimbus/build/10981938/
+[maintenance-publish]: https://github.com/Furyfree/copr/actions/runs/34770315892
