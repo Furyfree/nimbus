@@ -12,6 +12,30 @@ installation and reboot checks remain pending.
 
 ## Local agent proxy, 2026-09-13
 
+[Nimbus v0.5.2](https://github.com/Furyfree/nimbus/releases/tag/v0.5.2)
+is published from commit `94f448a560dd5e556eb6bb651265a2e29b6eda69`.
+The archive SHA-256 is
+`d6f99a5b62e35f9b754b0b5b2475456e517ba437a09cc66170289f55f62fbc36`.
+All 332 tagged files and executable modes match the archive. The 754 vendored
+files and 23 dependency notices are unchanged from 0.5.1; the embedded
+upstream patch retains its MIT notice.
+
+Nimbus's complete gate, definition validation, CI and offline vendored release
+build/tests passed. Chezmoi commit `14a045d` passed 154 tests with three optional
+skips, Bash checks and CI. Its secret-skipping file diff is empty; verification
+excluding the five expected run-always scripts passes. The complete COPR gate,
+CI and unprivileged offline RPM rebuild passed. Prepared and published source
+RPMs retain the exact reviewed archive and spec; the RPM includes the new
+upstream license and runs the model-adapter tests with Node available.
+
+[COPR build 10982500](https://copr.fedorainfracloud.org/coprs/furyfree/nimbus/build/10982500/)
+is running through the
+[publication workflow](https://github.com/Furyfree/copr/actions/runs/34786152917).
+Source import completed; the Fedora 44 binary build is queued. Signed binary
+publication, repository metadata, signature/payload verification and extracted
+binary smoke tests remain pending. No workstation upgrade or laptop changes
+were performed during release preparation.
+
 - [x] Separate concise repeat-refresh output from initial setup and help. Verify
   operation selection on matching/changed/unreadable config, per-provider
   reporting and secret-safe distinction between sign-in skips and real errors.
