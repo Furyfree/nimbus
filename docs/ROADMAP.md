@@ -123,6 +123,8 @@ The desktop/laptop comparison and command review found:
   ID. Several tasks remain generically unknown despite prior manual setup.
 - Matching managed files does not prove matching effective configuration.
   The laptop's Noctalia GUI overrides disable the managed lockscreen widgets.
+  The explicit lockscreen repair is now implemented; the installed laptop
+  trial remains pending. Normal sync still preserves GUI overrides.
 
 ### Init and first-install experience
 
@@ -829,3 +831,15 @@ Nimbus is not becoming a multi-distribution framework, fleet manager, general
 AppImage manager, backup service or custom Fedora installer image. Package
 discovery results are input for owner review, never automatically desired
 state. Fedora major-release upgrades stay with native Fedora tools.
+
+## Local agents in Copilot
+
+Repeat postinstall now selects a concise refresh-only workflow when local setup
+and managed configuration match. Provider skips and actual errors are distinct.
+
+The postinstall and post-Topgrade model refresh are implemented locally; see the
+[operator commands](../README.md#local-agents-in-copilot). Keep the upstream
+source/compatibility pin reviewed when updating Nimbus. Automatic maintenance
+refreshes catalogs, not the proxy application release. New-engine setup can
+update that native release explicitly. Follow up when Antigravity gains an
+external tool bridge or Copilot exposes a stable public registration API.

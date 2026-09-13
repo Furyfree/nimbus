@@ -102,6 +102,14 @@ Older designs are history, not active requirements; revalidate before reuse.
 
 ## Neighbouring repositories
 
+The explicit lockscreen postinstall task may back up and remove only Noctalia
+lockscreen-widget overrides after approval, as SPEC defines. This does not
+authorize ordinary sync to edit runtime preferences.
+
+Nimbus may coordinate the explicitly selected local-agent proxy through native
+installer and application APIs. Chezmoi owns its static config; Nimbus owns
+private model registration evidence, never Copilot credentials or databases.
+
 Nimbus owns its setup-note catalog and commands. Read guidance from the selected
 Nimbus checkout; do not add a Chezmoi catalog handoff or standalone note reader.
 

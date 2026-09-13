@@ -10,6 +10,53 @@ repository updates during sync, Zed installation, browser fallbacks and
 reporting fixes. The signed Fedora 44 COPR package is available; its new
 installation and reboot checks remain pending.
 
+## Local agent proxy, 2026-09-13
+
+- [x] Separate concise repeat-refresh output from initial setup and help. Verify
+  operation selection on matching/changed/unreadable config, per-provider
+  reporting and secret-safe distinction between sign-in skips and real errors.
+
+- [x] Add previewable postinstall, native installer/config ownership, private
+  registration evidence and explicit opt-in/reset for upgrade catalog refresh.
+- [x] Query four native catalogs independently, preserve failed-provider and
+  manual entries, and verify idempotence, stale removal and interrupted retry.
+- [x] Replace the trial's hardcoded Copilot provider ID with native registration
+  and validated evidence import. Keep keys in native credentials, never Git.
+- [x] Validate patched upstream: 474 tests passed, two upstream skips;
+  build/typecheck/dead-code checks and production dependency audit passed.
+- [x] Exercise native installer install/upgrade/rollback/uninstall and activation
+  failure in disposable homes, with simulated systemd lifecycle operations.
+- [x] Verify local setup and refresh: 13 existing models retained, no duplicate
+  registrations, and real non-streaming replies from Codex, Claude and Grok.
+  Confirm both services use Mise Node and stable shims. Remove the temporary
+  helper, imported helper inventory and redundant trial service drop-in.
+- [x] Pass Nimbus `just check` and `just validate`; pass Chezmoi's full gate
+  (154 tests, three optional skips) and focused private-config rendering.
+  Chezmoi diff is empty; verification excluding five run-always scripts passes.
+- [ ] Antigravity is not signed in locally; live generation remains untested.
+  Discovery defers without deleting its inventory or starting authentication.
+- [x] Owner authorized committing both repositories and publishing Nimbus
+  0.5.2 through COPR. Release verification is recorded after publication.
+- [ ] Test the released setup on the laptop; no laptop edits are authorized.
+
+## Managed lockscreen repair, 2026-09-13
+
+- [x] Add a named, previewable lockscreen task with read-only status, locked
+  reinspection and explicit approval. Native configuration remains authoritative.
+- [x] Back up settings privately and remove only parsed lockscreen-widget
+  overrides, preserving other values and formatting. Reject unsafe paths and
+  abort when settings change before replacement or during shutdown.
+- [x] Gracefully stop the exact invoking-user Noctalia daemon using a pidfd,
+  restart after repair/failure, and verify readiness and effective configuration.
+  Never stop Hyprland, force-kill, request sudo or trigger the lockscreen.
+- [x] Pass `just check`, `just validate`, and race tests for CLI, postinstall
+  and native execution. Isolated tests cover approval refusal/drift, private
+  backups, TOML preservation, unsafe paths, shutdown writes and restart failure;
+  an isolated child process verifies pidfd identity checks and graceful exit.
+- [ ] Owner: exercise the task in the laptop desktop session and visually check
+  clock, date, avatar and password field. No laptop repair or live-desktop
+  mutation is performed during implementation. See the README for commands.
+
 ## Completion and output follow-up, 2026-09-13
 
 [Version 0.5.1](https://github.com/Furyfree/nimbus/releases/tag/v0.5.1) is
@@ -90,6 +137,10 @@ was performed; installed-session testing remains with the owner.
   execution. Terminal tests cover 40/120 columns and color opt-out; fixtures
   cover Doctor formatting, MOK history and preview order. Definition validation
   passes for desktop, laptop and VM.
+- [x] Reset output line tracking after confirmation and selection prompts, so
+  the first result receives the same styling as subsequent results. Regression
+  tests cover accepted, declined, default and exhausted input with colors on
+  and off, without adding blank lines or running native setup.
 - [ ] Owner reviews terminal colors and retests guided sign-in recovery.
   No live authentication, workstation mutation, release or laptop changes are
   part of automated validation.

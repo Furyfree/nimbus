@@ -626,6 +626,40 @@ owns runner downloads, updates and removal; Nimbus neither queries releases
 during inspection nor records runner completion from an exit code. This is a
 post-install action, not an automatic download during init or sync.
 
+When Noctalia is selected and recorded, `noctalia-lockscreen` offers an explicit
+repair of GUI overrides hiding Chezmoi's managed schema-2 widget layout. This
+is a narrow exception to native runtime-state ownership: Chezmoi retains the
+layout; Nimbus may remove only `lockscreen_widgets` and its descendants after
+preview and approval. Sync never removes GUI preferences. Help and previews
+remain read-only, and status rechecks configuration rather than trusting saved
+completion. Missing, invalid or nonmatching managed configuration blocks repair.
+
+Require an unlocked local Noctalia session, closed panels/editor, and exactly
+one invoking-user daemon with supported launch arguments. Preview the temporary
+shell interruption. After locked reinspection, use a pidfd and verify executable,
+UID and start time before SIGTERM; do not force-kill, stop Hyprland, log out, or
+request sudo. A ten-second exit timeout leaves settings untouched. If the shell
+exits later, the operator restarts it. Otherwise restart the shell even when
+subsequent repair fails or cancellation arrives. No automatic locking occurs.
+
+Read and hash the reviewed configuration again before writing; a shutdown flush
+or external edit aborts replacement. Reject symlinks, foreign ownership,
+shared-writable ancestors, hard links and oversized input. Save an exact 0600
+backup in the private Nimbus state directory before atomically replacing the
+settings file. Remove parsed TOML expressions rather than matching text inside
+strings. Preserve unrelated values, comments and formatting. Backups are local
+and never synchronized; operators review/remove them explicitly. Do not restore
+a whole backup automatically over newer preferences.
+
+Noctalia 5.0.1's explicit reload rebuilds from in-memory overrides; its filesystem
+watcher reloads external settings separately. Restart ensures it reads the
+repaired file without a stale editor writing back. This behavior was checked in
+upstream `src/config/config_service.cpp` at tag `v5.0.1`. After restart, check
+shell readiness, unchanged repaired files and native merged configuration.
+Record completion only on success; errors retain the backup and explain retry
+or native restart. These checks do not certify visual placement or unlock/PAM
+behavior. See the [README](../README.md#guided-setup) for commands and recovery.
+
 When Noctalia is selected and recorded, `noctalia-plugins` inspects its native
 full effective configuration and local IPC plugin listing. Enabled intent and
 cached catalogs do not establish installation: verify matching runtime
@@ -955,3 +989,57 @@ upgrades remain native operator workflows. Nimbus reports current compatibility
 and repairs its own drift afterwards; it does not manage those transactions.
 There is no background reconciliation daemon, generic provider/plugin system,
 secret manager, fleet manager or cross-distribution support commitment.
+
+## Local agent proxy integration
+
+`postinstall agent-proxy` is selected with GitHub Copilot. Help, plan and status
+read only local definitions and registration evidence. Execution requires
+approval, a running Copilot desktop, Mise-selected Node 24 or newer, Herdr and
+the desired authenticated CLIs. Authentication remains a separate native step.
+The task never starts sign-in or asks for privileged access.
+
+Chezmoi owns the loopback-only authenticated proxy configuration. The upstream
+current-user installer owns application releases, credentials, services and
+release backups. Nimbus builds pinned source after SHA-256 verification, applies
+the embedded compatibility patch, and invokes that installer. The patch fixes
+unit path quoting and completed-request disconnect detection, updates vulnerable
+locked dependencies, prefers stable Mise shims in generated service PATH, and
+preserves the trial's Herdr PTY access. The proxy keeps
+private devices; Herdr needs login-session devices to create terminal panes.
+Neither service gains privileges. Setup reports restart requirements and refuses
+to replace unrecognized service files or interrupt active proxy requests.
+
+Nimbus owns `agent-proxy.json` and its operation lock under the private XDG state
+directory. These are never synchronized. They record machine identity, provider
+and model IDs, catalog results and pending creation intents, without credentials.
+The adapter is embedded in the engine, extracted privately for an operation and
+removed afterwards. No mutable helper is installed in the user's PATH.
+
+Copilot's own provider API stores the API key in its credential store. Model
+mapping changes go through the proxy admin API, not either runtime database.
+Successful complete discoveries for Codex, Claude, Grok and Antigravity add and
+update owned entries and remove stale owned entries. A failed or unrecognized
+list preserves that provider's entries. Manual records and identity collisions
+are never adopted implicitly. Creation intents allow interrupted requests to be
+reconciled on retry; deletion retains ownership until both endpoints verify it.
+The explicitly approved trial handoff imports private evidence only after native
+IDs and provider settings match.
+
+Successful setup opts the machine into a model refresh after Topgrade completes
+in `sync --upgrade`. Ordinary sync, standalone `upgrade`, and `upgrade --system`
+do not run it. A closed Copilot app defers refresh before any CLI discovery or
+model mutation. Refresh does not install software, apply configuration, restart
+services or sign in. Results and per-provider deferrals join the final report;
+an earlier upgrade failure skips refresh. Reset disables the opt-in and retains
+all services, credentials, configuration and model ownership for later reuse.
+Local status verifies installation and registration files, not live account or
+service readiness. Antigravity's current adapter has no external tool bridge.
+
+Repeat postinstall runs check the selected proxy config with secret-free Chezmoi
+status inspection. A current registration, expected release and matching config
+select the refresh-only path. Changed configuration or missing setup selects the
+setup preview; an unreadable check stops before approval. Detailed prerequisites
+and recovery stay in help. Routine results show provider counts and specific
+skip reasons. Known missing authentication or CLIs are skips, not a partial
+setup failure. Genuine discovery errors remain visible and preserve their
+inventories.

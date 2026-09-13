@@ -15,6 +15,48 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func TestResultStylingAfterPrompt(t *testing.T) {
+	for _, input := range []string{"y\n", "n\n", "\n", ""} {
+		for _, color := range []bool{false, true} {
+			for _, prompt := range []string{"approval", "selection"} {
+				t.Run(fmt.Sprintf("%s/%q/color=%t", prompt, input, color), func(t *testing.T) {
+					var terminal strings.Builder
+					out := output.ColorWriter(&terminal, func() bool { return color })
+					if prompt == "approval" {
+						if got := approver(strings.NewReader(input), out, ""); got != (input == "y\n" || input == "\n") {
+							t.Fatal("approval changed", got)
+						}
+					} else {
+						_, _ = promptLineFn(strings.NewReader(input), out, "Machine", "desktop")
+					}
+					if terminal.Len() == 0 || strings.Contains(terminal.String(), "\n") {
+						t.Fatal("prompt was buffered or an extra newline was emitted")
+					}
+					// Input echo bypasses Nimbus's output writer, as it does on a TTY.
+					if _, err := io.WriteString(output.Native(out), "\n"); err != nil {
+						t.Fatal(err)
+					}
+					for _, provider := range []string{"Codex", "Claude", "Grok"} {
+						if _, err := fmt.Fprintf(out, "✓ %s: 2 models\n", provider); err != nil {
+							t.Fatal(err)
+						}
+					}
+					lines := strings.Split(terminal.String(), "\n")
+					for i, provider := range []string{"Codex", "Claude", "Grok"} {
+						want := "✓ " + provider + ": 2 models"
+						if color {
+							want = "\x1b[92m\x1b[1m" + want + "\x1b[0m"
+						}
+						if lines[i+1] != want {
+							t.Fatalf("result after prompt: got %q, want %q", lines[i+1], want)
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestCommandHelpUsesSharedColors(t *testing.T) {
 	saved := terminalColors
 	t.Cleanup(func() { terminalColors = saved })

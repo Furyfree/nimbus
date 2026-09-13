@@ -49,7 +49,11 @@ func runMaintenance(cmd *cobra.Command, opts *options, flags machineFlags, sf sy
 			if _, err := fmt.Fprintln(out, "\n3. Run software updates:"); err != nil {
 				return err
 			}
-			return runTopgrade(cmd, nil, true, flags)
+			if err := runTopgrade(cmd, nil, true, flags); err != nil {
+				return err
+			}
+			_, err := fmt.Fprintln(out, "4. Refresh local agent models if configured; defer when Copilot is closed.")
+			return err
 		}
 		return nil
 	}
@@ -220,6 +224,12 @@ func runMaintenance(cmd *cobra.Command, opts *options, flags machineFlags, sf sy
 			return err
 		}
 		result.Steps = append(result.Steps, runStep{Name: phase, Status: "succeeded"})
+	}
+	if upgrade {
+		phase = "agent model refresh"
+		if err := refreshAgentProxy(cmd, src, s.Resolved.Machine, out, &result); err != nil {
+			return err
+		}
 	}
 	phase = "final inspection"
 	return nil

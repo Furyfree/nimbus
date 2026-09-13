@@ -1,0 +1,317 @@
+--- a/package.json
++++ b/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "agent-proxy",
+-  "version": "1.3.0",
++  "version": "1.3.0-nimbus.2",
+   "private": true,
+   "description": "Linux API gateway for Claude Code, Codex, Antigravity, and Grok CLIs",
+   "workspaces": [
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+   "name": "agent-proxy",
+-  "version": "1.3.0",
++  "version": "1.3.0-nimbus.2",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "agent-proxy",
+-      "version": "1.3.0",
++      "version": "1.3.0-nimbus.2",
+       "workspaces": [
+         "packages/*"
+       ],
+@@ -3477,9 +3477,9 @@
+       "license": "MIT"
+     },
+     "node_modules/fast-uri": {
+-      "version": "3.1.4",
+-      "resolved": "https://registry.npmjs.org/fast-uri/-/fast-uri-3.1.4.tgz",
+-      "integrity": "sha512-8JnbkQ4juDyvYs4mgFGQqg4yCYtFDtUtmp2QIQq11ZZe5CFQ5wcqm1rqDgAh/QdMySuBnPzMUiJUNZG5N/AiQw==",
++      "version": "3.1.7",
++      "resolved": "https://registry.npmjs.org/fast-uri/-/fast-uri-3.1.7.tgz",
++      "integrity": "sha512-dOvZVzjdZdz7phd9v6jCbwxrBW3fK6n8Rc0CtdmM4bumzMnxywBYhuph6J819RRw/ku+rLbelwfMunktuzVVHg==",
+       "funding": [
+         {
+           "type": "github",
+@@ -3493,9 +3493,9 @@
+       "license": "BSD-3-Clause"
+     },
+     "node_modules/fastify": {
+-      "version": "5.10.0",
+-      "resolved": "https://registry.npmjs.org/fastify/-/fastify-5.10.0.tgz",
+-      "integrity": "sha512-A9L0ziuWGQHgEEVgF3davQ9vbD93IuX+lo2IsxapQmu5b/Y/ynn9m9K5JHt9dvyJXOFc5iN0Zk5GHEOqnzhWjg==",
++      "version": "5.12.4",
++      "resolved": "https://registry.npmjs.org/fastify/-/fastify-5.12.4.tgz",
++      "integrity": "sha512-zATD676fP6tBMsn+jQ7Q5/cO/Qo+149TXH0dUqUKel+1/hcZxwIbnflqtPa9EjlrvpY8eCZcL3M1UYrMc31Y7g==",
+       "funding": [
+         {
+           "type": "github",
+@@ -3518,7 +3518,7 @@
+         "find-my-way": "^9.6.0",
+         "light-my-request": "^6.0.0",
+         "pino": "^9.14.0 || ^10.1.0",
+-        "process-warning": "^5.0.0",
++        "process-warning": "^5.1.0",
+         "rfdc": "^1.3.1",
+         "secure-json-parse": "^4.0.0",
+         "semver": "^7.6.0",
+@@ -3566,9 +3566,9 @@
+       }
+     },
+     "node_modules/fastify/node_modules/fast-uri": {
+-      "version": "4.1.1",
+-      "resolved": "https://registry.npmjs.org/fast-uri/-/fast-uri-4.1.1.tgz",
+-      "integrity": "sha512-YPOs1zD5TG2+EZt+r88LwF6mclA7TPkpwMP7ZN3TO2HiHS8TXvq7QA/17iJsV9dubcLo/f8eEYqMBruyQV21hQ==",
++      "version": "4.1.4",
++      "resolved": "https://registry.npmjs.org/fast-uri/-/fast-uri-4.1.4.tgz",
++      "integrity": "sha512-dODXrIxlS9JSdgAnhIUKOosKV1oMtU2VtVw87QRaHzyl5jxO290Ii5tEZfCfzfWNHi3jKWwBSdQj0qIyshdZdQ==",
+       "funding": [
+         {
+           "type": "github",
+@@ -4491,9 +4491,9 @@
+       }
+     },
+     "node_modules/process-warning": {
+-      "version": "5.0.0",
+-      "resolved": "https://registry.npmjs.org/process-warning/-/process-warning-5.0.0.tgz",
+-      "integrity": "sha512-a39t9ApHNx2L4+HBnQKqxxHNs1r7KF+Intd8Q/g1bUh6q0WIp9voPXJ/x0j+ZL45KF1pJd9+q2jLIRMfvEshkA==",
++      "version": "5.1.0",
++      "resolved": "https://registry.npmjs.org/process-warning/-/process-warning-5.1.0.tgz",
++      "integrity": "sha512-jQSaVHsPgtyw60e1rQ/A+/ArPEj/S8pS/vFnyGa/gYFXrKk/6RuDkoqVDQ5NI5MmS01698ltlAk0NoDBNLujRw==",
+       "funding": [
+         {
+           "type": "github",
+@@ -5496,7 +5496,7 @@
+         "@libsql/client": "^0.17.4",
+         "dotenv": "^17.4.2",
+         "drizzle-orm": "^0.45.2",
+-        "fastify": "^5.10.0",
++        "fastify": "^5.12.4",
+         "nanoid": "^6.0.0",
+         "p-queue": "^9.3.3",
+         "pino-pretty": "^13.1.3",
+--- a/packages/server/package.json
++++ b/packages/server/package.json
+@@ -16,7 +16,7 @@
+     "@libsql/client": "^0.17.4",
+     "dotenv": "^17.4.2",
+     "drizzle-orm": "^0.45.2",
+-    "fastify": "^5.10.0",
++    "fastify": "^5.12.4",
+     "nanoid": "^6.0.0",
+     "p-queue": "^9.3.3",
+     "pino-pretty": "^13.1.3",
+--- a/packages/server/src/routes/v1/chat-completions.ts
++++ b/packages/server/src/routes/v1/chat-completions.ts
+@@ -915,7 +915,7 @@
+           if (
+             abortController.signal.aborted
+             || request.raw.aborted
+-            || request.raw.destroyed
++            || (request.raw.destroyed && !request.raw.complete)
+             || reply.raw.destroyed
+           ) {
+             await finalizeCancellation();
+--- a/packages/server/src/routes/v1/messages.ts
++++ b/packages/server/src/routes/v1/messages.ts
+@@ -1232,7 +1232,7 @@
+           if (
+             abortController.signal.aborted
+             || request.raw.aborted
+-            || request.raw.destroyed
++            || (request.raw.destroyed && !request.raw.complete)
+             || reply.raw.destroyed
+           ) {
+             await finalizeCancellation();
+--- a/packages/server/src/routes/v1/chat-completions.compat.test.ts
++++ b/packages/server/src/routes/v1/chat-completions.compat.test.ts
+@@ -463,6 +463,11 @@
+       await cacheReleased;
+     });
+     app = await createApp(deps);
++    let closed!: () => void;
++    const disconnected = new Promise<void>((resolve) => { closed = resolve; });
++    app.server.on('request', (_request, reply) => {
++      reply.once('close', closed);
++    });
+     await app.listen({ host: '127.0.0.1', port: 0 });
+     const address = app.server.address() as AddressInfo;
+     const controller = new AbortController();
+@@ -481,6 +486,7 @@
+     await cachePending;
+     controller.abort();
+     await expect(request).rejects.toThrow();
++    await disconnected;
+     releaseCache();
+ 
+     await vi.waitFor(() => {
+@@ -551,3 +557,23 @@
+     expect(deps.healthChecker.onRequestFailure).not.toHaveBeenCalled();
+   });
+ });
++
++
++describe('real HTTP request completion', () => {
++  it('returns non-streaming JSON after the incoming body has been consumed', async () => {
++    const provider = { execute: vi.fn(async () => result) } as unknown as BaseProvider;
++    const app = Fastify();
++    registerChatCompletionsRoute(app, createDeps(provider));
++    await app.listen({ host: '127.0.0.1', port: 0 });
++    try {
++      const { port } = app.server.address() as AddressInfo;
++      const response = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
++        method: 'POST',
++        headers: { 'Content-Type': 'application/json', Connection: 'close' },
++        body: JSON.stringify({ model: 'fixture', messages: [{ role: 'user', content: 'hello' }], stream: false }),
++      });
++      expect(response.status).toBe(200);
++      expect((await response.json() as { choices: { message: { content: string } }[] }).choices[0].message.content).toBe('done');
++    } finally { await app.close(); }
++  });
++});
+--- a/packages/server/src/routes/v1/messages.test.ts
++++ b/packages/server/src/routes/v1/messages.test.ts
+@@ -237,6 +237,11 @@
+       await cacheReleased;
+     });
+     app = await createTestApp(deps);
++    let closed!: () => void;
++    const disconnected = new Promise<void>((resolve) => { closed = resolve; });
++    app.server.on('request', (_request, reply) => {
++      reply.once('close', closed);
++    });
+     await app.listen({ host: '127.0.0.1', port: 0 });
+     const address = app.server.address() as AddressInfo;
+     const controller = new AbortController();
+@@ -256,6 +261,7 @@
+     await cachePending;
+     controller.abort();
+     await expect(request).rejects.toThrow();
++    await disconnected;
+     releaseCache();
+ 
+     await vi.waitFor(() => {
+--- a/packaging/systemd/agent-proxy.service
++++ b/packaging/systemd/agent-proxy.service
+@@ -6,10 +6,10 @@
+ 
+ [Service]
+ Type=simple
+-WorkingDirectory="@STATE_DIR@"
++WorkingDirectory=@STATE_DIR@
+ Environment=NODE_ENV=production
+ Environment=XDG_RUNTIME_DIR=%t
+-EnvironmentFile="@CONFIG_DIR@/agent-proxy.env"
++EnvironmentFile=@CONFIG_DIR@/agent-proxy.env
+ ExecStartPre=/usr/bin/env node "@DATA_DIR@/current/packages/server/dist/index.js" --check
+ ExecStart=/usr/bin/env node "@DATA_DIR@/current/packages/server/dist/index.js"
+ Restart=on-failure
+--- a/packaging/systemd/herdr.service
++++ b/packaging/systemd/herdr.service
+@@ -6,11 +6,11 @@
+ [Service]
+ Type=simple
+ Environment=XDG_RUNTIME_DIR=%t
+-Environment=CONFIG_PATH="@CONFIG_DIR@/config.yaml"
+-Environment=AGENT_PROXY_DATABASE_PATH="@STATE_DIR@/agent-proxy.db"
++Environment="CONFIG_PATH=@CONFIG_DIR@/config.yaml"
++Environment="AGENT_PROXY_DATABASE_PATH=@STATE_DIR@/agent-proxy.db"
+ Environment=ADMIN_TOKEN=
+ Environment=PROXY_API_KEY=
+-EnvironmentFile="@CONFIG_DIR@/herdr.env"
++EnvironmentFile=@CONFIG_DIR@/herdr.env
+ ExecStart=/usr/bin/env node "@DATA_DIR@/current/packages/server/dist/herdr/server.js"
+ Restart=on-failure
+ RestartSec=3s
+@@ -21,7 +21,8 @@
+ RuntimeDirectoryMode=0700
+ NoNewPrivileges=true
+ PrivateTmp=true
+-PrivateDevices=true
++# Herdr creates PTYs in the login session.
++PrivateDevices=false
+ ProtectSystem=full
+ ProtectHostname=true
+ ProtectKernelModules=true
+--- a/scripts/test-user-service.sh
++++ b/scripts/test-user-service.sh
+@@ -14,7 +14,11 @@
+ 		exit 1
+ 	fi
+ 	grep -q '^WantedBy=default.target$' "$unit"
+-	grep -q '^PrivateDevices=true$' "$unit"
++	if [[ $unit == "$PROXY_UNIT" ]]; then
++		grep -q '^PrivateDevices=true$' "$unit"
++	else
++		grep -q '^PrivateDevices=false$' "$unit"
++	fi
+ 	grep -q '^RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6$' "$unit"
+ 	grep -q '^RestrictNamespaces=true$' "$unit"
+ 	grep -q '^RestrictSUIDSGID=true$' "$unit"
+@@ -45,9 +49,9 @@
+ 	printf 'Herdr must not inherit the proxy credential environment file.\n' >&2
+ 	exit 1
+ fi
+-grep -q '^EnvironmentFile="@CONFIG_DIR@/herdr.env"$' "$HERDR_UNIT"
+-grep -q '^Environment=CONFIG_PATH="@CONFIG_DIR@/config.yaml"$' "$HERDR_UNIT"
+-grep -q '^Environment=AGENT_PROXY_DATABASE_PATH="@STATE_DIR@/agent-proxy.db"$' "$HERDR_UNIT"
++grep -q '^EnvironmentFile=@CONFIG_DIR@/herdr.env$' "$HERDR_UNIT"
++grep -q '^Environment="CONFIG_PATH=@CONFIG_DIR@/config.yaml"$' "$HERDR_UNIT"
++grep -q '^Environment="AGENT_PROXY_DATABASE_PATH=@STATE_DIR@/agent-proxy.db"$' "$HERDR_UNIT"
+ grep -q '^ExecStart=/usr/bin/env node "@DATA_DIR@/current/packages/server/dist/herdr/server.js"$' \
+ 	"$HERDR_UNIT"
+ grep -q '@DATA_DIR@/current/packages/server/dist/index.js' "$PROXY_UNIT"
+--- a/scripts/test-user-install.sh
++++ b/scripts/test-user-install.sh
+@@ -48,7 +48,7 @@
+ [[ $(<"$XDG_DATA_HOME/agent-proxy/current/VERSION") == 1.0.0-test1 ]]
+ [[ -f "$XDG_CONFIG_HOME/systemd/user/agent-proxy.service" ]]
+ [[ -f "$XDG_CONFIG_HOME/systemd/user/herdr.service" ]]
+-grep -Fq "WorkingDirectory=\"${XDG_STATE_HOME//%/%%}/agent-proxy\"" \
++grep -Fq "WorkingDirectory=${XDG_STATE_HOME//%/%%}/agent-proxy" \
+ 	"$XDG_CONFIG_HOME/systemd/user/agent-proxy.service"
+ grep -Fq "ExecStart=/usr/bin/env node \"${XDG_DATA_HOME//%/%%}/agent-proxy/current/packages/server/dist/index.js\"" \
+ 	"$XDG_CONFIG_HOME/systemd/user/agent-proxy.service"
+@@ -221,4 +221,12 @@
+ [[ ! -e "$XDG_CONFIG_HOME/systemd/user/agent-proxy.service" ]]
+ [[ ! -e "$XDG_CONFIG_HOME/systemd/user/herdr.service" ]]
+ 
++# Upgrading an existing install must prefer stable Mise shims and keep keys.
++export MISE_DATA_DIR="$TEST_DIR/mise"
++mkdir -p "$MISE_DATA_DIR/shims"
++proxy_key_before=$(sed -n '/^PROXY_API_KEY=/p' "$XDG_CONFIG_HOME/agent-proxy/agent-proxy.env")
++run_installer upgrade --archive "$ARCHIVE_V2"
++grep -Fq "PATH=$MISE_DATA_DIR/shims:" "$XDG_CONFIG_HOME/agent-proxy/agent-proxy.env"
++grep -Fq "PATH=$MISE_DATA_DIR/shims:" "$XDG_CONFIG_HOME/agent-proxy/herdr.env"
++[[ "$proxy_key_before" == "$(sed -n '/^PROXY_API_KEY=/p' "$XDG_CONFIG_HOME/agent-proxy/agent-proxy.env")" ]]
+ printf 'Current-user installer lifecycle passed.\n'
+--- a/scripts/install.sh
++++ b/scripts/install.sh
+@@ -180,7 +180,8 @@
+ }
+ 
+ safe_user_path() {
+-	local combined="${PATH:-}:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin"
++	local mise_shims="${MISE_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/mise}/shims"
++	local combined="$mise_shims:${PATH:-}:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin"
+ 	local result='' entry
+ 	local -a entries
+ 	IFS=: read -r -a entries <<<"$combined"
+@@ -351,9 +352,9 @@
+ 			printf 'SHUTDOWN_TIMEOUT_MS=30000\n'
+ 		} >"$CONFIG_DIR/agent-proxy.env"
+ 	fi
+-	if ! grep -q '^PATH=' "$CONFIG_DIR/agent-proxy.env"; then
+-		printf 'PATH=%s\n' "$(safe_user_path)" >>"$CONFIG_DIR/agent-proxy.env"
+-	fi
++	# Refresh only the installer-owned PATH; preserve native credentials.
++	sed -i '/^PATH=/d' "$CONFIG_DIR/agent-proxy.env"
++	printf 'PATH=%s\n' "$(safe_user_path)" >>"$CONFIG_DIR/agent-proxy.env"
+ 	install -m 0600 /dev/null "$CONFIG_DIR/herdr.env"
+ 	printf 'PATH=%s\n' "$(safe_user_path)" >"$CONFIG_DIR/herdr.env"
+ 

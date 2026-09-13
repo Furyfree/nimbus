@@ -12,6 +12,7 @@ import (
 
 	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/output"
 	"github.com/Furyfree/nimbus/internal/plan"
 	"github.com/Furyfree/nimbus/internal/selector"
 )
@@ -92,6 +93,7 @@ var (
 			return "", err
 		}
 		line, err := bufio.NewReader(in).ReadString('\n')
+		output.AfterPrompt(out)
 		if err != nil && (!errors.Is(err, io.EOF) || strings.TrimSpace(line) == "") {
 			return "", err
 		}

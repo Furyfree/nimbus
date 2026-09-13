@@ -149,7 +149,9 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 				return err
 			}
 			var runErr error
-			if task.Action.Kind == postinstall.SyncNoctaliaPlugins {
+			if task.Action.Kind == postinstall.RestoreNoctaliaLockscreen {
+				runErr = postinstall.RunNoctaliaLockscreen(cmd.Context(), src, cmd.OutOrStdout(), task)
+			} else if task.Action.Kind == postinstall.SyncNoctaliaPlugins {
 				runErr = postinstall.RunNoctaliaPlugins(cmd.Context(), src, cmd.OutOrStdout(), cmd.ErrOrStderr(), task)
 			} else if task.Action.Kind == postinstall.SyncHyprlandPlugins {
 				runErr = postinstall.RunHyprlandPlugins(cmd.Context(), src, cmd.OutOrStdout(), cmd.ErrOrStderr(), task)
@@ -242,6 +244,9 @@ func selectedTask(view postinstallView, id string) (postinstall.Task, error) {
 }
 
 func postinstallCommands(task postinstall.Task) ([][]string, error) {
+	if task.ID == "noctalia-lockscreen" && task.Status == postinstall.Pending && task.Action != nil && task.Action.Kind == postinstall.RestoreNoctaliaLockscreen && task.Action.Lockscreen != nil {
+		return [][]string{{"noctalia", "--daemon"}}, nil
+	}
 	if task.Action != nil && task.Action.Kind == postinstall.SyncHyprlandPlugins {
 		return postinstall.HyprlandCommands(task)
 	}

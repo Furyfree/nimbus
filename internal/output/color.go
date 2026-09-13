@@ -44,6 +44,16 @@ func Native(w io.Writer) io.Writer {
 	return w
 }
 
+// AfterPrompt resets line tracking after input, whose terminal echo bypasses
+// this writer. It emits no extra newline and leaves plain writers unchanged.
+func AfterPrompt(w io.Writer) {
+	if color, ok := w.(*colorWriter); ok {
+		color.mu.Lock()
+		defer color.mu.Unlock()
+		color.continuation = false
+	}
+}
+
 func (w *colorWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()

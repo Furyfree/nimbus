@@ -88,7 +88,7 @@ func TestNoctaliaReadinessAndPrivacy(t *testing.T) {
 				want = Pending
 			}
 			guard := &readGuard{FakeSource: src}
-			task := findTask(t, Inspect(guard, in), "noctalia-plugins")
+			task := noctaliaPlugins(guard, in, in.Resolved.Packages[0])
 			if task.Status != want || (task.Action != nil) != (want == Pending) {
 				t.Fatalf("unexpected task: %+v", task)
 			}

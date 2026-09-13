@@ -48,7 +48,7 @@ func inspectFinal(src native.Source, s *selected, result *syncResult, notes bool
 			if err := toml.Unmarshal(data, &settings); err != nil {
 				result.Notices = append(result.Notices, "Noctalia GUI overrides could not be parsed; effective lockscreen appearance is unverified.")
 			} else if settings.LockscreenWidgets.Enabled != nil && !*settings.LockscreenWidgets.Enabled {
-				result.Notices = append(result.Notices, "Noctalia GUI overrides disable managed lockscreen widgets. Reset only that override in the lockscreen editor; other preferences are preserved.")
+				result.Notices = append(result.Notices, "Noctalia GUI overrides disable managed lockscreen widgets. Preview nimbus postinstall noctalia-lockscreen --plan to restore the managed layout; normal sync preserves preferences.")
 			}
 		} else if !errors.Is(err, os.ErrNotExist) {
 			result.Notices = append(result.Notices, "Noctalia GUI overrides are unreadable; effective appearance is unverified.")
@@ -102,10 +102,10 @@ func renderFinalDetails(out io.Writer, result *syncResult) error {
 	return displayNotes(out, result.Notes)
 }
 func skippedMaintenance(result *syncResult, phase string, upgrade bool) {
-	phases := []string{"repository preflight", "repository update", "system sync", "Chezmoi apply", "software updates", "final inspection"}
+	phases := []string{"repository preflight", "repository update", "system sync", "Chezmoi apply", "software updates", "agent model refresh", "final inspection"}
 	start := slices.Index(phases, phase)
 	for _, name := range phases[max(0, start+1):] {
-		if name == "software updates" && !upgrade {
+		if (name == "software updates" || name == "agent model refresh") && !upgrade {
 			continue
 		}
 		if !slices.ContainsFunc(result.Steps, func(s runStep) bool { return strings.EqualFold(s.Name, name) }) {

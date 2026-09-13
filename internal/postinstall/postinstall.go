@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/Furyfree/nimbus/internal/agentproxy"
 	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/inspect"
 	"github.com/Furyfree/nimbus/internal/native"
@@ -26,24 +27,26 @@ const (
 type ActionKind string
 
 const (
-	OpenApplication      ActionKind = "open-application"
-	EnrollFingerprint    ActionKind = "enroll-fingerprint"
-	InstallApplication   ActionKind = "install-application"
-	SetTailscaleOperator ActionKind = "set-tailscale-operator"
-	SyncNoctaliaPlugins  ActionKind = "sync-noctalia-plugins"
-	SyncHyprlandPlugins  ActionKind = "sync-hyprland-plugins"
-	SetAccountPicture    ActionKind = "set-account-picture"
+	RestoreNoctaliaLockscreen ActionKind = "restore-noctalia-lockscreen"
+	OpenApplication           ActionKind = "open-application"
+	EnrollFingerprint         ActionKind = "enroll-fingerprint"
+	InstallApplication        ActionKind = "install-application"
+	SetTailscaleOperator      ActionKind = "set-tailscale-operator"
+	SyncNoctaliaPlugins       ActionKind = "sync-noctalia-plugins"
+	SyncHyprlandPlugins       ActionKind = "sync-hyprland-plugins"
+	SetAccountPicture         ActionKind = "set-account-picture"
 )
 
 // Action describes native commands offered for explicit user selection.
 // Argv is used for a single command; Commands is an ordered native workflow.
 type Action struct {
-	Hyprland *HyprlandSetup  `json:"hyprland,omitempty"`
-	Kind     ActionKind      `json:"kind"`
-	Argv     []string        `json:"argv,omitempty"`
-	Commands [][]string      `json:"commands,omitempty"`
-	User     string          `json:"user,omitempty"`
-	Picture  *AccountPicture `json:"picture,omitempty"`
+	Lockscreen *LockscreenRepair `json:"lockscreen,omitempty"`
+	Hyprland   *HyprlandSetup    `json:"hyprland,omitempty"`
+	Kind       ActionKind        `json:"kind"`
+	Argv       []string          `json:"argv,omitempty"`
+	Commands   [][]string        `json:"commands,omitempty"`
+	User       string            `json:"user,omitempty"`
+	Picture    *AccountPicture   `json:"picture,omitempty"`
 }
 
 type Task struct {
@@ -87,8 +90,19 @@ func Inspect(src native.Source, in Inputs) []Task {
 			result = append(result, tailscaleOperator(src, in, pkg))
 		case pkg.Name == "github-copilot-installer" || pkg.Name == "wowup-cf-installer":
 			result = append(result, installerHelper(src, in, pkg))
+			if pkg.Name == "github-copilot-installer" {
+				observed := agentproxy.Inspect(src, in.Resolved.Machine)
+				status := Pending
+				if observed.Status == "configured" {
+					status = Complete
+				}
+				if observed.Status == "blocked" {
+					status = Unknown
+				}
+				result = append(result, Task{ID: "agent-proxy", Owner: "agent-proxy", Title: "Connect Copilot to local agents", Status: status, Detail: observed.Detail, Instructions: []string{"Run nimbus postinstall agent-proxy for approved native setup and model refresh."}, Verification: "Local registration and installation files; runtime access is checked only by the explicit task.", Recovery: "Retry the task with Copilot open. Existing models are retained when discovery fails."})
+			}
 		case pkg.Name == "noctalia" && pkg.Prefix != "flatpak":
-			result = append(result, noctaliaPlugins(src, in, pkg))
+			result = append(result, noctaliaPlugins(src, in, pkg), noctaliaLockscreen(src, in, pkg))
 		case pkg.Name == "hyprland-devel" && pkg.Prefix != "flatpak":
 			result = append(result, hyprlandPlugins(src, in, pkg))
 		case pkg.Name == "accountsservice" && pkg.Prefix != "flatpak":

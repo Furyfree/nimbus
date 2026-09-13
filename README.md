@@ -15,6 +15,47 @@ runs the configured update workflow. Nimbus connects these tools where needed.
 - [Next work and deferred scope](docs/ROADMAP.md)
 - [Current implementation gaps and checks](docs/TASKS.md)
 
+## Local agents in Copilot
+
+Open the GitHub Copilot desktop app and sign into the desired agent CLIs first.
+Chezmoi selects Node, Herdr and the CLIs through Mise. Then preview and run:
+
+~~~sh
+nimbus postinstall agent-proxy --plan
+nimbus postinstall agent-proxy
+~~~
+
+The task applies only the managed proxy config, builds the checksum-pinned
+upstream source with a reviewed compatibility patch, and uses its native user
+installer. It registers a localhost provider through Copilot's own API and
+credential store. No keys are copied into dotfiles; no sign-in flow is started.
+Existing trial ownership is adopted only when its native record IDs match.
+
+After setup, `nimbus sync --upgrade` refreshes models after successful Topgrade
+updates. Plain sync and the Topgrade system callback do not refresh them.
+Rerunning the postinstall task checks the managed configuration: an already
+configured installation refreshes models only, without reapplying dotfiles or
+registering credentials again. Missing/changed setup gets a separate preview.
+Codex, Claude, Grok and Antigravity are queried separately: a complete
+successful list replaces only Nimbus-owned entries for that provider. Failure
+preserves its previous list; manual entries are preserved. Copilot being closed
+defers the refresh. Antigravity currently supports text only through this proxy;
+external tool execution has been verified with the other three backends.
+
+~~~sh
+nimbus postinstall agent-proxy --reset --plan
+nimbus postinstall agent-proxy --reset
+~~~
+
+Reset disables automatic refresh without deleting models, credentials or
+services. Rerun setup to enable it. To remove the application, use the upstream
+installer's `uninstall` action from the pinned source, after reviewing its
+documentation, and remove the provider in Copilot. Preserve Nimbus's
+ownership file until deciding whether to reinstall or discard that integration.
+The upstream installer owns release backups and rollback. Nimbus never edits
+Copilot's database directly. Catalog synchronization depends on Copilot's native
+local IPC, which may change with future app releases.
+
 ## Install
 
 On Fedora 44 x86_64, run as your normal user:
@@ -123,6 +164,31 @@ Both show `nimbus postinstall nvidia-mok` to request the sudo check. Run that
 command as your normal user so completion stays in your own local state.
 Missing certificates or observed enrollment failures still appear as setup or
 verification problems.
+
+To restore Chezmoi's lockscreen layout after GUI experiments:
+
+~~~sh
+nimbus postinstall noctalia-lockscreen --plan
+nimbus postinstall noctalia-lockscreen
+~~~
+
+Run inside the unlocked Noctalia desktop session, with its panels and lockscreen
+editor closed. This explicit repair briefly stops only Noctalia with SIGTERM,
+backs up its settings privately, removes only `lockscreen_widgets` overrides,
+and starts Noctalia again. The bar and shell services briefly disappear;
+Hyprland and applications remain running. No sudo or automatic lock is used.
+Matching layout files must already be applied through Chezmoi. Normal sync
+never performs this repair.
+
+The task prints a backup path under `${XDG_STATE_HOME:-~/.local/state}/nimbus/`.
+Backups are private, exact copies and may contain personal preferences; never
+commit or share them. They remain for manual review/removal. On restart failure,
+run `noctalia --daemon` from the desktop terminal. A failed repair retains its
+backup and does not record completion. Review a backup locally before restoring
+anything; copying the whole file back would overwrite later preferences.
+Verification covers effective configuration, not visual placement. Test the
+result yourself with `noctalia msg session lock`. `--reset` only clears task
+evidence, not configuration or backups.
 
 Nimbus owns the complete catalog in `setup-notes.json` at the checkout root;
 viewing it does not require Chezmoi. Init shows setup notes together. Later syncs

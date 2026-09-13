@@ -1,0 +1,2 @@
+# Unified-diff context preserves upstream whitespace, including blank lines.
+internal/agentproxy/resources/upstream.patch -whitespace

@@ -123,12 +123,20 @@ func TestPackagePrerequisitesDoNotTrustOldReceipts(t *testing.T) {
 func TestInstallerHelpersDoNotImplyApplicationCompletion(t *testing.T) {
 	for _, name := range []string{"github-copilot-installer", "wowup-cf-installer"} {
 		t.Run(name, func(t *testing.T) {
+			t.Setenv("XDG_STATE_HOME", t.TempDir())
 			in, src := fixture(name)
 			helper := "/usr/bin/" + name
 			src.Paths[helper] = helper
 			src.Commands[helper+" status"] = []byte("Installed GitHub Copilot: not installed\n")
 			guard := &readGuard{FakeSource: src}
 			got := Inspect(guard, in)
+			if name == "github-copilot-installer" {
+				if len(got) != 2 || len(guard.files) != 1 {
+					t.Fatalf("expected local proxy registration inspection: %+v", got)
+				}
+				got = slices.DeleteFunc(got, func(task Task) bool { return task.ID == "agent-proxy" })
+				guard.files = nil
+			}
 			if len(got) != 1 || (name == "github-copilot-installer" && !slices.Equal(guard.commands, []string{helper + " status"})) || len(guard.files) != 0 {
 				t.Fatalf("unexpected helper inspection: tasks=%+v commands=%v files=%v", got, guard.commands, guard.files)
 			}
@@ -140,7 +148,7 @@ func TestInstallerHelpersDoNotImplyApplicationCompletion(t *testing.T) {
 				t.Fatalf("offered an unsupported WoWUp command: %+v", got[0])
 			}
 			delete(src.Paths, helper)
-			got = Inspect(src, in)
+			got = slices.DeleteFunc(Inspect(src, in), func(task Task) bool { return task.ID == "agent-proxy" })
 			if got[0].Status != Blocked || got[0].Action != nil {
 				t.Fatalf("missing helper can run: %+v", got[0])
 			}

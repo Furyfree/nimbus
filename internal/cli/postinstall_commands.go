@@ -17,6 +17,7 @@ var taskDescriptions = []struct{ id, title, help string }{
 	{"copilot", "Install GitHub Copilot", "Requires the selected native installer helper. The helper owns installation, updates and removal."},
 	{"fingerprint", "Enroll a fingerprint", "Requires fprintd and a supported reader. Native enrollment verifies completion."},
 	{"hyprland-plugins", "Install selected Hyprland plugins", "Requires the active matching Hyprland session, development headers and Chezmoi plugin selection."},
+	{"noctalia-lockscreen", "Restore the managed lockscreen layout", "Requires an applied Chezmoi layout and the unlocked Noctalia desktop session. After approval, gracefully stop only Noctalia, save a private settings backup, remove only lockscreen_widgets overrides, restart the shell and verify configuration. Close the lockscreen editor first. The bar briefly disappears; applications and Hyprland stay running. No sudo, automatic locking or repair during sync. --reset clears evidence only; it does not restore the backup."},
 	{"noctalia-plugins", "Install missing enabled Noctalia plugins", "Requires the running Noctalia desktop session and initialized plugin sources."},
 	{"nvidia-mok", "Verify NVIDIA signing-key enrollment", "Requires the selected NVIDIA packages and akmods certificate. Complete native enrollment at reboot, then rerun to verify. Never enter a MOK password into Nimbus."},
 	{"onepassword", "Configure 1Password and selected SSH/Git integration", "In 1Password, sign in, unlock, and enable desktop CLI integration. If SSH is selected, enable its agent. Skip manual SSH/Git file edits: Chezmoi applies the selected files after review. SSH remains explicitly opt-in through Chezmoi or init --onepassword-ssh."},
@@ -73,7 +74,7 @@ func newPostinstall(opts *options) *cobra.Command {
 		}
 		return renderPostinstallStatus(c.OutOrStdout(), snapshot.view)
 	}}
-	cmd.AddCommand(status)
+	cmd.AddCommand(status, newAgentProxyPostinstall(opts, &flags))
 	return cmd
 }
 func renderPostinstallStatus(out io.Writer, view postinstallView) error {
