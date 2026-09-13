@@ -129,6 +129,16 @@ still follows it. Until then, auto-unlock remains planned, not working.
 
 ### Remaining integration
 
+Add an explicit greeter passwordless-sync post-install action after Fedora's
+stable Noctalia package supports constrained sync. Keep the Fedora package
+source; Chezmoi already enables native auto-sync. Nimbus should preview and
+delegate one-time authorization to the greeter's native CLI for the invoking
+local account, verify the result, and document native status and removal.
+Require a compatible shell, helper and packaged Polkit action; never authorize
+legacy sync. Complete this work when wallpaper changes sync without prompts
+and the next login shows the updated wallpaper on both desktop and laptop.
+See TASKS for package availability and the remaining validation.
+
 The Noctalia plugin post-install repair first appeared in 0.4.4. The laptop trial
 confirmed installation but exposed premature verification failure during the
 background update. Version 0.4.5 adds retries; validate missing-plugin repair

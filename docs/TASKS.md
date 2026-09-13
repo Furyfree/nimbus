@@ -341,6 +341,27 @@ Chezmoi. SSH server access stays unmanaged, and the Windows VM stays deferred.
 
 ### Engine and integration work
 
+- [x] Enable native greeter auto-sync through Chezmoi and refresh the desktop
+  wallpaper. On 2026-09-13, the effective setting is true and the native sync
+  helper completed with exit status 0 through run0. No login session was ended.
+- [ ] Verify the next greeter display and prompt-free automatic sync after a
+  compatible shell upgrade. On 2026-09-13, Fedora stable supplies Noctalia
+  5.0.1; [5.1.0 is in testing][greeter-shell-update] since September 11.
+  Wait for Fedora stable rather than switching package sources. Installed
+  Greeter 1.5.0 already supports constrained authorization; keep normal
+  authentication until the compatible shell and authorization are in place.
+- [ ] Add an explicit greeter passwordless-sync post-install action using the
+  [native authorization CLI][greeter-sync-guide]. Check shell/helper support
+  and the constrained Polkit action, preview the invoking local account and
+  root-owned rule change, then request approval before native enablement.
+  Verify native status, handle repeated setup and failure, and document native
+  disablement. Do not grant access to legacy sync or enable authorization
+  during ordinary sync. Test wallpaper changes and the next login on desktop
+  and laptop after the compatible Fedora update.
+
+[greeter-shell-update]: https://bodhi.fedoraproject.org/updates/FEDORA-2026-f99c9ff102
+[greeter-sync-guide]: https://docs.noctalia.dev/greeter/sync/
+
 - [x] Promote the tested minimal greeter appearance into the Hyprland session
   component. Keep canonical configuration in `/etc` and expose that one file
   read-only through systemd; preserve native runtime state and defer activation

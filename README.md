@@ -166,8 +166,13 @@ daemon-reload does not refresh the bind mount after an atomic file replacement;
 Nimbus never restarts the active display manager. Existing standalone greeter
 configuration outside the service namespace stays untouched. Removing this
 integration follows the existing console-only desktop retirement path and
-retains Noctalia runtime state. Noctalia's Sync Now remains a separate native
-action for wallpaper and colors; automatic sync is not enabled by these files.
+retains Noctalia runtime state. Chezmoi enables Noctalia's native greeter
+auto-sync for wallpaper and colors; Noctalia owns the generated copies.
+Settings > Security > Noctalia Greeter > Sync Now refreshes the current image.
+Noctalia 5.0.1 requires administrator authentication. Prompt-free sync needs
+Noctalia 5.1.0 or newer, Greeter 1.5.0 or newer, and the constrained
+[native authorization](https://docs.noctalia.dev/greeter/sync/). Do not authorize
+the older helper's unrestricted legacy mode without a password.
 
 With AccountsService selected and installed, `nimbus postinstall account-picture`
 registers `~/.config/noctalia/assets/profile-picture.jpg` for the invoking user.
