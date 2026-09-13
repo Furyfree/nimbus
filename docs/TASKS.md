@@ -29,12 +29,15 @@ RPMs retain the exact reviewed archive and spec; the RPM includes the new
 upstream license and runs the model-adapter tests with Node available.
 
 [COPR build 10982500](https://copr.fedorainfracloud.org/coprs/furyfree/nimbus/build/10982500/)
-is running through the
-[publication workflow](https://github.com/Furyfree/copr/actions/runs/34786152917).
-Source import completed; the Fedora 44 binary build is queued. Signed binary
-publication, repository metadata, signature/payload verification and extracted
-binary smoke tests remain pending. No workstation upgrade or laptop changes
-were performed during release preparation.
+published `nimbus-0.5.2-0.1.fc44.x86_64`; its
+[publication workflow](https://github.com/Furyfree/copr/actions/runs/34786152917)
+passed. Repository metadata and the binary checksum match:
+`f61a2cec904b4ec70e8ae0dc19c5fd17365f739ff7f2c2ff3093dc2f8282d9c4`.
+Signatures and digests passed in an isolated RPM database containing only the
+pinned project key. The payload contains only Nimbus and licenses, without
+scriptlets or triggers. An unprivileged offline container confirms version
+0.5.2, all three machine definitions and help for both new tasks. No workstation
+upgrade or laptop changes were performed during release verification.
 
 - [x] Separate concise repeat-refresh output from initial setup and help. Verify
   operation selection on matching/changed/unreadable config, per-provider
