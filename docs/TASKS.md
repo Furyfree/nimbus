@@ -237,6 +237,31 @@ Noctalia task in an unprivileged, network-disabled Fedora container. Missing
 Noctalia is correctly reported as blocked. No workstation package was
 installed; a fresh desktop repair with the released retry fix remains untested.
 
+### Version 0.4.6 release verification, 2026-09-13
+
+[Nimbus v0.4.6](https://github.com/Furyfree/nimbus/releases/tag/v0.4.6) selects
+commit `9e529807149cec86123bfe07ec97aa88f69df00f`. Its source archive SHA-256 is
+`2d891a105e85b2ffb8ff291ede5e38163f05531144f504dccdeaeb141c845a95`.
+All 279 tagged files and executable bits match. Dependencies and
+23 vendored notices are unchanged from 0.4.5. Nimbus local checks, all three
+machine validations, CI and the GitHub offline vendored build/tests passed.
+
+[COPR build 10980604](https://copr.fedorainfracloud.org/coprs/furyfree/nimbus/build/10980604/)
+published `nimbus-0.4.6-0.1.fc44.x86_64`. The full offline Fedora packaging gate,
+full and selected-package CI, and publication workflow passed. Prepared and
+published source RPMs retain the exact archive and reviewed spec. Binary RPM
+SHA-256 is
+`e833600b0315f04e18dd4514517f3f339e68cf7a2c013e304062aa5510b4cf39`.
+
+Native signature and digest checks passed with an isolated RPM database
+containing only the pinned Nimbus key. The payload contains only the engine
+and licenses, with no scripts or triggers. In an unprivileged, network-disabled
+Fedora container, the extracted engine reports 0.4.6, validates all three tagged
+machines and recognizes both new post-install tasks. Missing development headers
+and AccountsService correctly block their setup previews. No workstation
+package was installed. Fresh laptop plugin setup and the promoted greeter
+mount after sync/reboot remain separate installed-session checks.
+
 ### Desktop package and setup audit, 2026-09-12
 
 - Zathura's PDF backend was missing. The desktop profile now selects Fedora's
@@ -333,14 +358,14 @@ Chezmoi. SSH server access stays unmanaged, and the Windows VM stays deferred.
   registered the desktop owner's picture through native authorization, verified
   the stored bytes and reported complete on a second run. The greeter
   appearance still needs the owner's next-login check.
-- [ ] Publish the account-picture task in a new engine release. This change
-  does not release Nimbus or alter greeter wallpaper behavior.
+- [x] Publish the account-picture task in engine 0.4.6 and its signed COPR RPM.
+  Greeter wallpaper behavior remains unchanged.
 
 - [x] Simplify completed post-install output to its verified result. Omit setup
   titles and action/recovery guidance for completed checks, and use the same
   concise result after successful actions. CLI tests cover completed Noctalia
   selection and preview without repeating its update. This presentation change
-  is unreleased; engine 0.4.5 retains the previous output.
+  ships in engine 0.4.6; engine 0.4.5 retains the previous output.
 - [x] Add Noctalia plugin inspection and a native post-install repair for
   enabled plugins lacking runtime exports. Read the effective Noctalia config;
   preserve preview, approval, local-only inspection and native ownership.
