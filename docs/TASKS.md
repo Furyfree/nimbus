@@ -12,13 +12,21 @@ installation and reboot checks remain pending.
 
 ## Completion and output follow-up, 2026-09-13
 
-Release preparation: the owner approved Nimbus 0.5.1, commits to main and COPR
-publication. This patch includes verify-only setup, corrected MOK inspection,
-1Password sign-in recovery, no-op upgrade handling and clearer terminal output.
-Definitions remain compatible with engine 0.5.0. Local checks and read-only
-operator previews passed; publication evidence follows after the signed build.
-No live system upgrade, vault authorization or laptop change is part of release
-preparation.
+[Version 0.5.1](https://github.com/Furyfree/nimbus/releases/tag/v0.5.1) is
+published from commit `95bb78202344bc90c4e6c4372ffebb552fd9c82b`. This patch
+includes verify-only setup, corrected MOK inspection, 1Password sign-in recovery,
+no-op upgrade handling and clearer terminal output. Definitions remain
+compatible with engine 0.5.0; Chezmoi is unchanged.
+
+[COPR build 10982208](https://copr.fedorainfracloud.org/coprs/furyfree/nimbus/build/10982208/)
+published `nimbus-0.5.1-0.1.fc44.x86_64`. Local gates, CI, the offline source RPM
+rebuild and remote publication passed. Published repository metadata and the
+binary checksum match. Signatures and digests passed against the pinned COPR
+key in an isolated RPM database. The extracted engine reports 0.5.1, validates
+all three tagged machines and shows task help in an unprivileged, offline
+Fedora container. The payload contains only the engine and licenses, without
+scriptlets or triggers. No live upgrade, vault authorization or laptop change
+was performed; installed-session testing remains with the owner.
 
 - [x] Verify existing setup through supported completion commands without
   installing or applying configuration. Preserve explicit GUI acknowledgment,
