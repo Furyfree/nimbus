@@ -1361,3 +1361,18 @@ Validation: focused DTU tests and their race-detector run pass. The full
 `just check` gate passes after correcting an extra blank line in this note's
 roadmap link. Existing installation and failure paths remain covered by
 isolated fixtures; no fresh privileged installation was run on the desktop.
+
+[Release v0.5.10](https://github.com/Furyfree/nimbus/releases/tag/v0.5.10)
+is published from `a36618114b1c5287dfe626d9eec0c372f7c4d899`.
+[Source preparation](https://github.com/Furyfree/nimbus/actions/runs/34899326543)
+passed its full checks and vendored tests. All 358 tagged files and executable
+bits match the archive; vendor files and license notices match 0.5.9.
+Archive SHA-256:
+`4f0959aef43e994fb63a59f12f87e6d2c2255785b6abeab60f6d3cd9257e29d3`.
+
+COPR recipe `9bc0221` selects the reviewed archive. The complete packaging gate
+passed in an offline Fedora container using a copied checkout with no host
+mounts. [Publication](https://github.com/Furyfree/copr/actions/runs/34899644892)
+was dispatched for Nimbus only. Handoff remains after COPR submission without
+monitoring completion; published-RPM availability and signature checks remain
+pending. No workstation package installation was changed during publication.
