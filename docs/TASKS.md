@@ -982,9 +982,18 @@ network-disabled source RPM rebuild passed all tests and definition validation.
 Its payload contains only the engine and licenses, without scripts or triggers.
 
 [COPR build 10984155](https://copr.fedorainfracloud.org/coprs/furyfree/nimbus/build/10984155/)
-is submitted through the
+published `nimbus-0.5.3-0.1.fc44.x86_64` through the successful
 [publication workflow](https://github.com/Furyfree/copr/actions/runs/34846942114).
-Source import succeeded; COPR is waiting to allocate its build VM. Signed binary
-publication, signature/payload verification and extracted-binary checks remain
-pending. Desktop greeter authorization, visual wallpaper updates and laptop
-installation remain operator checks after the RPM becomes available.
+Repository metadata and both package checksums match. Published binary and
+rebuilt source RPM signatures and digests pass in an isolated database with
+only the pinned project key. The rebuilt source RPM preserves the exact archive
+and spec. Binary RPM SHA-256 is
+`19795d3e2a1cc1bba735df5b7927131341af826cbea6dfcfc592371639f473f4`.
+The payload contains only Nimbus and licenses, without scripts or triggers.
+An unprivileged offline container confirms version 0.5.3, all three machine
+definitions and postinstall help. Desktop greeter authorization, visual
+wallpaper updates and laptop installation remain operator checks.
+
+One documentation-only CI run timed out in the terminal interruption test.
+Its unchanged rerun passed; ten consecutive focused local runs and COPR's
+package tests also passed. Investigate if this intermittent timeout recurs.
