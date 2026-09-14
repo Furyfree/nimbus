@@ -1,0 +1,7 @@
+# Optional certificate provisioning; never installs trust material during sync.
+schema = 1
+id = "dtu-network"
+requires = []
+conflicts = []
+packages = ["NetworkManager", "policycoreutils", "libselinux-utils"]
+removes = []

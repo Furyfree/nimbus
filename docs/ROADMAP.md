@@ -9,6 +9,17 @@ Existing local code is a candidate, not proof that the new contract is shipped.
 
 ## Next steps
 
+The approved DTU network task targets release 0.5.7: download the pinned CA
+bundle only during explicit postinstall, install it for NetworkManager, and
+verify without broadening global trust or managing account credentials. See
+[TASKS](TASKS.md#dtu-eduroam-certificate) for validation and release status.
+
+The Tailscale operator task now distinguishes initial sign-in from an existing
+signed-in profile. Initial setup offers native sign-in with the operator set
+and verifies a running connection; existing stopped connections stay stopped.
+Release 0.5.7 includes this change. See
+[TASKS](TASKS.md#tailscale-initial-sign-in) for validation and delivery status.
+
 The lockscreen verification correction accepts equivalent native screen-size
 adjustments during restart and status inspection. It retains strict checks for
 actual layout or unrelated preference changes. Validation is tracked in

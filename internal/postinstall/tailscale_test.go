@@ -27,6 +27,7 @@ func TestTailscaleOperatorReadinessAndPrivacy(t *testing.T) {
 			in, src := fixture("tailscale")
 			src.Paths["/usr/bin/tailscale"] = "/usr/bin/tailscale"
 			src.Commands["/usr/bin/tailscale debug prefs"] = []byte(test.prefs)
+			src.Commands["/usr/bin/tailscale status --json --peers=false"] = []byte(`{"BackendState":"Stopped","Self":{"private":"do-not-render"}}`)
 			guard := &readGuard{FakeSource: src}
 			task := findTask(t, Inspect(guard, in), "tailscale-operator")
 			if task.Status != test.status || (task.Action != nil) != (test.status == Pending) {
@@ -39,7 +40,11 @@ func TestTailscaleOperatorReadinessAndPrivacy(t *testing.T) {
 			if err != nil || strings.Contains(string(data), "do-not-render") || strings.Contains(string(data), "WantRunning") {
 				t.Fatal("retained unrelated preferences")
 			}
-			if !slices.Equal(guard.commands, []string{"/usr/bin/tailscale debug prefs"}) || len(guard.files) != 0 {
+			wantReads := []string{"/usr/bin/tailscale debug prefs"}
+			if test.status != Unknown {
+				wantReads = append(wantReads, "/usr/bin/tailscale status --json --peers=false")
+			}
+			if !slices.Equal(guard.commands, wantReads) || len(guard.files) != 0 {
 				t.Fatalf("unexpected reads: %v %v", guard.commands, guard.files)
 			}
 		})
@@ -100,5 +105,54 @@ func TestTailscaleOperatorActionRejectsAmbiguousUser(t *testing.T) {
 		if action := TailscaleOperatorAction(user); action != nil {
 			t.Fatalf("accepted %q: %+v", user, action)
 		}
+		if action := TailscaleLoginAction(user); action != nil {
+			t.Fatalf("accepted login for %q: %+v", user, action)
+		}
+	}
+}
+
+func TestTailscaleSignInReadiness(t *testing.T) {
+	for _, test := range []struct {
+		name, response string
+		status         Status
+		login          bool
+	}{
+		{"login even with matching operator", `{"BackendState":"NeedsLogin"}`, Pending, true},
+		{"connected", `{"BackendState":"Running"}`, Complete, false},
+		{"intentionally stopped", `{"BackendState":"Stopped"}`, Complete, false},
+		{"device approval", `{"BackendState":"NeedsMachineAuth"}`, Blocked, false},
+		{"starting", `{"BackendState":"Starting"}`, Unknown, false},
+		{"no state", `{"BackendState":"NoState"}`, Unknown, false},
+		{"in use", `{"BackendState":"InUse"}`, Unknown, false},
+		{"future state", `{"BackendState":"future-private-value"}`, Unknown, false},
+		{"missing state", `{}`, Unknown, false},
+		{"null", `null`, Unknown, false},
+		{"bad type", `{"BackendState":42}`, Unknown, false},
+		{"malformed", `{`, Unknown, false},
+		{"daemon failure", ``, Unknown, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			in, src := fixture("tailscale")
+			src.Paths["/usr/bin/tailscale"] = "/usr/bin/tailscale"
+			src.Commands["/usr/bin/tailscale debug prefs"] = []byte(`{"WantRunning":false,"OperatorUser":"tester"}`)
+			src.Commands["/usr/bin/tailscale status --json --peers=false"] = []byte(test.response)
+			if test.response == "" {
+				src.Failures["/usr/bin/tailscale status --json --peers=false"] = "private daemon failure"
+			}
+			task := findTask(t, Inspect(src, in), "tailscale-operator")
+			if task.Status != test.status || (task.Action != nil) != test.login {
+				t.Fatalf("unexpected task: %+v", task)
+			}
+			if test.login && (task.Action.Kind != LoginTailscale || !slices.Equal(task.Action.Argv, []string{"sudo", "--", "/usr/bin/tailscale", "up", "--operator=tester"})) {
+				t.Fatalf("unexpected login action: %+v", task.Action)
+			}
+			data, _ := json.Marshal(task)
+			if strings.Contains(string(data), "private") {
+				t.Fatalf("leaked native data: %s", data)
+			}
+			if err := VerifyTailscaleConnection(src); (err == nil) != (test.name == "connected") {
+				t.Fatalf("connection verification: %v", err)
+			}
+		})
 	}
 }

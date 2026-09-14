@@ -133,7 +133,9 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 				return err
 			}
 			var runErr error
-			if task.Action.Kind == postinstall.RestoreNoctaliaLockscreen {
+			if task.Action.Kind == postinstall.InstallDTUCertificate {
+				runErr = postinstall.RunDTUNetwork(cmd.Context(), src, cmd.OutOrStdout(), cmd.ErrOrStderr(), task)
+			} else if task.Action.Kind == postinstall.RestoreNoctaliaLockscreen {
 				runErr = postinstall.RunNoctaliaLockscreen(cmd.Context(), src, cmd.OutOrStdout(), task)
 			} else if task.Action.Kind == postinstall.SyncNoctaliaPlugins {
 				runErr = postinstall.RunNoctaliaPlugins(cmd.Context(), src, cmd.OutOrStdout(), cmd.ErrOrStderr(), task)
@@ -153,6 +155,11 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 			current, checkErr := selectedTask(after.view, task.ID)
 			if checkErr != nil {
 				return errors.Join(runErr, fmt.Errorf("task selection changed during the native action: %w", checkErr))
+			}
+			if runErr == nil && task.Action.Kind == postinstall.LoginTailscale && current.Status == postinstall.Complete {
+				if err := postinstall.VerifyTailscaleConnection(src); err != nil {
+					current.Status, current.Detail = postinstall.Pending, err.Error()
+				}
 			}
 			var reportErr error
 			if runErr == nil && current.Status == postinstall.Complete {
@@ -236,6 +243,9 @@ func selectedTask(view postinstallView, id string) (postinstall.Task, error) {
 }
 
 func postinstallCommands(task postinstall.Task) ([][]string, error) {
+	if task.Action != nil && task.Action.Kind == postinstall.InstallDTUCertificate {
+		return postinstall.DTUCommands(task)
+	}
 	if task.ID == "noctalia-lockscreen" && task.Status == postinstall.Pending && task.Action != nil && task.Action.Kind == postinstall.RestoreNoctaliaLockscreen && task.Action.Lockscreen != nil {
 		return postinstall.LockscreenCommands(task.Action.Lockscreen), nil
 	}
@@ -263,8 +273,14 @@ func postinstallArgv(task postinstall.Task) ([]string, error) {
 				return expected.Argv, nil
 			}
 		}
-		if task.ID == "tailscale-operator" && task.Status == postinstall.Pending && task.Action.Kind == postinstall.SetTailscaleOperator {
-			expected := postinstall.TailscaleOperatorAction(task.Action.User)
+		if task.ID == "tailscale-operator" && task.Status == postinstall.Pending {
+			var expected *postinstall.Action
+			switch task.Action.Kind {
+			case postinstall.SetTailscaleOperator:
+				expected = postinstall.TailscaleOperatorAction(task.Action.User)
+			case postinstall.LoginTailscale:
+				expected = postinstall.TailscaleLoginAction(task.Action.User)
+			}
 			if expected != nil && slices.Equal(task.Action.Argv, expected.Argv) {
 				return expected.Argv, nil
 			}

@@ -13,6 +13,7 @@ profiles = [
 ]
 
 components = [
+  "dtu-network",
   "amd-graphics",
   "laptop-power",
 ]

@@ -1,5 +1,5 @@
-# Tailscale from Fedora. Authentication remains a manual task.
-# nimbus postinstall tailscale-operator offers local operator permission.
+# Tailscale from Fedora. Explicit postinstall guides native sign-in when needed.
+# nimbus postinstall tailscale-operator verifies sign-in and operator permission.
 schema = 1
 id = "tailscale"
 

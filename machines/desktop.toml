@@ -14,6 +14,7 @@ profiles = [
 ]
 
 components = [
+  "dtu-network",
   "intel-graphics",
   "nvidia",
   "desktop-display",

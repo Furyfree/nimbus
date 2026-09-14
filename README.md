@@ -412,17 +412,55 @@ your desktop's account settings. No privileged completion receipt or automatic w
 processing is added. This task requires engine 0.4.6 or newer.
 
 With Tailscale selected and installed, `nimbus postinstall tailscale-operator`
-offers permission for the invoking user to manage it through the CLI or
-Noctalia. It previews `sudo -- /usr/bin/tailscale set --operator=USER`, then
-verifies the daemon's operator preference. Use `--plan` to inspect only.
-Sign-in remains manual. This action also requires engine 0.4.1 or newer.
+sets up permission to manage it through the CLI or Noctalia. If sign-in is
+needed, it offers `sudo tailscale up --operator=USER`: approve, follow the
+native browser sign-in link and let the command finish. This connects the
+machine, then verifies both the operator and running connection. Device
+approval, if required, happens in the Tailscale admin console.
+
+Already signed-in machines only need `sudo tailscale set --operator=USER`;
+an intentionally stopped connection stays stopped. Use `--plan` to inspect
+without sudo or sign-in. Avoid `tailscale login` for initial operator setup:
+its profile switch can clear permission. Canceled or failed setup remains
+incomplete; rerun the task to inspect and retry. Guided sign-in requires engine
+0.5.7 or newer; older releases only set the operator.
+
+With the `dtu-network` component selected (desktop and laptop), use:
+
+~~~sh
+nimbus postinstall dtu-network --plan
+nimbus postinstall dtu-network
+~~~
+
+After approval, Nimbus downloads the [DTU eduroam CA bundle][dtu-ca], verifies
+its pinned SHA-256 and all three CA certificates, then atomically installs
+`/etc/NetworkManager/certs/dtu-eduroam.pem` with root ownership, mode 0644 and
+native SELinux labels when enabled. Apply the component's packages through
+`nimbus sync` first. Status and previews stay offline and never request sudo.
+An unfamiliar destination blocks replacement; a matching valid file needs no
+download. Known-file metadata or label drift can be repaired by rerunning.
+
+When configuring eduroam in NetworkManager, select that file as the CA
+certificate and follow DTU's current authentication and server-name settings.
+Enter credentials through the native network dialog. This task does not change
+global CA trust, restart networking, create a Wi-Fi profile or test sign-in.
+Completion means only that the certificate is installed and verified.
+
+The bundle's first intermediate expires on 2027-12-02. A changed or expired
+bundle requires review and a Nimbus release; downloads cannot silently change
+the trusted certificate. Deselecting the component or using `--reset` leaves
+the installed file in place. Review profiles that reference it before manual
+removal. This task requires engine 0.5.7 or newer.
+
+[dtu-ca]: https://itswiki.compute.dtu.dk/images/0/07/Eduroam_aug2020.pem
 
 User preferences and account setup belong to the
 [dotfiles first-login checklist](https://github.com/Furyfree/dotfiles#first-login-and-setup-ownership).
 Chezmoi installs declared Mise tools after applying their configuration,
 including AI Usage and the agent CLIs. Nimbus does not keep another tool list
 or inspect their credentials. Native application sign-in remains separate
-from system installation and local Tailscale operator permission.
+from system installation; explicit guided tasks may coordinate sign-in after
+approval.
 
 Use the installed command's `--help` to check its available options. Local
 candidate features are not proof of a published COPR release. See

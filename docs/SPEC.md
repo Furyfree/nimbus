@@ -364,18 +364,71 @@ Unchanged or merely adopted resources do not repeat them. `postinstall` reports
 requirements still outstanding from earlier changes.
 
 When native Tailscale is selected, `postinstall tailscale-operator` offers
-local operator permission for the invoking non-root user. Require an installed
-package with a valid receipt and readable daemon preferences. Preview the
-current and requested operator and `sudo -- /usr/bin/tailscale set
---operator=USER`; recheck after approval, then verify the requested operator
-after execution. A failed or ineffective command never counts as complete.
-Only the operator is retained from the local preference response; other
-network and account preferences are not rendered, hashed or stored.
-Sign-in, connection state and other settings remain unchanged. Unknown daemon
-state offers no action. An already matching operator needs no command.
+guided sign-in and local operator permission for the invoking non-root user.
+Require an installed package with a valid receipt and readable daemon
+preferences and status. Retain only the operator and recognized backend state;
+other network and account data is not rendered, hashed or stored.
+
+For `NeedsLogin`, preview `sudo -- /usr/bin/tailscale up --operator=USER`
+and explain that it starts native browser sign-in and connects the machine.
+Explicit approval is required; `--yes` approves the action but cannot complete
+authentication. Native output and sign-in links go directly to the terminal,
+never Nimbus diagnostics. Do not use `tailscale login`: its new-profile flow
+can clear the operator and lose permission mid-command. Do not add `--reset`
+or bypass native checks for existing non-default preferences.
+
+For signed-in `Running` or `Stopped` state, preview only the current and
+requested operator and `sudo -- /usr/bin/tailscale set --operator=USER`.
+An already matching operator needs no command. Preserve stopped connections
+and report them separately from operator readiness. `NeedsMachineAuth` blocks
+on admin-console device approval; unknown or transitional states offer no
+action. Recheck after approval and refuse changed observations. After initial
+sign-in, verify both the operator and `Running` state; operator-only changes
+verify sign-in and operator without requiring a stopped connection to start.
+Failed, canceled or ineffective actions never record successful completion.
+Native state always overrides saved evidence. Status, help and previews never
+start sign-in or request sudo.
+
 This is an explicit post-install action, not a sync resource: Tailscale owns
 the preference and package deselection does not reset it. Revoke it through
-`sudo tailscale set --operator=` or explicitly choose another operator.
+`sudo tailscale set --operator=` or explicitly choose another operator;
+`tailscale down` disconnects without removing the operator.
+
+The explicit `dtu-network` component selects NetworkManager and native SELinux
+tools on desktop and laptop, not the generic VM. Its `postinstall dtu-network`
+task owns only `/etc/NetworkManager/certs/dtu-eduroam.pem`. Sync installs the
+prerequisite packages but never downloads or installs this certificate.
+This supersedes the earlier course-repository certificate setup proposal;
+Chezmoi and `dtu-bachelor` do not own the trust material.
+
+Inspection and previews are offline and unprivileged. Require applied package
+receipts and a named non-root caller; observe the file without following links,
+check root-owned non-writable parents and compare metadata and SELinux labels.
+Missing files are pending; unfamiliar content blocks replacement. Unreadable
+or unsafe paths remain unknown. A matching valid file and labels need no work.
+
+After approval and a fresh inspection, download only the fixed HTTPS URL
+`https://itswiki.compute.dtu.dk/images/0/07/Eduroam_aug2020.pem`, with a timeout,
+64 KiB limit and no redirects. Require SHA-256
+`936b4f18224d20594983341d08c6dd8cebc69e384c2d22e65a55f86689b76a73`, three valid
+CA certificates and signatures chaining to the included root. The reviewed
+bundle validity ends on 2027-12-02; changes require a reviewed engine release.
+Recheck the observed file after download, then use the existing atomic
+system-file helper through sudo with a private temporary payload. Install
+root:root 0644 and restore native labels on the certificate directory and file
+when SELinux is enabled. Never recursively relabel other files. Verify content,
+metadata, validity and labels before recording user-local completion evidence.
+Partial labeling failures report retry guidance and never record completion.
+
+Trust is scoped to NetworkManager's explicit CA-file setting. Do not add a
+global trust anchor, run `update-ca-trust`, modify Wi-Fi profiles or credentials,
+or restart/activate network connections. Guided instructions identify the CA
+path and refer to current DTU authentication and server-name settings. Successful
+certificate installation does not prove eduroam authentication. Native file
+state overrides saved evidence; reset or component removal does not delete the
+file. Unknown files are preserved, and manual removal requires reviewing
+profiles that reference the file. Public certificate fixtures are permitted
+in tests; account data and native network profiles are not.
 
 When AccountsService is selected, the account-picture post-install task
 registers the Chezmoi-supplied JPEG for the invoking non-root user. Require a

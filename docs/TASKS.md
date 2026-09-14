@@ -10,6 +10,54 @@ repository updates during sync, Zed installation, browser fallbacks and
 reporting fixes. The signed Fedora 44 COPR package is available; its new
 installation and reboot checks remain pending.
 
+## DTU eduroam certificate
+
+- [x] Select explicit `dtu-network` prerequisites on desktop and laptop only.
+  Add help, offline preview/status, explicit approval and fresh observation.
+- [x] Download the pinned HTTPS bundle with bounded size/time and no redirects.
+  Validate SHA-256, all three CA certificates, signatures and validity. Refuse
+  expired or changed bundles and unfamiliar target files.
+- [x] Reuse atomic system-file installation for the fixed NetworkManager path,
+  root ownership and 0644 permissions. Restore only directory/file SELinux
+  labels when enabled; verify before completion. No global trust, Wi-Fi profile
+  or credential changes. Preserve existing Tailscale candidate work.
+- [x] Update ownership, README/help, SPEC and the installation checklist.
+- [x] `just check`, `just validate` and focused DTU/Tailscale race tests pass.
+  Regression tests cover approval/cancellation, offline inspection, download
+  failures, redirects, size limits, checksum/expiry, unsafe/unknown files,
+  SELinux drift/failure, verification, idempotence and stale completion.
+- [x] Network-disabled Fedora container with the built candidate verifies native
+  atomic installation, exact bytes, root ownership, file/directory modes, stale
+  approval refusal, symlink refusal and writable-parent refusal. No host mounts.
+- [ ] Publication as 0.5.7 is authorized. Native SELinux-enforcing and actual
+  campus Wi-Fi validation remain for the released candidate on the laptop.
+  No host/laptop installation, sudo or network repair during implementation.
+- [ ] Review DTU's renewed CA bundle before the first intermediate expires on
+  2027-12-02; see the [README workflow](../README.md#workflow).
+
+## Tailscale initial sign-in
+
+- [x] Inspect operator and recognized backend state without authentication.
+  Offer approved native sign-in and connection only for `NeedsLogin`; keep
+  operator-only changes for signed-in machines, preserving stopped connections.
+- [x] Avoid the upstream `tailscale login` profile-switch permission loss.
+  Keep native preferences checks, sign-in prompts and explicit approval;
+  never add `--reset`, persist sign-in links or repair during sync/status.
+- [x] Require operator and running connection after initial sign-in. Block on
+  device approval and unknown state; saved evidence never overrides native
+  inspection. Update help, README and SPEC for both paths.
+- [x] Isolated regressions cover fresh sign-in, operator loss, canceled/failed
+  or ineffective actions, stopped connections, device approval, unknown native
+  state, approval drift, private data, read-only preview/status and stale
+  completion evidence. Focused race tests, `just check` and `just validate` pass.
+- [ ] Publication as 0.5.7 is authorized through the release/COPR workflow;
+  then validate native browser sign-in on the laptop through released Nimbus.
+  No live sign-in, sudo, laptop repairs or service changes during development.
+
+Upstream diagnosis: [profile-switch operator loss][tailscale-login-bug].
+
+[tailscale-login-bug]: https://github.com/tailscale/tailscale/issues/18294
+
 ## Declared RPM sources and help colors, 2026-09-14
 
 - [x] Color every visible help command, including the single-space row for

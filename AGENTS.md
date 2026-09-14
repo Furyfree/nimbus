@@ -102,6 +102,11 @@ Older designs are history, not active requirements; revalidate before reuse.
 
 ## Neighbouring repositories
 
+Nimbus owns the optional DTU eduroam CA bundle through the explicit
+`dtu-network` postinstall task. Keep it scoped to NetworkManager: no global
+trust anchors, credential storage or automatic Wi-Fi profile changes. The
+course-material repository and Chezmoi do not install this certificate.
+
 The explicit lockscreen postinstall task may back up and remove only Noctalia
 lockscreen-widget overrides after approval, as SPEC defines. This does not
 authorize ordinary sync to edit runtime preferences.

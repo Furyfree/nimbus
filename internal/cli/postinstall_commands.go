@@ -16,6 +16,7 @@ import (
 var taskDescriptions = []struct{ id, title, help string }{
 	{"account-picture", "Register the managed account picture", "Requires AccountsService, a valid managed JPEG and the desktop authorization session."},
 	{"copilot", "Install GitHub Copilot", "Requires the selected native installer helper. The helper owns installation, updates and removal."},
+	{"dtu-network", "Install the DTU eduroam CA certificate", "Requires the selected dtu-network component and its applied packages. After approval, download the pinned DTU CA bundle, validate its checksum and certificates, then install /etc/NetworkManager/certs/dtu-eduroam.pem as root:root 0644 with native SELinux labels. An unfamiliar destination blocks replacement. No global trust changes, network restart or credentials. Select the file as the CA certificate when configuring eduroam using DTU's current authentication and server-name settings. Completion verifies only the certificate; Wi-Fi sign-in is not tested. Status and --plan stay offline and never request sudo. --reset clears evidence only; component removal does not delete the certificate."},
 	{"fingerprint", "Enroll a fingerprint", "Requires fprintd and a supported reader. Native enrollment verifies completion."},
 	{"hyprland-plugins", "Install selected Hyprland plugins", "Requires the active matching Hyprland session, development headers and Chezmoi plugin selection."},
 	{"noctalia-lockscreen", "Restore the managed lockscreen layout", "Requires an applied Chezmoi layout and the unlocked Noctalia desktop session. After approval, gracefully stop only Noctalia, save a private settings backup, remove only lockscreen_widgets overrides, restart the shell and verify configuration. Close the lockscreen editor first. The bar briefly disappears; applications and Hyprland stay running. No sudo, automatic locking or repair during sync. --reset clears evidence only; it does not restore the backup."},
@@ -23,7 +24,7 @@ var taskDescriptions = []struct{ id, title, help string }{
 	{"nvidia-mok", "Verify NVIDIA signing-key enrollment", "Requires the selected NVIDIA packages and akmods certificate. Complete native enrollment at reboot, then rerun to verify. Never enter a MOK password into Nimbus."},
 	{"onepassword", "Configure 1Password and selected SSH/Git integration", "The guided task offers SSH/Git integration when it is not selected (default: no). An explicit yes saves the choice through Chezmoi while preserving machine and profiles; --yes cannot opt in. In 1Password, sign in, unlock, and enable desktop CLI integration. If SSH is selected, enable its agent. Skip manual SSH/Git file edits: Chezmoi creates managed parent directories and applies only the selected files after a concise change summary and approval. Use --diff during guided setup to show the full private diff without a pager. Existing file-conflict prompts remain enabled. --mark-done verifies the existing selection without changing it."},
 	{"proton-cachyos", "Install Proton-CachyOS Latest for Steam", "Requires native Steam and ProtonPlus. Start Steam once, then close games. Native ProtonPlus owns runners and updates."},
-	{"tailscale-operator", "Set the local Tailscale operator", "Requires selected Tailscale and readable daemon preferences; sign-in remains separate."},
+	{"tailscale-operator", "Set up Tailscale sign-in and local operator", "Requires selected Tailscale and readable daemon preferences and status. If sign-in is needed, preview and approve sudo tailscale up --operator=USER, then complete the native browser sign-in. This connects the machine; --yes cannot complete authentication. Initial setup verifies both operator and a running connection. Already signed-in machines only need the operator setting; stopped connections stay stopped. Do not use tailscale login for initial operator setup: switching profiles can clear the setting. Device approval remains in the Tailscale admin console. Status and --plan never sign in or request sudo."},
 	{"wowup", "Inspect WoWUp setup requirements", "Blocked until the selected helper supplies standalone installation."},
 }
 
@@ -139,7 +140,7 @@ func postinstallStatusDetail(task postinstall.Task) string {
 	case "proton-cachyos":
 		return "Latest runner installed."
 	case "tailscale-operator":
-		return "Local operator configured."
+		return task.Detail
 	default:
 		return task.Detail
 	}

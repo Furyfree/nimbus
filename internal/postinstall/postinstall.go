@@ -32,6 +32,8 @@ const (
 	EnrollFingerprint         ActionKind = "enroll-fingerprint"
 	InstallApplication        ActionKind = "install-application"
 	SetTailscaleOperator      ActionKind = "set-tailscale-operator"
+	LoginTailscale            ActionKind = "login-tailscale"
+	InstallDTUCertificate     ActionKind = "install-dtu-certificate"
 	SyncNoctaliaPlugins       ActionKind = "sync-noctalia-plugins"
 	SyncHyprlandPlugins       ActionKind = "sync-hyprland-plugins"
 	SetAccountPicture         ActionKind = "set-account-picture"
@@ -40,6 +42,7 @@ const (
 // Action describes native commands offered for explicit user selection.
 // Argv is used for a single command; Commands is an ordered native workflow.
 type Action struct {
+	DTU        *DTUCertificate   `json:"dtu,omitempty"`
 	Lockscreen *LockscreenRepair `json:"lockscreen,omitempty"`
 	Hyprland   *HyprlandSetup    `json:"hyprland,omitempty"`
 	Kind       ActionKind        `json:"kind"`
@@ -129,6 +132,9 @@ func Inspect(src native.Source, in Inputs) []Task {
 	}
 	if slices.ContainsFunc(in.Resolved.Components, func(c definitions.ResolvedComponent) bool { return c.ID == "nvidia" }) {
 		add("nvidia-mok", func() Task { return mok(src, in) })
+	}
+	if slices.ContainsFunc(in.Resolved.Components, func(c definitions.ResolvedComponent) bool { return c.ID == "dtu-network" }) {
+		add("dtu-network", func() Task { return dtuNetwork(src, in) })
 	}
 	if in.Task == "" {
 		result = append(result, sessionTasks(src, in)...)
