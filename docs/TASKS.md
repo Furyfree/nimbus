@@ -1253,3 +1253,24 @@ desktop configuration changes.
 
 - [ ] Review terminal-cancellation and foreground-restoration test timing/reaping;
   successful retries do not establish that those intermittent failures are fixed.
+
+## Version 0.5.7 publication
+
+[Nimbus v0.5.7](https://github.com/Furyfree/nimbus/releases/tag/v0.5.7) selects
+`631f96a077dfd972e0c69ea5fbf6623986605734` for guided Tailscale initial sign-in
+and the DTU eduroam certificate task. All 358 tagged files and executable bits
+match the release archive; modules are unchanged from 0.5.6. Archive SHA-256:
+`a1729743a1d47776888895744d9c4cece9f74e99fa86dbfbb6982ba2ddb135e0`.
+
+The complete local gate, definition validation, focused DTU/Tailscale race
+tests, push CI and Go 1.26.7 offline vendored release tests passed. COPR recipe
+`07a027c` selects that version and checksum. The packaging gate passed in an
+offline Fedora container using a copied checkout after the host-mounted
+wrapper was denied access; host permissions and SELinux were not changed.
+
+[Publication workflow](https://github.com/Furyfree/copr/actions/runs/34882682523)
+was dispatched for Nimbus only. The owner requested handoff after COPR
+submission, without monitoring the build. A queued build is not proof of a
+published RPM; signed-package verification and the native browser sign-in,
+enforcing SELinux and campus Wi-Fi trials remain pending. No Nimbus setup
+was applied to either workstation during release preparation.
