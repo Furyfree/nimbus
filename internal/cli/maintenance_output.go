@@ -33,7 +33,19 @@ func (r *syncResult) conciseSteps() []runStep {
 	matching := 0
 	var snapshots []string
 	cleanups := 0
+	repositoriesCurrent := 0
+	softwareSucceeded := slices.ContainsFunc(r.Steps, func(s runStep) bool { return s.Name == "software updates" && s.Status == "succeeded" })
 	for _, step := range r.Steps {
+		if !r.Verbose && step.Status == "succeeded" && (step.Name == "upgrade:dnf" || step.Name == "upgrade:flatpak") && softwareSucceeded {
+			continue
+		}
+		if !r.Verbose && step.Status == "current" && (step.Name == "Nimbus repository" || step.Name == "dotfiles repository") {
+			repositoriesCurrent++
+			continue
+		}
+		if !r.Verbose && step.Name == "Nimbus" && step.Status == "current" {
+			step.Detail = ""
+		}
 		if step.Status == "succeeded" {
 			if slices.Contains(r.MatchingFiles, step.Name) {
 				matching++
@@ -59,21 +71,27 @@ func (r *syncResult) conciseSteps() []runStep {
 		}
 		steps = append(steps, step)
 	}
+	if repositoriesCurrent > 0 {
+		steps = append(steps, runStep{Name: "repositories", Status: "current", Detail: fmt.Sprintf("%d checked", repositoriesCurrent)})
+	}
 	if matching > 0 {
 		steps = append(steps, runStep{Name: "file ownership records", Status: "succeeded", Detail: fmt.Sprintf("%d matching files; contents unchanged", matching)})
 	}
 	if len(snapshots) > 0 {
 		steps = append(steps, runStep{Name: "Snapper snapshots", Status: "succeeded", Detail: strings.Join(snapshots, ", ")})
 	}
-	if cleanups > 0 {
+	if cleanups > 0 && (r.Verbose || len(snapshots) == 0) {
 		steps = append(steps, runStep{Name: "snapshot retention", Status: "succeeded"})
+	}
+	if !r.Verbose && cleanups > 0 && len(snapshots) > 0 {
+		steps[len(steps)-1].Detail += "; retention applied"
 	}
 	return steps
 }
 
 func (r *syncResult) collectPlanNotices(p *plan.Plan) {
 	for _, op := range p.Operations {
-		if plan.IsConstraintOperation(op) {
+		if plan.IsConstraintOperation(op) || (op.Kind == plan.KindGreeterSync && op.Action == plan.ActionKeep) {
 			continue
 		}
 		for _, note := range op.Notes {

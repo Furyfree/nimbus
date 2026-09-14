@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Furyfree/nimbus/internal/native"
+	"github.com/Furyfree/nimbus/internal/output"
 	"github.com/Furyfree/nimbus/internal/postinstall"
 	"github.com/Furyfree/nimbus/internal/userstate"
 	"github.com/spf13/cobra"
@@ -58,10 +59,6 @@ func newPostinstall(opts *options) *cobra.Command {
 		if spec.id == "onepassword" {
 			child.Aliases = []string{"1password"}
 		}
-		execute := child.RunE
-		child.Args = noArgs
-
-		child.RunE = func(c *cobra.Command, _ []string) error { return execute(c, []string{spec.id}) }
 		cmd.AddCommand(child)
 	}
 	status := &cobra.Command{Use: "status", Short: "Show applicable setup tasks and session notices", Args: noArgs, RunE: func(c *cobra.Command, _ []string) error {
@@ -72,12 +69,12 @@ func newPostinstall(opts *options) *cobra.Command {
 		if opts.json {
 			return writeJSON(c.OutOrStdout(), snapshot.view, nil)
 		}
-		return renderPostinstallStatus(c.OutOrStdout(), snapshot.view)
+		return renderPostinstallStatus(c.OutOrStdout(), snapshot.view, opts.verbose)
 	}}
 	cmd.AddCommand(status, newAgentProxyPostinstall(opts, &flags))
 	return cmd
 }
-func renderPostinstallStatus(out io.Writer, view postinstallView) error {
+func renderPostinstallStatus(out io.Writer, view postinstallView, verbose ...bool) error {
 	if _, err := fmt.Fprintf(out, "Setup for %s:\n", view.Machine); err != nil {
 		return err
 	}
@@ -94,7 +91,11 @@ func renderPostinstallStatus(out io.Writer, view postinstallView) error {
 			continue
 		}
 		status := postinstallStatusLabel(t)
-		if _, err := fmt.Fprintf(out, "  %-20s %-19s %s\n", t.ID, status, postinstallStatusDetail(t)); err != nil {
+		detail := postinstallStatusDetail(t)
+		if len(verbose) > 0 && verbose[0] {
+			detail = t.Detail
+		}
+		if err := output.StatusRow(out, t.ID, status, detail); err != nil {
 			return err
 		}
 		if t.PreviouslyVerified && t.Status == postinstall.Unknown && t.VerificationNeedsRoot {

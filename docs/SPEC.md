@@ -281,12 +281,10 @@ uncommitted local work. Use the separate
 [TASKS.md](TASKS.md) before desktop installation; the documented base still
 needs its clean-install trial.
 
-These definitions require Nimbus 0.4.2 for combined sync ordering. Version
-0.4.1 introduced the machine shell field and Tailscale operator action;
-registering the guide's pre-created snapshot mount requires 0.3.1 or newer.
-On an existing installation,
-update the Nimbus RPM through DNF before updating this checkout or applying
-the matching Chezmoi Topgrade configuration. Bootstrap validates an installed
+The minimum compatible engine is declared in `nimbus.toml`. Engines from 0.5.0
+check their configured RPM repository before fetching definitions; use the
+combined upgrade command from the README. Older engines need the one-time
+native RPM upgrade before using that workflow. Bootstrap validates an installed
 engine but does not upgrade it automatically.
 
 Reboot when requested and select Hyprland through UWSM in Noctalia Greeter.
@@ -334,8 +332,12 @@ Ordinary sync follows this order:
 3. Check both approved repositories for clean, attached, tracking branches
    without local-only commits. Fetch both and require fast-forward history.
    Update without stashing, resetting or overwriting local or ignored files.
-4. Reload definitions, inspect the system, preview changes and apply only after
-   approval. No-op reconciliation creates no system snapshots.
+4. Reload definitions and announce the selected greeter's read-only
+   administrator verification. Inspect before previewing mutations, using the
+   fixed native status command only for the invoking account. A missing
+   authorization becomes a reviewed change; an unreadable state remains a
+   problem. Recheck the same observations after approval. No-op reconciliation
+   creates no mutation prompt or system snapshots.
 5. Ask before applying Chezmoi once, including its scripts and tools. Refresh
    shared profile IDs while preserving the explicit 1Password SSH choice.
    `--yes` approves automated apply stages, never manual GUI confirmations.
@@ -401,8 +403,9 @@ or cancellation of the system phase stops dependent work. Independent user
 steps may continue after a failure, but the final result remains unsuccessful.
 
 `sync --upgrade` performs the same fresh engine check first. When an update
-exists, show the engine transaction and disclose dependencies; DNF retains its
-native transaction prompt unless `--yes` was supplied. Restrict the requested
+exists, announce the engine update, dependencies and subsequent restart. DNF
+owns the exact transaction confirmation; there is no duplicate Nimbus question.
+`--yes` supplies its native assume-yes option. Restrict the requested
 Nimbus package to `nimbus-engine`, require its effective enabled/signature/TLS
 settings, retain native dependency
 sources, and never enable testing or permit erasing to satisfy an update.
@@ -415,9 +418,12 @@ The updated process performs one configuration sync and one Topgrade run. There
 is no second Git fetch or Chezmoi apply. A failed engine update or sync skips
 later phases. The Topgrade callback uses a private temporary report to return
 system changes and failures to the parent. The parent combines these with the
-configuration result; native Topgrade output remains visible. Unresolved native
-failures retain unsuccessful exit status. Standalone `upgrade` still delegates
-to Topgrade without fetching repositories.
+configuration result; native Topgrade output remains visible. Combined
+`sync --upgrade --yes` passes Topgrade's native `--yes` and explicit approval
+to the Nimbus system callback. It never forces Chezmoi conflicts or confirms
+manual setup. Normal execution retains the separate Chezmoi decision.
+Unresolved native failures retain unsuccessful exit status. Standalone
+`upgrade` still delegates to Topgrade without fetching repositories.
 
 Explicit system upgrades refresh all enabled repositories with unavailable
 sources treated as errors. Cached planning queries and the transaction use the
@@ -444,7 +450,7 @@ to this callback. Upgrading software must not silently change machine
 selections.
 
 Routine execution groups matching-file receipt refreshes without hiding content
-changes. Full plan inspection retains individual paths and metadata. Replans
+changes. Verbose plan inspection retains individual paths and metadata. Replans
 show only changes to outstanding operations; resolved dependencies and unchanged
 policy notes are not differences. The closing report groups successful receipt
 refreshes and snapshot results, retaining individual failures and skipped work.
@@ -490,6 +496,14 @@ and repository fetches report elapsed time. No progress percentage is invented.
 Direct init retains its compatible-definition validation before installation;
 it does not silently upgrade itself or fetch repositories.
 
+Configuration planning and replanning omit unrelated software-update solver
+queries, explicitly identifying update information as uninspected in JSON.
+Status still queries update availability; explicit system upgrades always
+perform the source-constrained native preview. Install transaction source
+policies remain independent, and before/after transaction checks remain fresh.
+Single-task postinstall workflows inspect only the selected task; checklist
+and final maintenance inspection retain all applicable tasks.
+
 One closing report distinguishes completed changes, failed and skipped phases,
 remaining guided tasks, new guidance and session activation notices. It includes
 known Noctalia GUI overrides that disable managed lockscreen widgets without
@@ -520,7 +534,7 @@ their line structure. Partial prompts and progress writes are emitted
 immediately without waiting for a newline.
 
 Doctor removes duplicate resource prefixes and indents multiline observations;
-its closing summary distinguishes passed, failed and unknown checks. Preview
+its closing summary distinguishes passed, failed and unknown checks. Compact preview
 output follows execution order: engine check/update, system sync and Chezmoi,
 then Topgrade. Unchanged plans omit recurring snapshot/source policy prose;
 help documents it, while relevant planned actions and warnings stay visible.
@@ -1135,3 +1149,43 @@ direct browser launch. A missing wrapper in an active UWSM session fails clearly
 Browser discovery, URL validation, native arguments and user activation remain
 unchanged; URLs never pass through a shell. No environment or service mutation
 occurs during browser discovery.
+
+## Concise maintenance output and diagnostics
+
+Default previews retain proposed mutations, package names and sources, file
+content differences, removals, blocked reasons and activation notices. They omit
+stable policy prose and group matching-file receipt work. `--verbose` restores
+full resource and policy details and follows an engine restart. Native progress
+and conflict prompts are never filtered. Final result statuses carry explicit
+presentation semantics; the existing text formatter remains for legacy help
+and prose. JSON retains structured operation detail and historical verification.
+The additive `current` step status identifies unchanged repositories;
+`historical_verification` contains earlier administrator-only verification.
+
+Concise final reports group current repositories, omit repeated successful
+DNF/Flatpak rows when the combined software phase succeeded, and group snapshot
+retention. Failures, skipped phases, actual differences and pending tasks remain
+visible. Historical administrator-only MOK rechecks remain in explicit task
+status and verbose reports, without being described as fresh verification.
+The lockscreen task is the single source of effective-widget inspection; the
+final report does not parse a second runtime-settings path.
+
+Execution creates schema-1, mode-0600 metadata records in the private local
+`nimbus/runs` directory. Records contain only engine, machine, available commit,
+command kind, timestamps, phase durations, result counts and activation flags.
+Native output, error bodies, arbitrary arguments, environment and configuration
+contents are excluded. Init's existing private engine log also contains its
+closing Nimbus report; secret-capable child output still bypasses that log.
+Records are limited to 64 KiB; retention preserves active processes and the
+latest 20 completed or abandoned records. Invalid or foreign files are not
+retention targets. Record failures are reported; they never establish success.
+Help, status and previews create no run records. A hard termination can leave a
+running record and does not establish the actual result. Engine replacement
+creates separate records for the old and restarted process, identifying their
+respective versions; a delegated Topgrade run can also have a separate system
+callback record. Records are diagnostics, never completion evidence.
+
+Init retains approval of its provisional greeter check when packages are not
+yet installed. Resolving that announced conditional operation must not introduce
+unrelated changes: reject such drift and require a fresh preview. Neither init
+nor sync may treat a saved greeter receipt as a replacement for native inspection.

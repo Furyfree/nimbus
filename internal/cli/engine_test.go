@@ -74,8 +74,8 @@ func TestEngineRestartPreservesSelectionAndFlags(t *testing.T) {
 		}
 	}})
 	base.Commands["sudo dnf5 --setopt=cacheonly=metadata --setopt=nimbus-engine.gpgcheck=1 --setopt=nimbus-engine.skip_if_unavailable=0 upgrade --from-repo=nimbus-engine "+candidate+" --assumeyes"] = nil
-	code, out, errOut := run(t, "sync", "--upgrade", "--yes", "--prune", "--checkout", root, "--machine", "vm")
-	if code != 17 || !strings.Contains(out, "RESTART:"+candidate) || !strings.Contains(out, "<--upgrade>\n<--checkout>\n<"+root+">\n<--machine>\n<vm>\n<--yes>\n<--prune>") {
+	code, out, errOut := run(t, "sync", "--upgrade", "--yes", "--prune", "--verbose", "--checkout", root, "--machine", "vm")
+	if code != 17 || !strings.Contains(out, "RESTART:"+candidate) || !strings.Contains(out, "<--upgrade>\n<--checkout>\n<"+root+">\n<--machine>\n<vm>\n<--yes>\n<--prune>\n<--verbose>") {
 		t.Fatalf("restart: %d %s%s", code, out, errOut)
 	}
 }
@@ -180,5 +180,59 @@ func TestExplicitUpgradeStopsWhenFreshMetadataFails(t *testing.T) {
 	}
 	if slices.ContainsFunc(src.calls, func(call string) bool { return strings.Contains(call, " -y upgrade") }) {
 		t.Fatal(src.calls)
+	}
+}
+
+func TestEngineUsesNativeApprovalAndDeclinePreventsFetch(t *testing.T) {
+	root, base := installerFixture(t)
+	candidate := "nimbus-0:0.9.0-1.fc44.x86_64"
+	executable := "/test/nimbus"
+	saved := syncExecutable
+	syncExecutable = func() (string, error) { return executable, nil }
+	t.Cleanup(func() { syncExecutable = saved })
+	base.Commands[nativetest.Key("sudo", engineQueryArgs...)] = []byte(candidate)
+	base.Commands[nativetest.Key("rpm", "-qf", "--qf", "%{NAME}", executable)] = []byte("nimbus")
+	key := "sudo dnf5 --setopt=cacheonly=metadata --setopt=nimbus-engine.gpgcheck=1 --setopt=nimbus-engine.skip_if_unavailable=0 upgrade --from-repo=nimbus-engine " + candidate
+	base.Failures[key] = "native transaction declined"
+	src := &maintenanceSource{Source: base}
+	withSource(t, src)
+	old := approver
+	approver = func(io.Reader, io.Writer, string) bool { t.Fatal("duplicate Nimbus engine approval"); return false }
+	t.Cleanup(func() { approver = old })
+	code, out, errOut := run(t, "sync", "--upgrade", "--checkout", root, "--machine", "vm")
+	if code == 0 || !strings.Contains(out+errOut, "native transaction declined") {
+		t.Fatal(code, out, errOut)
+	}
+	if !slices.Contains(src.events, key) {
+		t.Fatal("DNF did not receive native approval command", src.events)
+	}
+	for _, event := range src.events {
+		if strings.Contains(event, " fetch ") || strings.Contains(event, "--assumeyes") {
+			t.Fatal(event)
+		}
+	}
+}
+
+func TestMaintenanceYesReachesTopgradeWithoutForcingChezmoi(t *testing.T) {
+	root, base := installerFixture(t)
+	bin := t.TempDir()
+	t.Setenv("PATH", bin)
+	script := "#!/bin/sh\nprintf 'UPGRADE_APPROVAL=%s\\n' \"$NIMBUS_UPGRADE_YES\"\nprintf 'ARG=%s\\n' \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "topgrade"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	src := &maintenanceSource{Source: base}
+	withSource(t, src)
+	code, out, errOut := run(t, "sync", "--upgrade", "--yes", "--checkout", root, "--machine", "vm")
+	if code != 0 || !strings.Contains(out, "UPGRADE_APPROVAL=true") || !strings.Contains(out, "ARG=--yes") {
+		t.Fatal(code, out, errOut)
+	}
+	if !slices.Contains(src.events, "chezmoi apply") {
+		t.Fatal("native conflict-capable apply missing", src.events)
+	}
+	for _, event := range src.events {
+		if strings.Contains(event, "chezmoi") && strings.Contains(event, "--force") {
+			t.Fatal(event)
+		}
 	}
 }

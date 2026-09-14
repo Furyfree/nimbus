@@ -44,7 +44,7 @@ func runMOKVerification(cmd *cobra.Command, src native.Source, before *postinsta
 			return fmt.Errorf("administrator verification unavailable: %w", err)
 		}
 		// Recheck selection and ordinary native state after the approval prompt.
-		fresh, err := inspectPostinstall(src, machineFlags{checkout: before.selected.Root, machine: before.view.Machine})
+		fresh, err := inspectPostinstall(src, machineFlags{checkout: before.selected.Root, machine: before.view.Machine}, "nvidia-mok")
 		if err != nil {
 			return err
 		}

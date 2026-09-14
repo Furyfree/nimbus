@@ -131,7 +131,9 @@ type Plan struct {
 // Inputs are everything the planner reads. Source runs only read-only
 // native previews.
 type Inputs struct {
-	Upgrade     bool
+	Upgrade bool
+	// SkipUpdates avoids solving unrelated software upgrades during configuration reconciliation.
+	SkipUpdates bool
 	Resolved    *definitions.Resolved
 	Root        definitions.Root
 	Definitions string // the checkout's definition digest
@@ -213,7 +215,11 @@ func Build(in Inputs) (*Plan, error) {
 		p.Operations = append(p.Operations, b.pruneTransaction(p.Prune))
 	}
 	deferPackageRemovalForResources(p.Operations)
-	p.Updates = b.updates()
+	if !in.SkipUpdates || in.Upgrade {
+		p.Updates = b.updates()
+	} else {
+		p.Updates = Updates{Available: []Upgrade{}, Unavailable: "not inspected during configuration sync; use nimbus upgrade --system --plan"}
+	}
 	if slices.ContainsFunc(p.Operations, func(op Operation) bool { return op.Blocked != "" }) {
 		p.Complete = false
 	}

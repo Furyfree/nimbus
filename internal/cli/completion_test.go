@@ -197,7 +197,7 @@ func TestMOKExplicitVerificationAndUnprivilegedStatus(t *testing.T) {
 				}
 				var result syncResult
 				inspectFinal(certificateDeniedSource{src}, selected, &result, false, false)
-				if slices.ContainsFunc(result.Tasks, func(task postinstall.Task) bool { return task.ID == "nvidia-mok" }) || !slices.ContainsFunc(result.Notices, func(notice string) bool { return strings.Contains(notice, "nvidia-mok: Previously verified") }) {
+				if slices.ContainsFunc(result.Tasks, func(task postinstall.Task) bool { return task.ID == "nvidia-mok" }) || !slices.ContainsFunc(result.Historical, func(notice string) bool { return strings.Contains(notice, "nvidia-mok: Previously verified") }) {
 					t.Fatal("historical verification belongs in notices", result)
 				}
 				// Existing evidence cannot hide a fresh, readable negative result.

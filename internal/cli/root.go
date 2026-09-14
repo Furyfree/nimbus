@@ -25,6 +25,7 @@ const (
 
 type options struct {
 	json        bool
+	verbose     bool
 	showVersion bool
 	installLog  *installLog
 }
@@ -82,6 +83,7 @@ func newRoot() (*cobra.Command, *options) {
 			return cmd.Help()
 		},
 	}
+	root.PersistentFlags().BoolVar(&opts.verbose, "verbose", false, "show full plans and diagnostic report details")
 	root.PersistentFlags().BoolVarP(&opts.json, "json", "j", false, "render the result as versioned JSON")
 	// Nimbus runs as the user and escalates per command; only the hidden
 	// internal actions may run as root.

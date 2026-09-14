@@ -224,7 +224,7 @@ func TestPlanReadsTheCacheAndARunRefreshesIt(t *testing.T) {
 	withSource(t, src)
 	// Plan-only never refreshes: the failure is not even reached.
 	code, out, errOut := run(t, "sync", "-p", "--checkout", root, "--machine", "laptop")
-	if code != ExitFailure || strings.Contains(errOut, "metadata") || !strings.Contains(out, "from the local metadata cache") {
+	if code != ExitFailure || strings.Contains(errOut, "metadata") || !strings.Contains(out, "Cached metadata") {
 		t.Fatalf("sync -p: %d %q\n%s", code, errOut, out)
 	}
 	// A run refreshes first; a failed refresh stops the run.

@@ -90,7 +90,7 @@ func TestSyncReportsFailedReadOnlyResults(t *testing.T) {
 		flags        syncFlags
 	}{
 		{"plan", "plan for vm", syncFlags{plan: true}},
-		{"cache note", "from the local metadata cache", syncFlags{plan: true}},
+		{"cache note", "Cached metadata", syncFlags{plan: true}},
 		{"unchanged", "nothing to do;", syncFlags{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

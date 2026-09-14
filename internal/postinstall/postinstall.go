@@ -67,6 +67,7 @@ type Task struct {
 }
 
 type Inputs struct {
+	Task     string // Empty inspects the complete checklist; a task ID inspects only its prerequisites.
 	Resolved *definitions.Resolved
 	Facts    inspect.Facts
 	Applied  state.Applied
@@ -80,17 +81,26 @@ func Inspect(src native.Source, in Inputs) []Task {
 	if in.Resolved == nil {
 		return result
 	}
+	add := func(id string, check func() Task) {
+		if in.Task == "" || in.Task == id {
+			result = append(result, check())
+		}
+	}
 	for _, pkg := range in.Resolved.Packages {
 		switch {
 		case pkg.Name == "1password" && pkg.Prefix == "onepassword":
-			result = append(result, onePassword(src, in, pkg))
+			add("onepassword", func() Task { return onePassword(src, in, pkg) })
 		case pkg.Name == "fprintd" && pkg.Prefix == "dnf":
-			result = append(result, fingerprint(src, in, pkg))
+			add("fingerprint", func() Task { return fingerprint(src, in, pkg) })
 		case pkg.Name == "tailscale" && pkg.Prefix != "flatpak":
-			result = append(result, tailscaleOperator(src, in, pkg))
+			add("tailscale-operator", func() Task { return tailscaleOperator(src, in, pkg) })
 		case pkg.Name == "github-copilot-installer" || pkg.Name == "wowup-cf-installer":
-			result = append(result, installerHelper(src, in, pkg))
-			if pkg.Name == "github-copilot-installer" {
+			id := "copilot"
+			if pkg.Name == "wowup-cf-installer" {
+				id = "wowup"
+			}
+			add(id, func() Task { return installerHelper(src, in, pkg) })
+			if pkg.Name == "github-copilot-installer" && (in.Task == "" || in.Task == "agent-proxy") {
 				observed := agentproxy.Inspect(src, in.Resolved.Machine)
 				status := Pending
 				if observed.Status == "configured" {
@@ -102,24 +112,27 @@ func Inspect(src native.Source, in Inputs) []Task {
 				result = append(result, Task{ID: "agent-proxy", Owner: "agent-proxy", Title: "Connect Copilot to local agents", Status: status, Detail: observed.Detail, Instructions: []string{"Run nimbus postinstall agent-proxy for approved native setup and model refresh."}, Verification: "Local registration and installation files; runtime access is checked only by the explicit task.", Recovery: "Retry the task with Copilot open. Existing models are retained when discovery fails."})
 			}
 		case pkg.Name == "noctalia" && pkg.Prefix != "flatpak":
-			result = append(result, noctaliaPlugins(src, in, pkg), noctaliaLockscreen(src, in, pkg))
+			add("noctalia-plugins", func() Task { return noctaliaPlugins(src, in, pkg) })
+			add("noctalia-lockscreen", func() Task { return noctaliaLockscreen(src, in, pkg) })
 		case pkg.Name == "hyprland-devel" && pkg.Prefix != "flatpak":
-			result = append(result, hyprlandPlugins(src, in, pkg))
+			add("hyprland-plugins", func() Task { return hyprlandPlugins(src, in, pkg) })
 		case pkg.Name == "accountsservice" && pkg.Prefix != "flatpak":
-			result = append(result, accountPicture(src, in, pkg))
+			add("account-picture", func() Task { return accountPicture(src, in, pkg) })
 		case pkg.Name == "protonplus":
 			for _, steam := range in.Resolved.Packages {
 				if steam.Name == "steam" && steam.Prefix != "flatpak" {
-					result = append(result, protonCachyOS(src, in, pkg, steam))
+					add("proton-cachyos", func() Task { return protonCachyOS(src, in, pkg, steam) })
 					break
 				}
 			}
 		}
 	}
 	if slices.ContainsFunc(in.Resolved.Components, func(c definitions.ResolvedComponent) bool { return c.ID == "nvidia" }) {
-		result = append(result, mok(src, in))
+		add("nvidia-mok", func() Task { return mok(src, in) })
 	}
-	result = append(result, sessionTasks(src, in)...)
+	if in.Task == "" {
+		result = append(result, sessionTasks(src, in)...)
+	}
 	slices.SortFunc(result, func(a, b Task) int { return strings.Compare(a.ID, b.ID) })
 	return result
 }

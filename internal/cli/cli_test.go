@@ -3,10 +3,39 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// Every CLI test, including delegated-command tests, must start outside the
+// workstation's home and XDG state. Individual fixtures can further isolate it.
+func TestMain(m *testing.M) {
+	root, err := os.MkdirTemp("", "nimbus-cli-tests-")
+	if err != nil {
+		panic(err)
+	}
+	for _, key := range []string{"HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR"} {
+		path := filepath.Join(root, key)
+		if err := os.Mkdir(path, 0700); err != nil {
+			panic(err)
+		}
+		if err := os.Setenv(key, path); err != nil {
+			panic(err)
+		}
+	}
+	for _, key := range []string{"NIMBUS_INSTALL_LOG_DIR", maintenanceReport, upgradeActive, engineRestart, "NIMBUS_UPGRADE_YES", "NIMBUS_UPGRADE_VERBOSE"} {
+		if err := os.Unsetenv(key); err != nil {
+			panic(err)
+		}
+	}
+	code := m.Run()
+	if err := os.RemoveAll(root); err != nil {
+		panic(err)
+	}
+	os.Exit(code)
+}
 
 func run(t *testing.T, args ...string) (int, string, string) {
 	t.Helper()

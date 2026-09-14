@@ -9,11 +9,16 @@ Existing local code is a candidate, not proof that the new contract is shipped.
 
 ## Next steps
 
-The local candidate fixes command coloring for the longest postinstall name
-and enforces declared RPM sources for installation and system upgrades. Sync
-previews corrections for known installed-source mismatches. Native signed-RPM
-checks cover correction and failure paths; see [TASKS](TASKS.md) for evidence.
-Further UWSM/session changes remain research-only and are not part of this work.
+The owner approved CLI simplification on 2026-09-14 after comparing desktop and
+laptop logs by engine version. The local candidate adds concise previews,
+explicit verbose detail, fewer overlapping approvals, scoped inspections and
+private metadata records. Both Nimbus and Chezmoi keep native ownership and
+interactive conflict handling. See [SPEC](SPEC.md#concise-maintenance-output-and-diagnostics)
+and [TASKS](TASKS.md#cli-simplification-2026-09-14) for the implemented contract
+and validation. No release is implied by local completion.
+
+Declared RPM-source enforcement and UWSM/session integration shipped in 0.5.3.
+This work preserves those contracts and does not reopen boot or VM setup.
 
 The prepared XDG defaults file remains unselected until explicit adoption of
 the package-owned file is supported. Chezmoi already manages the working
@@ -24,8 +29,8 @@ per-user paths, so this does not block the engine release.
    unlock. Verify enrollment, booting and removal on real hardware.
 3. Extract shared operations from the CLI, then build the Bubble Tea dashboard.
 
-This is the current priority order. GRUB and FDE auto-unlock come before the
-remaining CLI refactor and TUI work. Other installation checks below remain
+The explicitly approved CLI simplification runs first. GRUB and FDE auto-unlock
+remain ahead of the deferred TUI work. Other installation checks below remain
 open; this change does not mark them complete.
 
 ## Review draft: maintenance and setup workflows

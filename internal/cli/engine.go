@@ -128,11 +128,8 @@ func enginePreflight(cmd *cobra.Command, src native.Source, flags machineFlags, 
 	// Restrict the requested engine to its source while allowing native
 	// dependencies from the already configured repositories. Never allow erasing.
 	args := []string{"dnf5", "--setopt=cacheonly=metadata", "--setopt=nimbus-engine.gpgcheck=1", "--setopt=nimbus-engine.skip_if_unavailable=0", "upgrade", "--from-repo=nimbus-engine", candidate}
-	if _, err := fmt.Fprintf(out, "Nimbus: %s -> %s\nUpgrade only Nimbus and any required dependencies through DNF. Native transaction review and signature checks remain enabled.\n$ sudo %s\n", current, candidate, strings.Join(args, " ")); err != nil {
+	if _, err := fmt.Fprintf(out, "Nimbus: %s -> %s\nDNF will review Nimbus and required dependencies. After success, restart Nimbus, sync configuration, then run Topgrade.\n$ sudo %s\n", current, candidate, strings.Join(args, " ")); err != nil {
 		return "", false, err
-	}
-	if !sf.yes && !approver(cmd.InOrStdin(), out, "") {
-		return "", false, errors.New("Nimbus update declined; neither repository was fetched")
 	}
 	if sf.yes {
 		args = append(args, "--assumeyes")
@@ -160,6 +157,9 @@ func enginePreflight(cmd *cobra.Command, src native.Source, flags machineFlags, 
 	}
 	if sf.prune {
 		args = append(args, "--prune")
+	}
+	if verbose, _ := cmd.Flags().GetBool("verbose"); verbose {
+		args = append(args, "--verbose")
 	}
 	if err := lock.Release(); err != nil {
 		return "", false, err

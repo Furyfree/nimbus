@@ -101,6 +101,35 @@ Nimbus supports:
 | Apply user configuration | `chezmoi apply` |
 | Fetch and apply dotfiles updates | `chezmoi update` |
 
+Normal previews show changes and problems. Add `--verbose` for full policy,
+resource and diagnostic report details:
+
+~~~sh
+nimbus sync --plan
+nimbus sync --plan --verbose
+nimbus sync --upgrade
+~~~
+
+Engine upgrades use DNF's transaction confirmation. System changes and Chezmoi
+apply retain separate approvals; unchanged system checks need no mutation
+approval. Executing sync announces a read-only administrator check for selected
+greeter authorization before planning changes. Previews never request sudo.
+`sync --upgrade --yes` approves automated Nimbus and Topgrade updates, including
+its Nimbus system callback. It does not force Chezmoi file conflicts, confirm
+manual setup, or opt into SSH integration. Native tool prompts and progress
+remain visible. Historical MOK verification remains in `postinstall status`
+and verbose maintenance reports.
+
+Init, sync and upgrades keep private metadata records under
+`$XDG_STATE_HOME/nimbus/runs` (default `~/.local/state/nimbus/runs`). Records
+identify the engine, machine, available definitions commit, timings and outcome;
+they exclude command output, error bodies, arguments, credentials and rendered
+configuration. The latest 20 completed or abandoned records are retained;
+active runs are preserved. A record is limited to 64 KiB. Failures and verbose
+sync reports show the path. Init also keeps its existing installation logs,
+now including the final Nimbus report. An abruptly terminated run can remain
+marked running; it is not evidence of success.
+
 Status counts package installations/source repairs separately from pending
 system checks and configuration changes. A greeter authorization recheck that
 requires sudo is pending work, not a missing package.

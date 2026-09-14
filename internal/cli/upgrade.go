@@ -34,6 +34,12 @@ func newUpgrade(opts *options) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if sf.systemUpgrade {
 				if os.Getenv(upgradeActive) != "" {
+					if os.Getenv("NIMBUS_UPGRADE_VERBOSE") == "true" {
+						opts.verbose = true
+					}
+					if os.Getenv(maintenanceReport) != "" && os.Getenv("NIMBUS_UPGRADE_YES") == "true" {
+						sf.yes = true
+					}
 					if flags.checkout == "" {
 						flags.checkout = os.Getenv("NIMBUS_UPGRADE_CHECKOUT")
 					}
@@ -68,7 +74,7 @@ func newUpgrade(opts *options) *cobra.Command {
 	return cmd
 }
 
-func runTopgrade(cmd *cobra.Command, args []string, preview bool, flags machineFlags) error {
+func runTopgrade(cmd *cobra.Command, args []string, preview bool, flags machineFlags, yes ...bool) (retErr error) {
 	if os.Getenv(upgradeActive) != "" {
 		return errors.New("recursive upgrade refused: configure Topgrade's Nimbus system step as nimbus upgrade --system")
 	}
@@ -76,8 +82,20 @@ func runTopgrade(cmd *cobra.Command, args []string, preview bool, flags machineF
 		_, err := fmt.Fprintf(cmd.OutOrStdout(), "Run Topgrade with its user configuration:\n  $ %s\nNative steps determine their updates when executed.\n", strings.Join(append([]string{"topgrade"}, args...), " "))
 		return err
 	}
+	if os.Getenv(maintenanceReport) == "" {
+		identity := flags
+		if selected, err := maintenanceSelection(flags); err == nil {
+			identity = selected
+		}
+		record, err := beginRunRecord("upgrade", identity.machine)
+		if err != nil {
+			return fmt.Errorf("start run record: %w", err)
+		}
+		defer func() { retErr = finishRunRecord(cmd.ErrOrStderr(), record, &syncResult{}, "Topgrade", retErr) }()
+	}
 	child := exec.CommandContext(cmd.Context(), "topgrade", args...)
-	child.Env = append(os.Environ(), upgradeActive+"=1", "NIMBUS_UPGRADE_CHECKOUT="+flags.checkout, "NIMBUS_UPGRADE_MACHINE="+flags.machine)
+	verbose, _ := cmd.Flags().GetBool("verbose")
+	child.Env = append(os.Environ(), fmt.Sprintf("NIMBUS_UPGRADE_VERBOSE=%t", verbose), upgradeActive+"=1", "NIMBUS_UPGRADE_CHECKOUT="+flags.checkout, "NIMBUS_UPGRADE_MACHINE="+flags.machine, fmt.Sprintf("NIMBUS_UPGRADE_YES=%t", len(yes) > 0 && yes[0]))
 	child.Stdin, child.Stdout, child.Stderr = cmd.InOrStdin(), output.Native(cmd.OutOrStdout()), output.Native(cmd.ErrOrStderr())
 	return runChild(child)
 }

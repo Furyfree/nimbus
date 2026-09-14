@@ -1,17 +1,13 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 
 	"github.com/Furyfree/nimbus/internal/native"
 	"github.com/Furyfree/nimbus/internal/postinstall"
-	"github.com/pelletier/go-toml/v2"
 )
 
 // inspectFinal only reads native observations. It never authenticates to an app,
@@ -26,7 +22,7 @@ func inspectFinal(src native.Source, s *selected, result *syncResult, notes bool
 				continue
 			}
 			if t.PreviouslyVerified && t.Status == postinstall.Unknown && t.VerificationNeedsRoot {
-				result.Notices = append(result.Notices, t.ID+": Previously verified. "+t.Detail)
+				result.Historical = append(result.Historical, t.ID+": Previously verified. "+t.Detail)
 				continue
 			}
 			if t.ID == "reboot" || t.ID == "logout" {
@@ -34,24 +30,6 @@ func inspectFinal(src native.Source, s *selected, result *syncResult, notes bool
 				continue
 			}
 			result.Tasks = append(result.Tasks, t)
-		}
-	}
-	if slices.Contains(s.Resolved.Profiles, "hyprland-noctalia") {
-		home, _ := os.UserHomeDir()
-		data, err := src.ReadFile(filepath.Join(home, ".config", "noctalia", "settings.toml"))
-		if err == nil {
-			var settings struct {
-				LockscreenWidgets struct {
-					Enabled *bool `toml:"enabled"`
-				} `toml:"lockscreen_widgets"`
-			}
-			if err := toml.Unmarshal(data, &settings); err != nil {
-				result.Notices = append(result.Notices, "Noctalia GUI overrides could not be parsed; effective lockscreen appearance is unverified.")
-			} else if settings.LockscreenWidgets.Enabled != nil && !*settings.LockscreenWidgets.Enabled {
-				result.Notices = append(result.Notices, "Noctalia GUI overrides disable managed lockscreen widgets. Preview nimbus postinstall noctalia-lockscreen --plan to restore the managed layout; normal sync preserves preferences.")
-			}
-		} else if !errors.Is(err, os.ErrNotExist) {
-			result.Notices = append(result.Notices, "Noctalia GUI overrides are unreadable; effective appearance is unverified.")
 		}
 	}
 	if notes {
@@ -94,6 +72,13 @@ func renderFinalDetails(out io.Writer, result *syncResult) error {
 		}
 	}
 
+	if result.Verbose {
+		for _, notice := range result.Historical {
+			if _, err := fmt.Fprintln(out, "Notice: "+notice); err != nil {
+				return err
+			}
+		}
+	}
 	for _, notice := range result.Notices {
 		if _, err := fmt.Fprintln(out, "Notice: "+notice); err != nil {
 			return err

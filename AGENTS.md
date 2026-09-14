@@ -158,8 +158,8 @@ not Fedora.
 - Do not edit live agent configuration, agent homes, authentication, or runtime
   state unless the user explicitly asks for that exact system-level change.
 - This checkout lives on the owner's workstation. Tests, validation, and
-  fixtures never read or create `~/.config/nimbus` or `/var/lib/nimbus`; they
-  use temporary directories and explicit checkout and machine inputs.
+  fixtures never read or create live Nimbus configuration, state or run records;
+  isolate HOME and XDG directories and use explicit checkout and machine inputs.
 - Run destructive system tests only in disposable Fedora virtual machines.
 
 ## Make controlled changes

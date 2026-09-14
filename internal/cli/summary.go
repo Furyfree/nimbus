@@ -1,13 +1,14 @@
 package cli
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/Furyfree/nimbus/internal/apply"
+	"github.com/Furyfree/nimbus/internal/output"
 	"github.com/Furyfree/nimbus/internal/plan"
 	"github.com/Furyfree/nimbus/internal/postinstall"
 )
@@ -20,29 +21,34 @@ type runStep struct {
 }
 
 func renderRunSummary(out io.Writer, command string, steps []runStep) error {
-	var summary bytes.Buffer
-	fmt.Fprintf(&summary, "\n%s summary:\n", command)
+	if _, err := fmt.Fprintf(out, "\n%s summary:\n", command); err != nil {
+		return err
+	}
 	if len(steps) == 0 {
-		fmt.Fprintln(&summary, "  unchanged: nothing needed to run")
+		return output.StatusLine(out, "unchanged", "nothing needed to run")
 	}
 	for _, step := range steps {
-		fmt.Fprintf(&summary, "  %-10s %s", step.Status, step.Name)
+		var message strings.Builder
+		message.WriteString(step.Name)
 		if step.DurationMS > 0 {
-			fmt.Fprintf(&summary, " (%s)", (time.Duration(step.DurationMS) * time.Millisecond).Round(time.Millisecond))
+			fmt.Fprintf(&message, " (%s)", (time.Duration(step.DurationMS) * time.Millisecond).Round(time.Millisecond))
 		}
 		if step.Detail != "" {
-			fmt.Fprintf(&summary, ": %s", step.Detail)
+			fmt.Fprintf(&message, ": %s", step.Detail)
 		}
-		fmt.Fprintln(&summary)
+		if err := output.StatusLine(out, step.Status, message.String()); err != nil {
+			return err
+		}
 	}
-	_, err := summary.WriteTo(out)
-	return err
+	return nil
 }
 
 type syncResult struct {
+	Verbose         bool               `json:"-"`
 	OperationLabels map[string]string  `json:"operation_labels,omitempty"`
 	MatchingFiles   []string           `json:"matching_files,omitempty"`
 	Tasks           []postinstall.Task `json:"pending_tasks,omitempty"`
+	Historical      []string           `json:"historical_verification,omitempty"`
 	Notices         []string           `json:"notices,omitempty"`
 	Notes           []setupNote        `json:"setup_notes,omitempty"`
 	Digest          string             `json:"digest"`
@@ -98,17 +104,18 @@ func (result *syncResult) render(out io.Writer, systemUpgrade bool) error {
 }
 
 func (result *syncResult) renderNamed(out io.Writer, name string) error {
-	var summary bytes.Buffer
-	_ = renderRunSummary(&summary, name, result.conciseSteps())
-	if len(result.Differences) > 0 {
-		fmt.Fprintln(&summary, "differences from the plan:")
-		for _, d := range result.Differences {
-			fmt.Fprintf(&summary, "  %s\n", d)
-		}
-	}
-	if err := renderFinalDetails(&summary, result); err != nil {
+	if err := renderRunSummary(out, name, result.conciseSteps()); err != nil {
 		return err
 	}
-	_, err := summary.WriteTo(out)
-	return err
+	if len(result.Differences) > 0 {
+		if _, err := fmt.Fprintln(out, "differences from the plan:"); err != nil {
+			return err
+		}
+		for _, d := range result.Differences {
+			if _, err := fmt.Fprintf(out, "  %s\n", d); err != nil {
+				return err
+			}
+		}
+	}
+	return renderFinalDetails(out, result)
 }

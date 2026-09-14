@@ -66,18 +66,40 @@ func runMaintenance(cmd *cobra.Command, opts *options, flags machineFlags, sf sy
 	if err := inspect.CheckPlatform(src, []string{"44"}); err != nil {
 		return err
 	}
+	command := "sync"
+	if upgrade {
+		command = "sync --upgrade"
+	}
+	record, err := beginRunRecord(command, flags.machine)
+	if err != nil {
+		return fmt.Errorf("start run record: %w", err)
+	}
+	// This early defer also captures authentication failure before the report exists.
+	defer func() {
+		if record.Outcome == "running" {
+			retErr = finishRunRecord(cmd.ErrOrStderr(), record, &syncResult{}, "authentication", retErr)
+		}
+	}()
 	stopSudo, err := sudoKeepalive(src, out, cmd.ErrOrStderr())
 	if err != nil {
 		return err
 	}
 	defer stopSudo()
-	result := syncResult{Executed: []string{}, Differences: []string{}}
+	result := syncResult{Verbose: opts.verbose, Executed: []string{}, Differences: []string{}}
 	var steps []runStep
 	var restarted bool
 	phase := "Nimbus update"
+	phaseStarted := time.Now()
+	var timings []runPhase
+	setPhase := func(next string) {
+		timings = append(timings, runPhase{Name: phase, DurationMS: time.Since(phaseStarted).Milliseconds()})
+		phase, phaseStarted = next, time.Now()
+	}
 	var finalSelection *selected
 	defer func() {
 		if restarted {
+			record.Outcome = "restarted"
+			retErr = finishRunRecord(cmd.ErrOrStderr(), record, &result, phase, retErr)
 			return
 		}
 		result.Steps = append(steps, result.Steps...)
@@ -90,6 +112,20 @@ func runMaintenance(cmd *cobra.Command, opts *options, flags machineFlags, sf sy
 		}
 		if finalSelection != nil {
 			inspectFinal(src, finalSelection, &result, retErr == nil, false)
+		}
+		timings = append(timings, runPhase{Name: phase, DurationMS: time.Since(phaseStarted).Milliseconds()})
+		record.Phases = timings
+
+		if retErr != nil || opts.verbose {
+			result.Notices = append(result.Notices, "Run record: "+record.path)
+		}
+		if recordErr := record.finish(&result, phase, retErr != nil); recordErr != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("finish run record: %w", recordErr))
+			if result.Error != "" {
+				result.Error += "; "
+			}
+			result.Error += "finish run record: " + recordErr.Error()
+			result.Steps = append(result.Steps, runStep{Name: "run record", Status: "failed", Detail: recordErr.Error()})
 		}
 		var err error
 		if opts.json {
@@ -115,7 +151,7 @@ func runMaintenance(cmd *cobra.Command, opts *options, flags machineFlags, sf sy
 		status = "updated"
 	}
 	steps = append(steps, runStep{Name: "Nimbus", Status: status, Detail: engine})
-	phase = "repository preflight"
+	setPhase("repository preflight")
 
 	s, err := loadSelected(flags)
 	if err != nil {
@@ -152,18 +188,25 @@ func runMaintenance(cmd *cobra.Command, opts *options, flags machineFlags, sf sy
 		}
 	}
 
-	phase = "repository update"
+	setPhase("repository update")
 	for _, repo := range repos {
 		if err := cmd.Context().Err(); err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintf(out, "-> update %s repository: %s\n", repo.Name, repo.Path); err != nil {
+		status := "current"
+		if repo.Changed() {
+			status = "updated"
+		}
+		if _, err := fmt.Fprintf(out, "-> %s repository: %s\n", repo.Name, status); err != nil {
 			return err
 		}
 		if err := repo.Update(src); err != nil {
 			return err
 		}
-		steps = append(steps, runStep{Name: repo.Name + " repository", Status: "succeeded"})
+		if repo.Name == "Nimbus" {
+			record.Commit = repo.PreparedCommit()
+		}
+		steps = append(steps, runStep{Name: repo.Name + " repository", Status: status})
 	}
 	// Read new definitions only after both repositories have passed preflight.
 	s, err = loadSelected(flags)
@@ -183,14 +226,14 @@ func runMaintenance(cmd *cobra.Command, opts *options, flags machineFlags, sf sy
 			return errors.New("repository selection changed during sync; inspect the checkout and rerun nimbus sync")
 		}
 	}
-	phase = "system sync"
+	setPhase("system sync")
 	sf.result = &result
 	if err := runSyncWith(cmd, opts, flags, sf, lock); err != nil {
 		return err
 	}
 	if len(repos) > 1 {
-		phase = "Chezmoi apply"
-		if _, err := fmt.Fprintln(out, "System sync completed. Apply the updated Chezmoi configuration and its declared scripts/tools?"); err != nil {
+		setPhase("Chezmoi apply")
+		if _, err := fmt.Fprintln(out, "Apply Chezmoi configuration and tool hooks? Native file-conflict prompts remain enabled."); err != nil {
 			return err
 		}
 		if !sf.yes && !approver(cmd.InOrStdin(), out, "") {
@@ -219,19 +262,19 @@ func runMaintenance(cmd *cobra.Command, opts *options, flags machineFlags, sf sy
 	}
 	lock = nil
 	if upgrade {
-		phase = "software updates"
-		if err := runMaintenanceUpgrade(cmd, flags, &result); err != nil {
+		setPhase("software updates")
+		if err := runMaintenanceUpgrade(cmd, flags, &result, sf.yes); err != nil {
 			return err
 		}
 		result.Steps = append(result.Steps, runStep{Name: phase, Status: "succeeded"})
 	}
 	if upgrade {
-		phase = "agent model refresh"
+		setPhase("agent model refresh")
 		if err := refreshAgentProxy(cmd, src, s.Resolved.Machine, out, &result); err != nil {
 			return err
 		}
 	}
-	phase = "final inspection"
+	setPhase("final inspection")
 	return nil
 }
 

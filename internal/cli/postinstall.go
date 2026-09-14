@@ -42,33 +42,17 @@ type postinstallSnapshot struct {
 func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cobra.Command {
 	var yes, preview, markDone, reset bool
 	cmd := &cobra.Command{
-		Use: "postinstall [TASK]", Short: "Inspect manual setup tasks or select one native action",
-		Long: "List pending, blocked, and unknown manual tasks without changing the system. Select a task ID to see its instructions or approve its fixed native action. JSON lists tasks without selecting or executing one.",
-		Args: func(cmd *cobra.Command, args []string) error {
-			if len(args) > 1 {
-				return usageError{errors.New("expected at most one task ID")}
-			}
-			return nil
-		},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if opts.json && (yes || markDone || reset || (len(args) != 0 && !preview)) {
+		Use: taskID, Args: noArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if opts.json && (yes || markDone || reset || !preview) {
 				return usageError{errors.New("postinstall --json lists tasks only; it cannot select or approve an action")}
 			}
-			if yes && len(args) == 0 {
-				return usageError{errors.New("postinstall --yes requires one task ID")}
-			}
 			src := newSource()
-			before, err := inspectPostinstall(src, *flags)
+			before, err := inspectPostinstall(src, *flags, taskID)
 			if err != nil {
 				return err
 			}
-			if len(args) == 0 {
-				if opts.json {
-					return writeJSON(cmd.OutOrStdout(), before.view, nil)
-				}
-				return renderPostinstallStatus(cmd.OutOrStdout(), before.view)
-			}
-			task, err := selectedTask(before.view, args[0])
+			task, err := selectedTask(before.view, taskID)
 			if err != nil {
 				return err
 			}
@@ -135,7 +119,7 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 				return err
 			}
 			defer func() { _ = lock.Release() }()
-			fresh, err := inspectPostinstall(src, *flags)
+			fresh, err := inspectPostinstall(src, *flags, taskID)
 			if err != nil {
 				return err
 			}
@@ -162,7 +146,7 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 			if runErr != nil {
 				runErr = fmt.Errorf("postinstall %s action failed: %w", task.ID, runErr)
 			}
-			after, checkErr := inspectPostinstall(src, *flags)
+			after, checkErr := inspectPostinstall(src, *flags, taskID)
 			if checkErr != nil {
 				return errors.Join(runErr, fmt.Errorf("action finished but task status could not be checked: %w", checkErr))
 			}
@@ -200,7 +184,7 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 	return cmd
 }
 
-func inspectPostinstall(src native.Source, flags machineFlags) (*postinstallSnapshot, error) {
+func inspectPostinstall(src native.Source, flags machineFlags, tasks ...string) (*postinstallSnapshot, error) {
 	s, err := loadSelected(flags)
 	if err != nil {
 		return nil, err
@@ -210,7 +194,11 @@ func inspectPostinstall(src native.Source, flags machineFlags) (*postinstallSnap
 		return nil, fmt.Errorf("postinstall ownership state: %w", err)
 	}
 	f := inspect.InspectTasks(src)
-	view := postinstallView{Machine: s.Resolved.Machine, Tasks: postinstall.Inspect(src, postinstall.Inputs{Resolved: s.Resolved, Facts: *f, Applied: *applied})}
+	taskID := ""
+	if len(tasks) > 0 {
+		taskID = tasks[0]
+	}
+	view := postinstallView{Machine: s.Resolved.Machine, Tasks: postinstall.Inspect(src, postinstall.Inputs{Task: taskID, Resolved: s.Resolved, Facts: *f, Applied: *applied})}
 	if err := enrichPostinstall(src, s, &view); err != nil {
 		return nil, err
 	}

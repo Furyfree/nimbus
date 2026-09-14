@@ -1,6 +1,7 @@
 package postinstall
 
 import (
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -401,5 +402,33 @@ func TestLogoutSeparatesShellChangesFromGroups(t *testing.T) {
 				t.Fatalf("%+v", got)
 			}
 		})
+	}
+}
+
+func TestSingleTaskInspectionMatchesFullCatalogWithoutOtherProbes(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	in, src := fixture("1password", "fprintd", "tailscale", "github-copilot-installer", "wowup-cf-installer", "noctalia", "hyprland-devel", "accountsservice", "protonplus", "steam")
+	in.Resolved.Components = append(in.Resolved.Components, definitions.ResolvedComponent{ID: "nvidia"})
+	all := Inspect(src, in)
+	if len(all) != 12 {
+		t.Fatalf("task coverage changed: %d", len(all))
+	}
+	for _, task := range all {
+		t.Run(task.ID, func(t *testing.T) {
+			scoped := in
+			scoped.Task = task.ID
+			got := Inspect(src, scoped)
+			if len(got) != 1 || !reflect.DeepEqual(got[0], task) {
+				t.Fatalf("scoped task differs: %+v vs %+v", got, task)
+			}
+		})
+	}
+	guard := &readGuard{FakeSource: src}
+	in.Task = "onepassword"
+	Inspect(guard, in)
+	if len(guard.commands) != 0 || len(guard.files) != 0 {
+		t.Fatalf("unrelated task probes: %v %v", guard.commands, guard.files)
 	}
 }

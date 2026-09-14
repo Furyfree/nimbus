@@ -24,7 +24,7 @@ func writeUpgradeReport(path string, result *syncResult) error {
 	defer f.Close()
 	return json.NewEncoder(f).Encode(result)
 }
-func runMaintenanceUpgrade(cmd *cobra.Command, flags machineFlags, result *syncResult) error {
+func runMaintenanceUpgrade(cmd *cobra.Command, flags machineFlags, result *syncResult, yes ...bool) error {
 	report, err := os.CreateTemp("", "nimbus-upgrade-*.json")
 	if err != nil {
 		return err
@@ -45,7 +45,12 @@ func runMaintenanceUpgrade(cmd *cobra.Command, flags machineFlags, result *syncR
 			_ = os.Unsetenv(maintenanceReport)
 		}
 	}()
-	runErr := runTopgrade(cmd, nil, false, flags)
+	var args []string
+	approved := len(yes) > 0 && yes[0]
+	if approved {
+		args = []string{"--yes"}
+	}
+	runErr := runTopgrade(cmd, args, false, flags, approved)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return errors.Join(runErr, err)

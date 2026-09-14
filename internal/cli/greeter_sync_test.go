@@ -76,7 +76,7 @@ func TestGreeterAuthorizationUsesNormalSyncAndInitApproval(t *testing.T) {
 			t.Cleanup(func() { approver = saved })
 			approver = func(io.Reader, io.Writer, string) bool { return false }
 			_, _, _ = run(t, args...)
-			if slices.Contains(src.reads, adminStatus) || slices.Contains(src.calls, enable) {
+			if (command == "init" && slices.Contains(src.reads, adminStatus)) || slices.Contains(src.calls, enable) {
 				t.Fatal("greeter access attempted after refusal")
 			}
 			approver = saved

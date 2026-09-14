@@ -198,7 +198,7 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 		return rerrs[0]
 	}
 	trial := &selected{Root: root, Checkout: c, Resolved: r}
-	p, _, err := planWithState(trial, src, false)
+	p, _, err := planWithState(trial, src, false, false)
 	if err != nil {
 		return err
 	}
@@ -216,7 +216,7 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 			return err
 		}
 	}
-	if _, err := out.Write(renderPlan(p, false, false)); err != nil {
+	if _, err := out.Write(renderPlanView(p, false, false, !opts.verbose)); err != nil {
 		return fmt.Errorf("show installation plan: %w", err)
 	}
 	if _, err := fmt.Fprintln(out, "\nFrom the local metadata cache. Applying creates installation logs and runs the setup shown above."); err != nil {
@@ -237,6 +237,20 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	if err := cmd.Context().Err(); err != nil {
 		return err
 	}
+	systemResult := syncResult{Verbose: opts.verbose}
+	record, err := beginRunRecord("init", machine)
+	if err != nil {
+		return fmt.Errorf("start run record: %w", err)
+	}
+	record.Commit = p.Checkout.Commit
+	defer func() {
+		for _, step := range systemResult.Steps {
+			if step.DurationMS > 0 && slices.Contains([]string{"selection", "system installation", "dotfiles and tools"}, step.Name) {
+				record.Phases = append(record.Phases, runPhase{Name: step.Name, DurationMS: step.DurationMS})
+			}
+		}
+		retErr = finishRunRecord(cmd.ErrOrStderr(), record, &systemResult, "installation", retErr)
+	}()
 	log, err := openInstallLog()
 	if err != nil {
 		return fmt.Errorf("start installation log: %w", err)
@@ -278,7 +292,6 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	src = installSource{src, log, oldErr}
 	stageStarted := time.Now()
 	steps := []runStep{{Name: "selection", Status: "skipped"}, {Name: "system installation", Status: "skipped"}, {Name: "dotfiles and tools", Status: "skipped"}}
-	var systemResult syncResult
 	active := 0
 	defer func() {
 		if retErr != nil && steps[active].Status != "failed" {
@@ -291,7 +304,10 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 		log.event("stage end name=%s status=%s elapsed_ms=%d", steps[active].Name, steps[active].Status, steps[active].DurationMS)
 		systemResult.Steps = append(steps, systemResult.Steps...)
 		inspectFinal(newSource(), trial, &systemResult, retErr == nil, true)
-		err := systemResult.renderNamed(oldOut, "init")
+		if retErr != nil || opts.verbose {
+			systemResult.Notices = append(systemResult.Notices, "Run record: "+record.path)
+		}
+		err := systemResult.renderNamed(out, "init")
 		if err == nil {
 			err = rememberNotes(machine, systemResult.Notes)
 		}
@@ -334,7 +350,7 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	} else if err != nil || latestSelector == nil || *latestSelector != *existingSelector {
 		return errors.New("selector changed during initialization; run init again")
 	}
-	freshPlan, _, err := planWithState(trial, src, false)
+	freshPlan, _, err := planWithState(trial, src, false, false)
 	if err != nil {
 		return err
 	}

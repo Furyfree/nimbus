@@ -1007,3 +1007,66 @@ No approval, native inspection, package transaction or Chezmoi behavior changes.
 Regression checks cover mixed package/resource work and human/JSON greeter
 status after init and sync, without privilege escalation or mutation.
 Validation: focused regressions, `just check` and `just validate` passed.
+
+## CLI simplification, 2026-09-14
+
+Owner-approved local implementation after version-attributed desktop/laptop
+analysis. Original install logs came from 0.4.0 and 0.4.3; current command
+observations and DNF transactions came from 0.5.3. Routine sync had no retained
+Nimbus transcript, so old installation output was not treated as current output.
+
+- [x] Compact default previews with full `--verbose` detail; preserve mutations,
+  source restrictions, blocked reasons, native streams and file conflicts.
+- [x] Delegate engine transaction approval once to DNF; retain separate Chezmoi
+  approval and propagate explicit combined-upgrade approval to Topgrade/callback.
+- [x] Announce read-only administrator greeter inspection before sync mutation
+  approval; keep previews unprivileged and reject unrelated init replan drift.
+- [x] Skip unrelated update queries during configuration replans; retain full
+  source policies and transaction verification. Scope named task inspection.
+- [x] Remove the positional postinstall adapter; render result status explicitly
+  and consolidate routine success reporting without hiding failures.
+- [x] Replace duplicate lockscreen override parsing with authoritative task
+  inspection. Keep historical MOK details in explicit/verbose inspection.
+- [x] Add private bounded metadata records; exclude native/error/configuration
+  contents. Include the final Nimbus report in init's existing engine log.
+- [x] Quiet unchanged Chezmoi hook messages while retaining native Mise output,
+  extension repair and verification, icon refresh and standalone behavior.
+- [x] Finish the full regression gates and final independent Claude Fable 5.1
+  and Grok 4.6 validation; record exact outcomes below.
+- [ ] Owner trial of interactive desktop maintenance after review. No live
+  installation, desktop apply, laptop changes or release was performed.
+
+The implementation deliberately retains existing native lifecycle boundaries
+and the legacy prose formatter; this is not a new updater or UI framework.
+
+Validation evidence for this candidate:
+
+- Nimbus `just check` and `just validate` pass. CLI, output and postinstall
+  packages also pass with Go's race detector.
+- The disposable signed-RPM maintenance drill passes, including stale root
+  metadata, engine-first replacement/restart and incompatible definitions.
+  Its synthetic 0.4.6/0.4.7 labels exercise this candidate code, not old releases.
+- Native Fedora DNF constraint/source fixtures pass: competing providers,
+  source-bound installs and upgrades, wrong-source repair, signature checks,
+  dependencies and unavailable selected providers. Container fixtures use stdin
+  transfer rather than relabeling or mounting workstation files.
+- Chezmoi's complete gate passes (156 tests; optional Neovim download, Niri
+  parser and Zathura GUI checks skipped). Its read-only diff is empty; status
+  lists five always-run hooks, and verification passes with scripts excluded.
+- Test isolation initially allowed mocked upgrade diagnostics into the live
+  state directory. Only the identified synthetic records were removed. CLI
+  TestMain now isolates HOME and XDG paths; subsequent tests leave no live run
+  records. No real upgrade or application authentication occurred.
+- Independent review caught diagnostic-retention validation, error-reporting
+  and approval-detail issues; regression tests cover their corrections. The
+  suggested removal of the greeter snapshot-policy drift check was rejected:
+  inspected snapshot policy is independent of greeter action, and must still
+  match approval.
+
+Final validator results: Claude Fable 5.1 (`claude-fable-5-1`) and Grok 4.6
+(`grok-4.6-build`) completed source-only reviews and follow-ups with no remaining
+blockers. A separate read-only validator also confirmed the error-reporting and
+phase-classification fixes. Reviews did not run authentication or native setup.
+The observed desktop preview is 15 lines by default versus 24 with `--verbose`.
+Optional Chezmoi Markdown lint retains the same 81 pre-existing findings and no
+new findings. Interactive approvals and desktop behavior remain owner trials.

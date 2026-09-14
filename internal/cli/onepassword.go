@@ -73,7 +73,7 @@ func offerPasswordIntegration(cmd *cobra.Command, src native.Source, before *pos
 	if err != nil || !samePasswordSelection(fresh, selection) {
 		return false, errors.New("Chezmoi selection changed during approval; retry the task")
 	}
-	checked, err := inspectPostinstall(src, machineFlags{checkout: before.selected.Root, machine: before.view.Machine})
+	checked, err := inspectPostinstall(src, machineFlags{checkout: before.selected.Root, machine: before.view.Machine}, "onepassword")
 	if err != nil || checked.digest != before.digest {
 		return false, errors.New("postinstall state changed after approval; retry the task")
 	}
@@ -222,7 +222,7 @@ func runOnePassword(cmd *cobra.Command, src native.Source, before *postinstallSn
 		}
 		if changed {
 			selection.OnePasswordSSH = true
-			before, err = inspectPostinstall(src, machineFlags{checkout: before.selected.Root, machine: before.view.Machine})
+			before, err = inspectPostinstall(src, machineFlags{checkout: before.selected.Root, machine: before.view.Machine}, "onepassword")
 			if err != nil {
 				return err
 			}
@@ -268,7 +268,7 @@ func runOnePassword(cmd *cobra.Command, src native.Source, before *postinstallSn
 	if _, err := fmt.Fprintln(cmd.OutOrStdout(), "GUI prerequisites confirmed. Verifying selected integration..."); err != nil {
 		return err
 	}
-	freshBefore, err := inspectPostinstall(src, machineFlags{checkout: before.selected.Root, machine: before.view.Machine})
+	freshBefore, err := inspectPostinstall(src, machineFlags{checkout: before.selected.Root, machine: before.view.Machine}, "onepassword")
 	if err != nil {
 		return err
 	}
@@ -313,7 +313,7 @@ func runOnePassword(cmd *cobra.Command, src native.Source, before *postinstallSn
 		}
 		expectedHash := sha256.Sum256(expected)
 		expected = nil
-		approved, err := inspectPostinstall(src, machineFlags{checkout: before.selected.Root, machine: before.view.Machine})
+		approved, err := inspectPostinstall(src, machineFlags{checkout: before.selected.Root, machine: before.view.Machine}, "onepassword")
 		if err != nil {
 			return err
 		}
@@ -333,7 +333,7 @@ func runOnePassword(cmd *cobra.Command, src native.Source, before *postinstallSn
 		if err != nil || !samePasswordSelection(fresh, selection) {
 			return errors.New("Chezmoi selection changed during approval; retry the task")
 		}
-		checked, err := inspectPostinstall(src, machineFlags{checkout: before.selected.Root, machine: before.view.Machine})
+		checked, err := inspectPostinstall(src, machineFlags{checkout: before.selected.Root, machine: before.view.Machine}, "onepassword")
 		if err != nil || checked.digest != approved.digest {
 			return errors.New("postinstall state changed after approval; retry the task")
 		}

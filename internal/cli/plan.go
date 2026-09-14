@@ -24,8 +24,8 @@ const planWidth = 80
 
 // renderPlan writes the plan the way an installer shows its work: what
 // will be prepared, installed, upgraded, and removed, then problems. The
-// update list is plan's information; apply passes listUpdates false and
-// gets one line.
+// update list belongs to explicit upgrade/status inspection; configuration
+// reconciliation does not query it.
 func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 	return renderPlanView(p, prune, listUpdates, false)
 }
@@ -83,7 +83,7 @@ func renderPlanView(p *plan.Plan, prune, listUpdates, compact bool) []byte {
 		// The same note from several operations, such as every crate
 		// waiting for the Rust runtime, is shown once.
 		for _, n := range op.Notes {
-			if compact && op.Action == plan.ActionKeep && plan.IsConstraintOperation(*op) {
+			if compact && ((op.Action == plan.ActionKeep && plan.IsConstraintOperation(*op)) || op.Kind == plan.KindGreeterSync) {
 				continue
 			}
 			if !noted[n] {
@@ -226,6 +226,10 @@ func renderPlanView(p *plan.Plan, prune, listUpdates, compact bool) []byte {
 				if !bytes.Equal(op.File.Before.Content, op.File.After.Content) {
 					b.WriteString(acceptanceDiff(op.File.Target, op.File.Before.Content, op.File.After.Content))
 				}
+			}
+			if compact && op.Kind == plan.KindGreeterSync {
+				fmt.Fprintln(&b, "    Administrator verification; enable only if missing. Use --verbose for native commands.")
+				continue
 			}
 			for _, step := range op.Steps {
 				if op.File != nil {

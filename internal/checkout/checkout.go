@@ -63,6 +63,12 @@ func Inspect(src native.Source, name, path, approvedOrigin string) (*Repository,
 	return r, nil
 }
 
+// PreparedCommit is the fetched commit verified by Prepare.
+func (r *Repository) PreparedCommit() string { return r.target }
+
+// Changed reports whether the verified fetched commit differs from HEAD.
+func (r *Repository) Changed() bool { return r.target != "" && r.target != r.head }
+
 // Prepare fetches the selected branch and verifies that it can fast-forward.
 // Prepare every repository before updating either working tree.
 func (r *Repository) Prepare(src native.Source) error {
