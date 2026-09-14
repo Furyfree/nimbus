@@ -662,8 +662,16 @@ skips sign-in. Shared init prerequisites report sign-in advice without starting
 this postinstall recovery flow. Status and previews never authenticate.
 
 The task then verifies selected Chezmoi SSH/public-selector/agent/Git targets;
-matching files need no apply. Otherwise it previews, approves and applies only those
-targets with scripts excluded, then verifies files and agent readiness.
+matching files need no apply. Otherwise native Chezmoi status supplies a concise
+create/update summary for those targets and their managed parent directories.
+After approval, `chezmoi apply --parent-dirs --exclude=scripts` creates missing
+directories with their managed permissions and applies the selected files.
+Native file-conflict prompts remain enabled. Nimbus rechecks rendered content,
+file/directory status and task selection before applying, then verifies files
+and agent readiness. Guided `--diff` additionally streams the private Chezmoi
+diff with `--no-pager`, including managed parents; no diff is shown by default.
+It cannot combine with `--plan`, `--mark-done` or `--reset`, and may authenticate
+as part of guided setup. Diff and rendered content remain outside logs.
 Verify-only completion checks the file fingerprint before and after verification
 and rechecks the selection. GUI acknowledgment persists after a failed check so
 retry can address the remaining failure. The `1password` alias selects this task;

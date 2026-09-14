@@ -9,6 +9,11 @@ Existing local code is a candidate, not proof that the new contract is shipped.
 
 ## Next steps
 
+The 1Password first-install correction creates managed parent directories through
+Chezmoi and replaces the automatic full diff with a concise change summary.
+Explicit `--diff` retains detailed review without a pager. See
+[TASKS](TASKS.md#onepassword-first-install-and-preview) for release evidence.
+
 The owner approved CLI simplification on 2026-09-14 after comparing desktop and
 laptop logs by engine version. The local candidate adds concise previews,
 explicit verbose detail, fewer overlapping approvals, scoped inspections and

@@ -40,7 +40,7 @@ type postinstallSnapshot struct {
 }
 
 func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cobra.Command {
-	var yes, preview, markDone, reset bool
+	var yes, preview, markDone, reset, showDiff bool
 	cmd := &cobra.Command{
 		Use: taskID, Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -70,7 +70,7 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 				return markExistingTask(cmd, src, before, task, yes)
 			}
 			if task.ID == "onepassword" && !preview {
-				return runOnePassword(cmd, src, before, task, yes, false)
+				return runOnePassword(cmd, src, before, task, yes, false, showDiff)
 			}
 			if task.ID == "nvidia-mok" && !preview {
 				return runMOKVerification(cmd, src, before, task, yes)
@@ -176,6 +176,10 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 		cmd.Flags().BoolVar(&markDone, "mark-done", false, "verify existing setup and record completion without applying configuration")
 	}
 	cmd.Flags().BoolVar(&reset, "reset", false, "reset this machine's acknowledgment without changing configuration")
+	if taskID == "onepassword" {
+		cmd.Flags().BoolVar(&showDiff, "diff", false, "show the full private file diff during guided setup, without a pager")
+		cmd.MarkFlagsMutuallyExclusive("diff", "plan", "mark-done", "reset")
+	}
 	if cmd.Flags().Lookup("mark-done") != nil {
 		cmd.MarkFlagsMutuallyExclusive("plan", "mark-done", "reset")
 	} else {

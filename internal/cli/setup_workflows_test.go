@@ -78,6 +78,7 @@ func TestOnePasswordSelectedFilesAndFailedVerification(t *testing.T) {
 			src.Paths["/opt/1Password/op-ssh-sign"] = "/opt/1Password/op-ssh-sign"
 			src.Commands["env SSH_AUTH_SOCK="+filepath.Join(os.Getenv("HOME"), ".1password", "agent.sock")+" ssh-add -l"] = []byte("public identity, never printed")
 			targets := passwordTargets(true)
+			src.Commands[nativetest.Key("chezmoi", append([]string{"--color=false", "status", "--parent-dirs", "--exclude=scripts", "--"}, targets...)...)] = []byte(" A .config/1Password/ssh\n A .config/1Password/ssh/agent.toml\n M .config/git/config\n")
 			cat := nativetest.Key("chezmoi", append([]string{"cat", "--"}, targets...)...)
 			verify := nativetest.Key("chezmoi", append([]string{"verify", "--exclude=scripts", "--"}, targets...)...)
 			src.Commands[cat] = []byte("synthetic SSH and public selectors")
@@ -87,7 +88,7 @@ func TestOnePasswordSelectedFilesAndFailedVerification(t *testing.T) {
 				src.Failures[verify] = "mismatch"
 			}
 			src.onStream = func(call string) {
-				if strings.HasPrefix(call, "chezmoi apply --exclude=scripts -- ") {
+				if strings.HasPrefix(call, "chezmoi apply --parent-dirs --exclude=scripts -- ") {
 					for _, path := range targets {
 						src.Files[path] = []byte("synthetic selected file")
 					}
@@ -105,7 +106,7 @@ func TestOnePasswordSelectedFilesAndFailedVerification(t *testing.T) {
 			if strings.Contains(out.String(), "public identity") {
 				t.Fatal("identity output leaked")
 			}
-			want := nativetest.Key("chezmoi", append([]string{"apply", "--exclude=scripts", "--"}, targets...)...)
+			want := nativetest.Key("chezmoi", append([]string{"apply", "--parent-dirs", "--exclude=scripts", "--"}, targets...)...)
 			if !slices.Contains(src.streams, want) || slices.Contains(src.streams, "chezmoi apply") {
 				t.Fatal(src.streams)
 			}

@@ -1102,3 +1102,21 @@ rebuild passes with Fedora tools and a native build-user account. Initial local
 container mount and missing-user/group failures were environment setup errors;
 no host packages, permissions or accounts were modified to resolve them.
 Desktop/laptop upgrade and interactive maintenance remain operator trials.
+
+### OnePassword first install and preview
+
+The laptop had no `~/.config/1Password/ssh/` directory. Targeted Chezmoi apply
+omitted managed parents, so preview could succeed while the first apply failed.
+The task now includes parents, prints native create/update status before approval,
+and offers `--diff` for a private preview without a pager. Scripts stay excluded;
+local-conflict prompts, explicit SSH opt-in and final verification remain intact.
+
+Validation includes a native Chezmoi trial in disposable directories: missing
+parents are created with managed permissions, unrelated files stay untouched,
+and an unanswered conflict preserves a local edit. Fixture tests cover guided
+setup, optional diff, incomplete verification and completion evidence. No desktop
+configuration, authentication or laptop changes are part of this release work.
+
+`just check`, `just validate`, and focused 1Password race tests pass. Native
+Chezmoi coverage runs where the executable is available; it passed locally.
+Source-only CI may skip that native trial while retaining the fixture tests.

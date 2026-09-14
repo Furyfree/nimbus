@@ -176,8 +176,13 @@ configuration. Completion is recorded only when verification passes. `--reset`
 clears that task's local evidence without undoing configuration.
 
 The 1Password task guides GUI prerequisites and verifies the selected SSH/Git
-integration. Matching configuration needs no apply; changes use a Chezmoi preview
-and approval. Skip manual SSH/Git file edits.
+integration. Matching configuration needs no apply. Changes show a concise list
+of files and managed parent directories to create or update, followed by approval.
+Chezmoi creates missing parent directories, excludes scripts, and retains native
+file-conflict prompts. Skip manual SSH/Git file edits. For a full private diff
+during guided setup, use `nimbus postinstall onepassword --diff`; it prints
+directly without a pager and is never logged. This option still runs guided
+setup and may request authentication; `--plan` remains the read-only overview.
 The guided task offers SSH/Git integration when it is not selected, even after
 CLI-only setup is complete. Answering yes saves the choice through Chezmoi;
 the default is no, and `--yes` does not opt in. `--mark-done` checks the existing

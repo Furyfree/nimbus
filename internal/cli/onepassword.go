@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -204,7 +205,47 @@ func passwordFingerprint(src native.Source, ssh bool) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func runOnePassword(cmd *cobra.Command, src native.Source, before *postinstallSnapshot, t postinstall.Task, yes, verifyOnly bool) error {
+// Chezmoi includes the same managed parents in status and apply. Contents stay
+// private; only paths and native create/update actions appear in the summary.
+func passwordFileStatus(src native.Source, targets []string) ([]byte, error) {
+	status, err := src.Run("chezmoi", append([]string{"--color=false", "status", "--parent-dirs", "--exclude=scripts", "--"}, targets...)...)
+	if err != nil {
+		return nil, errors.New("Chezmoi could not inspect the selected SSH/Git changes; no configuration was applied")
+	}
+	return status, nil
+}
+
+func renderPasswordFileStatus(out io.Writer, status []byte) error {
+	if _, err := fmt.Fprintln(out, "Configure selected SSH/Git files and their managed parent directories:"); err != nil {
+		return err
+	}
+	for line := range strings.SplitSeq(string(status), "\n") {
+		if line == "" {
+			continue
+		}
+		if len(line) < 4 || line[2] != ' ' {
+			return errors.New("unexpected Chezmoi file status; no configuration was applied")
+		}
+		var action string
+		switch line[1] {
+		case 'A':
+			action = "Create"
+		case 'M':
+			action = "Update"
+		case ' ':
+			continue
+		default:
+			return errors.New("unexpected Chezmoi file action; no configuration was applied")
+		}
+		if _, err := fmt.Fprintf(out, "  %s %s\n", action, line[3:]); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintln(out, "Scripts excluded. Existing file-conflict prompts remain enabled.")
+	return err
+}
+
+func runOnePassword(cmd *cobra.Command, src native.Source, before *postinstallSnapshot, t postinstall.Task, yes, verifyOnly, showDiff bool) error {
 	if t.Status == postinstall.Blocked {
 		return errors.New(t.Detail)
 	}
@@ -301,11 +342,20 @@ func runOnePassword(cmd *cobra.Command, src native.Source, before *postinstallSn
 		}
 	}
 	if len(targets) > 0 && !verifyOnly {
-		if _, err := fmt.Fprintln(cmd.OutOrStdout(), "Reviewing only selected SSH/Git files. This preview can contain private host configuration; it is never logged."); err != nil {
+		status, err := passwordFileStatus(src, targets)
+		if err != nil {
 			return err
 		}
-		if err := src.Stream(cmd.OutOrStdout(), cmd.ErrOrStderr(), "chezmoi", append([]string{"diff", "--exclude=scripts", "--"}, targets...)...); err != nil {
-			return errors.New("Chezmoi could not preview the selected integration; see terminal diagnostics")
+		if err := renderPasswordFileStatus(cmd.OutOrStdout(), status); err != nil {
+			return err
+		}
+		if showDiff {
+			if _, err := fmt.Fprintln(cmd.OutOrStdout(), "Private SSH/Git diff (not logged):"); err != nil {
+				return err
+			}
+			if err := src.Stream(cmd.OutOrStdout(), cmd.ErrOrStderr(), "chezmoi", append([]string{"--no-pager", "diff", "--parent-dirs", "--exclude=scripts", "--"}, targets...)...); err != nil {
+				return errors.New("Chezmoi could not preview the selected integration; see terminal diagnostics")
+			}
 		}
 		expected, err := src.Run("chezmoi", append([]string{"cat", "--"}, targets...)...)
 		if err != nil {
@@ -342,7 +392,11 @@ func runOnePassword(cmd *cobra.Command, src native.Source, before *postinstallSn
 			return errors.New("selected integration changed after preview; review again")
 		}
 		checkContent = nil
-		if err := src.Stream(cmd.OutOrStdout(), cmd.ErrOrStderr(), "chezmoi", append([]string{"apply", "--exclude=scripts", "--"}, targets...)...); err != nil {
+		checkedStatus, err := passwordFileStatus(src, targets)
+		if err != nil || !bytes.Equal(checkedStatus, status) {
+			return errors.New("selected files or parent directories changed after preview; review again")
+		}
+		if err := src.Stream(cmd.OutOrStdout(), cmd.ErrOrStderr(), "chezmoi", append([]string{"apply", "--parent-dirs", "--exclude=scripts", "--"}, targets...)...); err != nil {
 			return errors.New("Chezmoi integration apply failed; files may be partly updated; retry after fixing the reported error")
 		}
 		if _, err := src.Run("chezmoi", append([]string{"verify", "--exclude=scripts", "--"}, targets...)...); err != nil {
