@@ -1170,3 +1170,38 @@ Validation: `just check`, `just validate`, and focused lockscreen race tests pas
 The owner authorized publication as a patch release. The laptop was not repaired
 again; its earlier visual confirmation remains the live result. Testing through
 the installed Nimbus package remains an owner trial.
+
+### Version 0.5.6 publication
+
+[Nimbus v0.5.6](https://github.com/Furyfree/nimbus/releases/tag/v0.5.6) selects
+commit `91df8a9c272e0734f44d01e490f0234752bac117`. All 353 tagged files match
+the source archive; vendored dependencies are unchanged from 0.5.5.
+Archive SHA-256:
+`c67b8f4265755a376d37a566880389de785ab85dd2371f3d87858625d6aee286`.
+Local checks, definition validation, focused race tests and the release workflow
+passed. Push CI hit the previously recorded terminal-cancellation timeout; its
+unchanged rerun passed.
+
+Packaging commit `eff80d4664e03fc9acd0e21213cdd5286a87b962` passed the full
+local offline gate and hosted checks. Initial COPR build 10984943 failed in
+`test_foreground_restored` after printing `RESTORED`. The unchanged test performs
+one nonblocking wait immediately after terminal closure, consistent with a
+process-exit race. Three local handoff-suite repetitions passed. The handoff
+implementation and tests are unchanged from 0.5.5; no tests were disabled.
+
+[COPR retry build 10984982](https://copr.fedorainfracloud.org/coprs/furyfree/nimbus/build/10984982/)
+and the retried
+[publication workflow](https://github.com/Furyfree/copr/actions/runs/34863980532)
+succeeded with the same source. Repository metadata exposes
+`nimbus-0.5.6-0.1.fc44.x86_64`, matching the downloaded RPM SHA-256:
+`c71e3f552869b01c6b41693f9550306b661947d5d27fa8b1d79f5336e125855e`.
+
+Binary and source RPM signatures/digests pass with only the pinned COPR key
+trusted. Source archive/spec match reviewed inputs; the payload contains only
+Nimbus and licenses, without scripts/triggers. Offline unprivileged checks
+verify the version, all machine definitions and command help. The owner will
+update and test the laptop through Nimbus; release work made no laptop or live
+desktop configuration changes.
+
+- [ ] Review terminal-cancellation and foreground-restoration test timing/reaping;
+  successful retries do not establish that those intermittent failures are fixed.
