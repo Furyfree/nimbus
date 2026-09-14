@@ -554,6 +554,12 @@ which refreshes shared profile IDs during its approved Chezmoi stage.
 
 ## Configuration and inspection
 
+Status counts runnable RPM and Flatpak installations/source repairs under
+`to_install`; other system checks and configuration changes count as `pending`.
+Blocked operations and dependency waits retain their separate classification.
+A permission-protected greeter authorization check never implies a missing
+package or verified current authorization. Status remains unprivileged.
+
 Chezmoi also works directly, independently of the sync workflow:
 
 ~~~sh

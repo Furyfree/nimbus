@@ -997,3 +997,13 @@ wallpaper updates and laptop installation remain operator checks.
 One documentation-only CI run timed out in the terminal interruption test.
 Its unchanged rerun passed; ten consecutive focused local runs and COPR's
 package tests also passed. Investigate if this intermittent timeout recurs.
+
+## Status count correction, 2026-09-14
+
+The local fix classifies system checks and configuration changes as pending
+instead of package installations. The greeter's permission-protected recheck
+therefore reports zero installations and one pending operation after setup.
+No approval, native inspection, package transaction or Chezmoi behavior changes.
+Regression checks cover mixed package/resource work and human/JSON greeter
+status after init and sync, without privilege escalation or mutation.
+Validation: focused regressions, `just check` and `just validate` passed.

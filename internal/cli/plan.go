@@ -480,8 +480,10 @@ func summarize(s *selected, p *plan.Plan) statusResult {
 			st.Repositories++
 		case op.ID == "packages:install":
 			st.ToInstall += len(op.Items)
-		default:
+		case op.Kind == plan.KindPackage || op.Kind == plan.KindFlatpak:
 			st.ToInstall++
+		default:
+			st.Pending++
 		}
 	}
 	return st

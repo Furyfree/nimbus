@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -87,6 +88,22 @@ func TestGreeterAuthorizationUsesNormalSyncAndInitApproval(t *testing.T) {
 			code, out, errOut = run(t, append(slices.Clone(args), "--yes")...)
 			if code != ExitOK || slices.Contains(src.calls, enable) || !slices.Contains(src.reads, adminStatus) {
 				t.Fatalf("repeat: %d %s%s calls=%v reads=%v", code, out, errOut, src.calls, src.reads)
+			}
+			src.calls, src.reads = nil, nil
+			statusArgs := []string{"status", "--checkout", root, "--machine", "vm"}
+			code, out, errOut = run(t, statusArgs...)
+			if code != ExitOK || !strings.Contains(out, "to install 0") || !strings.Contains(out, "pending 1, blocked 0") {
+				t.Fatalf("greeter check reported as installation: %d %s%s", code, out, errOut)
+			}
+			code, out, errOut = run(t, append(statusArgs, "--json")...)
+			var result struct {
+				Data statusResult `json:"data"`
+			}
+			if err := json.Unmarshal([]byte(out), &result); err != nil || code != ExitOK || result.Data.ToInstall != 0 || result.Data.Pending != 1 || !result.Data.Complete {
+				t.Fatalf("JSON greeter status: %d %s%s: %v", code, out, errOut, err)
+			}
+			if slices.Contains(src.reads, adminStatus) || len(src.calls) != 0 {
+				t.Fatalf("status authenticated or mutated state: reads=%v calls=%v", src.reads, src.calls)
 			}
 		})
 	}

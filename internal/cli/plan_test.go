@@ -140,6 +140,23 @@ func TestStatusCountsRetainedSourcesAsManaged(t *testing.T) {
 	}
 }
 
+func TestStatusSeparatesPackageWorkFromSystemChecksAndChanges(t *testing.T) {
+	s := &selected{Resolved: &definitions.Resolved{Machine: "vm"}}
+	p := &plan.Plan{Machine: "vm", Complete: true, Operations: []plan.Operation{
+		{ID: "packages:install", Kind: plan.KindPackage, Action: plan.ActionInstall, Items: []string{"dnf:git", "dnf:curl"}},
+		{ID: "flatpak:org.example.App", Kind: plan.KindFlatpak, Action: plan.ActionInstall},
+		{ID: "package:rpmfusion-nonfree:steam", Kind: plan.KindPackage, Action: plan.ActionRepair},
+		{ID: "greeter-sync:test", Kind: plan.KindGreeterSync, Action: plan.ActionRepair},
+		{ID: "file:/etc/example", Kind: plan.KindFile, Action: plan.ActionInstall},
+		{ID: "service:example.service", Kind: plan.KindService, Action: plan.ActionEnable},
+		{ID: "group:example:test", Kind: plan.KindGroup, Action: plan.ActionInstall},
+	}}
+	st := summarize(s, p)
+	if st.ToInstall != 4 || st.Pending != 4 || st.Blocked != 0 || !st.Complete {
+		t.Fatalf("package work and system work must be counted separately: %+v", st)
+	}
+}
+
 func TestStatusReportsSnapperDriftWithoutMutation(t *testing.T) {
 	for _, mode := range []string{"unchanged", "settings", "setup"} {
 		t.Run(mode, func(t *testing.T) {

@@ -101,6 +101,10 @@ Nimbus supports:
 | Apply user configuration | `chezmoi apply` |
 | Fetch and apply dotfiles updates | `chezmoi update` |
 
+Status counts package installations/source repairs separately from pending
+system checks and configuration changes. A greeter authorization recheck that
+requires sudo is pending work, not a missing package.
+
 Nimbus highlights important text with bold, bright terminal colors: green for
 success,
 yellow for pending work and notices, red for failures, and cyan for actions and
