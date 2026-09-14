@@ -961,5 +961,30 @@ recheck native state; receipts alone cannot claim authorization.
 - [ ] Activate the desktop's native greeter authorization and visually verify
   prompt-free wallpaper updates. Noninteractive sudo reports that a password
   is required; no authentication prompt was opened.
-- [ ] Commit, push, publish Nimbus and update COPR after separate authorization.
-  No remote resources, release artifacts or laptop settings were changed.
+- [x] Commit and push Nimbus, Chezmoi and the updated COPR recipe after the
+  owner's authorization. Publish Nimbus v0.5.3 and submit COPR build 10984155.
+  No workstation package upgrade or laptop changes were performed.
+
+### Version 0.5.3 release verification
+
+[Nimbus v0.5.3](https://github.com/Furyfree/nimbus/releases/tag/v0.5.3)
+is published from commit `4635c6d22e940e6264f084fde03a930d782c3555`.
+Matching Chezmoi changes are published at `18c4364`; the COPR recipe is at
+`6deb1f8`. All three repositories' CI checks passed, as did Nimbus's offline
+vendored release build/tests and the complete offline Fedora packaging gate.
+
+The source archive SHA-256 is
+`4885f72e5bdc6e8f31514d92be9bdc27277b15e6f5998fcbbc42675539163537`.
+All 348 tagged files and executable bits match. The 754 vendored files and
+dependency notices are unchanged from v0.5.2. Prepared, submitted and published
+source RPMs preserve the exact archive and reviewed spec. An unprivileged,
+network-disabled source RPM rebuild passed all tests and definition validation.
+Its payload contains only the engine and licenses, without scripts or triggers.
+
+[COPR build 10984155](https://copr.fedorainfracloud.org/coprs/furyfree/nimbus/build/10984155/)
+is submitted through the
+[publication workflow](https://github.com/Furyfree/copr/actions/runs/34846942114).
+Source import succeeded; COPR is waiting to allocate its build VM. Signed binary
+publication, signature/payload verification and extracted-binary checks remain
+pending. Desktop greeter authorization, visual wallpaper updates and laptop
+installation remain operator checks after the RPM becomes available.
