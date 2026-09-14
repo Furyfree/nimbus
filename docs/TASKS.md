@@ -1070,3 +1070,35 @@ phase-classification fixes. Reviews did not run authentication or native setup.
 The observed desktop preview is 15 lines by default versus 24 with `--verbose`.
 Optional Chezmoi Markdown lint retains the same 81 pre-existing findings and no
 new findings. Interactive approvals and desktop behavior remain owner trials.
+
+### Version 0.5.4 publication
+
+The owner authorized publication after reviewing the local implementation.
+[Nimbus v0.5.4](https://github.com/Furyfree/nimbus/releases/tag/v0.5.4) selects
+commit `b9df8a081d0f60d6dadfa51fb1f94076c6e21e64`; matching Chezmoi changes are
+on main at `b4851a6`. All 353 tagged files match the vendored release archive;
+the 754 vendored files and dependency notices are unchanged from 0.5.3.
+Archive SHA-256:
+`545f42b8231256c866310e34cfcc568f7f9ee6a5cb9f7326657ec31d0f717d48`.
+
+The release checks, vendored build/tests, Chezmoi CI, and packaging checks pass.
+Push CI encountered the previously recorded terminal-interruption timeout once;
+the unchanged rerun and ten focused local repetitions passed. This intermittent
+test remains a follow-up, not a demonstrated fix in 0.5.4.
+
+[COPR build 10984708](https://copr.fedorainfracloud.org/coprs/furyfree/nimbus/build/10984708/)
+and the
+[publication workflow](https://github.com/Furyfree/copr/actions/runs/34857112822)
+succeeded. Repository metadata exposes `nimbus-0.5.4-0.1.fc44.x86_64` and matches
+the downloaded RPM checksum:
+`18dff1db76097a9678ca241df58a8fdf4fbc71a53ed5a0727ba9ae32adf22c8a`.
+
+Binary and source signatures/digests pass in an isolated RPM database containing
+only the pinned COPR key. The source RPM retains the exact reviewed archive and
+spec; the binary contains only Nimbus and licenses, without scripts or triggers.
+An offline unprivileged container verifies the released engine version, all
+three machine definitions and command help. A separate offline source-RPM
+rebuild passes with Fedora tools and a native build-user account. Initial local
+container mount and missing-user/group failures were environment setup errors;
+no host packages, permissions or accounts were modified to resolve them.
+Desktop/laptop upgrade and interactive maintenance remain operator trials.
