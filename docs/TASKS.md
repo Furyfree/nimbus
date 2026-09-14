@@ -1274,3 +1274,27 @@ submission, without monitoring the build. A queued build is not proof of a
 published RPM; signed-package verification and the native browser sign-in,
 enforcing SELinux and campus Wi-Fi trials remain pending. No Nimbus setup
 was applied to either workstation during release preparation.
+
+## Version 0.5.8 terminal-test correction
+
+COPR build 10985459 failed the 0.5.7 RPM check in
+`test_foreground_restored`: it captured `RESTORED` but treated terminal closure
+as proof that a single nonblocking process wait must succeed. The same race
+had already affected the initial 0.5.6 build. The 0.5.7 source release remains
+published; that failed build did not publish its RPM.
+
+The test now waits for process exit within its original five-second deadline
+and always reaps its child on failure. It still requires successful exit and
+the terminal-restoration marker. A regression deliberately closes the terminal
+before exiting; restoring the old single-wait check makes that case fail.
+The installer supervisor and all application behavior remain unchanged.
+
+Publication of 0.5.8 is authorized. It also includes the 0.5.7 Tailscale and
+DTU setup changes. Native account sign-in, enforcing SELinux and campus Wi-Fi
+remain user trials; successful build checks do not establish those results.
+
+Validation: `just check` and `just validate` pass. Both foreground cases passed
+30 local repetitions and 10 more in a network-disabled Fedora container with
+no host mounts; its complete 10-test handoff suite also passed. The deliberately
+restored old waiting logic fails the delayed-exit regression after `RESTORED`.
+No tests were skipped and no live installer, sign-in or system repair ran.

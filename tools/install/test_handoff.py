@@ -395,15 +395,30 @@ finally:
             os.close(fd)
 
     def test_foreground_restored(self):
+        self.check_foreground_restored(False)
+
+    def test_foreground_restored_before_process_exit(self):
+        self.check_foreground_restored(True)
+
+    def check_foreground_restored(self, close_before_exit):
         pid, fd = pty.fork()
         if not pid:
-            env = {**os.environ, "PYTHON": sys.executable, "HELPER": str(HELPER)}
+            env = {**os.environ, "PYTHON": sys.executable, "HELPER": str(HELPER),
+                   "CLOSE_BEFORE_EXIT": str(int(close_before_exit))}
             command = '''set -e
 "$PYTHON" -I -B "$HELPER" "$PYTHON" -c 'import os; assert os.tcgetpgrp(0)==os.getpgrp()'
-"$PYTHON" -c 'import os; assert os.tcgetpgrp(0)==os.getpgrp(); print("RESTORED",flush=True)'
+exec "$PYTHON" -c 'import os,time
+assert os.tcgetpgrp(0)==os.getpgrp()
+print("RESTORED",flush=True)
+if os.environ["CLOSE_BEFORE_EXIT"] == "1":
+    for fd in (0, 1, 2):
+        os.close(fd)
+    time.sleep(.15)
+os._exit(0)'
 '''
             os.execve("/bin/bash", ["bash", "-c", command], env)
         output = b""
+        reaped = False
         try:
             end = time.monotonic() + 5
             while time.monotonic() < end:
@@ -416,14 +431,25 @@ finally:
                 if not chunk:
                     break
                 output += chunk
-            got, status = os.waitpid(pid, os.WNOHANG)
-            if not got:
-                os.kill(pid, signal.SIGKILL)
-                os.waitpid(pid, 0)
+            # Closing the terminal can precede process exit. Keep the original
+            # deadline and wait for exit separately instead of treating EOF as
+            # proof that a nonblocking wait must already reap the child.
+            while True:
+                got, status = os.waitpid(pid, os.WNOHANG)
+                if got:
+                    reaped = True
+                    break
+                if time.monotonic() >= end:
+                    break
+                time.sleep(.01)
+            if not reaped:
                 self.fail(("foreground check did not finish", output))
             self.assertEqual(os.waitstatus_to_exitcode(status), 0, output)
             self.assertIn(b"RESTORED", output)
         finally:
+            if not reaped:
+                os.kill(pid, signal.SIGKILL)
+                os.waitpid(pid, 0)
             os.close(fd)
 
     def test_permission_denied_waits_for_descendants(self):

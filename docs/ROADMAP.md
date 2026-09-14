@@ -9,6 +9,12 @@ Existing local code is a candidate, not proof that the new contract is shipped.
 
 ## Next steps
 
+Release 0.5.8 corrects the terminal-test process-exit race that blocked the
+0.5.7 COPR build. It preserves the existing timeout and checks, adds a
+reproducible delayed-exit case and changes no installer runtime behavior.
+Publication and validation evidence are tracked in
+[TASKS](TASKS.md#version-058-terminal-test-correction).
+
 The approved DTU network task targets release 0.5.7: download the pinned CA
 bundle only during explicit postinstall, install it for NetworkManager, and
 verify without broadening global trust or managing account credentials. See
