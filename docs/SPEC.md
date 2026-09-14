@@ -404,6 +404,10 @@ Chezmoi and `dtu-bachelor` do not own the trust material.
 Inspection and previews are offline and unprivileged. Require applied package
 receipts and a named non-root caller; observe the file without following links,
 check root-owned non-writable parents and compare metadata and SELinux labels.
+Use native `matchpathcon -V` verification for labels; a preserved SELinux user
+field alone does not require repair. Retain full context observations in the
+approval evidence. Distinguish a reported mismatch from failed inspection, and
+name the failing path or metadata field in diagnostics.
 Missing files are pending; unfamiliar content blocks replacement. Unreadable
 or unsafe paths remain unknown. A matching valid file and labels need no work.
 

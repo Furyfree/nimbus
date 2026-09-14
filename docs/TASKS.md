@@ -1332,3 +1332,32 @@ an offline Fedora container with a copied checkout and no host mounts.
 was dispatched for Nimbus only. Handoff is after submission, without monitoring
 build completion; RPM availability and signature checks remain pending.
 Neither workstation's Nimbus installation was changed during this release.
+
+## DTU native SELinux verification correction
+
+Nimbus 0.5.9 installed the desktop certificate correctly but reported failure:
+its full-context equality check rejected `unconfined_u` where policy defaults
+use `system_u`, although ordinary restorecon preserves this user field.
+Native `matchpathcon -V` verified both the directory and certificate; checksum,
+root ownership and mode 0644 matched.
+
+Use native label verification, retaining complete observations for approval.
+Only a recognized native mismatch permits repair; failed or unrecognized
+inspection remains unknown and has no action. Report specific ownership,
+permissions, content, missing-file or label failures. Preserve pinned download,
+certificate validation and nonrecursive restorecon behavior.
+
+Regressions cover preserved user fields during inspection, installation and
+repeat commands, genuine directory/file label mismatches, inspection errors,
+unrecognized results, metadata failures and changed certificate content.
+The local source command and its preview both verified the existing desktop
+certificate without download, sudo or file changes. Normal execution recorded
+completion through the existing user-state mechanism. Wi-Fi was not tested.
+
+The owner confirmed the local command works and authorized commit, push and
+publication as version 0.5.10.
+
+Validation: focused DTU tests and their race-detector run pass. The full
+`just check` gate passes after correcting an extra blank line in this note's
+roadmap link. Existing installation and failure paths remain covered by
+isolated fixtures; no fresh privileged installation was run on the desktop.

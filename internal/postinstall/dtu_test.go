@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -32,8 +33,9 @@ func dtuFixture(t *testing.T) (Inputs, *nativetest.FakeSource, []byte) {
 	}
 	src.Commands["/usr/sbin/getenforce"] = []byte("Enforcing\n")
 	for _, path := range []string{dtuCertificateDir, DTUCertificatePath} {
-		src.Commands["/usr/sbin/matchpathcon -n -- "+path] = []byte("system_u:object_r:NetworkManager_etc_rw_t:s0\n")
-		src.Commands["stat --format=%C -- "+path] = []byte("system_u:object_r:NetworkManager_etc_rw_t:s0\n")
+		src.Commands["/usr/sbin/matchpathcon -n -- "+path] = []byte("system_u:object_r:NetworkManager_etc_t:s0\n")
+		src.Commands["stat --format=%C -- "+path] = []byte("unconfined_u:object_r:NetworkManager_etc_t:s0\n")
+		src.Commands["/usr/sbin/matchpathcon -V -- "+path] = []byte(path + " verified.\n")
 	}
 	data, err := os.ReadFile("testdata/dtu-eduroam.pem")
 	if err != nil {
@@ -57,8 +59,19 @@ func dtuInstalled(src *nativetest.FakeSource, data []byte) {
 	src.Commands["stat --format=%F|%U|%G|%a|%h -- "+DTUCertificatePath] = []byte("regular file|root|root|644|1")
 }
 
+func dtuWrongLabel(src *nativetest.FakeSource, path string) {
+	got := "unconfined_u:object_r:user_tmp_t:s0"
+	src.Commands["stat --format=%C -- "+path] = []byte(got)
+	key := "/usr/sbin/matchpathcon -V -- " + path
+	src.Commands[key] = []byte(fmt.Sprintf("%s has context %s, should be system_u:object_r:NetworkManager_etc_t:s0\n", path, got))
+	if src.ExitCodes == nil {
+		src.ExitCodes = map[string]int{}
+	}
+	src.ExitCodes[key] = 1
+}
+
 func TestDTUInspectionIsOfflineAndNativeStateIsAuthoritative(t *testing.T) {
-	for _, mode := range []string{"missing", "matching", "wrong mode", "wrong label", "wrong directory label", "disabled SELinux", "unknown file", "expired", "unknown SELinux", "unreadable", "unsafe parent", "symlink", "missing package", "unselected", "root"} {
+	for _, mode := range []string{"missing", "matching", "wrong owner", "wrong mode", "verification failure", "unrecognized verification", "inconsistent verification", "wrong label", "wrong directory label", "disabled SELinux", "unknown file", "expired", "unknown SELinux", "unreadable", "unsafe parent", "symlink", "missing package", "unselected", "root"} {
 		t.Run(mode, func(t *testing.T) {
 			in, src, data := dtuFixture(t)
 			want := Pending
@@ -68,12 +81,25 @@ func TestDTUInspectionIsOfflineAndNativeStateIsAuthoritative(t *testing.T) {
 			switch mode {
 			case "matching":
 				want = Complete
+			case "wrong owner":
+				src.Commands["stat --format=%F|%U|%G|%a|%h -- "+DTUCertificatePath] = []byte("regular file|alice|root|644|1")
+			case "verification failure":
+				src.Commands["/usr/sbin/matchpathcon -V -- "+DTUCertificatePath] = []byte(DTUCertificatePath + " error: Permission denied")
+				src.Failures["/usr/sbin/matchpathcon -V -- "+DTUCertificatePath] = "PRIVATE DO NOT RENDER"
+				want = Unknown
+			case "unrecognized verification":
+				src.Commands["/usr/sbin/matchpathcon -V -- "+DTUCertificatePath] = nil
+				want = Unknown
+			case "inconsistent verification":
+				dtuWrongLabel(src, DTUCertificatePath)
+				src.Commands["stat --format=%C -- "+DTUCertificatePath] = []byte("changed")
+				want = Unknown
 			case "wrong mode":
 				src.Commands["stat --format=%F|%U|%G|%a|%h -- "+DTUCertificatePath] = []byte("regular file|root|root|600|1")
 			case "wrong label":
-				src.Commands["stat --format=%C -- "+DTUCertificatePath] = []byte("unconfined_u:object_r:user_tmp_t:s0")
+				dtuWrongLabel(src, DTUCertificatePath)
 			case "wrong directory label":
-				src.Commands["stat --format=%C -- "+dtuCertificateDir] = []byte("unconfined_u:object_r:user_tmp_t:s0")
+				dtuWrongLabel(src, dtuCertificateDir)
 			case "disabled SELinux":
 				src.Commands["/usr/sbin/getenforce"] = []byte("Disabled")
 				want = Complete
@@ -114,6 +140,11 @@ func TestDTUInspectionIsOfflineAndNativeStateIsAuthoritative(t *testing.T) {
 			task := findTask(t, tasks, "dtu-network")
 			if task.Status != want || (task.Action != nil) != (want == Pending) {
 				t.Fatalf("unexpected task: %+v", task)
+			}
+			for scenario, detail := range map[string]string{"wrong owner": "ownership is alice:root", "wrong mode": "permissions are 0600", "wrong label": "SELinux label needs repair on " + DTUCertificatePath, "wrong directory label": "SELinux label needs repair on " + dtuCertificateDir, "verification failure": "cannot verify the SELinux label"} {
+				if mode == scenario && !strings.Contains(task.Detail, detail) {
+					t.Fatalf("missing precise reason %q: %s", detail, task.Detail)
+				}
 			}
 			encoded, _ := json.Marshal(task)
 			if bytes.Contains(encoded, []byte("PRIVATE")) || bytes.Contains(encoded, []byte("BEGIN CERTIFICATE")) {
@@ -160,6 +191,12 @@ func (s *dtuSource) Stream(_, _ io.Writer, name string, args ...string) error {
 		if s.mode != "no effect" {
 			dtuInstalled(s.FakeSource, s.data)
 		}
+		if s.mode == "wrong owner" {
+			s.Commands["stat --format=%F|%U|%G|%a|%h -- "+DTUCertificatePath] = []byte("regular file|alice|root|644|1")
+		}
+		if s.mode == "wrong mode" {
+			s.Commands["stat --format=%F|%U|%G|%a|%h -- "+DTUCertificatePath] = []byte("regular file|root|root|600|1")
+		}
 		if s.mode == "changed after write" {
 			s.Files[DTUCertificatePath] = []byte("foreign")
 		}
@@ -172,13 +209,17 @@ func (s *dtuSource) Stream(_, _ io.Writer, name string, args ...string) error {
 		return errors.New("fixture label failure")
 	}
 	if s.mode == "label no effect" {
-		s.Commands["stat --format=%C -- "+DTUCertificatePath] = []byte("wrong")
+		dtuWrongLabel(s.FakeSource, DTUCertificatePath)
+	}
+	if s.mode == "verification failure" {
+		s.Commands["/usr/sbin/matchpathcon -V -- "+DTUCertificatePath] = nil
+		s.Failures["/usr/sbin/matchpathcon -V -- "+DTUCertificatePath] = "PRIVATE DO NOT RENDER"
 	}
 	return nil
 }
 
 func TestDTUInstallationDownloadDriftAndVerification(t *testing.T) {
-	for _, mode := range []string{"success", "disabled SELinux", "download failure", "wrong checksum", "canceled", "drift", "write failure", "label failure", "label no effect", "no effect", "changed after write"} {
+	for _, mode := range []string{"success", "disabled SELinux", "download failure", "wrong checksum", "canceled", "drift", "write failure", "label failure", "label no effect", "verification failure", "wrong owner", "wrong mode", "no effect", "changed after write"} {
 		t.Run(mode, func(t *testing.T) {
 			in, base, data := dtuFixture(t)
 			if mode == "disabled SELinux" {
@@ -209,6 +250,11 @@ func TestDTUInstallationDownloadDriftAndVerification(t *testing.T) {
 			success := mode == "success" || mode == "disabled SELinux"
 			if (err == nil) != success {
 				t.Fatalf("result: %v", err)
+			}
+			for scenario, detail := range map[string]string{"wrong owner": "ownership is alice:root", "wrong mode": "permissions are 0600", "label no effect": "SELinux label needs repair on " + DTUCertificatePath, "verification failure": "cannot verify the SELinux label", "no effect": "missing after installation", "changed after write": "checksum changed after installation"} {
+				if mode == scenario && (err == nil || !strings.Contains(err.Error(), detail)) {
+					t.Fatalf("missing precise failure %q: %v", detail, err)
+				}
 			}
 			if mode == "canceled" && fetched != 0 {
 				t.Fatal("download after cancellation")

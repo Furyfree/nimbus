@@ -117,7 +117,7 @@ func dtuNetwork(src native.Source, in Inputs) Task {
 		t.Status, t.Detail = Blocked, err.Error()
 		return t
 	}
-	have, evidence, labelsMatch, err := observeDTU(src)
+	have, evidence, labelProblem, err := observeDTU(src)
 	if err != nil {
 		t.Detail = err.Error()
 		return t
@@ -132,27 +132,38 @@ func dtuNetwork(src native.Source, in Inputs) Task {
 			return t
 		}
 	}
-	if have.Exists && have.Owner == "root" && have.Group == "root" && have.Mode == "0644" && labelsMatch {
+	if have.Exists && dtuMetadataProblem(have) == "" && labelProblem == "" {
 		t.Status, t.Detail = Complete, "DTU eduroam CA bundle verified; Wi-Fi sign-in is not tested."
 		return t
 	}
 	t.Status, t.Detail = Pending, "Install the reviewed DTU eduroam CA bundle for NetworkManager."
 	if have.Exists {
-		t.Detail = "Repair ownership, permissions or SELinux labels on the matching DTU CA bundle."
+		t.Detail = strings.Join(slices.DeleteFunc([]string{dtuMetadataProblem(have), labelProblem}, func(s string) bool { return s == "" }), "; ")
 	}
 	t.Action = &Action{Kind: InstallDTUCertificate, DTU: &evidence}
 	return t
 }
 
-func observeDTU(src native.Source) (inspect.SystemFile, DTUCertificate, bool, error) {
+func dtuMetadataProblem(have inspect.SystemFile) string {
+	var problems []string
+	if have.Owner != "root" || have.Group != "root" {
+		problems = append(problems, fmt.Sprintf("DTU certificate ownership is %s:%s; expected root:root", have.Owner, have.Group))
+	}
+	if have.Mode != "0644" {
+		problems = append(problems, fmt.Sprintf("DTU certificate permissions are %s; expected 0644", have.Mode))
+	}
+	return strings.Join(problems, "; ")
+}
+
+func observeDTU(src native.Source) (inspect.SystemFile, DTUCertificate, string, error) {
 	have, err := inspect.ObserveFile(src, DTUCertificatePath)
 	if err != nil {
-		return have, DTUCertificate{}, false, errors.New("DTU certificate path is unreadable or unsafe; inspect its parents, links and permissions")
+		return have, DTUCertificate{}, "", errors.New("DTU certificate path is unreadable or unsafe; inspect its parents, links and permissions")
 	}
 	for _, dir := range []string{"/etc", "/etc/NetworkManager", dtuCertificateDir} {
 		names, err := src.ReadDir(filepath.Dir(dir))
 		if err != nil {
-			return have, DTUCertificate{}, false, errors.New("cannot inspect DTU certificate parent directory")
+			return have, DTUCertificate{}, "", errors.New("cannot inspect DTU certificate parent directory")
 		}
 		if !slices.Contains(names, filepath.Base(dir)) {
 			break
@@ -160,36 +171,52 @@ func observeDTU(src native.Source) (inspect.SystemFile, DTUCertificate, bool, er
 		out, err := src.Run("stat", "--format=%U|%G|%a", "--", dir)
 		fields := strings.Split(strings.TrimSpace(string(out)), "|")
 		if err != nil || len(fields) != 3 {
-			return have, DTUCertificate{}, false, errors.New("cannot inspect DTU certificate directory ownership")
+			return have, DTUCertificate{}, "", errors.New("cannot inspect DTU certificate directory ownership")
 		}
 		mode, err := strconv.ParseUint(fields[2], 8, 32)
 		if err != nil || fields[0] != "root" || fields[1] != "root" || mode&0022 != 0 {
-			return have, DTUCertificate{}, false, errors.New("DTU certificate directory must be root-owned and not writable by other users")
+			return have, DTUCertificate{}, "", errors.New("DTU certificate directory must be root-owned and not writable by other users")
 		}
 	}
 	mode, err := src.Run("/usr/sbin/getenforce")
 	if err != nil {
-		return have, DTUCertificate{}, false, errors.New("cannot inspect SELinux mode")
+		return have, DTUCertificate{}, "", errors.New("cannot inspect SELinux mode")
 	}
 	enforcing := strings.TrimSpace(string(mode))
 	if !slices.Contains([]string{"Enforcing", "Permissive", "Disabled"}, enforcing) {
-		return have, DTUCertificate{}, false, errors.New("unrecognized SELinux mode")
+		return have, DTUCertificate{}, "", errors.New("unrecognized SELinux mode")
 	}
 	evidence := DTUCertificate{SELinux: enforcing != "Disabled"}
-	labelsMatch := true
+	var labelProblems []string
 	var labels []string
 	if evidence.SELinux && have.Exists {
 		for _, path := range []string{dtuCertificateDir, DTUCertificatePath} {
 			want, err := src.Run("/usr/sbin/matchpathcon", "-n", "--", path)
 			if err != nil || !strings.Contains(string(want), ":object_r:") {
-				return have, evidence, false, errors.New("cannot determine the native DTU certificate SELinux label")
+				return have, evidence, "", errors.New("cannot determine the native DTU certificate SELinux label")
 			}
 			got, err := src.Run("stat", "--format=%C", "--", path)
 			if err != nil {
-				return have, evidence, false, errors.New("cannot inspect the current DTU certificate SELinux label")
+				return have, evidence, "", errors.New("cannot inspect the current DTU certificate SELinux label")
 			}
-			labels = append(labels, strings.TrimSpace(string(want)), strings.TrimSpace(string(got)))
-			labelsMatch = labelsMatch && strings.TrimSpace(string(want)) == strings.TrimSpace(string(got))
+			wantLabel, gotLabel := strings.TrimSpace(string(want)), strings.TrimSpace(string(got))
+			// Native verification follows restorecon semantics, including preserved
+			// SELinux user fields. Full context equality rejects valid labels.
+			verified, verifyErr := src.Run("/usr/sbin/matchpathcon", "-V", "--", path)
+			result := strings.TrimSpace(string(verified))
+			labels = append(labels, wantLabel, gotLabel, result)
+			if verifyErr == nil && result == path+" verified." {
+				continue
+			}
+			exit, exited := errors.AsType[interface {
+				error
+				ExitCode() int
+			}](verifyErr)
+			if exited && exit.ExitCode() == 1 && result == fmt.Sprintf("%s has context %s, should be %s", path, gotLabel, wantLabel) {
+				labelProblems = append(labelProblems, "SELinux label needs repair on "+path)
+				continue
+			}
+			return have, evidence, "", fmt.Errorf("cannot verify the SELinux label on %s with matchpathcon -V", path)
 		}
 	}
 	data, err := json.Marshal(struct {
@@ -198,10 +225,10 @@ func observeDTU(src native.Source) (inspect.SystemFile, DTUCertificate, bool, er
 		Labels []string
 	}{have, enforcing, labels})
 	if err != nil {
-		return have, evidence, false, err
+		return have, evidence, "", err
 	}
 	evidence.Observed = fmt.Sprintf("%x", sha256.Sum256(data))
-	return have, evidence, labelsMatch, nil
+	return have, evidence, strings.Join(labelProblems, "; "), nil
 }
 
 // DTUCommands describes the fixed file-only operations in the approval preview.
@@ -299,12 +326,21 @@ func RunDTUNetwork(ctx context.Context, src native.Source, out, errOut io.Writer
 			return fmt.Errorf("certificate written but SELinux labeling failed; rerun the task: %w", err)
 		}
 	}
-	actual, _, labelsMatch, err := observeDTU(src)
+	actual, _, labelProblem, err := observeDTU(src)
 	if err != nil {
 		return err
 	}
-	if !plan.SameFile(actual, payload.Change.After) || !labelsMatch {
-		return errors.New("DTU certificate content, metadata or SELinux labels failed verification; rerun the task")
+	if !actual.Exists {
+		return errors.New("DTU certificate is missing after installation")
+	}
+	if !bytes.Equal(actual.Content, data) {
+		return errors.New("DTU certificate checksum changed after installation")
+	}
+	if problem := dtuMetadataProblem(actual); problem != "" {
+		return errors.New(problem)
+	}
+	if labelProblem != "" {
+		return errors.New(labelProblem)
 	}
 	return validateDTUCertificate(actual.Content, dtuNow())
 }
