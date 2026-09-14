@@ -1120,3 +1120,28 @@ configuration, authentication or laptop changes are part of this release work.
 `just check`, `just validate`, and focused 1Password race tests pass. Native
 Chezmoi coverage runs where the executable is available; it passed locally.
 Source-only CI may skip that native trial while retaining the fixture tests.
+
+### Version 0.5.5 publication
+
+[Nimbus v0.5.5](https://github.com/Furyfree/nimbus/releases/tag/v0.5.5) selects
+commit `d0687535653e0045f818f62d2609cd4140e54d16`. All 353 tagged files match
+the source archive; vendored dependencies remain unchanged from 0.5.4.
+Archive SHA-256:
+`de3b682f01b867a0c7ba2ff4fb9a0c4743db6bc6e9dd37e2cec58d93cc3a6a30`.
+Nimbus push CI, release checks and the vendored build/tests passed.
+
+Packaging commit `5457a9ef0884206c323b161b8346a1d867bdf43c` passed the full
+local offline gate and hosted checks.
+[COPR build 10984870](https://copr.fedorainfracloud.org/coprs/furyfree/nimbus/build/10984870/)
+and the
+[publication workflow](https://github.com/Furyfree/copr/actions/runs/34861313985)
+succeeded. Repository metadata exposes `nimbus-0.5.5-0.1.fc44.x86_64`, whose
+SHA-256 matches the downloaded package:
+`8996d7207a40328e614848c2ef2c03383627972fbe985e487ab7497c59ad86a0`.
+
+The binary and source RPM pass signature/digest checks in an isolated keyring
+containing only the pinned COPR key. Source archive and spec match the reviewed
+inputs. The payload contains only Nimbus and licenses, with no scripts/triggers.
+An offline unprivileged container verified version, all three machine definitions
+and the new task help. Desktop/laptop update and interactive 1Password setup
+remain owner trials; neither machine was changed during release validation.
