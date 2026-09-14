@@ -1145,3 +1145,28 @@ inputs. The payload contains only Nimbus and licenses, with no scripts/triggers.
 An offline unprivileged container verified version, all three machine definitions
 and the new task help. Desktop/laptop update and interactive 1Password setup
 remain owner trials; neither machine was changed during release validation.
+
+### Lockscreen screen-adjustment verification
+
+The owner confirmed that the laptop's repaired lockscreen looks correct on
+Noctalia 5.1.0 with Nimbus 0.5.5. Native startup changed the layout reference
+height from 1080 to 1200 and proportionally adjusted all four widget centers.
+The effective layout matched those adjusted values; unrelated preferences were
+unchanged. Exact-byte and exact-coordinate verification falsely rejected it.
+
+Status and post-restart verification now share relative-position comparison
+with bounded rounding tolerance. Saved and effective layouts must both match;
+widget identities, order, appearance and box sizes remain exact. Native settings
+reserialization is accepted only when unrelated parsed values remain unchanged.
+Pre-write digests, shutdown-flush protection, private backups and managed-file
+checks are unchanged. Already equivalent saved layouts need no restart.
+
+Synthetic fixtures reproduce the observed laptop coordinates and cover width
+adjustments, wrong positions, sizes, styles, order, missing/extra widgets, invalid
+numbers, restart rewrites, unrelated edits and effective-layout disagreement.
+No laptop changes or live desktop repair are part of this implementation.
+
+Validation: `just check`, `just validate`, and focused lockscreen race tests pass.
+The owner authorized publication as a patch release. The laptop was not repaired
+again; its earlier visual confirmation remains the live result. Testing through
+the installed Nimbus package remains an owner trial.

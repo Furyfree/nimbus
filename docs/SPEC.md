@@ -756,7 +756,21 @@ Noctalia 5.0.1's explicit reload rebuilds from in-memory overrides; its filesyst
 watcher reloads external settings separately. Restart ensures it reads the
 repaired file without a stale editor writing back. This behavior was checked in
 upstream `src/config/config_service.cpp` at tag `v5.0.1`. After restart, check
-shell readiness, unchanged repaired files and native merged configuration.
+shell readiness, unchanged managed configuration and native merged configuration.
+Noctalia 5.1.0 can persist an equivalent screen-adjusted layout during startup.
+For each widget, compare `cx / placement_width` and `cy / placement_height`
+within an absolute tolerance of one millionth; placement extents must be positive
+and all four values finite numbers. Missing pairs match only when both layouts
+omit them. Widget IDs, order, types, box sizes, appearance and other settings
+remain exact comparisons. Apply the same equivalence check to saved and effective
+layouts during status inspection; matching persisted layouts need no repair.
+
+After restart, accept either absent widget overrides or a saved equivalent
+layout. Compare unrelated preferences as parsed TOML values, allowing native
+reserialization without accepting changed preferences. All pre-write digest,
+shutdown-flush, ownership and backup checks remain strict. A mismatching saved
+or effective layout, changed managed file or changed unrelated preferences
+prevents completion; never restore the backup automatically.
 Record completion only on success; errors retain the backup and explain retry
 or native restart. These checks do not certify visual placement or unlock/PAM
 behavior. See the [README](../README.md#guided-setup) for commands and recovery.

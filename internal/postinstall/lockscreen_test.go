@@ -7,13 +7,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/Furyfree/nimbus/internal/native/nativetest"
+	"github.com/pelletier/go-toml/v2"
 )
 
 const lockscreenConfig = `[lockscreen_widgets]
@@ -27,6 +31,60 @@ type = 'clock'
 [lockscreen_widgets.widget.avatar]
 type = 'sticker'
 `
+
+// Synthetic layout with the laptop's observed reference coordinates.
+const placedLockscreenConfig = `[lockscreen_widgets]
+enabled = true
+schema_version = 2
+widget_order = ['login','date','clock','avatar']
+[lockscreen_widgets.widget.login]
+type = 'login_box'
+cx = 960.0
+cy = 745.0
+placement_width = 1920.0
+placement_height = 1080.0
+box_width = 320.0
+box_height = 72.0
+[lockscreen_widgets.widget.login.settings]
+show_login_button = false
+[lockscreen_widgets.widget.date]
+type = 'clock'
+cx = 960.0
+cy = 240.0
+placement_width = 1920.0
+placement_height = 1080.0
+[lockscreen_widgets.widget.clock]
+type = 'clock'
+cx = 960.0
+cy = 330.0
+placement_width = 1920.0
+placement_height = 1080.0
+[lockscreen_widgets.widget.avatar]
+type = 'sticker'
+cx = 960.0
+cy = 654.0
+placement_width = 1920.0
+placement_height = 1080.0
+`
+
+func laptopLockscreen(t *testing.T) []byte {
+	t.Helper()
+	doc, err := lockscreenDocument([]byte(placedLockscreenConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	widgets := doc["lockscreen_widgets"].(map[string]any)["widget"].(map[string]any)
+	for id, cy := range map[string]float64{"login": 827.77783203125, "date": 266.66668701171875, "clock": 366.66668701171875, "avatar": 726.6666870117188} {
+		widget := widgets[id].(map[string]any)
+		widget["cy"], widget["placement_height"] = cy, float64(1200)
+	}
+	data, err := toml.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
 const lockscreenSettings = `# Keep my wallpaper
 [wallpaper]
 path = '/pictures/example.jpg'
@@ -117,7 +175,7 @@ func lockscreenFixture(t *testing.T) (Inputs, *nativetest.FakeSource, string, st
 }
 
 func TestLockscreenInspection(t *testing.T) {
-	for _, mode := range []string{"pending", "complete", "missing settings", "missing config", "malformed", "locked", "panel", "offline", "unmanaged", "invalid native", "other config", "multiple processes", "missing receipt"} {
+	for _, mode := range []string{"pending", "complete", "equivalent saved", "scaled effective", "different saved", "different effective", "missing settings", "missing config", "malformed", "locked", "panel", "offline", "unmanaged", "invalid native", "other config", "multiple processes", "missing receipt"} {
 		t.Run(mode, func(t *testing.T) {
 			in, src, config, settings := lockscreenFixture(t)
 			want := Blocked
@@ -127,6 +185,20 @@ func TestLockscreenInspection(t *testing.T) {
 			case "complete":
 				src.Files[settings] = []byte("[wallpaper]\npath='foo'\n")
 				want = Complete
+			case "equivalent saved", "scaled effective", "different saved", "different effective":
+				src.Files[config] = []byte(placedLockscreenConfig)
+				src.Files[settings] = laptopLockscreen(t)
+				src.Commands["noctalia config export merged"] = laptopLockscreen(t)
+				want = Complete
+				if mode == "scaled effective" {
+					src.Files[settings] = []byte("[wallpaper]\npath='foo'\n")
+				} else if mode == "different saved" {
+					src.Files[settings] = bytes.ReplaceAll(src.Files[settings], []byte("show_login_button = false"), []byte("show_login_button = true"))
+					want = Pending
+				} else if mode == "different effective" {
+					src.Commands["noctalia config export merged"] = bytes.ReplaceAll(laptopLockscreen(t), []byte("show_login_button = false"), []byte("show_login_button = true"))
+					want = Unknown
+				}
 			case "missing settings":
 				delete(src.Files, settings)
 				want = Complete
@@ -201,9 +273,13 @@ func (s *lockscreenSource) Stream(_, _ io.Writer, name string, args ...string) e
 }
 
 func TestLockscreenRepair(t *testing.T) {
-	for _, mode := range []string{"success", "cancelled", "changed before", "changed during shutdown", "symlink", "hardlink", "symlink ancestor", "restart failure", "concurrent restart write", "wrong effective"} {
+	for _, mode := range []string{"success", "scaled restart", "reserialized restart", "unrelated restart write", "wrong saved", "scaled wrong effective", "cancelled", "changed before", "changed during shutdown", "symlink", "hardlink", "symlink ancestor", "restart failure", "concurrent restart write", "wrong effective"} {
 		t.Run(mode, func(t *testing.T) {
 			in, fake, config, settings := lockscreenFixture(t)
+			if slices.Contains([]string{"scaled restart", "unrelated restart write", "wrong saved", "scaled wrong effective"}, mode) {
+				fake.Files[config] = []byte(placedLockscreenConfig)
+				fake.Commands["noctalia config export merged"] = laptopLockscreen(t)
+			}
 			for path, data := range map[string][]byte{config: fake.Files[config], settings: fake.Files[settings]} {
 				if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 					t.Fatal(err)
@@ -230,6 +306,40 @@ func TestLockscreenRepair(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			switch mode {
+			case "scaled restart", "unrelated restart write", "wrong saved", "scaled wrong effective", "reserialized restart":
+				src.onStart = func() {
+					data, err := os.ReadFile(settings)
+					if err != nil {
+						t.Fatal(err)
+					}
+					doc, err := lockscreenDocument(data)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if mode != "reserialized restart" {
+						layout, err := lockscreenDocument(laptopLockscreen(t))
+						if err != nil {
+							t.Fatal(err)
+						}
+						doc["lockscreen_widgets"] = layout["lockscreen_widgets"]
+					}
+					if mode == "unrelated restart write" {
+						doc["wallpaper"] = map[string]any{"path": "new preference"}
+					}
+					data, err = toml.Marshal(doc)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if mode == "wrong saved" {
+						data = bytes.ReplaceAll(data, []byte("show_login_button = false"), []byte("show_login_button = true"))
+					}
+					if err := os.WriteFile(settings, data, 0600); err != nil {
+						t.Fatal(err)
+					}
+					if mode == "scaled wrong effective" {
+						src.Commands["noctalia config export merged"] = []byte(lockscreenConfig)
+					}
+				}
 			case "cancelled":
 				cancel()
 			case "changed before":
@@ -255,14 +365,14 @@ func TestLockscreenRepair(t *testing.T) {
 			}
 			var out bytes.Buffer
 			err := RunNoctaliaLockscreen(ctx, src, &out, task)
-			if (err == nil) != (mode == "success") {
+			if (err == nil) != (slices.Contains([]string{"success", "scaled restart", "reserialized restart"}, mode)) {
 				t.Fatalf("%s: %v %s", mode, err, &out)
 			}
 			if strings.Contains(out.String(), "do-not-render") || (err != nil && strings.Contains(err.Error(), "do-not-render")) {
 				t.Fatal("secret leaked")
 			}
 			backups, _ := filepath.Glob(filepath.Join(os.Getenv("XDG_STATE_HOME"), "nimbus", "*.backup"))
-			if mode == "success" || mode == "restart failure" || mode == "concurrent restart write" || mode == "wrong effective" {
+			if slices.Contains([]string{"success", "scaled restart", "reserialized restart", "unrelated restart write", "wrong saved", "scaled wrong effective", "restart failure", "concurrent restart write", "wrong effective"}, mode) {
 				if stopCount != 1 || src.starts != 1 || len(backups) != 1 {
 					t.Fatalf("lifecycle: %d %d %v", stopCount, src.starts, backups)
 				}
@@ -386,6 +496,70 @@ func TestLockscreenRejectsUncontrolledService(t *testing.T) {
 			task := noctaliaLockscreen(src, in, in.Resolved.Packages[0])
 			if task.Status != Blocked || task.Action != nil {
 				t.Fatalf("%+v", task)
+			}
+		})
+	}
+}
+
+func TestEquivalentLockscreen(t *testing.T) {
+	for _, mode := range []string{"laptop", "width", "integers", "moved", "resized box", "appearance", "order", "missing widget", "extra widget", "extra field", "missing coordinate", "zero extent", "negative extent", "nan", "infinity", "string coordinate"} {
+		t.Run(mode, func(t *testing.T) {
+			desired, err := managedLockscreen([]byte(placedLockscreenConfig))
+			if err != nil {
+				t.Fatal(err)
+			}
+			actual, err := managedLockscreen(laptopLockscreen(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			widgets := actual["widget"].(map[string]any)
+			widget := widgets["login"].(map[string]any)
+			want := false
+			switch mode {
+			case "laptop":
+				want = true
+			case "width":
+				for _, w := range widgets {
+					w := w.(map[string]any)
+					w["cx"], w["placement_width"] = float64(640), float64(1280)
+				}
+				want = true
+			case "integers":
+				widget["cx"], widget["placement_width"] = int64(960), int64(1920)
+				want = true
+			case "moved":
+				widget["cy"] = float64(830)
+			case "resized box":
+				widget["box_width"] = float64(321)
+			case "appearance":
+				widget["settings"].(map[string]any)["show_login_button"] = true
+			case "order":
+				actual["widget_order"] = []any{"clock", "login", "date", "avatar"}
+			case "missing widget":
+				delete(widgets, "clock")
+			case "extra widget":
+				widgets["extra"] = map[string]any{"type": "clock"}
+			case "extra field":
+				widget["extra"] = true
+			case "missing coordinate":
+				delete(widget, "cy")
+			case "zero extent":
+				widget["placement_height"] = float64(0)
+			case "negative extent":
+				widget["placement_height"] = float64(-1200)
+			case "nan":
+				widget["cy"] = math.NaN()
+			case "infinity":
+				widget["placement_height"] = math.Inf(1)
+			case "string coordinate":
+				widget["cx"] = "960"
+			}
+			if equivalentLockscreen(actual, desired) != want || equivalentLockscreen(desired, actual) != want {
+				t.Fatal("incorrect layout equivalence", mode)
+			}
+			unchanged, _ := managedLockscreen([]byte(placedLockscreenConfig))
+			if !reflect.DeepEqual(desired, unchanged) {
+				t.Fatal("comparison mutated managed layout")
 			}
 		})
 	}

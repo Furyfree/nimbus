@@ -227,7 +227,10 @@ backs up its settings privately, removes only `lockscreen_widgets` overrides,
 and starts Noctalia again. The bar and shell services briefly disappear;
 Hyprland and applications remain running. No sudo or automatic lock is used.
 Matching layout files must already be applied through Chezmoi. Normal sync
-never performs this repair.
+never performs this repair. A saved layout that matches the managed layout,
+including Noctalia's proportional screen-size adjustments, is already verified
+and needs no restart. After a repair, verification accepts Noctalia saving that
+equivalent layout while checking that unrelated preferences remain unchanged.
 
 The task prints a backup path under `${XDG_STATE_HOME:-~/.local/state}/nimbus/`.
 Backups are private, exact copies and may contain personal preferences; never

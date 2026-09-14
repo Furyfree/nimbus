@@ -9,6 +9,11 @@ Existing local code is a candidate, not proof that the new contract is shipped.
 
 ## Next steps
 
+The lockscreen verification correction accepts equivalent native screen-size
+adjustments during restart and status inspection. It retains strict checks for
+actual layout or unrelated preference changes. Validation is tracked in
+[TASKS](TASKS.md#lockscreen-screen-adjustment-verification).
+
 The 1Password first-install correction creates managed parent directories through
 Chezmoi and replaces the automatic full diff with a concise change summary.
 Explicit `--diff` retains detailed review without a pager. See

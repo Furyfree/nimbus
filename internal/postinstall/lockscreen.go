@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -97,6 +99,99 @@ func managedLockscreen(data []byte) (map[string]any, error) {
 		return nil, errors.New("Managed lockscreen must contain a login box, clock and avatar")
 	}
 	return section, nil
+}
+
+// Noctalia saves screen-adjusted centers and placement dimensions on startup.
+// Only those position/extent pairs may differ; appearance, widget sizes, IDs,
+// order, and all other settings must still match the managed layout exactly.
+func equivalentLockscreen(actual any, desired map[string]any) bool {
+	section, ok := actual.(map[string]any)
+	if !ok {
+		return false
+	}
+	a, b := maps.Clone(section), maps.Clone(desired)
+	aw, aOK := a["widget"].(map[string]any)
+	bw, bOK := b["widget"].(map[string]any)
+	if !aOK || !bOK || len(aw) != len(bw) {
+		return false
+	}
+	delete(a, "widget")
+	delete(b, "widget")
+	if !reflect.DeepEqual(a, b) {
+		return false
+	}
+	for id, want := range bw {
+		actualWidget, aOK := aw[id].(map[string]any)
+		desiredWidget, bOK := want.(map[string]any)
+		if !aOK || !bOK || !equivalentLockscreenWidget(actualWidget, desiredWidget) {
+			return false
+		}
+	}
+	return true
+}
+
+func equivalentLockscreenWidget(actual, desired map[string]any) bool {
+	a, b := maps.Clone(actual), maps.Clone(desired)
+	for _, pair := range [][2]string{{"cx", "placement_width"}, {"cy", "placement_height"}} {
+		ap, apSet := a[pair[0]]
+		as, asSet := a[pair[1]]
+		bp, bpSet := b[pair[0]]
+		bs, bsSet := b[pair[1]]
+		if !apSet && !asSet && !bpSet && !bsSet {
+			continue
+		}
+		actualPosition, apOK := lockscreenNumber(ap)
+		actualSize, asOK := lockscreenNumber(as)
+		desiredPosition, bpOK := lockscreenNumber(bp)
+		desiredSize, bsOK := lockscreenNumber(bs)
+		if !apOK || !asOK || !bpOK || !bsOK || actualSize <= 0 || desiredSize <= 0 {
+			return false
+		}
+		// One millionth of the placement dimension accommodates float32 saves
+		// (including the observed 1080 -> 1200 laptop adjustment).
+		if !(math.Abs(actualPosition/actualSize-desiredPosition/desiredSize) <= 1e-6) {
+			return false
+		}
+		delete(a, pair[0])
+		delete(a, pair[1])
+		delete(b, pair[0])
+		delete(b, pair[1])
+	}
+	return reflect.DeepEqual(a, b)
+}
+
+func lockscreenNumber(value any) (float64, bool) {
+	var number float64
+	switch value := value.(type) {
+	case int64:
+		number = float64(value)
+	case float64:
+		number = value
+	default:
+		return 0, false
+	}
+	return number, !math.IsNaN(number) && !math.IsInf(number, 0)
+}
+
+// After restart, Noctalia may reserialize preferences and save an equivalent
+// lockscreen. Accept that rewrite without accepting unrelated preference edits.
+func verifyRestartedLockscreenSettings(current, replacement []byte, desired map[string]any) error {
+	after, err := lockscreenDocument(current)
+	if err != nil {
+		return err
+	}
+	before, err := lockscreenDocument(replacement)
+	if err != nil {
+		return err
+	}
+	if layout, present := after["lockscreen_widgets"]; present && !equivalentLockscreen(layout, desired) {
+		return errors.New("Saved lockscreen differs from the managed layout after restart; backup retained, completion not recorded")
+	}
+	delete(after, "lockscreen_widgets")
+	if !reflect.DeepEqual(after, before) {
+		return errors.New("Unrelated Noctalia preferences changed during restart; backup retained, completion not recorded")
+	}
+	return nil
 }
 
 // Remove expressions by their parsed TOML ranges, not line-based regexes.
@@ -234,7 +329,7 @@ func noctaliaLockscreen(src native.Source, in Inputs, pkg definitions.ResolvedPa
 	t := Task{ID: "noctalia-lockscreen", Owner: "package:" + pkg.Canonical, Title: "Restore the managed lockscreen layout", Status: Unknown,
 		Prerequisites: []string{"Apply Chezmoi and close Noctalia panels and its lockscreen editor. Keep the screen unlocked during repair."},
 		Instructions:  []string{"After approval, briefly stop only the invoking user's Noctalia shell, back up settings privately, and remove only lockscreen_widgets overrides.", "Restart Noctalia and verify the effective layout. The bar and shell services briefly disappear; Hyprland and applications stay running. The screen is not locked automatically."},
-		Verification:  "Verify managed configuration, absence of widget overrides, restarted shell readiness and effective widget settings. Visual placement still needs a manual lockscreen test.",
+		Verification:  "Verify managed configuration, matching saved and effective widget settings (allowing proportional screen adjustments), and restarted shell readiness. Visual placement still needs a manual lockscreen test.",
 		Recovery:      "The task prints its private backup path before changing settings. On failure it attempts to restart Noctalia; if that fails run noctalia --daemon from the desktop terminal. Preserve the backup and review it locally before any restoration; restoring it wholesale would undo later preferences."}
 	if status, detail := packageReady(in, pkg); status != Complete {
 		t.Status, t.Detail = status, detail
@@ -270,12 +365,13 @@ func noctaliaLockscreen(src native.Source, in Inputs, pkg definitions.ResolvedPa
 		t.Detail = "Noctalia GUI settings are unreadable."
 		return t
 	}
-	_, hasOverrides, err := removeLockscreenOverrides(data)
+	saved, err := lockscreenDocument(data)
 	if err != nil {
 		t.Detail = err.Error()
 		return t
 	}
-	if !hasOverrides {
+	savedLayout, hasOverrides := saved["lockscreen_widgets"]
+	if !hasOverrides || equivalentLockscreen(savedLayout, desired) {
 		if err := verifyLockscreenLayout(src, desired); err != nil {
 			t.Detail = err.Error()
 			return t
@@ -320,7 +416,7 @@ func verifyLockscreenLayout(src native.Source, desired map[string]any) error {
 	if err != nil {
 		return err
 	}
-	if !reflect.DeepEqual(doc["lockscreen_widgets"], desired) {
+	if !equivalentLockscreen(doc["lockscreen_widgets"], desired) {
 		return errors.New("Effective lockscreen differs from the managed layout; inspect other Noctalia configuration sources")
 	}
 	return nil
@@ -444,8 +540,8 @@ func RunNoctaliaLockscreen(ctx context.Context, src native.Source, out io.Writer
 	if err != nil {
 		return err
 	}
-	if !bytes.Equal(current, replacement) {
-		return errors.New("Noctalia settings changed during restart; backup retained, completion not recorded")
+	if err := verifyRestartedLockscreenSettings(current, replacement, desired); err != nil {
+		return err
 	}
 	managed, err = safeLockscreenRead(config)
 	if err != nil || lockscreenDigest(managed) != p.ConfigDigest {
