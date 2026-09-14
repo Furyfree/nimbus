@@ -48,10 +48,10 @@ func TestPlanNotesWhatGoesBeyondTheDefinitions(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			src, f := readyHost(t, c)
 			p := answerInstall(t, src, Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src}, tc.mutate)
-			// DNF's resolution runs as it is; what goes beyond the
-			// definitions is shown for review, not refused.
+			// Additional native effects stay visible; a selected package
+			// from the wrong source blocks execution.
 			op := find(p, "packages:install")
-			if op.Blocked != "" || !strings.Contains(strings.Join(op.Notes, "\n"), tc.want) {
+			if (strings.Contains(tc.name, "wrong repository") && !strings.Contains(op.Blocked, tc.want)) || (!strings.Contains(tc.name, "wrong repository") && (op.Blocked != "" || !strings.Contains(strings.Join(op.Notes, "\n"), tc.want))) {
 				t.Fatalf("blocked %q notes %v", op.Blocked, op.Notes)
 			}
 		})
@@ -77,12 +77,11 @@ func TestPlanNotesWhatGoesBeyondTheDefinitions(t *testing.T) {
 	})
 }
 
-func TestAdoptionTakesWhatIsInstalled(t *testing.T) {
+func TestSourceMismatchRequiresCorrectionBeforeAdoption(t *testing.T) {
 	c, r := repository(t)
 	src, f := host(t)
 	withoutTerraFile(f)
-	// Whatever source a desired package came from, it is installed and
-	// desired: Nimbus adopts it and records the source in the receipt.
+	// Known source mismatches need correction even when the package exists.
 	f.Packages.Value = append(f.Packages.Value,
 		inspect.Package{Name: "ripgrep", Version: "1", Release: "1", Arch: "x86_64", FromRepo: "terra", Reason: "user"},
 		inspect.Package{Name: "ghostty", Version: "1", Release: "1", Arch: "x86_64", FromRepo: "terra", Reason: "user"},
@@ -90,7 +89,7 @@ func TestAdoptionTakesWhatIsInstalled(t *testing.T) {
 	)
 	p, _ := Build(Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src})
 	for _, id := range []string{"package:dnf:ripgrep", "package:terra:ghostty", "package:dnf:git"} {
-		if op := find(p, id); op == nil || op.Blocked != "" || op.Action != ActionAdopt {
+		if op := find(p, id); op == nil || op.Blocked != "" || op.Action != map[string]string{"package:dnf:ripgrep": ActionRepair, "package:terra:ghostty": ActionRepair, "package:dnf:git": ActionAdopt}[id] {
 			t.Fatalf("%s = %+v", id, op)
 		}
 	}
@@ -181,7 +180,7 @@ func TestNeededUpgradesAreAcceptedAndNoted(t *testing.T) {
 	}
 }
 
-func TestAnotherSourceIsNotedOnAdoptionAndKeep(t *testing.T) {
+func TestAnotherSourceNeedsRepairOnAdoptionAndKeep(t *testing.T) {
 	c, r := repository(t)
 	src, f := readyHost(t, c)
 	f.Packages.Value = append(f.Packages.Value,
@@ -190,10 +189,10 @@ func TestAnotherSourceIsNotedOnAdoptionAndKeep(t *testing.T) {
 		inspect.Package{Name: "git", Version: "1", Release: "1", Arch: "x86_64", FromRepo: "anaconda", Reason: "user"},
 	)
 	p, _ := Build(Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: f, Source: src, Applied: applied("package:dnf:ripgrep")})
-	if op := find(p, "package:dnf:ripgrep"); op == nil || op.Action != ActionKeep || len(op.Notes) != 1 || !strings.Contains(op.Notes[0], "installed from nimbus-terra, not from fedora") {
+	if op := find(p, "package:dnf:ripgrep"); op == nil || op.Action != ActionRepair || !strings.Contains(op.Summary, "nimbus-terra -> fedora") {
 		t.Fatalf("kept from another source = %+v", op)
 	}
-	if op := find(p, "package:terra:ghostty"); op == nil || op.Action != ActionAdopt || len(op.Notes) != 1 || !strings.Contains(op.Notes[0], "not from nimbus-terra") {
+	if op := find(p, "package:terra:ghostty"); op == nil || op.Action != ActionRepair || !strings.Contains(op.Summary, "-> nimbus-terra") {
 		t.Fatalf("adopted from another source = %+v", op)
 	}
 	if op := find(p, "package:dnf:git"); op == nil || len(op.Notes) != 0 {

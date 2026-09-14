@@ -176,7 +176,7 @@ func TestServicePlanningRetainsObservationFailures(t *testing.T) {
 			src.Failures[nativetest.Key("readlink", "--", "/etc/systemd/system/display-manager.service")] = "ownership inspection unavailable"
 			if tc.pending {
 				b.in.Resolved.Packages = []definitions.ResolvedPackage{{Name: "greetd", Prefix: "dnf", Canonical: "dnf:greetd"}}
-				src.Commands[nativetest.Key("dnf5", "--assumeno", "--cacheonly", "install", "greetd")] = previewText([]TxPackage{{Name: "greetd", Arch: "x86_64", EVR: "1-1", Repository: "fedora", Section: "installing"}})
+				src.Commands[nativetest.Key("dnf5", "--assumeno", "--cacheonly", "do", "--action=install", "--from-repo=fedora", "greetd")] = previewText([]TxPackage{{Name: "greetd", Arch: "x86_64", EVR: "1-1", Repository: "fedora", Section: "installing"}})
 			}
 			p, err := Build(b.in)
 			if err != nil {

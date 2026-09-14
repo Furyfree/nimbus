@@ -113,6 +113,13 @@ Nimbus styling is excluded from installer logs. Doctor prints each resource
 name once and closes with a check summary. Upgrade previews show the engine
 step first, system sync next and Topgrade last.
 
+Selected RPMs install and upgrade only from their declared sources. A package
+already installed from another repository gets a reviewed source-correction
+plan, including a downgrade or reinstall when necessary. Preview it with
+`nimbus sync --plan`; `nimbus sync` applies approved corrections. Preview system
+updates with `nimbus upgrade --system --plan`. Nimbus stops if the declared
+source cannot provide the package instead of falling back to another source.
+
 ## Guided setup
 
 ~~~sh
@@ -138,7 +145,11 @@ clears that task's local evidence without undoing configuration.
 The 1Password task guides GUI prerequisites and verifies the selected SSH/Git
 integration. Matching configuration needs no apply; changes use a Chezmoi preview
 and approval. Skip manual SSH/Git file edits.
-SSH remains explicitly opt-in through Chezmoi or init's `--onepassword-ssh`.
+The guided task offers SSH/Git integration when it is not selected, even after
+CLI-only setup is complete. Answering yes saves the choice through Chezmoi;
+the default is no, and `--yes` does not opt in. `--mark-done` checks the existing
+selection without changing it. Chezmoi and init's `--onepassword-ssh` also remain
+available for explicit opt-in.
 Remote SSH access and signing-key registration are separate checks.
 
 For setup you already completed:
@@ -321,10 +332,32 @@ integration follows the existing console-only desktop retirement path and
 retains Noctalia runtime state. Chezmoi enables Noctalia's native greeter
 auto-sync for wallpaper and colors; Noctalia owns the generated copies.
 Settings > Security > Noctalia Greeter > Sync Now refreshes the current image.
-Noctalia 5.0.1 requires administrator authentication. Prompt-free sync needs
-Noctalia 5.1.0 or newer, Greeter 1.5.0 or newer, and the constrained
-[native authorization](https://docs.noctalia.dev/greeter/sync/). Do not authorize
-the older helper's unrestricted legacy mode without a password.
+The Hyprland session component also selects `greeter_passwordless_sync`.
+Nimbus 0.5.3 and newer include this in the ordinary `init`/`sync` plan; no
+postinstall is needed. After package installation and approval, Nimbus checks
+Noctalia 5.1.0 or newer, the greeter's `secure-sync-v1` helper capability and
+its constrained packaged Polkit action. The native Greeter 1.5.0+ command
+then enables appearance sync for the invoking non-root local user only when
+missing, preserving other users and administrator rules. Native status is
+verified before recording success. Preview never requests authentication;
+protected status is resolved after approval, before taking snapshots.
+
+The greeter owns its generated Polkit rule. Nimbus never writes that rule or
+grants access to legacy sync. This follows the
+[native authorization contract](https://docs.noctalia.dev/greeter/sync/).
+For an older installed shell, run `nimbus upgrade` first, then retry sync.
+Manual inspection and revocation use the same upstream interface:
+
+~~~sh
+sudo noctalia-greeter passwordless-sync status "$USER"
+sudo noctalia-greeter passwordless-sync disable "$USER"
+~~~
+
+A later sync restores selected authorization. To stop managing it, remove
+`greeter_passwordless_sync` from the component before syncing; Nimbus retires
+its receipt and retains the native rule. Revoke explicitly if desired. Failed
+or unfamiliar native status never counts as completion. After setup, change
+wallpaper or use Sync Now; verify the next login visually.
 
 With AccountsService selected and installed, `nimbus postinstall account-picture`
 registers `~/.config/noctalia/assets/profile-picture.jpg` for the invoking user.
@@ -434,3 +467,22 @@ stale-cache detection, signed engine replacement, restart, argument preservation
 and reporting after a later failure. Docker images/build cache remain local;
 no artifacts are published. Full init/login and real GUI setup still need a
 [disposable VM trial](tools/vm/README.md).
+
+### UWSM session integration
+
+The Hyprland profile already includes the UWSM login entry. Chezmoi configures
+session environment, app launches and the Noctalia/udiskie user services.
+Log out and back in after applying these startup changes. The topbar clock
+shows seconds and has wider widget spacing. Existing GUI preferences can
+override managed Noctalia settings; reset only the conflicting preferences.
+
+Browser and webapp helpers use UWSM in an active local Wayland session and
+retain direct launch elsewhere. Lockscreen repair recognizes the managed
+Noctalia service, previews its stop/restart and checks it before editing.
+Inspect the session without changing it:
+
+~~~sh
+systemctl --user status app-noctalia.service app-udiskie.service
+journalctl --user -u app-noctalia.service -u app-udiskie.service -b
+nimbus postinstall noctalia-lockscreen --plan
+~~~

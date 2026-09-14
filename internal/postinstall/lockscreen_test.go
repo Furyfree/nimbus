@@ -111,6 +111,7 @@ func lockscreenFixture(t *testing.T) (Inputs, *nativetest.FakeSource, string, st
 	src.Paths["noctalia"] = "/usr/bin/noctalia"
 	src.Commands["readlink /proc/1234/exe"] = []byte("/usr/bin/noctalia\n")
 	src.Files["/proc/1234/cmdline"] = []byte("noctalia\x00")
+	src.Files["/proc/1234/cgroup"] = []byte("0::/user.slice/wayland-wm@hyprland.desktop.service\n")
 	src.Files["/proc/1234/stat"] = []byte("1234 (noctalia) S " + strings.Repeat("0 ", 18) + "12345\n")
 	return in, src, config, settings
 }
@@ -173,10 +174,20 @@ type lockscreenSource struct {
 	onStart   func()
 	failStart bool
 	starts    int
+	stops     int
+	service   bool
+	failStop  bool
 }
 
 func (s *lockscreenSource) Stream(_, _ io.Writer, name string, args ...string) error {
-	if name != "/usr/bin/noctalia" || strings.Join(args, " ") != "--daemon" {
+	if s.service && name == "systemctl" && strings.Join(args, " ") == "--user stop app-noctalia.service" {
+		s.stops++
+		if s.failStop {
+			return errors.New("failed stop")
+		}
+		return nil
+	}
+	if !(s.service && name == "uwsm" && strings.Join(args, " ") == "app -s s -t service -u app-noctalia.service -p TimeoutStopSec=10s -p SendSIGKILL=no -- /usr/bin/noctalia --daemon") && (name != "/usr/bin/noctalia" || strings.Join(args, " ") != "--daemon") {
 		return fmt.Errorf("unexpected mutation %s", name)
 	}
 	s.starts++
@@ -273,6 +284,108 @@ func TestLockscreenRepair(t *testing.T) {
 				if !bytes.Equal(data, want) {
 					t.Fatal("incorrect replacement")
 				}
+			}
+		})
+	}
+}
+
+func managedNoctaliaService(src *nativetest.FakeSource) {
+	group := "/user.slice/user-1000.slice/user@1000.service/session.slice/session-graphical.slice/app-noctalia.service"
+	src.Files["/proc/1234/cgroup"] = []byte("0::" + group + "\n")
+	src.Commands["systemctl --user show app-noctalia.service --property=ControlGroup,ActiveState,Restart,SendSIGKILL,TimeoutStopUSec,KillSignal,KillMode,ExecStop,Transient,TimeoutStopFailureMode"] = []byte(
+		"ControlGroup=" + group + "\nActiveState=active\nRestart=no\nSendSIGKILL=no\nTimeoutStopUSec=10s\nKillSignal=15\nKillMode=control-group\nTransient=yes\nTimeoutStopFailureMode=terminate\n")
+	src.Paths["uwsm"] = "/usr/bin/uwsm"
+	src.Commands["uwsm check is-active compositor-only"] = nil
+	src.Commands["systemctl --user show app-noctalia.service --property=ActiveState --value"] = []byte("inactive\n")
+}
+
+func TestLockscreenManagedService(t *testing.T) {
+	for _, mode := range []string{"success", "supervisor changed", "stop failed", "child remains", "restart failed"} {
+		t.Run(mode, func(t *testing.T) {
+			in, fake, config, settings := lockscreenFixture(t)
+			managedNoctaliaService(fake)
+			for path, data := range map[string][]byte{config: fake.Files[config], settings: fake.Files[settings]} {
+				if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, data, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			task := noctaliaLockscreen(fake, in, in.Resolved.Packages[0])
+			if task.Status != Pending || task.Action.Lockscreen.Service != noctaliaService {
+				t.Fatalf("%+v", task)
+			}
+			if commands := LockscreenCommands(task.Action.Lockscreen); len(commands) != 2 || commands[0][0] != "systemctl" || commands[1][0] != "uwsm" {
+				t.Fatalf("%v", commands)
+			}
+			src := &lockscreenSource{FakeSource: fake, service: true}
+			switch mode {
+			case "supervisor changed":
+				fake.Files["/proc/1234/cgroup"] = []byte("0::/other.service\n")
+			case "stop failed":
+				src.failStop = true
+			case "child remains":
+				fake.Commands["systemctl --user show app-noctalia.service --property=ActiveState --value"] = []byte("deactivating\n")
+			case "restart failed":
+				src.failStart = true
+			}
+			err := RunNoctaliaLockscreen(t.Context(), src, io.Discard, task)
+			if (err == nil) != (mode == "success") {
+				t.Fatalf("%v", err)
+			}
+			if mode == "supervisor changed" && (src.starts != 0 || src.stops != 0) {
+				t.Fatal("mutated changed supervisor")
+			}
+			if mode == "success" || mode == "restart failed" {
+				if src.stops != 1 || src.starts != 1 {
+					t.Fatalf("stop/start %d/%d", src.stops, src.starts)
+				}
+			} else {
+				got, _ := os.ReadFile(settings)
+				if string(got) != lockscreenSettings {
+					t.Fatal("settings changed before successful stop")
+				}
+			}
+		})
+	}
+}
+
+func TestLockscreenRejectsUncontrolledService(t *testing.T) {
+	for _, mode := range []string{"foreign", "unreadable", "restart policy", "kill policy", "abort policy", "timeout", "group mismatch", "inactive", "uwsm missing", "kill signal", "stop hook", "nested supervisor"} {
+		t.Run(mode, func(t *testing.T) {
+			in, src, _, _ := lockscreenFixture(t)
+			managedNoctaliaService(src)
+			key := "systemctl --user show app-noctalia.service --property=ControlGroup,ActiveState,Restart,SendSIGKILL,TimeoutStopUSec,KillSignal,KillMode,ExecStop,Transient,TimeoutStopFailureMode"
+			switch mode {
+			case "kill signal":
+				src.Commands[key] = bytes.ReplaceAll(src.Commands[key], []byte("KillSignal=15"), []byte("KillSignal=9"))
+			case "stop hook":
+				src.Commands[key] = append(src.Commands[key], []byte("ExecStop=/custom/stop\n")...)
+			case "nested supervisor":
+				src.Files["/proc/1234/cgroup"] = []byte("0::/custom-noctalia.service/subgroup\n")
+			case "foreign":
+				src.Files["/proc/1234/cgroup"] = []byte("0::/custom-noctalia.service\n")
+			case "unreadable":
+				delete(src.Files, "/proc/1234/cgroup")
+			case "restart policy":
+				src.Commands[key] = bytes.ReplaceAll(src.Commands[key], []byte("Restart=no"), []byte("Restart=always"))
+			case "kill policy":
+				src.Commands[key] = bytes.ReplaceAll(src.Commands[key], []byte("SendSIGKILL=no"), []byte("SendSIGKILL=yes"))
+			case "abort policy":
+				src.Commands[key] = bytes.ReplaceAll(src.Commands[key], []byte("TimeoutStopFailureMode=terminate"), []byte("TimeoutStopFailureMode=abort"))
+			case "timeout":
+				src.Commands[key] = bytes.ReplaceAll(src.Commands[key], []byte("10s"), []byte("infinity"))
+			case "group mismatch":
+				src.Commands[key] = bytes.ReplaceAll(src.Commands[key], []byte("ControlGroup=/user.slice"), []byte("ControlGroup=/other.slice"))
+			case "inactive":
+				src.Commands[key] = bytes.ReplaceAll(src.Commands[key], []byte("ActiveState=active"), []byte("ActiveState=inactive"))
+			case "uwsm missing":
+				delete(src.Paths, "uwsm")
+			}
+			task := noctaliaLockscreen(src, in, in.Resolved.Packages[0])
+			if task.Status != Blocked || task.Action != nil {
+				t.Fatalf("%+v", task)
 			}
 		})
 	}

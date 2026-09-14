@@ -110,6 +110,10 @@ Nimbus may coordinate the explicitly selected local-agent proxy through native
 installer and application APIs. Chezmoi owns its static config; Nimbus owns
 private model registration evidence, never Copilot credentials or databases.
 
+Normal init/sync owns selected greeter appearance authorization through the
+native greeter CLI after approval. The greeter owns its Polkit rule; Chezmoi
+owns auto-sync preferences. Do not duplicate the rule or add a postinstall.
+
 Nimbus owns its setup-note catalog and commands. Read guidance from the selected
 Nimbus checkout; do not add a Chezmoi catalog handoff or standalone note reader.
 

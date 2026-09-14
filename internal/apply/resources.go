@@ -21,6 +21,9 @@ type FilePayload struct {
 }
 
 func (ex *executor) systemResource(op plan.Operation) ([]state.Receipt, []string, error) {
+	if op.Kind == plan.KindGreeterSync {
+		return ex.greeterSync(op)
+	}
 	if op.Kind == plan.KindFile {
 		return ex.systemFile(op)
 	}

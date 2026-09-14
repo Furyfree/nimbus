@@ -20,6 +20,7 @@ const (
 	KindFile          = "system-file"
 	KindService       = "service"
 	KindGroup         = "group"
+	KindGreeterSync   = "greeter-sync"
 	KindShell         = "login-shell"
 	KindTarget        = "default-target"
 	KindTrigger       = "trigger"
@@ -53,15 +54,16 @@ type Step struct {
 
 // Operation is one reviewed unit of the plan.
 type Operation struct {
-	Source   *state.SourceOwnership `json:"source,omitempty"`
-	File     *FileChange            `json:"file,omitempty"`
-	Resource *ResourceChange        `json:"resource,omitempty"`
-	ID       string                 `json:"id"`
-	Kind     string                 `json:"kind"`
-	Action   string                 `json:"action"`
-	Risk     string                 `json:"risk"`
-	Summary  string                 `json:"summary"`
-	Paths    []string               `json:"paths,omitempty"`
+	PackageSources PackageSources         `json:"package_sources,omitempty"`
+	Source         *state.SourceOwnership `json:"source,omitempty"`
+	File           *FileChange            `json:"file,omitempty"`
+	Resource       *ResourceChange        `json:"resource,omitempty"`
+	ID             string                 `json:"id"`
+	Kind           string                 `json:"kind"`
+	Action         string                 `json:"action"`
+	Risk           string                 `json:"risk"`
+	Summary        string                 `json:"summary"`
+	Paths          []string               `json:"paths,omitempty"`
 	// Items are the package references a merged transaction installs, one
 	// receipt each; Paths then explains the transaction as a whole.
 	Items []string `json:"items,omitempty"`
@@ -98,8 +100,11 @@ type Prune struct {
 
 // Updates is the known normal-update information, kept apart from apply.
 type Updates struct {
-	Available   []Upgrade `json:"available"`
-	Unavailable string    `json:"unavailable,omitempty"`
+	Command        []string       `json:"command,omitempty"`
+	Transaction    *Transaction   `json:"transaction,omitempty"`
+	PackageSources PackageSources `json:"package_sources,omitempty"`
+	Available      []Upgrade      `json:"available"`
+	Unavailable    string         `json:"unavailable,omitempty"`
 }
 
 // Plan is the complete result for one machine.
@@ -126,6 +131,7 @@ type Plan struct {
 // Inputs are everything the planner reads. Source runs only read-only
 // native previews.
 type Inputs struct {
+	Upgrade     bool
 	Resolved    *definitions.Resolved
 	Root        definitions.Root
 	Definitions string // the checkout's definition digest
@@ -241,6 +247,9 @@ type builder struct {
 }
 
 func (b *builder) updates() Updates {
+	if b.in.Upgrade {
+		return b.sourceUpgrade()
+	}
 	if len(b.in.Resolved.Constraints) > 0 {
 		return b.constraintUpdates()
 	}

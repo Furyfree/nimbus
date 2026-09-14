@@ -141,7 +141,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			return fmt.Errorf("metadata refresh failed: %w", err)
 		}
 	}
-	p, _, err := planWithState(s, src, sf.prune)
+	p, _, err := planWithState(s, src, sf.prune, sf.systemUpgrade)
 	if err != nil {
 		return err
 	}
@@ -190,7 +190,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 		var pending bool
 		err := native.Activity(execOut, "check system updates", func() error {
 			var checkErr error
-			pending, checkErr = systemUpdatesPending(src, s.Checkout.Definitions())
+			pending, checkErr = systemUpdatesPending(src, s.Checkout.Definitions(), &p.Updates)
 			return checkErr
 		})
 		if err != nil {
@@ -263,7 +263,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	if freshSelection.Root != s.Root || freshSelection.Resolved.Machine != s.Resolved.Machine {
 		return errors.New("the selection changed while the question was open; run sync again")
 	}
-	fresh, applied, err := planWithState(freshSelection, src, sf.prune)
+	fresh, applied, err := planWithState(freshSelection, src, sf.prune, sf.systemUpgrade)
 	if err != nil {
 		return err
 	}
@@ -305,6 +305,34 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			return err
 		}
 		defer stopSudo()
+	}
+	// Resolve an unreadable greeter rule after approval, before deciding whether
+	// snapshots are needed. Subsequent package-dependent replans use the same
+	// narrowly privileged observation and can converge without trusting receipts.
+	if !sf.systemUpgrade && s.Resolved.GreeterPasswordlessSync != "" {
+		for _, op := range p.Operations {
+			if op.Kind != plan.KindGreeterSync || op.Resource == nil || op.Action == plan.ActionRetire {
+				continue
+			}
+			src = approvedGreeterSource{Source: src, user: op.Resource.User}
+			before := p
+			p, applied, err = replanUnchanged(s, flags, src, sf.prune, approvedCheckout)
+			if err != nil {
+				return fmt.Errorf("inspect approved greeter authorization: %w", err)
+			}
+			if !p.Complete {
+				if _, err := execOut.Write(renderExecutionPlan(p, sf.prune, false)); err != nil {
+					return fmt.Errorf("show failed greeter authorization check: %w", err)
+				}
+				return errors.New("approved greeter authorization check failed; inspect native status before retrying")
+			}
+			if err := showReplanned(execOut, before, p, sf.prune, &result); err != nil {
+				return err
+			}
+			currentPlan = p
+			snapshotWork = p.Snapshots != nil && systemChanges(p)
+			break
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -353,8 +381,8 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 		}
 	}
 	options := func(p *plan.Plan) apply.Options {
-		var upgradePreview *plan.Transaction
-		if p.Updates.Unavailable == "" {
+		upgradePreview := p.Updates.Transaction
+		if upgradePreview == nil && p.Updates.Unavailable == "" {
 			upgradePreview = &plan.Transaction{}
 			for _, row := range p.Updates.Available {
 				upgradePreview.Packages = append(upgradePreview.Packages, plan.TxPackage{Name: row.Name, Arch: row.Arch, EVR: row.EVR, Repository: row.Repository, Section: "upgrading"})
@@ -367,7 +395,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			Source:      src, Fetch: newFetcher(), Record: newRecorder(src, stage), Keys: apply.ExtractKeysWithRPM2Archive(src),
 			Stage: stage, Checkout: s.Checkout, Root: s.Checkout.Definitions(), FirstApply: !applied.Present,
 			Engine: version.Engine, Definitions: state.Definitions{Origin: p.Checkout.Origin, Commit: p.Checkout.Commit, Dirty: p.Checkout.Dirty, Digest: p.Definitions},
-			Out: execOut, ErrOut: errOut, UpgradePreview: upgradePreview,
+			Out: execOut, ErrOut: errOut, UpgradePreview: upgradePreview, UpgradeCommand: p.Updates.Command, PackageSources: p.Updates.PackageSources,
 		}
 	}
 	fail := func(failed, msg string) error {
@@ -383,7 +411,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 			return err
 		}
 		if pass > 0 {
-			if p, applied, err = replanUnchanged(s, flags, src, sf.prune, approvedCheckout); err != nil {
+			if p, applied, err = replanUnchanged(s, flags, src, sf.prune, approvedCheckout, sf.systemUpgrade); err != nil {
 				return err
 			}
 			currentPlan = p
@@ -423,7 +451,7 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 					return fmt.Errorf("refresh metadata: %w", err)
 				}
 			}
-			if p, applied, err = replanUnchanged(s, flags, src, sf.prune, approvedCheckout); err != nil {
+			if p, applied, err = replanUnchanged(s, flags, src, sf.prune, approvedCheckout, sf.systemUpgrade); err != nil {
 				return err
 			}
 			currentPlan = p
@@ -548,7 +576,7 @@ func systemChanges(p *plan.Plan) bool {
 
 // replanUnchanged refreshes facts while requiring the approved definitions
 // and selection to remain unchanged for the entire run.
-func replanUnchanged(s *selected, flags machineFlags, src native.Source, prune bool, approvedCheckout inspect.Checkout) (*plan.Plan, *state.Applied, error) {
+func replanUnchanged(s *selected, flags machineFlags, src native.Source, prune bool, approvedCheckout inspect.Checkout, upgrade ...bool) (*plan.Plan, *state.Applied, error) {
 	fresh, err := loadSelected(flags)
 	if err != nil {
 		return nil, nil, err
@@ -556,12 +584,15 @@ func replanUnchanged(s *selected, flags machineFlags, src native.Source, prune b
 	if fresh.Root != s.Root || fresh.Resolved.Machine != s.Resolved.Machine || fresh.Checkout.Digest() != s.Checkout.Digest() {
 		return nil, nil, errors.New("definitions or selection changed during sync; run sync again")
 	}
-	p, applied, err := planWithState(fresh, src, prune)
+	p, applied, err := planWithState(fresh, src, prune, upgrade...)
 	if err != nil {
 		return nil, nil, err
 	}
 	if !sameCheckoutIdentity(p.Checkout, approvedCheckout) {
 		return nil, nil, errors.New("checkout identity changed during sync; run sync again")
+	}
+	if len(upgrade) > 0 && upgrade[0] {
+		p = systemUpgradePlan(p)
 	}
 	return p, applied, nil
 }
@@ -643,13 +674,13 @@ func nothingToRun(p *plan.Plan) bool {
 }
 
 // planWithState builds the plan with the applied state read as the user.
-func planWithState(s *selected, src native.Source, prune bool) (*plan.Plan, *state.Applied, error) {
+func planWithState(s *selected, src native.Source, prune bool, upgrade ...bool) (*plan.Plan, *state.Applied, error) {
 	applied, err := state.Read(stateRoot)
 	if err != nil {
 		return nil, nil, err
 	}
 	f := inspect.Inspect(src, s.Root)
-	p, err := plan.Build(plan.Inputs{Resolved: s.Resolved, Root: s.Checkout.Definitions(), Definitions: s.Checkout.Digest(), Facts: f, Applied: applied, Source: src, Prune: prune})
+	p, err := plan.Build(plan.Inputs{Resolved: s.Resolved, Root: s.Checkout.Definitions(), Definitions: s.Checkout.Digest(), Facts: f, Applied: applied, Source: src, Prune: prune, Upgrade: len(upgrade) > 0 && upgrade[0]})
 	if err != nil {
 		return nil, nil, err
 	}

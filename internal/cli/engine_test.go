@@ -134,6 +134,7 @@ func TestManualConfirmationCannotBeAssumed(t *testing.T) {
 		t.Fatal(task, err)
 	}
 	cmd, _ = postinstallCommand(root, false, "onepassword", "--yes")
+	cmd.SetIn(strings.NewReader("no\n"))
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}

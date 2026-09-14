@@ -10,6 +10,50 @@ repository updates during sync, Zed installation, browser fallbacks and
 reporting fixes. The signed Fedora 44 COPR package is available; its new
 installation and reboot checks remain pending.
 
+## Declared RPM sources and help colors, 2026-09-14
+
+- [x] Color every visible help command, including the single-space row for
+  `noctalia-lockscreen`; preserve status colors, plain output and wrapping.
+- [x] Restrict selected RPMs to enabled declared sources in mixed install and
+  system-upgrade transactions. Keep native dependency resolution and signatures.
+  Verify previews and actual provenance before successful receipts/reporting.
+- [x] Preview wrong-source corrections through native distro-sync or same-version
+  reinstall. Block unavailable candidates, conflicting resolved sources and
+  unexpected removal of selected packages. Preserve architecture and ownership.
+- [x] Run signed synthetic-RPM tests in a network-disabled Fedora 44 container:
+  competing priorities, mixed sources, cross-source dependencies, upgrades,
+  disabled sources, downgrade/reinstall correction and missing-candidate refusal.
+  Test commands are produced by the Go planner; see
+  [the native test instructions](../tools/dnf-sources/README.md).
+- [x] Nimbus `just check` and `just validate` pass. The desktop's read-only
+  cached plan shows only Steam source correction: same-version x86_64 reinstall
+  from RPM Fusion Updates, 19 MiB. No transaction was executed.
+- [x] Chezmoi secret-skipping managed/status/diff/verify checks: file diff empty;
+  verification excluding scripts passes. The five existing run-always scripts
+  remain pending. This change adds no Chezmoi configuration.
+- [ ] Apply the candidate on the desktop after review. No host package changes,
+  sudo, authentication, laptop edits, commits or publication in this work.
+  Use the [README workflow](../README.md#workflow) for local previews.
+- [ ] UWSM/session follow-up remains research-only.
+
+## Guided 1Password SSH/Git selection, 2026-09-14
+
+- [x] Offer default-no SSH/Git opt-in during the explicit guided task, including
+  after CLI-only completion. Save an approved choice through native Chezmoi init
+  while preserving machine and ordered profiles. Never infer opt-in from `--yes`.
+- [x] Keep verification-only completion and inspection free of selection changes.
+  Require fresh SSH GUI confirmation, then preview/apply only selected targets.
+  Keep incomplete or failed setup pending, retaining an enabled choice for retry.
+- [x] Test opt-in, decline, default, EOF, invalid input, unattended operation,
+  selection drift, failed initialization/apply, GUI refusal and completed reruns
+  in temporary homes. Nimbus `just check` passes.
+- [x] Validate the real Chezmoi init template in a disposable home: preserve
+  machine, ordered profiles and existing account metadata; no scripts, target
+  file applies or 1Password calls during selection.
+- [ ] User desktop authorization and end-to-end guided setup. No live apply,
+  authentication, sudo, laptop changes, commits or publication were performed.
+  Use the [README workflow](../README.md) for local testing.
+
 ## Local agent proxy, 2026-09-13
 
 [Nimbus v0.5.2](https://github.com/Furyfree/nimbus/releases/tag/v0.5.2)
@@ -511,23 +555,18 @@ Chezmoi. SSH server access stays unmanaged, and the Windows VM stays deferred.
 - [x] Enable native greeter auto-sync through Chezmoi and refresh the desktop
   wallpaper. On 2026-09-13, the effective setting is true and the native sync
   helper completed with exit status 0 through run0. No login session was ended.
-- [ ] Verify the next greeter display and prompt-free automatic sync after a
-  compatible shell upgrade. On 2026-09-13, Fedora stable supplies Noctalia
-  5.0.1; [5.1.0 is in testing][greeter-shell-update] since September 11.
-  Wait for Fedora stable rather than switching package sources. Installed
-  Greeter 1.5.0 already supports constrained authorization; keep normal
-  authentication until the compatible shell and authorization are in place.
-- [ ] Add an explicit greeter passwordless-sync post-install action using the
-  [native authorization CLI][greeter-sync-guide]. Check shell/helper support
-  and the constrained Polkit action, preview the invoking local account and
-  root-owned rule change, then request approval before native enablement.
-  Verify native status, handle repeated setup and failure, and document native
-  disablement. Do not grant access to legacy sync or enable authorization
-  during ordinary sync. Test wallpaper changes and the next login on desktop
-  and laptop after the compatible Fedora update.
-
-[greeter-shell-update]: https://bodhi.fedoraproject.org/updates/FEDORA-2026-f99c9ff102
-[greeter-sync-guide]: https://docs.noctalia.dev/greeter/sync/
+- [x] Make constrained greeter authorization part of ordinary init/sync with
+  approval, package prerequisites, numeric account identity, native enablement
+  and verified system receipts. No separate postinstall. Noctalia 5.1.0 and
+  Greeter 1.5.0 are installed on the desktop as of 2026-09-14.
+- [x] Check the exact secure helper capability and constrained packaged action;
+  reject legacy authorization and unknown status. Resolve protected status
+  after approval and before snapshots; preserve other native users/rules.
+- [x] Override Fedora's service timeout abort behavior for Noctalia and udiskie
+  through Chezmoi-owned per-unit user drop-ins. Lockscreen repair checks
+  and restores the same terminate timeout policy.
+- [ ] Verify prompt-free wallpaper updates and the next greeter display on
+  desktop and laptop after applying the candidate. The laptop stays untouched.
 
 - [x] Promote the tested minimal greeter appearance into the Hyprland session
   component. Keep canonical configuration in `/etc` and expose that one file
@@ -831,7 +870,8 @@ Effective-configuration reporting currently recognizes Noctalia's lockscreen
 widget disable override; it is not a general desktop preference comparison.
 Native task inspectors remain authoritative. Session/reboot notices cover
 Nimbus's managed activation requirements, not a guarantee that every vendor
-application has restarted. Passwordless greeter sync remains deferred.
+application has restarted. Greeter authorization is now implemented in normal
+init/sync; its desktop and laptop wallpaper checks remain outstanding.
 
 Owner smoke-test follow-up: Session notices now
 separate login-shell changes from group changes: current groups are checked
@@ -877,3 +917,49 @@ binary smoke test remain pending. No desktop or laptop package update was run.
 [maintenance-release]: https://github.com/Furyfree/nimbus/releases/tag/v0.5.0
 [maintenance-copr]: https://copr.fedorainfracloud.org/coprs/furyfree/nimbus/build/10981938/
 [maintenance-publish]: https://github.com/Furyfree/copr/actions/runs/34770315892
+
+## UWSM session integration
+
+The local implementation preserves browser argv while routing launches through
+an active UWSM session. Lockscreen repair recognizes Chezmoi's managed Noctalia
+service, checks its graceful-stop policy and restores it through UWSM.
+Chezmoi owns environment files, app shortcuts, shell startup and bar preferences.
+Fresh-login/logout and visual desktop validation remain operator checks; see
+[README](../README.md#uwsm-session-integration). No laptop changes or release
+are part of this implementation.
+
+Validation: `just check` and `just validate` passed. Fake-source tests cover
+literal browser arguments, direct/UWSM launch, missing wrappers, changed
+supervisors, failed stops, surviving children and restart failure. A temporary
+native UWSM service confirmed the selected slice, graceful-stop properties and
+inactive state after collection. No running desktop shell was restarted.
+
+## Greeter authorization and timeout follow-up, 2026-09-14
+
+Candidate definitions require engine 0.5.3 for `greeter_passwordless_sync`.
+Both init and sync use the same approved system operation, including private
+installation logging without losing native status diagnostics. Repeated runs
+recheck native state; receipts alone cannot claim authorization.
+
+- [x] Pass Nimbus `just check`, `just validate`, and race tests for CLI, apply,
+  plan and postinstall. Tests cover preview/refusal without privileged status,
+  init with logs, apply, repeat, repair, failed verification, changed account
+  identity, unsafe policy and retained native authorization on deselection.
+- [x] Exercise the installed Greeter 1.5.0 binaries in an isolated Fedora
+  container: enable, status, byte-identical repeated enable, two-user removal,
+  last-user removal and refusal to overwrite an unfamiliar rule. No host
+  Polkit state was changed; no active graphical authorization was exercised.
+- [x] Reproduce Fedora's abort timeout overriding transient launch properties.
+  Use service-specific user drop-ins instead. A temporary native service
+  ignored SIGTERM, survived the timeout without SIGABRT and exited normally;
+  all temporary unit files were removed.
+- [x] Apply those two Chezmoi drop-ins locally and reload the user manager.
+  Both running services now report `TimeoutStopFailureMode=terminate`; neither
+  was restarted. Noctalia retains its ten-second timeout and `SendSIGKILL=no`.
+- [x] Preview the desktop with the candidate. It includes the pending Steam
+  source correction and greeter authorization. No system sync was applied.
+- [ ] Activate the desktop's native greeter authorization and visually verify
+  prompt-free wallpaper updates. Noninteractive sudo reports that a password
+  is required; no authentication prompt was opened.
+- [ ] Commit, push, publish Nimbus and update COPR after separate authorization.
+  No remote resources, release artifacts or laptop settings were changed.

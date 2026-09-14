@@ -47,6 +47,7 @@ type='sticker'
 			src.Paths["noctalia"] = "/usr/bin/noctalia"
 			src.Commands["readlink /proc/1234/exe"] = []byte("/usr/bin/noctalia\n")
 			src.Files["/proc/1234/cmdline"] = []byte("noctalia\x00")
+			src.Files["/proc/1234/cgroup"] = []byte("0::/user.slice/wayland-wm@hyprland.desktop.service\n")
 			src.Files["/proc/1234/stat"] = []byte("1234 (noctalia) S " + strings.Repeat("0 ", 18) + "12345\n")
 			args := []string{"noctalia-lockscreen", "--plan"}
 			switch mode {

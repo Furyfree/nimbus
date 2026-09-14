@@ -25,6 +25,7 @@ type colorWriter struct {
 	out          io.Writer
 	enabled      func() bool
 	continuation bool
+	helpCommands bool
 	width        func() int
 }
 
@@ -67,17 +68,30 @@ func (w *colorWriter) Write(p []byte) (int, error) {
 	var b strings.Builder
 	for line := range strings.Lines(string(p)) {
 		start := !w.continuation
+		if start && strings.TrimSpace(line) == "" {
+			w.helpCommands = false
+		}
 		wrapped := line
 		if start && strings.HasSuffix(line, "\n") {
 			wrapped = wrapLine(line, width)
 		}
+		first := true
 		for part := range strings.Lines(wrapped) {
 			if color {
-				b.WriteString(highlight(part, start))
+				text := strings.TrimLeft(part, " \t")
+				if match := helpEntry.FindStringSubmatchIndex(text); w.helpCommands && start && first && match != nil {
+					b.WriteString(part[:len(part)-len(text)] + paint(text[:match[3]], accent+bold) + text[match[3]:])
+				} else {
+					b.WriteString(highlight(part, start))
+				}
 			} else {
 				b.WriteString(part)
 			}
 			start = true
+			first = false
+		}
+		if start && strings.TrimSpace(line) == "Available Commands:" {
+			w.helpCommands = true
 		}
 		w.continuation = !strings.HasSuffix(line, "\n")
 	}
@@ -113,7 +127,7 @@ var outcome = regexp.MustCompile(`^[0-9]+ (managed and unchanged|checks passed)`
 
 var leadingStatus = regexp.MustCompile(`(?i)^(succeeded|verified|ok|pass|current|unchanged|managed|installed|updated|pending|unknown|unmanaged|blocked|failed|failure|fail|error|skipped|adopt|desired|dependency|pre-existing|install|remove|retire|repair|note|notice|warning|reboot required|log out and back in)([ :\t]|$)`)
 var taskStatus = regexp.MustCompile(`^(\S+[ \t]+)(Previously verified|Unable to check|Verified|Pending|Blocked)([ \t]+)`)
-var helpEntry = regexp.MustCompile(`^([a-z][a-z0-9-]*|(?:-[a-zA-Z], )?--[a-zA-Z][a-zA-Z-]*)([ \t]{2,}|[ \t]+(?:string|int)\b)`)
+var helpEntry = regexp.MustCompile(`^([a-z][a-z0-9-]*|(?:-[a-zA-Z], )?--[a-zA-Z][a-zA-Z-]*)([ \t]{2,}|[ \t]+(?:string|int)\b| [A-Z])`)
 
 func statusColor(status string) string {
 	switch strings.ToLower(status) {

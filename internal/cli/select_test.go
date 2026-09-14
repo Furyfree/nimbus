@@ -596,9 +596,9 @@ func TestPackageSelectionRoundTrip(t *testing.T) {
 				}
 			}
 			src.Commands["dnf5 -q --cacheonly repoquery --available --qf %{name}|%{evr}|%{reponame}\n *demo*"] = []byte("demo|1-1|fedora\n")
-			src.Commands["dnf5 --assumeno --cacheonly install demo"] = []byte("Repositories loaded.\nPackage Arch Version Repository Size\nInstalling:\n demo x86_64 1-1 fedora 1 KiB\n\nTransaction Summary:\n")
+			src.Commands["dnf5 --assumeno --cacheonly do --action=install --from-repo=fedora demo"] = []byte("Repositories loaded.\nPackage Arch Version Repository Size\nInstalling:\n demo x86_64 1-1 fedora 1 KiB\n\nTransaction Summary:\n")
 			src.Commands["dnf5 --assumeno --cacheonly remove --no-autoremove demo.x86_64"] = []byte("Repositories loaded.\nPackage Arch Version Repository Size\nRemoving:\n demo x86_64 1-1 @System 1 KiB\n\nTransaction Summary:\n")
-			const install = "sudo dnf5 -y install demo"
+			const install = "sudo dnf5 -y do --action=install --from-repo=fedora demo"
 			const remove = "sudo dnf5 -y remove --no-autoremove demo.x86_64"
 			src.Commands[install], src.Commands[remove] = nil, nil
 			withSource(t, handoffOutputSource{Source: src, afterStream: func(name string, args []string) {

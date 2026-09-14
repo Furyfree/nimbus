@@ -21,6 +21,7 @@ func (s *launchSource) Stream(_, _ io.Writer, name string, args ...string) error
 	return nil
 }
 func TestLaunchUsesOnlyBrowserDiscoveryAndExactArgv(t *testing.T) {
+	t.Setenv("WAYLAND_DISPLAY", "")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
@@ -34,19 +35,46 @@ func TestLaunchUsesOnlyBrowserDiscoveryAndExactArgv(t *testing.T) {
 	newSource = func() native.Source { return src }
 	t.Cleanup(func() { newSource = old })
 	target := "https://example.org/?q=$(touch%20bad)&x=1"
-	for _, tc := range []struct {
-		args, want []string
-	}{
-		{[]string{"launch", "browser", target}, []string{"/fake/brave-browser", target}},
-		{[]string{"launch", "browser", target, "--private"}, []string{"/fake/brave-browser", "--incognito", target}},
-		{[]string{"launch", "webapp", target}, []string{"/fake/brave-browser", "--app=" + target}},
-		{[]string{"launch", "webapp", target, "--private"}, []string{"/fake/brave-browser", "--incognito", "--app=" + target}},
-	} {
-		code, _, errOut := run(t, tc.args...)
-		if code != 0 || !slices.Equal(src.argv, tc.want) {
-			t.Fatalf("%d %q %s", code, src.argv, errOut)
+	for _, mode := range []string{"direct", "uwsm", "inactive", "missing wrapper"} {
+		t.Setenv("XDG_SESSION_TYPE", "wayland")
+		t.Setenv("WAYLAND_DISPLAY", "")
+		src.Paths["uwsm"] = "/fake/uwsm"
+		src.Paths["uwsm-app"] = "/fake/uwsm-app"
+		if mode != "direct" {
+			t.Setenv("WAYLAND_DISPLAY", "wayland-1")
+		}
+		src.Commands["uwsm check is-active compositor-only"] = nil
+		if mode == "inactive" {
+			delete(src.Commands, "uwsm check is-active compositor-only")
+		}
+		if mode == "missing wrapper" {
+			delete(src.Paths, "uwsm-app")
+		}
+		for _, tc := range []struct {
+			args, want []string
+		}{
+			{[]string{"launch", "browser", target}, []string{"/fake/brave-browser", target}},
+			{[]string{"launch", "browser", target, "--private"}, []string{"/fake/brave-browser", "--incognito", target}},
+			{[]string{"launch", "webapp", target}, []string{"/fake/brave-browser", "--app=" + target}},
+			{[]string{"launch", "webapp", target, "--private"}, []string{"/fake/brave-browser", "--incognito", "--app=" + target}},
+		} {
+			src.argv = nil
+			code, _, errOut := run(t, tc.args...)
+			if mode == "missing wrapper" {
+				if code == 0 || src.argv != nil {
+					t.Fatal("launched without required wrapper")
+				}
+				continue
+			}
+			if mode == "uwsm" {
+				tc.want = append([]string{"/fake/uwsm-app", "--"}, tc.want...)
+			}
+			if code != 0 || !slices.Equal(src.argv, tc.want) {
+				t.Fatalf("%d %q %s", code, src.argv, errOut)
+			}
 		}
 	}
+	t.Setenv("WAYLAND_DISPLAY", "")
 	src.argv = nil
 	for _, kind := range []string{"webapp", "browser"} {
 		code, out, errOut := run(t, "launch", kind, target, "--json")

@@ -174,12 +174,12 @@ func (s *transactionReconcileSource) Stream(out, errOut io.Writer, name string, 
 		s.calls = append(s.calls, call)
 		return nil
 	}
-	if call != "sudo dnf5 -y install demo" && call != "sudo dnf5 --setopt=cacheonly=metadata -y upgrade" {
+	if call != "sudo dnf5 -y do --action=install --from-repo=nimbus-vendor demo" && !strings.HasPrefix(call, "sudo dnf5 --setopt=cacheonly=metadata -y do --action=upgrade ") {
 		return s.reconcileSource.Stream(out, errOut, name, args...)
 	}
 	s.calls = append(s.calls, call)
 	host := "vendor-install"
-	if call == "sudo dnf5 --setopt=cacheonly=metadata -y upgrade" {
+	if strings.Contains(call, "--action=upgrade") {
 		if !slices.Contains(s.calls, "sudo dnf5 config-manager setopt vendor-install.enabled=0") {
 			return errors.New("upgrade started while install-created duplicate remained enabled")
 		}
@@ -210,7 +210,7 @@ func TestSyncReconcilesInstallAndUpgradeCreatedRepositories(t *testing.T) {
 		t.Fatal(err)
 	}
 	readyRepositories(t, base.FakeSource, root)
-	base.Commands["dnf5 --assumeno --cacheonly install demo"] = []byte("Repositories loaded.\nPackage Arch Version Repository Size\nInstalling:\n demo x86_64 1-1 nimbus-vendor 1 KiB\n\nTransaction Summary:\n")
+	base.Commands["dnf5 --assumeno --cacheonly do --action=install --from-repo=nimbus-vendor demo"] = []byte("Repositories loaded.\nPackage Arch Version Repository Size\nInstalling:\n demo x86_64 1-1 nimbus-vendor 1 KiB\n\nTransaction Summary:\n")
 	src := &transactionReconcileSource{reconcileSource: &reconcileSource{FakeSource: base.FakeSource}}
 	withSource(t, src)
 	code, out, errOut := run(t, "sync", "--checkout", root, "--machine", "vm", "-y")
@@ -220,15 +220,26 @@ func TestSyncReconcilesInstallAndUpgradeCreatedRepositories(t *testing.T) {
 	if slices.Contains(src.calls, "sudo dnf5 --setopt=cacheonly=metadata -y upgrade") {
 		t.Fatal("sync upgraded the system")
 	}
+	pkgs := inspect.Packages(src).Value
+	var ids []string
+	for _, pkg := range pkgs {
+		if pkg.Name != "demo" {
+			ids = append(ids, pkg.ID())
+		}
+	}
+	slices.Sort(ids)
+	upgradeArgs := append([]string{"do", "--action=upgrade"}, ids...)
+	upgradeArgs = append(upgradeArgs, "--from-repo=nimbus-vendor", "demo.x86_64")
+	base.Commands[nativetest.Key("dnf5", append([]string{"--cacheonly", "--assumeno"}, upgradeArgs...)...)] = []byte("Repositories loaded.\nPackage Arch Version Repository Size\nUpgrading:\n demo x86_64 2-1 nimbus-vendor 1 KiB\n   replacing demo x86_64 1-1 nimbus-vendor 1 KiB\nTransaction Summary:\n")
 	code, out, errOut = run(t, "upgrade", "--system", "--checkout", root, "--machine", "vm", "-y")
 	if code != ExitOK {
 		t.Fatalf("system upgrade failed: %d %s%s calls=%v", code, out, errOut, src.calls)
 	}
 	want := []string{
-		"sudo dnf5 -y install demo",
+		"sudo dnf5 -y do --action=install --from-repo=nimbus-vendor demo",
 		"sudo dnf5 config-manager setopt vendor-install.enabled=0",
 		"chezmoi apply",
-		"sudo dnf5 --setopt=cacheonly=metadata -y upgrade",
+		"sudo dnf5 --setopt=cacheonly=metadata -y " + strings.Join(upgradeArgs, " "),
 		"sudo dnf5 config-manager setopt vendor-upgrade.enabled=0",
 	}
 	if strings.Join(src.calls, "\n") != strings.Join(want, "\n") {

@@ -71,16 +71,17 @@ type Profile struct {
 
 // Component is components/<id>.toml.
 type Component struct {
-	Schema        int           `toml:"schema"`
-	ID            string        `toml:"id"`
-	Requires      []string      `toml:"requires"`
-	Conflicts     []string      `toml:"conflicts"`
-	Packages      []string      `toml:"packages"`
-	Removes       []string      `toml:"removes"`
-	Files         []FileDecl    `toml:"files"`
-	Services      []ServiceDecl `toml:"services"`
-	Groups        []GroupDecl   `toml:"groups"`
-	DefaultTarget string        `toml:"default_target"`
+	Schema                  int           `toml:"schema"`
+	ID                      string        `toml:"id"`
+	Requires                []string      `toml:"requires"`
+	Conflicts               []string      `toml:"conflicts"`
+	Packages                []string      `toml:"packages"`
+	Removes                 []string      `toml:"removes"`
+	Files                   []FileDecl    `toml:"files"`
+	Services                []ServiceDecl `toml:"services"`
+	Groups                  []GroupDecl   `toml:"groups"`
+	DefaultTarget           string        `toml:"default_target"`
+	GreeterPasswordlessSync bool          `toml:"greeter_passwordless_sync"`
 	// Detect says which hardware makes init propose this component.
 	Detect *Detect `toml:"detect"`
 	// Installer is a user-scope tool the maker's installer script places

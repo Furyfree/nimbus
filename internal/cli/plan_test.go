@@ -13,6 +13,25 @@ import (
 	"github.com/Furyfree/nimbus/internal/snapper"
 )
 
+func TestSourceReviewShowsIncomingAndOutgoingPackages(t *testing.T) {
+	tx := &plan.Transaction{Download: "1 MiB", Packages: []plan.TxPackage{
+		{Name: "steam", Arch: "x86_64", EVR: "1-1", Repository: "rpmfusion-nonfree", Section: "reinstalling"},
+		{Name: "steam", Arch: "x86_64", EVR: "1-1", Repository: "nimbus-terra", Section: plan.SectionReplaced},
+	}}
+	p := &plan.Plan{Machine: "test", Complete: true, Operations: []plan.Operation{{ID: "package:rpmfusion-nonfree:steam", Kind: plan.KindPackage, Action: plan.ActionRepair, Summary: "correct Steam source", Transaction: tx}}}
+	for _, out := range []string{string(renderPlan(p, false, false)), string(renderPlan(&plan.Plan{Updates: plan.Updates{Transaction: tx}}, false, true))} {
+		for _, want := range []string{"reinstalling: steam.x86_64 1-1 (rpmfusion-nonfree)", "replaced: steam.x86_64 1-1 (nimbus-terra)", "download: 1 MiB"} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("preview omitted %q:\n%s", want, out)
+			}
+		}
+	}
+	upgrade := systemUpgradePlan(p)
+	if upgrade.Complete || !strings.Contains(upgrade.Operations[0].Blocked, "run nimbus sync first") {
+		t.Fatalf("upgrade bypassed source repair: %+v", upgrade)
+	}
+}
+
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", ".."))

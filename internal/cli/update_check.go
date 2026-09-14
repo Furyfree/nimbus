@@ -11,9 +11,19 @@ import (
 
 // Check the full native transaction, including obsoletes and dependencies.
 // An empty upgrade list alone does not prove that DNF has no work.
-func systemUpdatesPending(src native.Source, root definitions.Root) (bool, error) {
-	out, runErr := src.Run("dnf5", "--cacheonly", "--assumeno", "upgrade")
-	tx, err := plan.ParsePreview(out)
+func systemUpdatesPending(src native.Source, root definitions.Root, reviewed ...*plan.Updates) (bool, error) {
+	var tx *plan.Transaction
+	var err, runErr error
+	if len(reviewed) > 0 {
+		if reviewed[0].Unavailable != "" || reviewed[0].Transaction == nil {
+			return false, fmt.Errorf("DNF update check failed: %s", reviewed[0].Unavailable)
+		}
+		tx = reviewed[0].Transaction
+	} else {
+		var out []byte
+		out, runErr = src.Run("dnf5", "--cacheonly", "--assumeno", "upgrade")
+		tx, err = plan.ParsePreview(out)
+	}
 	if err != nil {
 		return false, fmt.Errorf("DNF update check failed: %w", err)
 	}

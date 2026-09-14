@@ -105,6 +105,37 @@ not request another reboot. No display-manager restart is automatic. The
 [upstream greeter configuration](https://docs.noctalia.dev/greeter/configuration/)
 keeps declarative appearance separate from mutable sync state.
 
+The component's typed `greeter_passwordless_sync` flag selects constrained
+appearance authorization for the invoking non-root local account in normal
+init/sync. Resolution requires the shell and greeter packages and a single
+component owner. The operation waits for package installation, checks stable
+Noctalia >= 5.1.0, the helper's `secure-sync-v1` capability and the packaged
+Polkit action's exact helper path and `--sync` argument. Native enablement
+also checks executable trust and ownership of its own rule; Nimbus does not
+write Polkit JavaScript, add a service or create a postinstall task.
+
+Preview is unprivileged. An unreadable Polkit directory means a pending
+administrator check, never disabled or verified authorization. After normal
+approval and sudo acquisition, replan using only the fixed native status query
+for that approved account. This permits already-enabled authorization to
+converge without a rule rewrite or unnecessary snapshot. Unknown native errors
+block; only the specific unprivileged directory permission failure is deferred.
+If access is missing, delegate enablement to the native greeter CLI, then
+verify its managed-rule status before recording a normal system receipt.
+Receipts bind the machine, user and numeric UID; they never replace native
+inspection. Installation logs allow only these fixed public greeter commands,
+not arbitrary greeter or helper invocations. Chezmoi owns auto-sync preferences;
+Noctalia owns generated wallpaper and sync state.
+
+Deselection retires valid tracking without revoking native authorization,
+preserving pre-existing and shared administrator choices. Explicit revocation
+uses the native CLI; subsequent sync restores access while it remains selected.
+Failures leave no completion record. Retry checks native state first, including
+partial enablement. No automatic rollback overwrites another administrator's
+rule. Old installed shells must be upgraded through the normal upgrade flow
+before authorization; preview does not silently substitute legacy permission.
+See README for commands and native removal.
+
 ## What Nimbus manages
 
 - Selected RPMs and system Flatpaks, their declared sources and constraints.
@@ -177,6 +208,26 @@ Browse [profiles](../profiles), [components](../components) and
 [machines](../machines). Bare package names mean Fedora; other package sources
 use their declared repository prefix. Chezmoi owns the user-tool and plugin
 inventories, including AI Usage and webapp desktop entries.
+
+Selected RPMs are restricted to their declared repository family during install
+and system upgrade. DNF5 `do` applies `--from-repo` per package group in one
+transaction; dependencies and unselected packages retain native sources. Pass
+only enabled concrete repository IDs, never enable a disabled testing source
+through this option. Repository priority cannot override an explicit selection.
+Bind resolved provides and architecture-qualified identities to the same policy.
+Reject a preview that violates it, and verify changed native provenance before
+recording success. Missing candidates or unavailable inspection block execution;
+there is no fallback to another source.
+
+An installed RPM with known provenance outside its declared family needs a
+reviewed source correction during sync, even if Nimbus already owns a receipt.
+Preview native `distro-sync --from-repo` for its existing architecture, or
+`reinstall` when the version already matches. Show downgrades, replacements and
+dependencies before approval. Record the verified old/new source evidence only
+after success. Preserve historical installer/local provenance when no repository
+can be established; new transactions still require verifiable allowed sources.
+System upgrades require these corrections to be completed by sync first. This
+policy governs Nimbus transactions, not package-manager commands run separately.
 
 ChatGPT uses its official DNF repository. Voxtype is packaged in the owner's
 COPR. Copilot uses the official RPM and WoWUp CurseForge the official AppImage,
@@ -567,8 +618,19 @@ never install or apply configuration. Failed checks explain what remains and
 point to the guided task. `--reset` clears the selected machine's manual and
 completion evidence without undoing configuration.
 
-1Password guides sign-in/unlock and desktop CLI integration, plus its SSH agent
-when already selected. It tells the user to skip manual SSH/Git file edits.
+1Password first offers SSH/Git integration when it is not selected, including
+after completed CLI-only setup. The terminal choice defaults to no; `--yes`
+cannot opt in. Without a terminal it retains the existing selection. An explicit
+yes approves saving the choice through native `chezmoi init --prompt`, preserving
+the machine, managed flag and ordered profile list. Nimbus rechecks the selection
+and task ownership under its operation lock before saving, then verifies the
+stored values. This step neither applies files nor runs scripts. A later failure
+keeps the choice enabled for retry, with completion requiring fresh verification.
+`--mark-done` never offers or changes this choice. Help, status and plan stay
+read-only. Existing selected SSH integrations do not need another opt-in.
+
+The task guides sign-in/unlock and desktop CLI integration, plus its SSH agent
+when selected. It tells the user to skip manual SSH/Git file edits.
 Manual readiness requires terminal confirmation; `--yes` cannot supply it.
 The guided task checks CLI access without displaying account output. After GUI
 confirmation, the specific native error "account is not signed in" offers a
@@ -641,6 +703,17 @@ UID and start time before SIGTERM; do not force-kill, stop Hyprland, log out, or
 request sudo. A ten-second exit timeout leaves settings untouched. If the shell
 exits later, the operator restarts it. Otherwise restart the shell even when
 subsequent repair fails or cancellation arrives. No automatic locking occurs.
+
+For Chezmoi's UWSM-managed `app-noctalia.service`, inspection verifies the
+process cgroup against the user manager, active state, disabled auto-restart,
+and the ten-second stop timeout with forced killing disabled. The service must
+use a per-unit user drop-in with `TimeoutStopFailureMode=terminate`;
+Fedora's inherited `abort` setting is
+rejected even when `SendSIGKILL=no`. Preview shows
+`systemctl --user stop` and the exact `uwsm app` restart. Recheck this evidence
+after approval and verify the service is inactive before editing settings.
+Other service supervisors block repair. A shell launched directly by Hyprland
+retains the pidfd path. Service stop failure leaves settings unchanged.
 
 Read and hash the reviewed configuration again before writing; a shutdown flush
 or external edit aborts replacement. Reject symlinks, foreign ownership,
@@ -938,6 +1011,7 @@ checks are opt-in and must be reported separately from the ordinary test gate.
 | `tools/vm/` | Stage unpublished candidates in disposable VMs |
 | `tools/package-query/` | Query Fedora package sources in a container |
 | `tools/dnf-constraints/` | Test version-family rules against native DNF |
+| `tools/dnf-sources/` | Test declared sources with signed fixture RPMs |
 | `tools/grub/` | Generate and check the small GRUB theme images |
 | `licenses/` | Supplemental third-party notices included in releases |
 
@@ -1043,3 +1117,15 @@ and recovery stay in help. Routine results show provider counts and specific
 skip reasons. Known missing authentication or CLIs are skips, not a partial
 setup failure. Genuine discovery errors remain visible and preserve their
 inventories.
+
+## UWSM application launch
+
+Chezmoi owns session environment, shortcuts, Noctalia's launcher command and
+named Noctalia/udiskie user-service startup through UWSM. Nimbus supplies the
+existing packaged UWSM session entry; no additional postinstall is needed.
+`launch browser` and `launch webapp` use `uwsm-app --` when invoked in a local
+Wayland environment and UWSM reports an active compositor. Other sessions keep
+direct browser launch. A missing wrapper in an active UWSM session fails clearly.
+Browser discovery, URL validation, native arguments and user activation remain
+unchanged; URLs never pass through a shell. No environment or service mutation
+occurs during browser discovery.

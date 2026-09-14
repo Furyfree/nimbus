@@ -50,7 +50,7 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 	selected := map[string]bool{}
 	pendingPackages := ""
 	for _, op := range earlier {
-		if op.Kind == KindPackage && op.Action == ActionInstall {
+		if op.Kind == KindPackage && (op.Action == ActionInstall || op.Action == ActionRepair) {
 			pendingPackages = op.ID
 		}
 	}
@@ -154,6 +154,7 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 		ops = append(ops, op)
 	}
 	ops = append(ops, b.loginShell(pendingPackages)...)
+	ops = append(ops, b.greeterSync(pendingPackages)...)
 	if target := b.in.Resolved.DefaultTarget; target != "" {
 		id := "default-target"
 		selected[id] = true

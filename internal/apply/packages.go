@@ -46,7 +46,15 @@ func (ex *executor) installed() ([]inspect.Package, error) {
 
 // packageTransaction always inspects the result, including a native failure
 // after partial work. Unknown verification never becomes an empty success.
-func (ex *executor) packageTransaction(argv []string, tx *plan.Transaction) ([]inspect.Package, error) {
+func (ex *executor) packageTransaction(argv []string, tx *plan.Transaction, policies ...plan.PackageSources) ([]inspect.Package, error) {
+	for _, policy := range policies {
+		if tx == nil {
+			return nil, errors.New("source-constrained transaction lacks a preview")
+		}
+		if err := policy.CheckTransaction(tx); err != nil {
+			return nil, err
+		}
+	}
 	nativeErr := ex.sudo(argv...)
 	installed, verifyErr := ex.installed()
 	if verifyErr != nil {
@@ -54,6 +62,26 @@ func (ex *executor) packageTransaction(argv []string, tx *plan.Transaction) ([]i
 		return nil, errors.Join(nativeErr, fmt.Errorf("verification: %w", verifyErr))
 	}
 	after := inspect.PackageMap(installed)
+	for old := range maps.Values(ex.seen) {
+		for _, policy := range policies {
+			_, named := policy[old.Name]
+			_, qualified := policy[old.ID()]
+			if (named || qualified) && !slices.ContainsFunc(installed, func(p inspect.Package) bool { return p.ID() == old.ID() }) {
+				nativeErr = errors.Join(nativeErr, fmt.Errorf("source verification failed: selected package %s disappeared", old.ID()))
+			}
+		}
+	}
+	for key, p := range after {
+		old, existed := ex.seen[key]
+		if existed && old.FromRepo == p.FromRepo {
+			continue
+		}
+		for _, policy := range policies {
+			if err := policy.Check(p.Name, p.Arch, p.FromRepo); err != nil {
+				nativeErr = errors.Join(nativeErr, fmt.Errorf("source verification failed: %w", err))
+			}
+		}
+	}
 	for _, c := range ex.opts.Constraints {
 		for key, p := range after {
 			if _, existed := ex.seen[key]; !existed && p.Name == c.Name && !c.Matches(p.EVR()) {
@@ -70,7 +98,8 @@ func (ex *executor) installTransaction(op plan.Operation) ([]state.Receipt, []st
 	if op.Transaction == nil || len(op.Steps) < 1 {
 		return nil, nil, errors.New("the install operation carries no previewed transaction")
 	}
-	installed, err := ex.packageTransaction(op.Steps[0].Argv, op.Transaction)
+	before := maps.Clone(ex.seen)
+	installed, err := ex.packageTransaction(op.Steps[0].Argv, op.Transaction, op.PackageSources)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -82,8 +111,22 @@ func (ex *executor) installTransaction(op plan.Operation) ([]state.Receipt, []st
 		if !ok {
 			return nil, nil, fmt.Errorf("verification: %s is not installed after the transaction", name)
 		}
-		sub := plan.Operation{ID: "package:" + canonical, Action: plan.ActionInstall, Paths: op.ItemPaths[canonical]}
-		r := ex.receipt(sub, "dnf", "absent", "installed "+inst.ID()+" "+inst.EVR(), "dnf5 repoquery --installed lists "+inst.ID()+" "+inst.EVR())
+		if err := op.PackageSources.Check(inst.Name, inst.Arch, inst.FromRepo); err != nil {
+			return nil, nil, fmt.Errorf("source verification failed: %w", err)
+		}
+		previous := "absent"
+		if op.Action == plan.ActionRepair {
+			var versions []string
+			for old := range maps.Values(before) {
+				if old.ID() == inst.ID() {
+					versions = append(versions, old.ID()+" "+old.EVR()+" from "+old.FromRepo)
+				}
+			}
+			slices.Sort(versions)
+			previous = strings.Join(versions, ", ")
+		}
+		sub := plan.Operation{ID: "package:" + canonical, Action: op.Action, Paths: op.ItemPaths[canonical]}
+		r := ex.receipt(sub, "dnf", previous, "installed "+inst.ID()+" "+inst.EVR(), "dnf5 repoquery --installed lists "+inst.ID()+" "+inst.EVR()+" from "+inst.FromRepo)
 		r.Package = inst.ID()
 		receipts = append(receipts, r)
 	}

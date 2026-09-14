@@ -97,7 +97,7 @@ func answerLaptopInstall(t *testing.T, src *nativetest.FakeSource, root string) 
 	}
 	var names []string
 	skip := false
-	for _, a := range argv[3:] { // dnf5 -y install ...
+	for _, a := range argv[3:] { // dnf5 -y do ...
 		if skip {
 			skip = false
 			continue
@@ -126,7 +126,7 @@ func answerLaptopInstall(t *testing.T, src *nativetest.FakeSource, root string) 
 			repoOf[p.Name] = plan.DNFRepoIDs(p.Prefix, c.Definitions().Repositories[p.Prefix])[0]
 		}
 	}
-	args := append([]string{"--assumeno", "--cacheonly", "install", "--allowerasing"}, names...)
+	args := append([]string{"--assumeno", "--cacheonly"}, argv[2:]...)
 	b := []byte("Repositories loaded.\nPackage Arch Version Repository Size\nInstalling:\n")
 	for _, n := range names {
 		repo := cmp.Or(repoOf[n], "fedora")

@@ -10,18 +10,19 @@ import (
 
 // Resolved is the deterministic desired graph of one machine.
 type Resolved struct {
-	Machine       string              `json:"machine"`
-	Shell         string              `json:"shell,omitempty"`
-	Profiles      []string            `json:"profiles"`
-	Components    []ResolvedComponent `json:"components"`
-	Packages      []ResolvedPackage   `json:"packages"`
-	Constraints   []PackageConstraint `json:"constraints,omitempty"`
-	Removes       []string            `json:"removes"`
-	Files         []ResolvedFile      `json:"files"`
-	Services      []ResolvedService   `json:"services,omitempty"`
-	Groups        []ResolvedGroup     `json:"groups,omitempty"`
-	DefaultTarget string              `json:"default_target,omitempty"`
-	Repositories  []string            `json:"repositories"`
+	Machine                 string              `json:"machine"`
+	Shell                   string              `json:"shell,omitempty"`
+	Profiles                []string            `json:"profiles"`
+	Components              []ResolvedComponent `json:"components"`
+	Packages                []ResolvedPackage   `json:"packages"`
+	Constraints             []PackageConstraint `json:"constraints,omitempty"`
+	Removes                 []string            `json:"removes"`
+	Files                   []ResolvedFile      `json:"files"`
+	Services                []ResolvedService   `json:"services,omitempty"`
+	Groups                  []ResolvedGroup     `json:"groups,omitempty"`
+	GreeterPasswordlessSync string              `json:"greeter_passwordless_sync,omitempty"`
+	DefaultTarget           string              `json:"default_target,omitempty"`
+	Repositories            []string            `json:"repositories"`
 	// Installers are the user-scope tools of the selected components.
 	Installers []ResolvedInstaller `json:"installers"`
 }

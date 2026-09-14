@@ -107,7 +107,7 @@ func (s *scripted) privileged(argv []string) ([]byte, error) {
 		return nil, nil
 	}
 	switch {
-	case argv[0] == "dnf5" && argv[1] == "-y" && argv[2] == "install":
+	case argv[0] == "dnf5" && argv[1] == "-y" && (argv[2] == "install" || slices.Contains(argv, "--action=install")):
 		// DNF resolves again at install time; the fake installs what the
 		// test scripted, which may differ from the preview.
 		s.installed = append(s.installed, s.installs...)

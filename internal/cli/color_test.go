@@ -76,6 +76,9 @@ func TestCommandHelpUsesSharedColors(t *testing.T) {
 			t.Fatalf("help changed for %v: %d %q %q", args, code, colored, errOut)
 		}
 		for _, child := range command.Commands() {
+			if !child.Hidden && child.Short != "" && !strings.Contains(colored, "\x1b[1m"+child.Name()+"\x1b[0m") {
+				t.Fatalf("uncolored help entry for %s in %v", child.Name(), args)
+			}
 			visit(child, append(append([]string{}, args...), child.Name()))
 		}
 	}

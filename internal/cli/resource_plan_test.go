@@ -33,7 +33,7 @@ func TestWhyExplainsSelectedSystemResourcesWithoutInspection(t *testing.T) {
 	if code != ExitOK || !strings.Contains(out, "machine:shell") {
 		t.Fatalf("login shell: %d %s %s", code, out, errOut)
 	}
-	for _, resource := range []string{"file:/etc/greetd/nimbus.toml", "service:greetd.service", "trigger:systemd-daemon-reload", "default-target"} {
+	for _, resource := range []string{"file:/etc/greetd/nimbus.toml", "service:greetd.service", "trigger:systemd-daemon-reload", "default-target", "greeter-sync"} {
 		code, out, errOut := run(t, "why", resource, "--checkout", repoRoot(t), "--machine", "vm")
 		if code != ExitOK || !strings.Contains(out, "component:hyprland-session") || !strings.Contains(out, "profile:hyprland-noctalia") {
 			t.Fatalf("%s: %d %s %s", resource, code, out, errOut)

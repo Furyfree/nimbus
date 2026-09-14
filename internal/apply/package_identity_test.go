@@ -23,10 +23,10 @@ func TestMergedInstallPreservesEachPackagesProvenance(t *testing.T) {
 		{Canonical: "dnf:ripgrep", Prefix: "dnf", Name: "ripgrep", Paths: []string{"component:search", "profile:common"}},
 	}}
 	source := &nativetest.FakeSource{Commands: map[string][]byte{
-		nativetest.Key("dnf5", "--assumeno", "--cacheonly", "install", "fd-find", "ripgrep"): []byte("Package Arch Version Repository Size\nInstalling:\n fd-find x86_64 1-1.fc44 fedora 1 KiB\n ripgrep x86_64 1-1.fc44 fedora 1 KiB\nTransaction Summary:\n"),
-		nativetest.Key("dnf5", "--cacheonly", "check-upgrade"):                               nil,
+		nativetest.Key("dnf5", "--assumeno", "--cacheonly", "do", "--action=install", "--from-repo=fedora", "fd-find", "ripgrep"): []byte("Package Arch Version Repository Size\nInstalling:\n fd-find x86_64 1-1.fc44 fedora 1 KiB\n ripgrep x86_64 1-1.fc44 fedora 1 KiB\nTransaction Summary:\n"),
+		nativetest.Key("dnf5", "--cacheonly", "check-upgrade"):                                                                    nil,
 	}}
-	inputs := plan.Inputs{Resolved: desired, Facts: &inspect.Facts{}, Source: source}
+	inputs := plan.Inputs{Resolved: desired, Facts: &inspect.Facts{Repositories: inspect.Section[[]inspect.Repository]{Value: []inspect.Repository{{ID: "fedora", Enabled: true}}}}, Source: source}
 	p, err := plan.Build(inputs)
 	if err != nil || !p.Complete {
 		t.Fatalf("plan: %+v, %v", p, err)

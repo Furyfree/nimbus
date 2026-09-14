@@ -27,6 +27,7 @@ func TestPalettePreservesTextAndAlignment(t *testing.T) {
 		{"Remaining setup:\n", warn + bold + "Remaining setup:"},
 		{"Verification problems:\n", bad + bold + "Verification problems:"},
 		{"  sync        Make the system match the definitions\n", accent + bold + "sync"},
+		{"  noctalia-lockscreen Restore the managed lockscreen layout\n", accent + bold + "noctalia-lockscreen"},
 		{"  -h, --help   help for nimbus\n", accent + bold + "-h, --help"},
 		{"      --machine string   selected machine\n", accent + bold + "--machine"},
 		{"  nimbus postinstall nvidia-mok\n", accent + bold},

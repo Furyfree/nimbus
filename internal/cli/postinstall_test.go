@@ -180,6 +180,7 @@ func TestPostinstallRechecksOwnershipAndDefinitionsAfterApproval(t *testing.T) {
 				return true
 			}
 			cmd, _ := postinstallCommand(root, false, "onepassword")
+			cmd.SetIn(strings.NewReader("no\n"))
 			err := cmd.Execute()
 			if err == nil || !strings.Contains(err.Error(), "changed after approval") || len(src.streams) != 0 {
 				t.Fatalf("stale approval accepted: %v, %v", err, src.streams)

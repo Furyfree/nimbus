@@ -56,10 +56,16 @@ func host(t *testing.T) (*nativetest.FakeSource, *inspect.Facts) {
 		}
 		return data
 	}
+	// The recorded container used temporary compose repositories. Generic
+	// host tests use stable provenance; dedicated source tests exercise drift.
+	packages := read("repoquery-installed.txt")
+	for _, compose := range []string{"8053cd8c8c7f4dbba631d7ec249c6ae2", "4a577bf60dff4a90ae44c8169306ec96"} {
+		packages = bytes.ReplaceAll(packages, []byte(compose), []byte("fedora"))
+	}
 	src := &nativetest.FakeSource{
 		Commands: map[string][]byte{
 			nativetest.Key("uname", "-m"):                                                                  []byte("x86_64\n"),
-			nativetest.Key("dnf5", inspect.PackageQueryArgs...):                                            read("repoquery-installed.txt"),
+			nativetest.Key("dnf5", inspect.PackageQueryArgs...):                                            packages,
 			nativetest.Key("flatpak", "remotes", "--system", "--columns=name,url"):                         []byte(""),
 			nativetest.Key("flatpak", "list", "--system", "--app", "--columns=application,version,origin"): []byte(""),
 			nativetest.Key("systemctl", "is-active", "firewalld"):                                          []byte("active\n"),
@@ -78,7 +84,10 @@ func host(t *testing.T) (*nativetest.FakeSource, *inspect.Facts) {
 	for _, name := range inspect.RequiredCommands {
 		src.Paths[name] = "/usr/bin/" + name
 	}
-	return src, inspect.Inspect(src, "")
+	src.Commands["getent --service=files passwd owner"] = []byte("owner:x:1000:1000::/home/owner:/bin/bash\n")
+	facts := inspect.Inspect(src, "")
+	facts.User.Value.Name = "owner"
+	return src, facts
 }
 
 // previewText renders a DNF5 preview table the way the fixture shows it.
@@ -116,7 +125,7 @@ func installArgs(p *Plan) []string {
 func installNames(args []string) []string {
 	var names []string
 	for _, a := range args {
-		if !strings.HasPrefix(a, "-") && a != "install" {
+		if !strings.HasPrefix(a, "-") && a != "install" && a != "do" {
 			names = append(names, a)
 		}
 	}
@@ -229,7 +238,7 @@ func TestPlanOnFreshFedora(t *testing.T) {
 	if inst.Blocked != "" || inst.After != "" || inst.Transaction == nil || !slices.Contains(inst.Steps[0].Argv, "--allowerasing") || !slices.Contains(inst.Steps[0].Argv, "docker-ce") || !strings.Contains(inst.Summary, "packages through one DNF transaction") {
 		t.Fatalf("install = %+v", inst)
 	}
-	if len(inst.Steps) != 1 || !strings.HasPrefix(strings.Join(inst.Steps[0].Argv, " "), "dnf5 -y install --allowerasing ") || !inst.Steps[0].Privileged {
+	if len(inst.Steps) != 1 || !strings.HasPrefix(strings.Join(inst.Steps[0].Argv, " "), "dnf5 -y do --action=install --allowerasing ") || !inst.Steps[0].Privileged {
 		t.Fatalf("argv = %v", inst.Steps)
 	}
 	// The remote is added in this round and the application's command is

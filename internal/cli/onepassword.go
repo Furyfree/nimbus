@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -25,6 +26,74 @@ func passwordSelection(src native.Source) (inspect.Chezmoi, error) {
 		return inspect.Chezmoi{}, errors.New("Chezmoi selection is unavailable; complete nimbus init")
 	}
 	return inspect.ParseChezmoiData(data)
+}
+
+func samePasswordSelection(a, b inspect.Chezmoi) bool {
+	return a.Initialized == b.Initialized && a.Machine == b.Machine &&
+		a.ManagedByNimbus == b.ManagedByNimbus && a.OnePasswordSSH == b.OnePasswordSSH &&
+		slices.Equal(a.Profiles, b.Profiles)
+}
+
+// Changing the stored choice is separate from confirming GUI prerequisites or
+// approving a file apply. --yes never supplies this opt-in.
+func offerPasswordIntegration(cmd *cobra.Command, src native.Source, before *postinstallSnapshot, selection inspect.Chezmoi) (bool, error) {
+	if selection.OnePasswordSSH {
+		return false, nil
+	}
+	out := cmd.OutOrStdout()
+	if !postinstallTerminal(cmd.InOrStdin()) {
+		_, err := fmt.Fprintln(out, "SSH/Git integration is not selected. Run nimbus postinstall onepassword interactively to enable it; --yes does not opt in.")
+		return false, err
+	}
+	if _, err := fmt.Fprintln(out, "Optional SSH/Git integration: use 1Password as the default SSH agent and Git signing helper.\nChezmoi will manage SSH config, GitHub/Homelab public-key selectors, agent selection and Git config. Existing keys are reused.\nEnabling saves the choice through chezmoi init --prompt, preserving your machine and profiles.\nNo files are applied or scripts run at this step. After GUI setup, review the selected files before applying.\nThe choice stays enabled if later setup fails; rerun this task to finish."); err != nil {
+		return false, err
+	}
+	answer, err := promptLineFn(cmd.InOrStdin(), out, "Enable 1Password SSH/Git integration? (yes/no)", "no")
+	if err != nil {
+		return false, fmt.Errorf("SSH/Git choice was not recorded: %w", err)
+	}
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "no", "n":
+		_, err := fmt.Fprintln(out, "Keeping CLI-only setup; SSH/Git configuration will not be applied.")
+		return false, err
+	case "yes", "y":
+	default:
+		return false, errors.New("answer yes or no; SSH/Git choice was not changed")
+	}
+	lockPath, err := apply.LockPath()
+	if err != nil {
+		return false, err
+	}
+	lock, err := apply.Acquire(lockPath, apply.LockInfo{Command: "postinstall onepassword", PID: os.Getpid(), Started: time.Now().UTC()})
+	if err != nil {
+		return false, err
+	}
+	defer lock.Release()
+	fresh, err := passwordSelection(src)
+	if err != nil || !samePasswordSelection(fresh, selection) {
+		return false, errors.New("Chezmoi selection changed during approval; retry the task")
+	}
+	checked, err := inspectPostinstall(src, machineFlags{checkout: before.selected.Root, machine: before.view.Machine})
+	if err != nil || checked.digest != before.digest {
+		return false, errors.New("postinstall state changed after approval; retry the task")
+	}
+	if err := cmd.Context().Err(); err != nil {
+		return false, err
+	}
+	args := []string{"init", "--prompt", "--promptString", "Machine=" + selection.Machine,
+		"--promptBool", "ManagedByNimbus=true",
+		"--promptMultichoice", "Profiles=" + strings.Join(selection.Profiles, "/"),
+		"--promptBool", "Enable 1Password SSH integration=true"}
+	if err := src.Stream(out, cmd.ErrOrStderr(), "chezmoi", args...); err != nil {
+		return false, errors.New("Chezmoi could not save the SSH/Git choice; inspect its configuration before retrying; no integration files were applied")
+	}
+	fresh, err = passwordSelection(src)
+	selection.OnePasswordSSH = true
+	if err != nil || !samePasswordSelection(fresh, selection) {
+		return false, errors.New("Chezmoi did not retain the requested SSH/Git choice and machine profiles; inspect its configuration before retrying; no integration files were applied")
+	}
+	_, err = fmt.Fprintln(out, "SSH/Git integration enabled in Chezmoi. Continue with GUI prerequisites, then review the files.")
+	return true, err
 }
 
 // SSH adds manual GUI prerequisites, so enabling it requires fresh confirmation.
@@ -146,6 +215,26 @@ func runOnePassword(cmd *cobra.Command, src native.Source, before *postinstallSn
 	if !selection.ManagedByNimbus || selection.Machine != before.view.Machine {
 		return errors.New("Chezmoi belongs to another selection; run nimbus init")
 	}
+	if !verifyOnly {
+		changed, err := offerPasswordIntegration(cmd, src, before, selection)
+		if err != nil {
+			return err
+		}
+		if changed {
+			selection.OnePasswordSSH = true
+			before, err = inspectPostinstall(src, machineFlags{checkout: before.selected.Root, machine: before.view.Machine})
+			if err != nil {
+				return err
+			}
+			t, err = selectedTask(before.view, t.ID)
+			if err != nil {
+				return err
+			}
+			if t.Status == postinstall.Blocked {
+				return errors.New(t.Detail)
+			}
+		}
+	}
 	if t.Status == postinstall.Complete && !verifyOnly {
 		return renderPostinstall(cmd.OutOrStdout(), postinstallView{Machine: before.view.Machine, Tasks: []postinstall.Task{t}})
 	}
@@ -153,7 +242,7 @@ func runOnePassword(cmd *cobra.Command, src native.Source, before *postinstallSn
 	if selection.OnePasswordSSH {
 		message += "\nEnable the SSH agent in Settings > Developer and keep 1Password running. Reuse your existing keys."
 	} else {
-		message += "\nSSH integration is not selected; this task will not configure it. Opt in through Chezmoi's Enable 1Password SSH integration setting when wanted."
+		message += "\nSSH integration is not selected; this task will not configure it. Run nimbus postinstall onepassword interactively to opt in when wanted."
 	}
 	if verifyOnly {
 		message = strings.ReplaceAll(message, "Nimbus will apply the selected integration through Chezmoi.", "this command only verifies existing integration.")
@@ -241,7 +330,7 @@ func runOnePassword(cmd *cobra.Command, src native.Source, before *postinstallSn
 		}
 		defer lock.Release()
 		fresh, err := passwordSelection(src)
-		if err != nil || fresh.Machine != selection.Machine || fresh.OnePasswordSSH != selection.OnePasswordSSH || !fresh.ManagedByNimbus {
+		if err != nil || !samePasswordSelection(fresh, selection) {
 			return errors.New("Chezmoi selection changed during approval; retry the task")
 		}
 		checked, err := inspectPostinstall(src, machineFlags{checkout: before.selected.Root, machine: before.view.Machine})
@@ -264,7 +353,7 @@ func runOnePassword(cmd *cobra.Command, src native.Source, before *postinstallSn
 		}
 	}
 	freshSelection, err := passwordSelection(src)
-	if err != nil || freshSelection.Machine != selection.Machine || freshSelection.OnePasswordSSH != selection.OnePasswordSSH || !freshSelection.ManagedByNimbus {
+	if err != nil || !samePasswordSelection(freshSelection, selection) {
 		return errors.New("Chezmoi selection changed during verification; retry the task")
 	}
 	fingerprint, err := passwordFingerprint(src, selection.OnePasswordSSH)
@@ -319,7 +408,7 @@ func enrichPostinstall(src native.Source, s *selected, view *postinstallView) er
 			t.Instructions = append(t.Instructions, "After confirmation, preview, apply and verify only these Chezmoi targets (scripts excluded): "+strings.Join(passwordTargets(true), ", "))
 			t.Verification = "Check CLI access, available SSH identities and selected Chezmoi targets before recording completion. Status later checks local files without authenticating; remote access remains a separate check."
 		} else {
-			t.Instructions = append(t.Instructions, "SSH is not selected. Confirm the GUI prerequisites and check CLI access; no SSH/Git files will be applied.")
+			t.Instructions = append(t.Instructions, "SSH is not selected. The guided task offers an explicit opt-in (default: no), saves it through Chezmoi, then confirms GUI prerequisites and previews selected SSH/Git files. Declining keeps CLI-only setup; --mark-done never changes the selection.")
 			t.Verification = "Record confirmed GUI prerequisites only after CLI access succeeds. Status does not inspect the current vault unlock."
 		}
 		if _, err := src.LookPath("op"); err != nil {

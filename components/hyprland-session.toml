@@ -2,6 +2,7 @@
 # the portals, audio, and session helpers they need.
 schema = 1
 id = "hyprland-session"
+greeter_passwordless_sync = true
 
 requires = ["hyprland-plugin-build"]
 conflicts = []

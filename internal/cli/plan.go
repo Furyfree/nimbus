@@ -68,7 +68,7 @@ func renderPlanView(p *plan.Plan, prune, listUpdates, compact bool) []byte {
 		fmt.Fprintln(&b, "After package changes: reconcile duplicate package sources.")
 	}
 
-	var sources, problems, notes, userTools []string
+	var sources, corrections, problems, notes, userTools []string
 	var resources []plan.Operation
 	var installTx *plan.Operation
 	var pendingNames, flatpaks, removals []string
@@ -120,6 +120,14 @@ func renderPlanView(p *plan.Plan, prune, listUpdates, compact bool) []byte {
 			sources = append(sources, summary)
 		case op.ID == "packages:install":
 			installTx = op
+		case op.Kind == plan.KindPackage && op.Action == plan.ActionRepair:
+			corrections = append(corrections, op.Summary)
+			if op.After != "" {
+				corrections = append(corrections, "  after "+describeAfter(p, op.After))
+			}
+			if op.Transaction != nil {
+				writeSourceTransactionInto(&corrections, op.Transaction)
+			}
 		case op.Kind == plan.KindPackage && op.Action == plan.ActionInstall:
 			pendingNames = append(pendingNames, plan.PackageName(op.ID))
 		case op.Kind == plan.KindFlatpak && op.Action == plan.ActionInstall:
@@ -189,6 +197,12 @@ func renderPlanView(p *plan.Plan, prune, listUpdates, compact bool) []byte {
 	case len(names) > 0:
 		fmt.Fprintf(&b, "\ninstall %d packages (exact versions once sources are prepared):\n", len(names))
 		writeWrapped(&b, "  ", names, ", ", ",", "  ")
+	}
+	if len(corrections) > 0 {
+		b.WriteString("\npackage source corrections:\n")
+		for _, line := range corrections {
+			fmt.Fprintf(&b, "  %s\n", line)
+		}
 	}
 	if len(flatpaks) > 0 {
 		slices.Sort(flatpaks)
@@ -278,7 +292,7 @@ func renderPlanView(p *plan.Plan, prune, listUpdates, compact bool) []byte {
 
 func isSystemResource(kind string) bool {
 	switch kind {
-	case plan.KindFile, plan.KindService, plan.KindGroup, plan.KindShell, plan.KindTarget, plan.KindTrigger:
+	case plan.KindGreeterSync, plan.KindFile, plan.KindService, plan.KindGroup, plan.KindShell, plan.KindTarget, plan.KindTrigger:
 		return true
 	}
 	return false
@@ -310,8 +324,27 @@ func writeTransactionInto(lines *[]string, tx *plan.Transaction) {
 	}
 }
 
+// Source reviews must show incoming and outgoing RPM identities and repositories.
+func writeSourceTransactionInto(lines *[]string, tx *plan.Transaction) {
+	for _, row := range tx.Packages {
+		*lines = append(*lines, fmt.Sprintf("  %s: %s.%s %s (%s)", row.Section, row.Name, row.Arch, row.EVR, row.Repository))
+	}
+	if tx.Download != "" {
+		*lines = append(*lines, "  download: "+tx.Download)
+	}
+}
+
 // writeUpdates renders cached information for the native system upgrade.
 func writeUpdates(b *bytes.Buffer, u plan.Updates) {
+	if u.Transaction != nil && u.Unavailable == "" && len(u.Transaction.Packages) > 0 {
+		fmt.Fprintln(b, "\nupgrade the system (declared RPM sources enforced, system Flatpak updates):")
+		var lines []string
+		writeSourceTransactionInto(&lines, u.Transaction)
+		for _, line := range lines {
+			fmt.Fprintln(b, line)
+		}
+		return
+	}
 	switch {
 	case u.Unavailable != "":
 		fmt.Fprintf(b, "\nupgrade the system (dnf5 upgrade, flatpak update): %s\n", u.Unavailable)

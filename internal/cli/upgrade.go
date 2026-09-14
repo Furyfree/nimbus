@@ -102,6 +102,10 @@ func systemUpgradePlan(p *plan.Plan) *plan.Plan {
 	copy := *p
 	copy.Operations = nil
 	copy.Complete = true
+	if p.Updates.Unavailable != "" {
+		copy.Complete = false
+		copy.Operations = append(copy.Operations, plan.Operation{ID: "upgrade:dnf", Kind: plan.KindPackage, Action: plan.ActionRepair, Summary: "check source-constrained DNF updates", Blocked: p.Updates.Unavailable})
+	}
 	if p.Snapshots != nil && (p.Snapshots.Setup || len(p.Snapshots.Changes()) > 0) {
 		snapshots := *p.Snapshots
 		snapshots.Blocked = "run nimbus sync first to configure root snapshots and retention"
@@ -109,6 +113,12 @@ func systemUpgradePlan(p *plan.Plan) *plan.Plan {
 		copy.Complete = false
 	}
 	for _, op := range p.Operations {
+		if op.Kind == plan.KindPackage && op.Action == plan.ActionRepair {
+			op.Blocked = "run nimbus sync first: " + op.Summary
+			copy.Operations = append(copy.Operations, op)
+			copy.Complete = false
+			continue
+		}
 		if op.Kind != plan.KindRepository && op.Kind != plan.KindFlatpakRemote && op.Kind != plan.KindDNFConfig && !plan.IsConstraintOperation(op) {
 			continue
 		}

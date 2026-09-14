@@ -24,6 +24,11 @@ func TestPasswordTaskSignInRecovery(t *testing.T) {
 			saved := postinstallTerminal
 			postinstallTerminal = func(io.Reader) bool { return mode != "no-terminal" }
 			t.Cleanup(func() { postinstallTerminal = saved })
+			if mode == "guided" {
+				savedPrompt := promptLineFn
+				promptLineFn = func(io.Reader, io.Writer, string, string) (string, error) { return "no", nil }
+				t.Cleanup(func() { promptLineFn = savedPrompt })
+			}
 			whoami := "op whoami --format=json"
 			if mode != "already-signed-in" {
 				src.Failures[whoami] = "[ERROR] 2026/09/13 19:50:01 account is not signed in"

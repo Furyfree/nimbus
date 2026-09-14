@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -32,11 +33,17 @@ func fixtureSource(t *testing.T, root string) *nativetest.FakeSource {
 		}
 		return data
 	}
+	// The recorded container used temporary compose repositories. Generic
+	// host tests use stable provenance; dedicated source tests exercise drift.
+	packages := read("repoquery-installed.txt")
+	for _, compose := range []string{"8053cd8c8c7f4dbba631d7ec249c6ae2", "4a577bf60dff4a90ae44c8169306ec96"} {
+		packages = bytes.ReplaceAll(packages, []byte(compose), []byte("fedora"))
+	}
 	src := &nativetest.FakeSource{
 		Commands: map[string][]byte{
 			"findmnt --noheadings --output FSTYPE --target /":                                              []byte("btrfs\n"),
 			nativetest.Key("uname", "-m"):                                                                  []byte("x86_64\n"),
-			nativetest.Key("dnf5", inspect.PackageQueryArgs...):                                            read("repoquery-installed.txt"),
+			nativetest.Key("dnf5", inspect.PackageQueryArgs...):                                            packages,
 			nativetest.Key("flatpak", "remotes", "--system", "--columns=name,url"):                         []byte(""),
 			nativetest.Key("flatpak", "list", "--system", "--app", "--columns=application,version,origin"): []byte(""),
 			nativetest.Key("systemctl", "is-active", "firewalld"):                                          []byte("active\n"),

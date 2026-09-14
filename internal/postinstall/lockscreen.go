@@ -31,6 +31,7 @@ type LockscreenRepair struct {
 	PID            int    `json:"pid"`
 	Started        string `json:"started"`
 	Binary         string `json:"binary"`
+	Service        string `json:"service,omitempty"`
 }
 
 func lockscreenPaths() (string, string, error) {
@@ -291,12 +292,21 @@ func noctaliaLockscreen(src native.Source, in Inputs, pkg definitions.ResolvedPa
 		t.Status, t.Detail = Blocked, err.Error()
 		return t
 	}
+	service, err := noctaliaSessionService(src, pid)
+	if err != nil {
+		t.Status, t.Detail = Blocked, err.Error()
+		return t
+	}
 	t.Status, t.Detail = Pending, "Saved GUI lockscreen-widget overrides take precedence over the managed layout."
 	t.Instructions = append(t.Instructions, fmt.Sprintf("Stop Noctalia PID %d with SIGTERM; back up %s under the private Nimbus state directory before replacement.", pid, settings))
+	if service != "" {
+		t.Instructions[len(t.Instructions)-1] = fmt.Sprintf("Stop user service %s gracefully without force-killing; back up %s before replacement. Restart it through UWSM.", service, settings)
+		t.Recovery = "The private backup path is printed before replacement. On failure Nimbus attempts to restart the same UWSM service. Retry the task or log in again if restart fails; preserve the backup. Restoring it wholesale would undo later preferences."
+	}
 	t.Action = &Action{Kind: RestoreNoctaliaLockscreen, Lockscreen: &LockscreenRepair{
 		Config: config, Settings: settings,
 		ConfigDigest: lockscreenDigest(managed), SettingsDigest: lockscreenDigest(data),
-		PID: pid, Started: started, Binary: binary,
+		PID: pid, Started: started, Binary: binary, Service: service,
 	}}
 	return t
 }
@@ -338,6 +348,10 @@ func RunNoctaliaLockscreen(ctx context.Context, src native.Source, out io.Writer
 	if err != nil || pid != p.PID || started != p.Started || binary != p.Binary {
 		return errors.New("Noctalia process changed after approval; inspect again")
 	}
+	service, err := noctaliaSessionService(src, pid)
+	if err != nil || service != p.Service {
+		return errors.New("Noctalia service changed after approval; inspect again")
+	}
 	managed, err := safeLockscreenRead(config)
 	if err != nil {
 		return err
@@ -357,16 +371,28 @@ func RunNoctaliaLockscreen(ctx context.Context, src native.Source, out io.Writer
 	if err != nil || !changed {
 		return errors.New("Noctalia overrides changed; inspect again")
 	}
-	fmt.Fprintln(out, "-> stop Noctalia gracefully (SIGTERM); leave Hyprland and applications running")
-	if err = stopLockscreenShell(ctx, pid, started, binary); err != nil {
-		return err
+	fmt.Fprintln(out, "-> stop Noctalia gracefully; leave Hyprland and applications running")
+	if service == "" {
+		err = stopLockscreenShell(ctx, pid, started, binary)
+	} else {
+		err = src.Stream(io.Discard, io.Discard, "systemctl", "--user", "stop", service)
+		if err == nil {
+			// A surviving child would keep the unit alive with ExitType=cgroup.
+			data, checkErr := src.Run("systemctl", "--user", "show", service, "--property=ActiveState", "--value")
+			if checkErr != nil || strings.TrimSpace(string(data)) != "inactive" {
+				err = errors.New("Noctalia service did not stop completely")
+			}
+		}
+	}
+	if err != nil {
+		return errors.New("Noctalia did not stop gracefully; settings untouched. Inspect the shell before retrying")
 	}
 	restarted := false
 	defer func() {
 		if !restarted {
 			fmt.Fprintln(out, "-> restart Noctalia after interrupted repair")
-			if err := src.Stream(io.Discard, io.Discard, binary, "--daemon"); err != nil {
-				result = errors.Join(result, errors.New("Noctalia restart failed; run noctalia --daemon from your desktop terminal"))
+			if err := restartLockscreenShell(src, p); err != nil {
+				result = errors.Join(result, errors.New("Noctalia restart failed; retry the task or log in again"))
 			}
 		}
 	}()
@@ -396,7 +422,7 @@ func RunNoctaliaLockscreen(ctx context.Context, src native.Source, out io.Writer
 	}
 	fmt.Fprintln(out, "-> removed only lockscreen-widget overrides; restart Noctalia")
 	restarted = true
-	if err = src.Stream(io.Discard, io.Discard, binary, "--daemon"); err != nil {
+	if err = restartLockscreenShell(src, p); err != nil {
 		return errors.New("Noctalia restart failed after repair; backup retained")
 	}
 	deadline := time.Now().Add(5 * time.Second)
@@ -426,4 +452,77 @@ func RunNoctaliaLockscreen(ctx context.Context, src native.Source, out io.Writer
 		return errors.New("Managed layout changed during repair; completion not recorded")
 	}
 	return verifyLockscreenLayout(src, desired)
+}
+
+// The fixed service is created by Chezmoi's Hyprland startup through UWSM.
+// Reject other supervisors: killing their process could trigger a concurrent restart.
+func noctaliaSessionService(src native.Source, pid int) (string, error) {
+	data, err := src.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
+	if err != nil {
+		return "", errors.New("Cannot inspect Noctalia session ownership")
+	}
+	var group string
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if path, ok := strings.CutPrefix(line, "0::"); ok {
+			group = path
+		}
+	}
+	if group == "" {
+		return "", errors.New("Cannot identify Noctalia session ownership")
+	}
+	unit := filepath.Base(group)
+	for parent := group; parent != "/" && parent != "."; parent = filepath.Dir(parent) {
+		candidate := filepath.Base(parent)
+		if strings.HasSuffix(candidate, ".service") || strings.HasSuffix(candidate, ".scope") {
+			unit = candidate
+			break
+		}
+	}
+	if unit != noctaliaService {
+		if strings.HasSuffix(unit, ".service") && !strings.HasPrefix(unit, "wayland-wm@") {
+			return "", errors.New("Noctalia has another service supervisor; use the managed UWSM startup and log in again")
+		}
+		return "", nil
+	}
+	data, err = src.Run("systemctl", "--user", "show", noctaliaService,
+		"--property=ControlGroup,ActiveState,Restart,SendSIGKILL,TimeoutStopUSec,KillSignal,KillMode,ExecStop,Transient,TimeoutStopFailureMode")
+	values := map[string]string{}
+	for line := range strings.SplitSeq(string(data), "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if ok {
+			values[key] = value
+		}
+	}
+	if err != nil || values["ControlGroup"] != group || values["ActiveState"] != "active" ||
+		values["TimeoutStopFailureMode"] != "terminate" || values["Restart"] != "no" || values["SendSIGKILL"] != "no" || values["TimeoutStopUSec"] != "10s" || values["KillSignal"] != "15" ||
+		values["KillMode"] != "control-group" || values["ExecStop"] != "" || values["Transient"] != "yes" {
+		return "", errors.New("Noctalia service does not match the managed graceful-stop policy; log in again first")
+	}
+	if _, err = src.LookPath("uwsm"); err != nil {
+		return "", errors.New("UWSM is unavailable; cannot restart the managed Noctalia service")
+	}
+	if _, err = src.Run("uwsm", "check", "is-active", "compositor-only"); err != nil {
+		return "", errors.New("UWSM session is unavailable; cannot restart Noctalia")
+	}
+	return noctaliaService, nil
+}
+
+const noctaliaService = "app-noctalia.service"
+
+// LockscreenCommands exposes the exact lifecycle for the approval preview.
+func LockscreenCommands(p *LockscreenRepair) [][]string {
+	if p.Service == noctaliaService {
+		return [][]string{
+			{"systemctl", "--user", "stop", noctaliaService},
+			{"uwsm", "app", "-s", "s", "-t", "service", "-u", noctaliaService,
+				"-p", "TimeoutStopSec=10s", "-p", "SendSIGKILL=no", "--", p.Binary, "--daemon"},
+		}
+	}
+	return [][]string{{p.Binary, "--daemon"}}
+}
+
+func restartLockscreenShell(src native.Source, p *LockscreenRepair) error {
+	commands := LockscreenCommands(p)
+	argv := commands[len(commands)-1]
+	return src.Stream(io.Discard, io.Discard, argv[0], argv[1:]...)
 }

@@ -9,6 +9,12 @@ Existing local code is a candidate, not proof that the new contract is shipped.
 
 ## Next steps
 
+The local candidate fixes command coloring for the longest postinstall name
+and enforces declared RPM sources for installation and system upgrades. Sync
+previews corrections for known installed-source mismatches. Native signed-RPM
+checks cover correction and failure paths; see [TASKS](TASKS.md) for evidence.
+Further UWSM/session changes remain research-only and are not part of this work.
+
 The prepared XDG defaults file remains unselected until explicit adoption of
 the package-owned file is supported. Chezmoi already manages the working
 per-user paths, so this does not block the engine release.
@@ -347,8 +353,11 @@ their evidence. Failure leaves remaining work incomplete and supports retry.
 
 The proposed task must do more than open the app and remember a checkbox:
 
-1. Explain sign-in/unlock and enabling desktop CLI integration. If SSH
-   integration is selected, also explain enabling the SSH agent.
+1. Offer SSH/Git opt-in when absent, defaulting to no, including after CLI-only
+   completion. Save an explicit yes through Chezmoi's native prompt flags while
+   preserving machine and profiles. `--yes` cannot opt in and `--mark-done` keeps
+   the selection unchanged. Explain sign-in/unlock and desktop CLI integration;
+   when SSH is selected, also explain enabling the SSH agent.
 2. Tell the user to skip onboarding instructions that manually edit SSH or
    Git files: Chezmoi owns those files in this setup. Enabling GUI features
    is still required. Preserve the existing keys and explicit SSH opt-in.
@@ -704,15 +713,14 @@ still follows it. Until then, auto-unlock remains planned, not working.
 
 ### Remaining integration
 
-Add an explicit greeter passwordless-sync post-install action after Fedora's
-stable Noctalia package supports constrained sync. Keep the Fedora package
-source; Chezmoi already enables native auto-sync. Nimbus should preview and
-delegate one-time authorization to the greeter's native CLI for the invoking
-local account, verify the result, and document native status and removal.
-Require a compatible shell, helper and packaged Polkit action; never authorize
-legacy sync. Complete this work when wallpaper changes sync without prompts
-and the next login shows the updated wallpaper on both desktop and laptop.
-See TASKS for package availability and the remaining validation.
+Greeter passwordless-sync authorization is implemented in the ordinary approved
+init/sync plan, using the native helper for the invoking local account. The
+Fedora stable shell is now 5.1.0; retain its existing package source. Chezmoi
+owns auto-sync preferences, and the greeter owns its generated Polkit rule.
+There is no separate postinstall. Compatibility, native status, repeated setup
+and failure checks are required; see SPEC and TASKS. Complete the hardware gate
+when wallpaper changes sync without prompts and the next login shows the new
+wallpaper on desktop and laptop.
 
 The Noctalia plugin post-install repair first appeared in 0.4.4. The laptop trial
 confirmed installation but exposed premature verification failure during the
@@ -843,3 +851,13 @@ source/compatibility pin reviewed when updating Nimbus. Automatic maintenance
 refreshes catalogs, not the proxy application release. New-engine setup can
 update that native release explicitly. Follow up when Antigravity gains an
 external tool bridge or Copilot exposes a stable public registration API.
+
+## UWSM session integration
+
+The local implementation preserves browser argv while routing launches through
+an active UWSM session. Lockscreen repair recognizes Chezmoi's managed Noctalia
+service, checks its graceful-stop policy and restores it through UWSM.
+Chezmoi owns environment files, app shortcuts, shell startup and bar preferences.
+Fresh-login/logout and visual desktop validation remain operator checks; see
+[README](../README.md#uwsm-session-integration). No laptop changes or release
+are part of this implementation.

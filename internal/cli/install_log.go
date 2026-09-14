@@ -299,7 +299,16 @@ type installSource struct {
 // Chezmoi, arbitrary maker scripts, shell commands and credential tools are
 // metadata-only; their output may include rendered secrets.
 func publicInstallCommand(name string, args []string) bool {
+	if name == inspect.GreeterBinary {
+		return len(args) == 3 && args[0] == "passwordless-sync" && (args[1] == "status" || args[1] == "enable")
+	}
+	if name == inspect.GreeterHelper {
+		return slices.Equal(args, []string{"--supports", "secure-sync-v1"})
+	}
 	if name == "sudo" {
+		if len(args) > 1 && args[0] == "--" && args[1] == inspect.GreeterBinary {
+			return publicInstallCommand(args[1], args[2:])
+		}
 		if len(args) == 0 {
 			return false
 		}

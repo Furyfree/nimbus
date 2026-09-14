@@ -283,6 +283,9 @@ func explain(s *selected, resource string) (*whyResult, error) {
 		}
 		return &whyResult{Kind: kind, ID: id, Paths: paths}
 	}
+	if r.GreeterPasswordlessSync != "" && (resource == "greeter-sync" || resource == "greeter-sync:<user>") {
+		return owned(plan.KindGreeterSync, "greeter-sync:<user>", r.GreeterPasswordlessSync), nil
+	}
 	for _, file := range r.Files {
 		if resource == "file:"+file.Target {
 			return owned("system-file", resource, file.Component), nil
