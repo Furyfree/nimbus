@@ -1298,3 +1298,23 @@ Validation: `just check` and `just validate` pass. Both foreground cases passed
 no host mounts; its complete 10-test handoff suite also passed. The deliberately
 restored old waiting logic fails the delayed-exit regression after `RESTORED`.
 No tests were skipped and no live installer, sign-in or system repair ran.
+
+## Version 0.5.9 terminal-interrupt test correction
+
+The 0.5.8 source workflow passed the foreground-restoration suite but failed
+`TestLoggedTTYProgressPrivacyResizeAndCancellation`: the shell printed WAITING
+before starting sleep, allowing Ctrl+C to race with child startup. The 0.5.8
+tag remains immutable; no source release or COPR build was published for it.
+
+The fixture now execs a worker which installs its interrupt handler before
+printing WAITING. It requires the worker's INTERRUPTED marker and exit 130,
+so an unrelated command failure cannot satisfy the cancellation assertion.
+The existing eight-second test deadline remains unchanged. This modifies test
+synchronization only; native terminal relay behavior is unchanged.
+
+Release 0.5.9 includes both terminal-test corrections and all 0.5.7 setup work.
+
+Validation: `just check` and `just validate` pass. The interrupt test passed
+40 consecutive local runs and 30 in an offline Fedora container using Go
+1.26.8. Its integration suite also passed with vendored modules and no host
+mounts. No production terminal code, test deadline or live setup was changed.

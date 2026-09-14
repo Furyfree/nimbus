@@ -2,6 +2,7 @@ package native
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -64,12 +65,27 @@ func TestLoggedTTYChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer log.Close()
-	body := `test -t 0 && test -t 1 || exit 91; stty -echo; printf 'READY\n'; read answer; test "$answer" = 'synthetic-private-answer' || exit 92; stty size; printf 'WAITING\n'; sleep 20`
+	// The process that receives Ctrl+C must announce its own readiness. A shell
+	// printing WAITING before spawning sleep races with delivery of the interrupt.
+	body := `test -t 0 && test -t 1 || exit 91
+stty -echo
+printf 'READY\n'
+read answer
+test "$answer" = 'synthetic-private-answer' || exit 92
+stty size
+exec python3 -c 'import signal,sys,time
+def interrupted(*args):
+    print("INTERRUPTED", flush=True)
+    sys.exit(130)
+signal.signal(signal.SIGINT, interrupted)
+print("WAITING", flush=True)
+time.sleep(20)'
+`
 	stdout := output.ColorWriter(os.Stdout, func() bool { return true })
 	stderr := output.ColorWriter(os.Stderr, func() bool { return true })
 	err = (ExecSource{}).StreamLogged(stdout, stderr, log, "sh", "-c", body)
-	if err == nil {
-		t.Fatal("interruption did not terminate child")
+	if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 130 {
+		t.Fatalf("expected interrupted child exit 130, got %v", err)
 	}
 }
 func TestLoggedTTYProgressPrivacyResizeAndCancellation(t *testing.T) {
@@ -117,6 +133,7 @@ try:
             except OSError: pass
     log=open(sys.argv[2],'rb').read()
     assert b'READY' in log and b'WAITING' in log,log
+    assert b'INTERRUPTED' in log,log
     assert b'synthetic-private-answer' not in log,log
 finally:
     try: os.kill(pid,signal.SIGKILL)
