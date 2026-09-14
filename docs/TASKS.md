@@ -1318,3 +1318,17 @@ Validation: `just check` and `just validate` pass. The interrupt test passed
 40 consecutive local runs and 30 in an offline Fedora container using Go
 1.26.8. Its integration suite also passed with vendored modules and no host
 mounts. No production terminal code, test deadline or live setup was changed.
+
+[Release v0.5.9](https://github.com/Furyfree/nimbus/releases/tag/v0.5.9)
+is published from `4be55e2b3825ebfd91dbb9095ba21bfb99a0e700`. Push CI and
+[source preparation](https://github.com/Furyfree/nimbus/actions/runs/34897443298)
+passed. All 358 tagged files and executable bits match the release archive;
+vendored files and license notices are unchanged from 0.5.7. Archive SHA-256:
+`4da5ba421be8bc5ea8c9212dbbdad7935c26c142a8cab0510c2f9ee2b6414619`.
+
+COPR recipe `2b9cb2d` selects that archive. Its full packaging gate passed in
+an offline Fedora container with a copied checkout and no host mounts.
+[Publication](https://github.com/Furyfree/copr/actions/runs/34897812125)
+was dispatched for Nimbus only. Handoff is after submission, without monitoring
+build completion; RPM availability and signature checks remain pending.
+Neither workstation's Nimbus installation was changed during this release.
