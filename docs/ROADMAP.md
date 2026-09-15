@@ -723,7 +723,9 @@ state is handled safely, and both affected repositories pass their local gates.
 
 ### GRUB first
 
-Activate the dark GRUB theme through a small, reversible native integration.
+Paper Dark sources and native renderer previews are prepared for GRUB and
+Plymouth. Activate them through explicit, reversible native integration;
+Plymouth needs its script/label plugins, font and dracut image refresh.
 Test Fedora-only and Windows-present menus, the five-second timeout, Fedora
 default, older-kernel selection, and removal of the theme. Preserve BLS entries
 and the EFI stub. Use a disposable VM snapshot as an independent test safeguard.

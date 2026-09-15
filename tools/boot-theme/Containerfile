@@ -1,0 +1,8 @@
+FROM registry.fedoraproject.org/fedora:44
+RUN dnf5 -y install python3 plymouth-plugin-script plymouth-theme-script \
+    xorg-x11-server-Xvfb xdotool ImageMagick \
+    dejavu-sans-mono-fonts grub2-tools-extra grub2-efi-x64-modules \
+    qemu-system-x86-core edk2-ovmf \
+    && dnf5 clean all
+RUN dnf5 -y install plymouth-devel plymouth-plugin-label && dnf5 clean all
+WORKDIR /work

@@ -1,6 +1,7 @@
 # The complete local gate.
 check: fmt-check vet test
     python3 -I -B tools/grub/assets.py --check
+    python3 -I -B tools/boot-theme/assets.py --check
     git diff --check HEAD
     if command -v markdownlint >/dev/null 2>&1; then markdownlint '*.md' 'docs/**/*.md' 'tools/**/*.md'; else echo 'markdownlint not installed: skipped'; fi
     if command -v shellcheck >/dev/null 2>&1; then shellcheck install.sh bootstrap tools/release/*.sh tools/vm/maintenance/*.sh; else echo 'shellcheck not installed: skipped'; fi

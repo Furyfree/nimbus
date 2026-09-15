@@ -33,3 +33,6 @@ go.work.sum
 
 # Local build output from `just build`
 /nimbus
+
+# Disposable native boot-theme preview output
+/boot-theme-preview/

@@ -290,6 +290,12 @@ was performed; installed-session testing remains with the owner.
 Follow the [priority order](ROADMAP.md#next-steps) before the shared-operation
 refactor and TUI.
 
+- [x] Prepare Paper Dark GRUB and Plymouth source themes; retain the selected
+  reference in `docs/images/`. Native QEMU/OVMF GRUB and X11 Plymouth previews
+  are documented in [the preview tool](../tools/boot-theme/README.md). These
+  are rendering checks, not installed Fedora or encrypted-boot validation.
+- [ ] Integrate Plymouth installation, required plugins/font, boot-image
+  refresh and removal. Verify native unlock and fallback through actual boots.
 - [ ] Finish the minimal dark GRUB integration. Check appearance, Fedora-only
   and Windows-present menus, Fedora default, five-second timeout, older kernels
   and theme removal through actual boots.
