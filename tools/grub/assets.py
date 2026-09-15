@@ -27,9 +27,10 @@ def main():
     args = parser.parse_args()
     theme = Path(__file__).resolve().parents[2] / "system" / "grub"
     for name, width, color in (
-        ("selection_c.png", 1, "264a66"),
-        ("scrollbar_frame_c.png", 4, "1b2633"),
-        ("scrollbar_thumb_c.png", 4, "a7b5c5"),
+        ("selection_c.png", 1, "2b2b2b"),
+        ("scrollbar_frame_c.png", 4, "2b2b2b"),
+        ("scrollbar_thumb_c.png", 4, "aaaaaa"),
+        ("rule.png", 1, "888888"),
     ):
         path = theme / name
         content = png(width, color)
