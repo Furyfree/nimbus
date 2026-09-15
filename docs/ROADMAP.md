@@ -9,20 +9,27 @@ Existing local code is a candidate, not proof that the new contract is shipped.
 
 ## Next steps
 
-Publish the validated DTU native-label verification correction as 0.5.10.
-The owner confirmed the desktop command accepts the existing certificate;
-see [TASKS](TASKS.md#dtu-native-selinux-verification-correction).
+The terminal-test correction is committed and pushed, pending merge/release.
+The owner confirms the desktop MOK command and Bluetooth/LibrePods issue are
+resolved. DTU certificate setup is delivered; actual campus connectivity waits
+for the owner's report. See the
+[current checklist](TASKS.md#current-workthrough-status-2026-09-15) for evidence
+and remaining work rather than reopening completed trials.
 
-Release 0.5.9 corrects the terminal-test process-exit race that blocked the
-0.5.7 COPR build and a separate interrupt-readiness race exposed during 0.5.8
-release checks. Both changes preserve test deadlines and change no installer
-runtime behavior. Publication and validation evidence are tracked in
-[TASKS](TASKS.md#version-059-terminal-interrupt-test-correction).
+WoWUp's standalone helper is complete and published as COPR 0.3.0. DNF owns
+package updates and triggers the helper's app installation; no duplicate
+Topgrade update step is needed. The owner accepted the completed helper work.
+Its optional Nimbus selection and stale setup messaging remain later
+workstation integration, not a reason to reopen helper development.
 
-The approved DTU network task targets release 0.5.7: download the pinned CA
-bundle only during explicit postinstall, install it for NetworkManager, and
-verify without broadening global trust or managing account credentials. See
-[TASKS](TASKS.md#dtu-eduroam-certificate) for validation and release status.
+Paper Dark GRUB and Plymouth sources and native previews are committed and
+pushed on `feat/paper-dark-boot`, pending merge. Next, finish supported theme
+installation and removal, preserving Fedora, Windows and fallback boot
+entries. Actual Fedora boot and encrypted-unlock verification remain pending.
+Keep FDE auto-unlock separate from appearance work. Reconcile other hardware
+results with the owner before assigning further checks. Dockur, final
+installation/recovery trials, documentation cleanup and release validation
+remain later work.
 
 The Tailscale operator task now distinguishes initial sign-in from an existing
 signed-in profile. Initial setup offers native sign-in with the operator set
@@ -689,8 +696,9 @@ its Fedora 44 COPR RPM now support those definitions. Chezmoi owns the asset lin
 and native Topgrade updater; Zeron owns application and service state.
 
 Keep only helper RPM declarations and small post-install calls in Nimbus.
-COPR helpers own downloads, verification, installation, status and removal;
-Topgrade calls their explicit updates. No custom application provider is needed.
+COPR helpers own downloads, verification, installation, status and removal.
+WoWUp updates through its DNF package lifecycle; do not add a separate Topgrade
+helper update. No custom application provider is needed.
 Tailscale operator setup uses the same explicit post-install approval flow,
 with native preference verification and a documented revocation command.
 Validate this new action in disposable Fedora before claiming host coverage.
@@ -699,8 +707,9 @@ available. The task requires engine 0.4.6 or newer; delivery and native
 validation evidence are tracked in TASKS.
 The matching greeter appearance is prepared in the Hyprland session component;
 activation of its read-only systemd mount still needs a sync/reboot trial.
-WoWUp requires a standalone install/update interface in COPR before integration
-can finish. Uninstalling a helper alone does not remove its application.
+WoWUp's standalone interface is published. Its package removal also removes
+the app; personal data stays unless the user explicitly runs purge. The optional
+Nimbus selection and outdated blocked status remain later integration work.
 
 Bootstrap logging and terminal supervision were reviewed and retained: they
 must work before the engine is installed and preserve cancellation. Bootstrap

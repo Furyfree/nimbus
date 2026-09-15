@@ -304,8 +304,10 @@ Bare `nimbus` prints help. [Next steps](docs/ROADMAP.md#next-steps): GRUB,
 FDE auto-unlock post-install, shared operations, then the dashboard.
 
 COPR helpers own application downloads and removal. Copilot initial setup is
-available through `nimbus postinstall copilot`. WoWUp still needs standalone
-install/update commands in its COPR helper before integration can finish.
+available through `nimbus postinstall copilot`. WoWUp still needs optional
+Nimbus integration; its published COPR helper already installs and updates
+through DNF, removes the app on package removal and offers explicit profile
+purge. See [current integration status](docs/TASKS.md#before-the-desktop-trial).
 Repair uses TTY; old owned graphical recovery files retire on sync. The
 Hyprland/Noctalia profile uses Snapper around system changes with six-snapshot
 retention. See [snapshot behavior and limits](docs/SPEC.md#snapper).

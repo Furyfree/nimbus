@@ -235,10 +235,22 @@ both through COPR installer helpers. Updating the helper RPM alone does not
 prove that the downloaded app is installed. Copilot helper 0.3.0 and newer
 queues a separate app installation job after DNF, using its pinned release;
 earlier versions need the explicit post-install action. Topgrade invokes the
-helper's update command. App status and uninstall belong to the helper.
-Removing the helper RPM leaves the app installed; uninstall the app first.
+Copilot helper's update command. Removing that helper RPM leaves Copilot
+installed; uninstall the app first.
+
+WoWUp helper 0.3.0 is published. Installing, reinstalling or upgrading its RPM
+queues a separate job to install the package-selected app release. DNF
+completion proves only that the job was queued; the helper's status and service
+result establish app completion. Updates follow DNF, with no separate Topgrade
+helper step. Final package removal removes the verified app and desktop entry;
+user settings, games and addons remain. Explicit unprivileged profile purge is
+available before removing the helper. The
+[COPR helper documentation][wowup-helper] owns its commands and recovery details.
+App status and uninstall belong to each helper.
 Nimbus retains old app receipts without using them to remove applications.
 See [Security](#security) for the download exceptions.
+
+[wowup-helper]: https://github.com/Furyfree/copr/tree/main/packages/wowup-cf-installer
 
 ## Installation workflow
 
@@ -741,28 +753,29 @@ GUI readiness from current unlock state, which it does not inspect.
 
 Copilot uses its helper's read-only status and standalone install command.
 ProtonPlus lists native Steam runners before and after installation. These
-native results override old completion evidence. WoWUp remains blocked until
-its helper supplies standalone installation. Fingerprints and MOK retain native
-checks; MOK enrollment still requires the firmware procedure. MOK inspection
-distinguishes missing, empty, permission-denied and other unreadable certificate
-states. Only an explicit task may offer approved read-only sudo verification of
-the fixed public certificate and its enrollment; no enrollment or permission
-changes are performed. Status/help/plan never authenticate. Stored verification
-is displayed as "Previously verified" when a permission-protected certificate
-prevents rechecking. Final reports put this historical result in notices, outside
-pending setup and verification problems. JSON retains the native `unknown`
-status and adds `previously_verified: true`; this is evidence of an earlier check,
-not current verification. Missing, unenrolled or otherwise failed native checks
-retain their normal status, and explicit verification clears the historical
-presentation before checking again.
-Enrollment checks use `--ignore-keyring --test-key` to bypass the kernel-keyring
-shortcut, which does not establish MOK/firmware enrollment. For the supported
-mokutil 0.7.2 behavior, an exact enrolled/trusted result with exit 1 is complete;
-an exact not-enrolled result with exit 0 or a pending request with exit 1 remains
+native results override old completion evidence. WoWUp's helper is published,
+but Nimbus's optional selection and outdated blocked-task message still need
+integration. Fingerprints and MOK retain native checks; MOK enrollment still
+requires the firmware procedure. MOK inspection distinguishes missing, empty,
+permission-denied and other unreadable certificate states. Only an explicit
+task may offer approved read-only sudo verification of the fixed public
+certificate and its enrollment; no enrollment or permission changes are
+performed. Status/help/plan never authenticate. Stored verification is
+displayed as "Previously verified" when a permission-protected certificate
+prevents rechecking. Final reports put this historical result in notices,
+outside pending setup and verification problems. JSON retains the native
+`unknown` status and adds `previously_verified: true`; this is evidence of an
+earlier check, not current verification. Missing, unenrolled or otherwise
+failed native checks retain their normal status, and explicit verification
+clears the historical presentation before checking again. Enrollment checks
+use `--ignore-keyring --test-key` to bypass the kernel-keyring shortcut, which
+does not establish MOK/firmware enrollment. For the supported mokutil 0.7.2
+behavior, an exact enrolled/trusted result with exit 1 is complete; an exact
+not-enrolled result with exit 0 or a pending request with exit 1 remains
 pending. Denylisted keys are blocked. Unexpected output or exit status remains
-unknown. The certificate path must match, and process errors retain their typed
-exit status through the native runner. This follows the native
-[mokutil test-key implementation][mok-test-key].
+unknown. The certificate path must match, and process errors retain their
+typed exit status through the native runner. This follows the native [mokutil
+test-key implementation][mok-test-key].
 
 [mok-test-key]: https://github.com/lcp/mokutil/blob/0.7.2/src/mokutil.c#L1448
 
@@ -1137,16 +1150,20 @@ The hidden `sync --no-upgrade` alias remains compatible;
 ordinary sync omits general software updates. Installed tests must cover
 repository updates, Chezmoi apply and the fresh-engine upgrade handoff.
 
-WoWUp's helper still needs standalone install/update commands and a published
-package source. Copilot helper publication and native app behavior also need
-verification. Nimbus no longer has custom app providers or Cargo/user-tool
-installation lists; Mise, Zed and Zeron use native binary bootstraps.
+WoWUp's standalone helper is complete and published; optional Nimbus selection
+and task messaging remain unfinished. Copilot helper publication and native
+app behavior also need verification. Nimbus no longer has custom app providers
+or Cargo/user-tool installation lists; Mise, Zed and Zeron use native binary
+bootstraps.
 
-Bare `nimbus` prints help until the dashboard is built. GRUB assets are present
-but inactive; FDE auto-unlock is not implemented. These boot features come
-before shared-operation extraction and the TUI. Installed TTY repair, legacy
-session retirement, clean install, upgrade and hardware trials remain open.
-[TASKS.md](TASKS.md) records evidence.
+Bare `nimbus` prints help until the dashboard is built. GRUB assets are
+present but inactive. Paper Dark GRUB and Plymouth sources and native renderer
+previews are committed on `feat/paper-dark-boot`, pending merge, supported
+installation, removal and actual Fedora boot verification. FDE auto-unlock is
+not implemented. These boot features come before shared-operation extraction
+and the TUI. Installed TTY repair, legacy session retirement, clean install,
+upgrade and hardware trials remain open. [TASKS.md](TASKS.md) records
+evidence.
 
 ## Out of scope
 

@@ -10,6 +10,49 @@ repository updates during sync, Zed installation, browser fallbacks and
 reporting fixes. The signed Fedora 44 COPR package is available; its new
 installation and reboot checks remain pending.
 
+## Current workthrough status, 2026-09-15
+
+- [x] Fix the terminal interrupt fixture's buffered-output race. Commit
+  `f953906` is pushed on `fix/terminal-interrupt-stdout`; 500 local and 500
+  Fedora repetitions pass. This source fix is not yet merged or released.
+  See [validation](#terminal-interrupt-buffered-output-correction).
+- [x] Verify the existing `nvidia-mok` command on the desktop. The owner
+  reports it works. This closes that command's desktop trial, not validation
+  of a new key-generation, module-rebuild or automatic-enrollment workflow.
+- [x] Resolve the reported Bluetooth/LibrePods issue. The owner confirms the
+  fix; COPR commit `816d826` accepts A2DP profiles with input loopbacks, and
+  `librepods-20260826-2.fc44` is installed on the current machine. Live checks
+  are recorded in the [COPR package documentation][librepods-validation].
+- [x] Verify DTU certificate setup; the corrected native SELinux verification
+  is delivered in 0.5.10. Certificate setup does not prove campus connectivity.
+- [ ] **Awaiting owner report:** connect to DTU eduroam and confirm internet
+  access during the planned campus test. Do not repeat certificate work or
+  treat this as an implementation failure while the result is pending.
+- [x] Finish and publish the standalone WoWUp helper. COPR 0.3.0 installs and
+  updates the app through DNF, removes it on package removal, and offers
+  explicit user-profile purge. Desktop install/removal passed; purge passed
+  isolated and packaged-command tests. The owner considers this work complete.
+  See [helper delivery][wowup-delivery]. No duplicate Topgrade update is needed.
+  CurseForge addon downloads and purge of the real profile remain unverified;
+  they do not block moving on from this helper work.
+- [x] Prepare Paper Dark GRUB and Plymouth themes. Commit `7d0732d` is pushed
+  on `feat/paper-dark-boot`, pending merge. It retains the selected reference,
+  native renderer previews and theme sources. See [theme evidence][paper-dark].
+  Native rendering and `just check` pass; no host boot configuration changed.
+- [ ] **Next:** finish the themes' supported installation and removal. Preserve
+  Fedora boot behavior, Windows and fallback entries. Native previews do not
+  establish actual encrypted boot, hardware appearance or removal behavior.
+- [ ] Reconcile other desktop/laptop checks with the owner's experience before
+  scheduling tests. Do not reopen the resolved Bluetooth issue by default.
+
+Dockur, FDE, shared operations/TUI, complete installation and recovery
+trials, documentation cleanup and final release validation remain later work.
+No live setup evidence or completion receipts were changed by this status update.
+
+[librepods-validation]: https://github.com/Furyfree/copr/blob/816d826b6deca9afacd537366ed12de2721e4c75/packages/librepods/README.md#validation
+[wowup-delivery]: https://copr.fedorainfracloud.org/coprs/furyfree/wowup-cf-installer/build/10989485/
+[paper-dark]: https://github.com/Furyfree/nimbus/blob/7d0732d8808accccd15ded5bf8f4da823e548d05/tools/boot-theme/README.md
+
 ## DTU eduroam certificate
 
 - [x] Select explicit `dtu-network` prerequisites on desktop and laptop only.
@@ -29,9 +72,10 @@ installation and reboot checks remain pending.
 - [x] Network-disabled Fedora container with the built candidate verifies native
   atomic installation, exact bytes, root ownership, file/directory modes, stale
   approval refusal, symlink refusal and writable-parent refusal. No host mounts.
-- [ ] Publication as 0.5.7 is authorized. Native SELinux-enforcing and actual
-  campus Wi-Fi validation remain for the released candidate on the laptop.
-  No host/laptop installation, sudo or network repair during implementation.
+- [x] Publish the certificate task and the 0.5.10 native SELinux verification
+  correction; see [release evidence](#dtu-native-selinux-verification-correction).
+- [ ] Await the owner's actual campus connection and internet-access report.
+  See [current status](#current-workthrough-status-2026-09-15).
 - [ ] Review DTU's renewed CA bundle before the first intermediate expires on
   2027-12-02; see the [README workflow](../README.md#workflow).
 
@@ -730,12 +774,12 @@ native/inspection split does not complete the CLI/TUI operation boundary.
 See [integration](ROADMAP.md#3-finish-workstation-integration) and
 [delivery](ROADMAP.md#5-prepare-the-desktop-trial).
 
-- [ ] Add standalone install/update commands to the WoWUp COPR helper, then
-  connect the small post-install action and Topgrade updater. No artifact
-  adapter in Nimbus.
-- [ ] Confirm published helper interfaces and package sources. Enable WoWUp's
-  gaming selection after its helper and repository key are available. Native
-  signatures stay enabled; no separate audit of the owner's package contents.
+- [x] Publish WoWUp's standalone install/update interface and DNF lifecycle,
+  including automatic app removal and explicit personal-data purge. Updates
+  follow DNF; no separate Topgrade updater or Nimbus artifact adapter is needed.
+- [ ] During later workstation integration, enable the optional WoWUp gaming
+  selection and replace Nimbus's outdated blocked-helper status. The helper
+  and COPR repository are published. Keep native package signatures enabled.
 - [x] Confirm matching Nimbus/Topgrade delivery in the installed VM: engine
   0.3.1 and a custom `nimbus upgrade --system` step are present.
 - [ ] Verify installed update/constraint behavior: allowed family updates,
@@ -761,9 +805,14 @@ Chezmoi owns user files.
 
 ## Hardware-only checks
 
-These wait for a proper installation and do not block independent local work.
+Reconcile remaining checks with the owner before scheduling more trials. These
+do not block independent local work; completed results are recorded below.
 
-- [ ] GPU, suspend/power, audio, Bluetooth/Librepods, fingerprint and NVIDIA MOK.
+- [x] Existing NVIDIA MOK command works on the desktop, per the owner.
+- [x] Reported Bluetooth/LibrePods issue is resolved, per the owner and the
+  installed COPR patch; see [current status](#current-workthrough-status-2026-09-15).
+- [ ] Reconcile GPU, suspend/power, other audio and fingerprint results with
+  the owner; test only outstanding behavior.
 - [ ] Portal file picking/screen sharing, UWSM logout/relogin and failure
   cleanup. Change startup only for a reproduced problem.
 - [ ] Appearance, keyring unlocking and application integration; recheck
@@ -1251,8 +1300,9 @@ verify the version, all machine definitions and command help. The owner will
 update and test the laptop through Nimbus; release work made no laptop or live
 desktop configuration changes.
 
-- [ ] Review terminal-cancellation and foreground-restoration test timing/reaping;
-  successful retries do not establish that those intermittent failures are fixed.
+- [x] Correct foreground-restoration, interrupt-readiness and buffered-output
+  races with demonstrated failure cases. See the 0.5.8 and 0.5.9 notes below
+  and the [latest correction](#terminal-interrupt-buffered-output-correction).
 
 ## Version 0.5.7 publication
 
