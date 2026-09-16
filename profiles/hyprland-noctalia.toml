@@ -14,7 +14,7 @@ packages = [
   "celluloid",
   "mpv",
   "obs-studio",
-  "pinta",
+  "flatpak:com.github.PintaProject.Pinta",
   "zathura",
   # Zathura's core needs a format plugin to read PDFs.
   "zathura-pdf-poppler",
