@@ -394,45 +394,106 @@ the preference and package deselection does not reset it. Revoke it through
 `sudo tailscale set --operator=` or explicitly choose another operator;
 `tailscale down` disconnects without removing the operator.
 
-The explicit `dtu-network` component selects NetworkManager and native SELinux
-tools on desktop and laptop, not the generic VM. Its `postinstall dtu-network`
-task owns only `/etc/NetworkManager/certs/dtu-eduroam.pem`. Sync installs the
-prerequisite packages but never downloads or installs this certificate.
-This supersedes the earlier course-repository certificate setup proposal;
-Chezmoi and `dtu-bachelor` do not own the trust material.
+The explicit `dtu-network` component selects NetworkManager, Python with
+native DBus bindings and SELinux tools on desktop and laptop. Sync installs
+prerequisites only. Its explicit Linux postinstall installs
+`/etc/NetworkManager/certs/dtu-eduroam.pem` and coordinates one named,
+user-restricted `Nimbus DTU eduroam` profile through NetworkManager. Chezmoi
+and the course repository own neither network trust nor credentials.
 
-Inspection and previews are offline and unprivileged. Require applied package
-receipts and a named non-root caller; observe the file without following links,
-check root-owned non-writable parents and compare metadata and SELinux labels.
-Use native `matchpathcon -V` verification for labels; a preserved SELinux user
-field alone does not require repair. Retain full context observations in the
-approval evidence. Distinguish a reported mismatch from failed inspection, and
-name the failing path or metadata field in diagnostics.
-Missing files are pending; unfamiliar content blocks replacement. Unreadable
-or unsafe paths remain unknown. A matching valid file and labels need no work.
+Inspection is offline, unprivileged and secret-free. Require a named non-root
+caller and selected, installed prerequisites. A valid Nimbus receipt or an
+exact native package identity (name and architecture) in the schema-2 recorded
+baseline establishes availability. Baseline packages are used without claiming
+ownership or writing adoption receipts. An existing invalid/foreign receipt
+still blocks; baseline evidence cannot override it. Missing packages, unknown
+inspection, ambiguous installed identities and unrecorded packages still block.
+Observe certificate parents, content,
+metadata and native `matchpathcon -V` results without following links. Bind
+approval to those observations and a digest of native non-secret settings;
+recheck before mutation, including after credential authorization. Detect saved
+Wi-Fi profiles by SSID (`eduroam` or `DTUsecure`), regardless of profile name
+or realm; this avoids silently creating a duplicate eduroam connection. List
+all matching SSIDs and UUIDs before offering their deletion and replacement.
+Default to keeping them; even `--yes` cannot bypass the interactive default-No
+replacement prompt. Declining reads no credentials, changes no certificate or
+profile, and records no new verification evidence. Presence alone is not
+proof of secure configuration or connection. Preserve unrelated profiles.
+A deterministic
+per-user UUID, ownership marker, profile name and user permissions identify the
+owned profile; collisions or ambiguous ownership block changes.
 
-After approval and a fresh inspection, download only the fixed HTTPS URL
-`https://itswiki.compute.dtu.dk/images/0/07/Eduroam_aug2020.pem`, with a timeout,
-64 KiB limit and no redirects. Require SHA-256
-`936b4f18224d20594983341d08c6dd8cebc69e384c2d22e65a55f86689b76a73`, three valid
-CA certificates and signatures chaining to the included root. The reviewed
-bundle validity ends on 2027-12-02; changes require a reviewed engine release.
-Recheck the observed file after download, then use the existing atomic
-system-file helper through sudo with a private temporary payload. Install
-root:root 0644 and restore native labels on the certificate directory and file
-when SELinux is enabled. Never recursively relabel other files. Verify content,
-metadata, validity and labels before recording user-local completion evidence.
-Partial labeling failures report retry guidance and never record completion.
+The embedded CA bundle comes from DTU's official CAT Linux installer, provider
+533, profile 863 (DTU Non Windows rev2022-10-04), reviewed 2026-09-16. Its
+SHA-256
+is `4044ec3c69ea71dade30be85294f22d6a3659cfb9c2b90986cebe3623775a7c1`.
+Validate all three CA certificates and signatures against the included root;
+the bundle's common validity ends on 2027-12-02. A renewed bundle requires a
+reviewed engine release. The exact previously pinned 2020 bundle may be
+replaced only during approved setup; all unfamiliar bytes block replacement.
+Reuse atomic system-file
+installation with root:root 0644 and native labels for the directory/file.
+Partial failures remain retryable. No global trust changes or network restart.
 
-Trust is scoped to NetworkManager's explicit CA-file setting. Do not add a
-global trust anchor, run `update-ca-trust`, modify Wi-Fi profiles or credentials,
-or restart/activate network connections. Guided instructions identify the CA
-path and refer to current DTU authentication and server-name settings. Successful
-certificate installation does not prove eduroam authentication. Native file
-state overrides saved evidence; reset or component removal does not delete the
-file. Unknown files are preserved, and manual removal requires reviewing
-profiles that reference the file. Public certificate fixtures are permitted
-in tests; account data and native network profiles are not.
+The embedded Python helper adapts CAT's NetworkManager path; it does not run a
+freshly downloaded script or perform unapproved same-SSID deletion. Use
+PEAP/MSCHAPv2, anonymous identity `anonymous@dtu.dk`, the pinned CA file and
+exact `domain-match` names `ait-pisepsn03.win.dtu.dk` and
+`ait-pisepsn04.win.dtu.dk`. Do not bypass server certificate verification or
+lower native TLS validation. CAT notices and licence are retained in
+`internal/postinstall/dtu/network.py` and `licenses/GEANT-CAT.txt`.
+
+Only after approval, offer manual hidden password entry or a 1Password login
+item UUID. The optional `--onepassword-item` selects that method directly.
+Read its standard `username` and `password` fields with the caller's native
+`op` CLI; do not run it through sudo. Append `@dtu.dk` only to a bare username;
+reject empty fields, duplicate fields and other domains. Credentials remain
+in process memory/private pipes until handed to NetworkManager; no secret
+arguments, environment variables, temporary files, diagnostic logs or Git.
+NetworkManager owns password storage with `password-flags=0` in its root-only
+system connection file, unencrypted within that file. Explain this before
+approval; Nimbus never writes its own credential file. Noctalia 5.1.0 accepts
+`SaveSecrets` without storing anything, so agent-owned passwords do not work
+for unattended connection in this session. Both credential input methods use
+the same native storage. During approved setup only, read back the password
+from the newly created profile through `GetSecrets` and compare privately
+before activation. Inspection never retrieves passwords. Failure to retain or
+verify the supplied password fails setup; do not silently fall back to another
+password prompt. Native profile deletion removes its saved credential file.
+
+Create with automatic connection disabled until profile/password verification
+passes, then enable and verify automatic connection before the optional
+connect-now prompt. Explain before approval that NetworkManager may connect
+when eduroam becomes available. Declining immediate activation or running
+noninteractively keeps autoconnect enabled and reports connection untested.
+After connect-now approval, accept an already active owned profile or use a
+fresh native Wi-Fi scan before activation. An absent eduroam SSID is a normal
+configured-for-later outcome; explain that the profile/password are saved,
+Wi-Fi must be enabled, and no setup rerun is needed. Failed scans are unknown,
+never proof that eduroam is absent. Inspection never scans or activates.
+Reruns offer the same keep-or-replace choice even for a valid Nimbus profile.
+Actual scan/activation errors fail setup even when the observed profile is
+valid; never record successful completion for these errors.
+After applying, completion means certificate and profile configuration verified;
+native connection state,
+Internet/DTU access and reboot reconnection are separate evidence. A failure
+after certificate installation or profile creation preserves that partial
+state for inspection/retry. Update credentials or remove the owned profile
+through NetworkManager's editor or explicitly approve recreation. Read
+credentials before deleting profiles, verify the approved set again after
+account authorization and before each deletion, and stop on drift. Deletion
+uses native NetworkManager calls for the exact approved UUIDs. Warn that an
+active profile may disconnect and a failed recreation cannot restore its old
+credentials. Report partial deletion honestly and support setup on retry.
+Reset/component deselection does not remove profiles, native credentials or
+the CA. Review remaining CA references before manual certificate removal.
+
+Sources: [DTU CAT installer][dtu-cat], [NetworkManager 802.1X][nm-8021x],
+[1Password item fields][op-item]. The operator commands live in README.
+
+[dtu-cat]: https://cat.eduroam.org/user/API.php?action=downloadInstaller&device=linux&profile=863&lang=en
+[nm-8021x]: https://networkmanager.dev/docs/api/latest/settings-802-1x.html
+[op-item]: https://www.1password.dev/cli/reference/management-commands/item
 
 When AccountsService is selected, the account-picture post-install task
 registers the Chezmoi-supplied JPEG for the invoking non-root user. Require a

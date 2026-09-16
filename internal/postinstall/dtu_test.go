@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,8 +20,9 @@ import (
 
 func dtuFixture(t *testing.T) (Inputs, *nativetest.FakeSource, []byte) {
 	t.Helper()
-	in, src := fixture("NetworkManager", "policycoreutils", "libselinux-utils")
+	in, src := fixture("NetworkManager", "NetworkManager-wifi", "policycoreutils", "libselinux-utils", "python3", "python3-dbus")
 	in.Resolved.Components = []definitions.ResolvedComponent{{ID: "dtu-network"}}
+	src.Commands[nativetest.Key(DTUProfileCommand("inspect")[0], DTUProfileCommand("inspect")[1:]...)] = []byte(`{"observed":"` + strings.Repeat("a", 64) + `","configured":true,"connected":false}`)
 	src.Dirs = map[string][]string{"/": {"etc"}, "/etc": {"NetworkManager"}, "/etc/NetworkManager": {}}
 	for _, dir := range []string{"/etc", "/etc/NetworkManager", dtuCertificateDir} {
 		src.Commands["stat --format=%F|%U|%G|%a|%h -- "+dir] = []byte("directory|root|root|755|2")
@@ -37,15 +37,15 @@ func dtuFixture(t *testing.T) (Inputs, *nativetest.FakeSource, []byte) {
 		src.Commands["stat --format=%C -- "+path] = []byte("unconfined_u:object_r:NetworkManager_etc_t:s0\n")
 		src.Commands["/usr/sbin/matchpathcon -V -- "+path] = []byte(path + " verified.\n")
 	}
-	data, err := os.ReadFile("testdata/dtu-eduroam.pem")
+	data, err := os.ReadFile("dtu/ca.pem")
 	if err != nil {
 		t.Fatal(err)
 	}
-	previousNow, previousFetch := dtuNow, dtuFetch
-	t.Cleanup(func() { dtuNow, dtuFetch = previousNow, previousFetch })
+	previousNow, previousLoad := dtuNow, dtuLoad
+	t.Cleanup(func() { dtuNow, dtuLoad = previousNow, previousLoad })
 	dtuNow = func() time.Time { return time.Date(2026, 9, 14, 0, 0, 0, 0, time.UTC) }
-	dtuFetch = func(context.Context) ([]byte, error) {
-		t.Fatal("unexpected download during inspection")
+	dtuLoad = func(context.Context) ([]byte, error) {
+		t.Fatal("unexpected certificate load during inspection")
 		return nil, nil
 	}
 	t.Setenv("TMPDIR", t.TempDir())
@@ -137,7 +137,7 @@ func TestDTUInspectionIsOfflineAndNativeStateIsAuthoritative(t *testing.T) {
 				}
 				return
 			}
-			task := findTask(t, tasks, "dtu-network")
+			task := dtuCertificateTask(src, in)
 			if task.Status != want || (task.Action != nil) != (want == Pending) {
 				t.Fatalf("unexpected task: %+v", task)
 			}
@@ -218,20 +218,20 @@ func (s *dtuSource) Stream(_, _ io.Writer, name string, args ...string) error {
 	return nil
 }
 
-func TestDTUInstallationDownloadDriftAndVerification(t *testing.T) {
-	for _, mode := range []string{"success", "disabled SELinux", "download failure", "wrong checksum", "canceled", "drift", "write failure", "label failure", "label no effect", "verification failure", "wrong owner", "wrong mode", "no effect", "changed after write"} {
+func TestDTUInstallationDriftAndVerification(t *testing.T) {
+	for _, mode := range []string{"success", "disabled SELinux", "bundle load failure", "wrong checksum", "canceled", "drift", "write failure", "label failure", "label no effect", "verification failure", "wrong owner", "wrong mode", "no effect", "changed after write"} {
 		t.Run(mode, func(t *testing.T) {
 			in, base, data := dtuFixture(t)
 			if mode == "disabled SELinux" {
 				base.Commands["/usr/sbin/getenforce"] = []byte("Disabled")
 			}
-			task := findTask(t, Inspect(base, in), "dtu-network")
+			task := dtuCertificateTask(base, in)
 			src := &dtuSource{FakeSource: base, t: t, data: data, mode: mode}
 			fetched := 0
-			dtuFetch = func(context.Context) ([]byte, error) {
+			dtuLoad = func(context.Context) ([]byte, error) {
 				fetched++
 				switch mode {
-				case "download failure":
+				case "bundle load failure":
 					return nil, errors.New("offline")
 				case "wrong checksum":
 					return []byte("not the certificate"), nil
@@ -246,7 +246,7 @@ func TestDTUInstallationDownloadDriftAndVerification(t *testing.T) {
 				cancel()
 				ctx = canceled
 			}
-			err := RunDTUNetwork(ctx, src, io.Discard, io.Discard, task)
+			err := RunDTUCertificate(ctx, src, io.Discard, io.Discard, task)
 			success := mode == "success" || mode == "disabled SELinux"
 			if (err == nil) != success {
 				t.Fatalf("result: %v", err)
@@ -257,9 +257,9 @@ func TestDTUInstallationDownloadDriftAndVerification(t *testing.T) {
 				}
 			}
 			if mode == "canceled" && fetched != 0 {
-				t.Fatal("download after cancellation")
+				t.Fatal("bundle load after cancellation")
 			}
-			if (mode == "download failure" || mode == "wrong checksum" || mode == "canceled" || mode == "drift") && len(src.streams) != 0 {
+			if (mode == "bundle load failure" || mode == "wrong checksum" || mode == "canceled" || mode == "drift") && len(src.streams) != 0 {
 				t.Fatal("mutation before validation")
 			}
 			if mode == "disabled SELinux" && len(src.streams) != 1 {
@@ -270,47 +270,26 @@ func TestDTUInstallationDownloadDriftAndVerification(t *testing.T) {
 					t.Fatal("staged payload remains")
 				}
 			}
-			if success && findTask(t, Inspect(base, in), "dtu-network").Status != Complete {
+			if success && dtuCertificateTask(base, in).Status != Complete {
 				t.Fatal("install did not converge")
 			}
 		})
 	}
 }
 
-type dtuTransport func(*http.Request) (*http.Response, error)
-
-func (f dtuTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
-
-func TestDTUDownloadHTTPBoundaries(t *testing.T) {
-	for _, mode := range []string{"success", "redirect", "status", "oversized", "failure"} {
-		t.Run(mode, func(t *testing.T) {
-			old := http.DefaultTransport
-			t.Cleanup(func() { http.DefaultTransport = old })
-			requests := 0
-			http.DefaultTransport = dtuTransport(func(req *http.Request) (*http.Response, error) {
-				requests++
-				if req.URL.String() != DTUCertificateURL || req.Method != http.MethodGet {
-					t.Fatal("unexpected download endpoint")
-				}
-				response := &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("bundle")), Request: req}
-				switch mode {
-				case "redirect":
-					response.StatusCode = 302
-					response.Header.Set("Location", "http://untrusted.invalid/cert")
-				case "status":
-					response.StatusCode = 503
-				case "oversized":
-					response.Body = io.NopCloser(strings.NewReader(strings.Repeat("x", dtuMaxDownload+1)))
-				case "failure":
-					return nil, errors.New("offline")
-				}
-				return response, nil
-			})
-			_, err := fetchDTUCertificate(t.Context())
-			if (err == nil) != (mode == "success") || requests != 1 {
-				t.Fatalf("result: %v, requests %d", err, requests)
-			}
-		})
+func TestDTUBundledCertificateAndKnownUpgrade(t *testing.T) {
+	in, src, _ := dtuFixture(t)
+	data, err := loadDTUCertificate(t.Context())
+	if err != nil || validateDTUCertificate(data, dtuNow()) != nil {
+		t.Fatal("invalid embedded certificate", err)
+	}
+	old, err := os.ReadFile("testdata/dtu-eduroam.pem")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dtuInstalled(src, old)
+	if task := dtuCertificateTask(src, in); task.Status != Pending || task.Action == nil {
+		t.Fatal("known old certificate cannot be upgraded", task)
 	}
 }
 
@@ -319,7 +298,7 @@ func TestDTUCertificatePinValidityAndForgedActions(t *testing.T) {
 	if err := validateDTUCertificate(data, dtuNow()); err != nil {
 		t.Fatal(err)
 	}
-	for _, now := range []time.Time{time.Date(2010, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2027, 12, 2, 11, 25, 30, 0, time.UTC)} {
+	for _, now := range []time.Time{time.Date(2010, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2027, 12, 2, 11, 29, 11, 0, time.UTC)} {
 		if validateDTUCertificate(data, now) == nil {
 			t.Fatal("accepted outside bundle validity")
 		}
@@ -330,7 +309,7 @@ func TestDTUCertificatePinValidityAndForgedActions(t *testing.T) {
 		}
 	}
 	for _, mode := range []string{"id", "kind", "digest", "argv", "commands", "status"} {
-		task := findTask(t, Inspect(src, in), "dtu-network")
+		task := dtuCertificateTask(src, in)
 		switch mode {
 		case "id":
 			task.ID = "other"

@@ -19,10 +19,20 @@ release checks. Both changes preserve test deadlines and change no installer
 runtime behavior. Publication and validation evidence are tracked in
 [TASKS](TASKS.md#version-059-terminal-interrupt-test-correction).
 
-The approved DTU network task targets release 0.5.7: download the pinned CA
-bundle only during explicit postinstall, install it for NetworkManager, and
-verify without broadening global trust or managing account credentials. See
-[TASKS](TASKS.md#dtu-eduroam-certificate) for validation and release status.
+Extend DTU postinstall with the approved guided Linux eduroam setup: adapt the
+reviewed CAT profile, choose manual or 1Password credentials, keep existing
+DTU profiles unless replacement is explicitly confirmed, and separately confirm
+connecting. Recorded baseline packages satisfy installed prerequisites without
+being adopted by postinstall. NetworkManager stores the password in its
+root-only native file, without depending on desktop secret-agent persistence.
+The owner verified connection using both 1Password and manual credentials
+with the corrected installer on the laptop, without a second password prompt.
+The owner also reports working Wi-Fi after reboot. Off-campus setup now keeps
+automatic connection enabled and treats a missing eduroam network as configured
+for later; native fixture coverage passes. DTU-only services and password
+renewal remain separate checks.
+See [TASKS](TASKS.md#dtu-eduroam-guided-setup). The earlier certificate-only
+release remains distinct from this unpublished addition.
 
 The Tailscale operator task now distinguishes initial sign-in from an existing
 signed-in profile. Initial setup offers native sign-in with the operator set

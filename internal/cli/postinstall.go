@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
@@ -41,11 +42,16 @@ type postinstallSnapshot struct {
 
 func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cobra.Command {
 	var yes, preview, markDone, reset, showDiff bool
+	var onepasswordItem string
 	cmd := &cobra.Command{
 		Use: taskID, Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			replaceDTU := false
 			if opts.json && (yes || markDone || reset || !preview) {
 				return usageError{errors.New("postinstall --json lists tasks only; it cannot select or approve an action")}
+			}
+			if onepasswordItem != "" && !postinstall.ValidDTUItem(onepasswordItem) {
+				return usageError{errors.New("--onepassword-item requires a 26-character 1Password item UUID")}
 			}
 			src := newSource()
 			before, err := inspectPostinstall(src, *flags, taskID)
@@ -74,6 +80,19 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 			}
 			if task.ID == "nvidia-mok" && !preview {
 				return runMOKVerification(cmd, src, before, task, yes)
+			}
+			if task.ID == "dtu-network" && !preview && task.Action != nil && task.Action.DTUProfile != nil && len(task.Action.DTUProfile.Existing) > 0 {
+				fmt.Fprintln(cmd.OutOrStdout(), "Existing Wi-Fi profiles (SSID and exact UUID):")
+				for _, existing := range task.Action.DTUProfile.Existing {
+					fmt.Fprintf(cmd.OutOrStdout(), "  %s  %s\n", existing.SSID, existing.UUID)
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), "Delete these profiles and create Nimbus DTU eduroam? This may disconnect Wi-Fi. Old credentials cannot be restored automatically if recreation fails. Default: keep existing profiles.")
+				if !postinstallTerminal(cmd.InOrStdin()) || !confirmDTUReplacement(cmd.InOrStdin(), cmd.OutOrStdout()) {
+					_, err := fmt.Fprintln(cmd.OutOrStdout(), "Existing profiles and certificates kept unchanged. No credentials were read. Replacement requires interactive confirmation; --yes does not bypass it.")
+					return err
+				}
+				replaceDTU = true
+				task.Status = postinstall.Pending
 			}
 			if err := renderPostinstall(cmd.OutOrStdout(), postinstallView{Machine: before.view.Machine, Tasks: []postinstall.Task{task}}); err != nil {
 				return err
@@ -133,8 +152,10 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 				return err
 			}
 			var runErr error
-			if task.Action.Kind == postinstall.InstallDTUCertificate {
-				runErr = postinstall.RunDTUNetwork(cmd.Context(), src, cmd.OutOrStdout(), cmd.ErrOrStderr(), task)
+			if task.Action.Kind == postinstall.ConfigureDTUNetwork {
+				runErr = postinstall.RunDTUSetup(cmd.Context(), src, cmd.OutOrStdout(), cmd.ErrOrStderr(), task, onepasswordItem, replaceDTU)
+			} else if task.Action.Kind == postinstall.InstallDTUCertificate {
+				runErr = postinstall.RunDTUCertificate(cmd.Context(), src, cmd.OutOrStdout(), cmd.ErrOrStderr(), task)
 			} else if task.Action.Kind == postinstall.RestoreNoctaliaLockscreen {
 				runErr = postinstall.RunNoctaliaLockscreen(cmd.Context(), src, cmd.OutOrStdout(), task)
 			} else if task.Action.Kind == postinstall.SyncNoctaliaPlugins {
@@ -162,7 +183,9 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 				}
 			}
 			var reportErr error
-			if runErr == nil && current.Status == postinstall.Complete {
+			if runErr != nil && task.Action.Kind == postinstall.ConfigureDTUNetwork {
+				_, reportErr = fmt.Fprintf(cmd.OutOrStdout(), "After action: %s: setup failed\nObserved configuration: %s\nVerification: %s\n", current.ID, current.Detail, current.Verification)
+			} else if runErr == nil && current.Status == postinstall.Complete {
 				reportErr = renderPostinstall(cmd.OutOrStdout(), postinstallView{Machine: after.view.Machine, Tasks: []postinstall.Task{current}})
 			} else {
 				_, reportErr = fmt.Fprintf(cmd.OutOrStdout(), "After action: %s: %s\n%s\nVerification: %s\n", current.ID, current.Status, current.Detail, current.Verification)
@@ -183,6 +206,10 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 		cmd.Flags().BoolVar(&markDone, "mark-done", false, "verify existing setup and record completion without applying configuration")
 	}
 	cmd.Flags().BoolVar(&reset, "reset", false, "reset this machine's acknowledgment without changing configuration")
+	if taskID == "dtu-network" {
+		cmd.Flags().StringVar(&onepasswordItem, "onepassword-item", "", "read username and password from this 1Password item UUID after approval; append @dtu.dk to a bare username")
+		cmd.MarkFlagsMutuallyExclusive("onepassword-item", "reset")
+	}
 	if taskID == "onepassword" {
 		cmd.Flags().BoolVar(&showDiff, "diff", false, "show the full private file diff during guided setup, without a pager")
 		cmd.MarkFlagsMutuallyExclusive("diff", "plan", "mark-done", "reset")
@@ -243,6 +270,9 @@ func selectedTask(view postinstallView, id string) (postinstall.Task, error) {
 }
 
 func postinstallCommands(task postinstall.Task) ([][]string, error) {
+	if task.Action != nil && task.Action.Kind == postinstall.ConfigureDTUNetwork {
+		return postinstall.DTUSetupCommands(task)
+	}
 	if task.Action != nil && task.Action.Kind == postinstall.InstallDTUCertificate {
 		return postinstall.DTUCommands(task)
 	}
@@ -349,4 +379,17 @@ func renderPostinstall(out io.Writer, view postinstallView) error {
 	}
 	_, err := out.Write(b.Bytes())
 	return err
+}
+
+// Replacement deliberately defaults to No, unlike the normal apply prompt.
+func confirmDTUReplacement(in io.Reader, out io.Writer) bool {
+	if _, err := fmt.Fprint(out, "Delete and replace? [y/N] "); err != nil {
+		return false
+	}
+	line, err := bufio.NewReader(in).ReadString('\n')
+	if err != nil {
+		return false
+	}
+	answer := strings.ToLower(strings.TrimSpace(line))
+	return answer == "y" || answer == "yes"
 }

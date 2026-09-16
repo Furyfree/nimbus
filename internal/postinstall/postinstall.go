@@ -33,6 +33,7 @@ const (
 	InstallApplication        ActionKind = "install-application"
 	SetTailscaleOperator      ActionKind = "set-tailscale-operator"
 	LoginTailscale            ActionKind = "login-tailscale"
+	ConfigureDTUNetwork       ActionKind = "configure-dtu-network"
 	InstallDTUCertificate     ActionKind = "install-dtu-certificate"
 	SyncNoctaliaPlugins       ActionKind = "sync-noctalia-plugins"
 	SyncHyprlandPlugins       ActionKind = "sync-hyprland-plugins"
@@ -42,6 +43,7 @@ const (
 // Action describes native commands offered for explicit user selection.
 // Argv is used for a single command; Commands is an ordered native workflow.
 type Action struct {
+	DTUProfile *DTUProfile       `json:"dtu_profile,omitempty"`
 	DTU        *DTUCertificate   `json:"dtu,omitempty"`
 	Lockscreen *LockscreenRepair `json:"lockscreen,omitempty"`
 	Hyprland   *HyprlandSetup    `json:"hyprland,omitempty"`

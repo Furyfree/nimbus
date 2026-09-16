@@ -102,10 +102,14 @@ Older designs are history, not active requirements; revalidate before reuse.
 
 ## Neighbouring repositories
 
-Nimbus owns the optional DTU eduroam CA bundle through the explicit
-`dtu-network` postinstall task. Keep it scoped to NetworkManager: no global
-trust anchors, credential storage or automatic Wi-Fi profile changes. The
-course-material repository and Chezmoi do not install this certificate.
+Nimbus owns the optional DTU eduroam CA bundle and coordinates its named,
+user-restricted NetworkManager profile through explicit `dtu-network` setup.
+Read credentials only after approval; NetworkManager owns password storage in
+its root-only system connection file. Explain storage before approval.
+Keep existing eduroam/DTUsecure profiles unless their exact UUIDs are approved
+for deletion and recreation. Preserve unrelated profiles. Ask before connecting.
+No global trust anchors. The course repository and Chezmoi own neither the
+certificate nor network credentials.
 
 The explicit lockscreen postinstall task may back up and remove only Noctalia
 lockscreen-widget overrides after approval, as SPEC defines. This does not

@@ -10,6 +10,63 @@ repository updates during sync, Zed installation, browser fallbacks and
 reporting fixes. The signed Fedora 44 COPR package is available; its new
 installation and reboot checks remain pending.
 
+## DTU eduroam guided setup
+
+Implemented in source; not released as a package. The owner tested the
+candidate on the laptop; the installed release remains unchanged.
+
+- [x] Extend the explicit Linux task with manual or 1Password item credentials,
+  DTU realm normalization, native profile ownership and separate activation.
+- [x] Embed the reviewed CAT CA bundle/profile; retain upstream attribution.
+  Permit replacement of the exact previous bundle while refusing unknown files.
+- [x] Keep inspection offline and secret-free; preserve unrelated profiles and
+  private credentials. Existing eduroam/DTUsecure profiles trigger a default-No
+  deletion/recreation prompt, including Nimbus profiles. Keeping them leaves
+  certificates untouched; `--yes` cannot bypass replacement approval.
+- [x] Fix the laptop prerequisite blocker: accept selected, installed packages
+  whose exact native identities are recorded in the schema-2 baseline, without
+  adopting them. Keep invalid receipt, missing package and unknown-state blocks.
+  Regression tests cover baseline-only setup and unchanged ownership records.
+- [x] `just check` (including 19 isolated Python credential/profile tests)
+  and `just validate` pass with isolated HOME/XDG state. CLI tests cover
+  approval, keep/replace decisions, empty answers, `--yes`, 1Password item
+  selection, partial deletion/setup, drift and unapproved reruns.
+- [x] Investigate the laptop failure: the owner connects when entering the
+  password in Noctalia. Noctalia 5.1.0's `SaveSecrets` is a no-op, so the
+  agent-owned password supplied by either input method was not retained.
+- [x] Use NetworkManager-owned storage, explained before approval, and privately
+  verify the newly saved password before connection. Failed activation reports
+  failed setup, retains the profile and records no successful completion.
+- [x] A network-disabled Fedora 44 container verifies storage with absent and
+  non-saving agents, root:root 0600 native keyfile permissions, password survival
+  through settings updates and daemon restart, and credential-file removal on
+  native profile deletion. Unrelated profiles and replacement approval remain
+  covered. This does not establish desktop-user authorization or Wi-Fi access.
+- [x] Both manual and 1Password credential paths pass isolated full-setup tests;
+  missing/unreadable saved credentials stop before connection. Connection
+  timeout and omitted native autoconnect defaults are covered.
+- [x] Owner-tested corrected 1Password setup on the laptop (2026-09-16):
+  approved replacement, saved password verification, connection without another
+  password prompt, automatic reconnect enabled, and subsequent status Verified.
+- [x] Owner-tested manual username/password entry on the laptop (2026-09-16):
+  saved password verified, connection succeeded without a second password
+  prompt, and automatic reconnect enabled.
+- [x] Owner reports Wi-Fi works and still works after reboot on the laptop.
+- [x] Support off-campus setup: verify saved credentials, enable automatic
+  connection, then offer immediate connection separately. Native Fedora tests
+  with no Wi-Fi AP verify the normal not-found outcome; isolated tests cover
+  skipping activation, exact SSID matching, scan errors and connection failure.
+- [ ] Separately verify any required DTU-only services and account-password
+  renewal. The latest off-campus flow has fixture coverage, not a new laptop
+  trial.
+- [x] Owner authorized committing and pushing DTU setup to main alongside the
+  separate Pinta Flatpak change. Package release remains separate.
+- [ ] Update the RPM licence metadata and include `licenses/GEANT-CAT.txt` when
+  packaging this separately licensed CAT adaptation.
+
+The following certificate-only evidence predates this addition; it does not
+establish that the new guided connection flow works on campus.
+
 ## DTU eduroam certificate
 
 - [x] Select explicit `dtu-network` prerequisites on desktop and laptop only.

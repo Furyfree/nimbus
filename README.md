@@ -425,34 +425,67 @@ its profile switch can clear permission. Canceled or failed setup remains
 incomplete; rerun the task to inspect and retry. Guided sign-in requires engine
 0.5.7 or newer; older releases only set the operator.
 
-With the `dtu-network` component selected (desktop and laptop), use:
+With the `dtu-network` component selected, the Linux setup candidate offers:
 
 ~~~sh
 nimbus postinstall dtu-network --plan
 nimbus postinstall dtu-network
+# Optional: select the login item in advance (item UUID, not vault UUID).
+nimbus postinstall dtu-network --onepassword-item <ITEM_UUID>
 ~~~
 
-After approval, Nimbus downloads the [DTU eduroam CA bundle][dtu-ca], verifies
-its pinned SHA-256 and all three CA certificates, then atomically installs
-`/etc/NetworkManager/certs/dtu-eduroam.pem` with root ownership, mode 0644 and
-native SELinux labels when enabled. Apply the component's packages through
-`nimbus sync` first. Status and previews stay offline and never request sudo.
-An unfamiliar destination blocks replacement; a matching valid file needs no
-download. Known-file metadata or label drift can be repaired by rerunning.
+Already installed prerequisites recorded in Nimbus's package baseline can be
+used directly. Run `nimbus sync` for missing or unrecorded prerequisites. The guided
+setup installs the reviewed DTU CAT CA bundle and creates your Nimbus DTU
+eduroam profile through NetworkManager. Choose manual credentials or unlock
+1Password and provide the login item's UUID. Its standard `username` and
+`password` fields are used: `s123456` becomes `s123456@dtu.dk`; an existing
+`@dtu.dk` is kept, and a different domain is rejected. Enable 1Password's
+native CLI integration first when choosing that method.
 
-When configuring eduroam in NetworkManager, select that file as the CA
-certificate and follow DTU's current authentication and server-name settings.
-Enter credentials through the native network dialog. This task does not change
-global CA trust, restart networking, create a Wi-Fi profile or test sign-in.
-Completion means only that the certificate is installed and verified.
+Setup first checks saved Wi-Fi profiles by SSID, including `eduroam` and
+`DTUsecure`, regardless of their display names. If any exist, it lists their
+SSIDs and exact UUIDs and asks whether to delete those profiles and create the
+Nimbus profile. The default is **No**; `--yes` cannot bypass this separate
+interactive confirmation. Keeping them changes neither profiles nor the CA
+file and reads no credentials. Unrelated Wi-Fi profiles are never replaced.
+Without an existing profile, setup proceeds through the normal approval flow.
 
-The bundle's first intermediate expires on 2027-12-02. A changed or expired
-bundle requires review and a Nimbus release; downloads cannot silently change
-the trusted certificate. Deselecting the component or using `--reset` leaves
-the installed file in place. Review profiles that reference it before manual
-removal. This task requires engine 0.5.7 or newer.
+Approved replacement reads credentials before deleting profiles. Canceled
+credential authorization preserves them. Deleting an active profile can
+interrupt Wi-Fi; if recreation fails, Nimbus cannot restore its old password.
+Rerun setup or recreate it through NetworkManager. Once the profile and saved
+password are verified, setup enables automatic connection, even away from DTU.
+NetworkManager may connect when eduroam is available. A separate default-No
+prompt offers to connect immediately. Skipping that step leaves setup ready
+for later. If a scan does not find eduroam, setup succeeds with a clear
+"not found nearby; connection not tested" message. No rerun is needed when
+you arrive; Wi-Fi must be enabled. Scan errors and failed authentication or
+activation remain errors, with the saved profile retained.
 
-[dtu-ca]: https://itswiki.compute.dtu.dk/images/0/07/Eduroam_aug2020.pem
+Passwords go privately to NetworkManager, which saves them unencrypted inside
+its root-only system connection file. Nimbus keeps no copy. Setup verifies the
+saved password before attempting connection; Noctalia/keyring storage is not
+required. Manual and 1Password input use the same storage path. Configuration
+alone does not
+prove password acceptance, Internet access or reboot reconnection. Status and
+previews are offline and never authenticate to 1Password. Existing profiles
+are reported as present, not certified as secure or connected by Nimbus.
+
+The CAT bundle differs from Nimbus's former bundle: the same root and Issuing
+CA 02 remain, while Issuing CA 03 (issued in 2022) replaces Issuing CA 01.
+This does not mean a working setup has expired or needs replacing. The bundled
+certificates are used only when you choose the new setup.
+
+Rerunning offers the same keep-or-replace choice, including for Nimbus's own
+profile. `--reset` and deselecting the component do not delete profiles,
+credentials or the certificate. Use NetworkManager for manual removal; review
+remaining references before removing the CA file. Deleting the profile through
+NetworkManager also removes its native file containing the saved password.
+
+This extends the released certificate-only task and is not published yet.
+See [the DTU contract](docs/SPEC.md#small-helpers-and-post-install) and
+[validation status](docs/TASKS.md#dtu-eduroam-guided-setup).
 
 User preferences and account setup belong to the
 [dotfiles first-login checklist](https://github.com/Furyfree/dotfiles#first-login-and-setup-ownership).
