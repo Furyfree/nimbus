@@ -361,6 +361,9 @@ refactor and TUI.
 
 ## NVIDIA MOK helper
 
+Implemented in source; the helper itself is not installation-tested yet. The
+manual native flow below is verified; the helper still needs its own trial.
+
 - [x] Add approved signing and enrollment to `postinstall nvidia-mok`, with
   read-only preview, native password prompts and preservation of existing keys.
 - [x] Verify module signing identifiers, stop on failed builds or boot-image
