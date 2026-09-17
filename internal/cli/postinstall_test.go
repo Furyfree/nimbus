@@ -213,6 +213,7 @@ func TestPostinstallRejectsForgedNativeActions(t *testing.T) {
 		{ID: "copilot", Status: postinstall.Unknown, Action: &postinstall.Action{Kind: postinstall.InstallApplication, Argv: []string{"sudo", "--", "/tmp/github-copilot-installer", "install"}}},
 		{ID: "proton-cachyos", Status: postinstall.Unknown, Action: &postinstall.Action{Kind: postinstall.InstallApplication, Argv: []string{"protonplus", "update", "all"}}},
 		{ID: "proton-cachyos", Status: postinstall.Blocked, Action: &postinstall.Action{Kind: postinstall.InstallApplication, Argv: []string{"protonplus", "install", "steam-system", "proton-cachyos", "latest"}}},
+		{ID: "wowup", Status: postinstall.Pending, Action: &postinstall.Action{Kind: postinstall.InstallApplication, Argv: []string{"sudo", "--", "/tmp/wowup-cf-installer", "install", "--assumeyes"}}},
 		{ID: "voxtype", Status: postinstall.Pending, Action: &postinstall.Action{Kind: postinstall.SetupVoxtype, Commands: [][]string{{"sh", "-c", "voxtype setup"}, {"systemctl", "--user", "enable", "--now", "voxtype.service"}}}},
 		{ID: "hostname", Status: postinstall.Pending, Action: &postinstall.Action{Kind: postinstall.SetHostname, Hostname: "nimbus-laptop", Argv: []string{"sudo", "--", "/usr/bin/hostnamectl", "set-hostname", "other"}}},
 	} {

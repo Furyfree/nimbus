@@ -336,6 +336,8 @@ func postinstallArgv(task postinstall.Task) ([]string, error) {
 			return []string{"fprintd-enroll"}, nil
 		case task.ID == "copilot" && task.Status == postinstall.Pending && task.Action.Kind == postinstall.InstallApplication && slices.Equal(task.Action.Argv, []string{"sudo", "--", "/usr/bin/github-copilot-installer", "install"}):
 			return slices.Clone(task.Action.Argv), nil
+		case task.ID == "wowup" && task.Status == postinstall.Pending && task.Action.Kind == postinstall.InstallApplication && slices.Equal(task.Action.Argv, []string{"sudo", "--", "/usr/bin/wowup-cf-installer", "install", "--assumeyes"}):
+			return slices.Clone(task.Action.Argv), nil
 		case task.ID == "proton-cachyos" && task.Status == postinstall.Pending && task.Action.Kind == postinstall.InstallApplication && slices.Equal(task.Action.Argv, []string{"protonplus", "install", "steam-system", "proton-cachyos", "latest"}):
 			return slices.Clone(task.Action.Argv), nil
 		}
