@@ -37,7 +37,7 @@ menuentry 'Fedora Linux' {{ echo 'Preview only'; sleep 60; }}
 menuentry 'Windows Boot Manager' {{ echo 'Preview only'; sleep 60; }}
 menuentry 'Fedora Linux - previous kernel' {{ echo 'Preview only'; sleep 60; }}
 """ + "".join(f"menuentry 'Older kernel {i}' {{ sleep 60; }}\n" for i in range(8)))
-    theme = Path("/work/system/grub")
+    theme = Path("/work/system/root/boot/grub2/themes/nimbus")
     run("grub2-mkstandalone", "-O", "x86_64-efi", "--locales=", "--fonts=",
         "-o", str(esp / "BOOTX64.EFI"), f"boot/grub/grub.cfg={config}",
         *(f"boot/grub/themes/nimbus/{p.name}={p}" for p in sorted(theme.iterdir())
@@ -96,7 +96,7 @@ menuentry 'Fedora Linux - previous kernel' {{ echo 'Preview only'; sleep 60; }}
 
 
 def plymouth(out):
-    shutil.copytree("/work/system/plymouth/nimbus",
+    shutil.copytree("/work/system/root/usr/share/plymouth/themes/nimbus",
                     "/usr/share/plymouth/themes/nimbus", dirs_exist_ok=True)
     Path("/etc/plymouth/plymouthd.conf").write_text("[Daemon]\nTheme=nimbus\n")
     env = os.environ | {"DISPLAY": ":99", "GDK_BACKEND": "x11"}
@@ -145,10 +145,10 @@ def main():
     out.mkdir(exist_ok=True)
     for size in (16, 20, 24):
         run("grub2-mkfont", "-s", str(size), "-o",
-            f"/work/system/grub/mono-{size}.pf2",
+            f"/work/system/root/boot/grub2/themes/nimbus/mono-{size}.pf2",
             "/usr/share/fonts/dejavu-sans-mono-fonts/DejaVuSansMono.ttf")
     license_text = Path("/usr/share/licenses/dejavu-sans-mono-fonts/LICENSE").read_text()
-    Path("/work/system/grub/FONT-LICENSE").write_text(
+    Path("/work/system/root/usr/share/licenses/nimbus-boot-theme/FONT-LICENSE").write_text(
         "\n".join(line.rstrip() for line in license_text.splitlines()) + "\n")
     grub(out, 1280, 720)
     grub(out, 800, 600)

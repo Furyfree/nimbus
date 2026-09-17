@@ -10,7 +10,9 @@ profiles = [
   "hyprland-noctalia",
 ]
 
-components = []
+components = [
+  "boot-theme",
+]
 
 packages = [
   "mesa-dri-drivers",

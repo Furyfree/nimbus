@@ -351,11 +351,18 @@ refactor and TUI.
   reference in `docs/images/`. Native QEMU/OVMF GRUB and X11 Plymouth previews
   are documented in [the preview tool](../tools/boot-theme/README.md). These
   are rendering checks, not installed Fedora or encrypted-boot validation.
-- [ ] Integrate Plymouth installation, required plugins/font, boot-image
-  refresh and removal. Verify native unlock and fallback through actual boots.
-- [ ] Finish the minimal dark GRUB integration. Check appearance, Fedora-only
-  and Windows-present menus, Fedora default, five-second timeout, older kernels
-  and theme removal through actual boots.
+- [x] Implement activation in source: the theme payload and the inert
+  `/etc/grub.d/36_paper_dark` drop-in ship in the engine package, the
+  `boot-theme` component owns `/etc/nimbus/boot-theme.enabled` with the
+  `grub-config` and `plymouth-theme` triggers, and removal restores the theme
+  observed before installation. Selected for the test VM only.
+- [ ] Ship the payload and drop-in in the 0.6.0 engine package (`nimbus.spec`)
+  and select `boot-theme` in the `common` profile in the release change. The
+  component stays deselected on physical machines until then, so an older
+  engine is never asked to run triggers whose payload it lacks.
+- [ ] Verify installed unlock and fallback through actual boots: Fedora-only
+  and Windows-present menus, Fedora default, five-second timeout, older
+  kernels, LUKS passphrase prompt and theme removal, in a disposable VM first.
 - [ ] Inspect the Fedora/LUKS2 boot path, TPM and Secure Boot support; choose
   the native auto-unlock method and boot-change policy before implementation.
 - [ ] Add explicit post-install preview and approval for FDE auto-unlock,

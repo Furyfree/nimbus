@@ -4,9 +4,12 @@ Original visual reference: [Paper Dark](../../docs/images/paper-dark-reference.p
 Native renders: [GRUB](../../docs/images/paper-dark-grub.png) and
 [Plymouth unlock](../../docs/images/paper-dark-plymouth.png).
 
-The theme sources are `system/grub/` and `system/plymouth/nimbus/`. Both use
-`#101010` backgrounds, `#eeeeee` foregrounds, gray rules and monospace text.
-They are not installed or activated by Nimbus yet.
+The theme payload lives in `system/root/boot/grub2/themes/nimbus/` and
+`system/root/usr/share/plymouth/themes/nimbus/`. Both use `#101010` backgrounds,
+`#eeeeee` foregrounds, gray rules and monospace text. The engine package
+installs both trees; the `boot-theme` component owns
+`/etc/nimbus/boot-theme.enabled` and activates them through the `grub-config`
+and `plymouth-theme` triggers.
 
 Plymouth uses its native script plugin for boot activity, password prompts,
 ordinary questions and messages. Password callbacks receive only a bullet
@@ -17,9 +20,11 @@ activity pulse is indeterminate, not a completion percentage.
 
 Plymouth needs `plymouth-plugin-script`, `plymouth-plugin-label` and
 `dejavu-sans-mono-fonts`, including the required renderer/font assets in the
-boot image. Installation, dracut integration, removal and actual encrypted
-boot verification remain open. Appearance does not change LUKS, TPM, MOK or
-Secure Boot policy. [GRUB notes](../grub/README.md) cover its separate needs.
+boot image; the `boot-theme` component selects these packages. The
+`plymouth-theme` trigger runs `plymouth-set-default-theme -R` and records the
+previous selection so removal restores it. Actual encrypted boot verification
+remains open. Appearance does not change LUKS, TPM, MOK or Secure Boot policy.
+[GRUB notes](../grub/README.md) cover its separate needs.
 
 ## Generate assets
 
@@ -56,7 +61,9 @@ Choose an unused output directory and container name. Preview output contains
 screenshots, temporary VM files and diagnostic logs; keep it outside Git.
 The runner generates PF2 fonts from Fedora's DejaVu Sans Mono package before
 rendering. To refresh the committed fonts, copy `mono-16.pf2`, `mono-20.pf2`,
-`mono-24.pf2` and `FONT-LICENSE` from `/work/system/grub/` before removing the
+`mono-24.pf2` from
+`/work/system/root/boot/grub2/themes/nimbus/` and `FONT-LICENSE` from
+`/work/system/root/usr/share/licenses/nimbus-boot-theme/` before removing the
 container. These are font conversion artifacts, not hand-edited files.
 
 GRUB runs under QEMU/OVMF with a disposable FAT EFI system partition. Plymouth

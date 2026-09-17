@@ -1,0 +1,4 @@
+# Nimbus owns this marker. Its presence activates the Paper Dark boot theme:
+# the engine-provided /etc/grub.d/36_paper_dark drop-in emits the GRUB theme
+# lines, and the grub-config and plymouth-theme triggers refresh the boot
+# configuration and select the matching Plymouth theme.

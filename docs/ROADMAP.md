@@ -734,12 +734,15 @@ state is handled safely, and both affected repositories pass their local gates.
 
 ### GRUB first
 
-Paper Dark sources and native renderer previews are prepared for GRUB and
-Plymouth. Activate them through explicit, reversible native integration;
-Plymouth needs its script/label plugins, font and dracut image refresh.
-Test Fedora-only and Windows-present menus, the five-second timeout, Fedora
-default, older-kernel selection, and removal of the theme. Preserve BLS entries
-and the EFI stub. Use a disposable VM snapshot as an independent test safeguard.
+Paper Dark activation is implemented in source: the engine package ships the
+GRUB/Plymouth payload and the inert `/etc/grub.d/36_paper_dark` drop-in, and the
+`boot-theme` component owns the `/etc/nimbus` marker plus the `grub-config` and
+`plymouth-theme` triggers. The component is selected for the test VM now and for
+the physical machines when the 0.6.0 package ships the payload. Test
+Fedora-only and Windows-present menus, the five-second timeout, Fedora
+default, older-kernel selection, encrypted-boot prompting, and removal of the
+theme. Preserve BLS entries and the EFI stub. Use a disposable VM snapshot as
+an independent test safeguard.
 
 ### FDE auto-unlock second
 

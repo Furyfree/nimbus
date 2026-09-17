@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -615,5 +616,34 @@ func TestGreeterAppearanceChangeExplainsDeferredActivation(t *testing.T) {
 				t.Fatal("restarts display manager")
 			}
 		}
+	}
+}
+
+func TestPlymouthRemovalRestoresRecordedTheme(t *testing.T) {
+	b, src := resourceBuilder()
+	target := "/etc/grub.d/36_paper_dark"
+	have := inspect.SystemFile{Exists: true, Content: []byte("snippet"), Owner: "root", Group: "root", Mode: "0644"}
+	answerFile(src, target, have)
+	file := fileReceipt(target, have)
+	file.Triggers = []string{"grub-config", "plymouth-theme"}
+	b.in.Applied.Receipts[file.Resource] = file
+	b.in.Applied.Receipts["trigger:plymouth-theme"] = state.Receipt{Resource: "trigger:plymouth-theme", Provider: KindTrigger, Machine: "vm", Verified: true, Previous: "text", Intended: "nimbus", Timestamp: time.Unix(10, 0)}
+	trigger := func(ops []Operation) *Operation {
+		for i := range ops {
+			if ops[i].ID == "trigger:plymouth-theme" {
+				return &ops[i]
+			}
+		}
+		return nil
+	}
+	op := trigger(b.systemResources(nil))
+	if op == nil || op.Action != ActionRemove || op.Blocked != "" ||
+		len(op.Steps) != 1 || !slices.Equal(op.Steps[0].Argv, []string{"plymouth-set-default-theme", "-R", "text"}) {
+		t.Fatalf("deselected theme did not restore the recorded selection: %+v", op)
+	}
+	delete(b.in.Applied.Receipts, "trigger:plymouth-theme")
+	op = trigger(b.systemResources(nil))
+	if op == nil || op.Blocked == "" {
+		t.Fatalf("unrecorded removal was not blocked: %+v", op)
 	}
 }

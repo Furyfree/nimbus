@@ -37,7 +37,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
-    theme = Path(__file__).resolve().parents[2] / "system/plymouth/nimbus"
+    theme = (Path(__file__).resolve().parents[2]
+             / "system/root/usr/share/plymouth/themes/nimbus")
     assets = {
         "pixel.png": png(1, 1, lambda x, y: True, (136, 136, 136)),
         "bullet.png": png(10, 10, lambda x, y: math.hypot(x - 5, y - 5) <= 4,

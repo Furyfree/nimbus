@@ -302,7 +302,8 @@ doctor and lists also stay read-only. JSON mutation requires `--yes`; the
 combined upgrade does not support JSON. Chezmoi commands still work directly.
 
 [Paper Dark boot-theme sources and previews](tools/boot-theme/README.md) are
-available for review; activation and Fedora boot validation remain pending.
+available for review. Activation is implemented in source and ships with the
+0.6.0 engine package; Fedora boot validation remains pending.
 
 Bare `nimbus` prints help. [Next steps](docs/ROADMAP.md#next-steps): GRUB,
 FDE auto-unlock post-install, shared operations, then the dashboard.

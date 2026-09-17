@@ -211,18 +211,23 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 		ops = append(ops, op)
 	}
 	// Triggers run after every changed file, once per apply. A failed trigger
-	// has no successful receipt, so the next sync will retry it.
+	// has no successful receipt, so the next sync will retry it. A trigger
+	// referenced only by removals restores the state the install replaced.
 	triggers := map[string]bool{}
+	removalTrigger := map[string]bool{}
 	for _, op := range ops {
 		if op.File != nil && op.Action == ActionRemove {
 			for _, id := range op.File.Triggers {
 				triggers[id] = true
+				removalTrigger[id] = true
 			}
 		}
 	}
+	selectedTrigger := map[string]bool{}
 	for _, file := range b.in.Resolved.Files {
 		for _, id := range file.Triggers {
 			triggers[id] = true
+			selectedTrigger[id] = true
 		}
 	}
 	for _, id := range slices.Sorted(maps.Keys(triggers)) {
@@ -254,6 +259,18 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 					op.Blocked = err.Error()
 				} else if before.Exists && before != desired {
 					op.Blocked = "existing greeter state directory has foreign ownership or mode; explicit migration required"
+				}
+			}
+			if id == "plymouth-theme" && removalTrigger[id] && !selectedTrigger[id] {
+				// The selection returns to what was observed before the
+				// install; that value lives in the previous trigger receipt.
+				previous := receipt.Previous
+				if !ok || previous == "" {
+					op.Blocked = "no recorded previous Plymouth theme; select the boot-theme component to record it before removal"
+				} else {
+					op.Action = ActionRemove
+					op.Summary = "restore the previous Plymouth theme"
+					op.Steps = []Step{{Description: "restore the previous Plymouth theme", Argv: []string{"plymouth-set-default-theme", "-R", previous}, Privileged: true}}
 				}
 			}
 			ops = append(ops, op)
