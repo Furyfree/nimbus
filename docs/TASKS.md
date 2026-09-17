@@ -368,8 +368,16 @@ refactor and TUI.
   Fedora's default menu, the `text` Plymouth theme and a theme-free initramfs;
   re-activation was repeatable. The payload was copied from the candidate
   checkout because the 0.5.10 package does not ship it yet.
+- [x] Remove the redundant `insmod` lines from the drop-in (2026-09-17): the
+  signed GRUB refused them under Secure Boot and printed
+  `shim_lock_verifier_init: prohibited by secure boot policy` on every boot,
+  while the built-in modules rendered the theme anyway. The fixed VM boot
+  console is clean and the menu still renders.
 - [ ] Verify the Windows-present menu on the dual-booting desktop and boot the
   older kernel end to end; the VM had no Windows entry.
+- Accepted limitation: an older kernel whose initramfs was built before
+  activation keeps the default Plymouth prompt until its next rebuild; the
+  GRUB menu stays themed.
 - [ ] Inspect the Fedora/LUKS2 boot path, TPM and Secure Boot support; choose
   the native auto-unlock method and boot-change policy before implementation.
 - [ ] Add explicit post-install preview and approval for FDE auto-unlock,
