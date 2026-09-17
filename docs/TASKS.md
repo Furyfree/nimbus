@@ -356,8 +356,16 @@ refactor and TUI.
   `boot-theme` component owns `/etc/nimbus/boot-theme.enabled` with the
   `grub-config` and `plymouth-theme` triggers, and removal restores the theme
   observed before installation. Selected for the test VM only.
-- [ ] Ship the payload and drop-in in the 0.6.0 engine package (`nimbus.spec`)
-  and select `boot-theme` in the `common` profile in the release change. The
+- [x] Group older kernels under "Previous kernels" through the engine payload
+  `/etc/grub.d/09_nimbus_previous_kernels` and `nimbus internal boot-menu`
+  (2026-09-17). VM-verified: the top level listed only the default kernel plus
+  the submenu, which held the older kernel and the rescue entry; deleting the
+  mirror self-healed at the next mkconfig; a missing engine or marker restored
+  Fedora's flat menu, and marker removal deleted the mirror. The image and
+  drop-in still need the 0.6.0 `nimbus.spec` packaging step below.
+- [ ] Ship the payload and drop-in in the 0.6.0 engine package (`nimbus.spec`),
+  including `/etc/grub.d/09_nimbus_previous_kernels`, and select `boot-theme` in
+  the `common` profile in the release change. The
   component stays deselected on physical machines until then, so an older
   engine is never asked to run triggers whose payload it lacks.
 - [x] Verify the VM boot path (2026-09-17, disposable Fedora 44 with Secure
@@ -377,7 +385,11 @@ refactor and TUI.
   older kernel end to end; the VM had no Windows entry.
 - Accepted limitations: an older kernel whose initramfs was built before
   activation keeps the default Plymouth prompt until its next rebuild; the
-  GRUB menu stays themed. BIOS-only systems are untested (EFI verified). The
+  GRUB menu stays themed. Observed 2026-09-17: booting 7.2.5 through GRUB
+  showed the text-mode disk-unlock prompt although `lsinitrd` shows the nimbus
+  theme in that initramfs, while the UKI path showed the themed prompt;
+  investigate the Plymouth handover before claiming the graphical prompt on
+  every boot path. BIOS-only systems are untested (EFI verified). The
   explicit `set timeout=5` intentionally overrides `GRUB_TIMEOUT`,
   `menu_auto_hide` and `systemctl reboot --boot-loader-menu`. If the engine
   does not ship the payload, or the recorded previous Plymouth theme is gone,
