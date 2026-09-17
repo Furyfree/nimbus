@@ -9,4 +9,5 @@ packages = [
 components = [
   "steam-stack",
   "prism-launcher",
+  "wowup",
 ]

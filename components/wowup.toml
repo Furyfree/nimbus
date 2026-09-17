@@ -1,0 +1,11 @@
+# COPR supplies the helper; the helper owns downloads, verification and the
+# official WoWUp AppImage. Desktop gaming selection only.
+schema = 1
+id = "wowup"
+
+requires = []
+conflicts = []
+
+packages = ["wowup-installer:wowup-cf-installer"]
+
+removes = []
