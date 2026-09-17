@@ -27,9 +27,11 @@ func fdeFixture(t *testing.T) (Inputs, *nativetest.FakeSource) {
 	src.Dirs["/sys/class/tpm"] = []string{"tpm0"}
 	src.Dirs["/sys/firmware/efi/efivars"] = []string{"SetupMode-8be4df61-93ca-11d2-aa0d-00e098032b8c"}
 	src.Files[setupModeVar] = []byte{6, 0, 0, 0, 0}
-	for _, tool := range []string{"systemd-cryptenroll", "ukify", "sbsign", "kernel-install", "dracut"} {
+	src.Files[FDEHookPath] = []byte("#!/bin/sh\n")
+	for _, tool := range []string{"systemd-cryptenroll", "ukify", "sbsign", "kernel-install", "dracut", "efibootmgr"} {
 		src.Paths[tool] = "/usr/bin/" + tool
 	}
+	src.Commands[nativetest.Key("efibootmgr")] = []byte("BootCurrent: 0008\nTimeout: 0 seconds\nBootOrder: 0008,0000\nBoot0008* Fedora\tHD(1,GPT,78f7ab0d-3bb7-4c71-ba1b-d8f8db372fdc,0x800,0x200000)/\\EFI\\fedora\\shimx64.efi\n")
 	return in, src
 }
 
@@ -37,7 +39,7 @@ func TestFDEInspectionStates(t *testing.T) {
 	t.Run("ready", func(t *testing.T) {
 		in, src := fdeFixture(t)
 		got := findTask(t, Inspect(src, in), "fde")
-		if got.Status != Pending || got.Action != nil || !strings.Contains(got.Detail, "not implemented yet") {
+		if got.Status != Pending || got.Action == nil || got.Action.Kind != SetupFDE || !strings.Contains(got.Detail, "Approved setup writes the marker") {
 			t.Fatalf("got %+v", got)
 		}
 	})
@@ -155,6 +157,40 @@ func TestFDEInspectionStates(t *testing.T) {
 		in, src := fdeFixture(t)
 		delete(src.Files, "/proc/mounts")
 		if got := findTask(t, Inspect(src, in), "fde"); got.Status != Unknown {
+			t.Fatalf("got %+v", got)
+		}
+	})
+	t.Run("missing hook payload", func(t *testing.T) {
+		in, src := fdeFixture(t)
+		delete(src.Files, FDEHookPath)
+		got := findTask(t, Inspect(src, in), "fde")
+		if got.Status != Blocked || !strings.Contains(got.Detail, "does not ship the kernel-install hook") {
+			t.Fatalf("got %+v", got)
+		}
+	})
+	t.Run("active setup needs root", func(t *testing.T) {
+		in, src := fdeFixture(t)
+		src.Files[FDEUKIMarker] = []byte(fdeMarkerText)
+		src.Commands[nativetest.Key("efibootmgr")] = []byte("BootCurrent: 0009\nBootOrder: 0009,0008\nBoot0009* Nimbus UKI\tHD(1,GPT,78f7ab0d-3bb7-4c71-ba1b-d8f8db372fdc,0x800,0x200000)/\\EFI\\Linux\\nimbus.efi\n")
+		got := findTask(t, Inspect(src, in), "fde")
+		if got.Status != Unknown || !got.VerificationNeedsRoot || got.Action != nil {
+			t.Fatalf("got %+v", got)
+		}
+	})
+	t.Run("wrong entry offers repair", func(t *testing.T) {
+		in, src := fdeFixture(t)
+		src.Files[FDEUKIMarker] = []byte(fdeMarkerText)
+		src.Commands[nativetest.Key("efibootmgr")] = []byte("BootCurrent: 0008\nBootOrder: 0008,0009\nBoot0008* Fedora\tHD(1,GPT,78f7ab0d-3bb7-4c71-ba1b-d8f8db372fdc,0x800,0x200000)/\\EFI\\fedora\\shimx64.efi\nBoot0009* Nimbus UKI\tHD(1,GPT,78f7ab0d-3bb7-4c71-ba1b-d8f8db372fdc,0x800,0x200000)/\\\\EFI\\\\Linux\\\\nimbus.efi\n")
+		got := findTask(t, Inspect(src, in), "fde")
+		if got.Status != Pending || got.Action == nil || got.Action.Kind != SetupFDE || !strings.Contains(got.Detail, "missing or different") {
+			t.Fatalf("got %+v", got)
+		}
+	})
+	t.Run("foreign marker blocks", func(t *testing.T) {
+		in, src := fdeFixture(t)
+		src.Files[FDEUKIMarker] = []byte("someone else's file")
+		got := findTask(t, Inspect(src, in), "fde")
+		if got.Status != Blocked || !strings.Contains(got.Detail, "unfamiliar content") {
 			t.Fatalf("got %+v", got)
 		}
 	})

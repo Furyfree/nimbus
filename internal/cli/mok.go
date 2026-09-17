@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"io"
 
@@ -29,35 +28,14 @@ func (s mokVerificationSource) Run(name string, args ...string) ([]byte, error) 
 
 func runMOKVerification(cmd *cobra.Command, src native.Source, before *postinstallSnapshot, task postinstall.Task, yes bool) error {
 	if task.VerificationNeedsRoot {
-		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Read-only administrator verification:\n  sudo -- /usr/bin/cat -- %s (public certificate; output stays private)\n  sudo -- /usr/bin/mokutil --ignore-keyring --test-key %s\nNo keys will be generated or enrolled.\n", postinstall.MOKCertificate, postinstall.MOKCertificate); err != nil {
-			return err
-		}
-		if !yes {
-			if !postinstallTerminal(cmd.InOrStdin()) {
-				return usageError{errors.New("administrator verification requires a terminal or explicit --yes; use --plan to inspect it")}
-			}
-			if !approver(cmd.InOrStdin(), cmd.OutOrStdout(), "") {
-				return errors.New("verification declined; completion was not recorded")
-			}
-		}
-		if err := src.Stream(cmd.OutOrStdout(), cmd.ErrOrStderr(), "sudo", "-v"); err != nil {
-			return fmt.Errorf("administrator verification unavailable: %w", err)
-		}
-		// Recheck selection and ordinary native state after the approval prompt.
-		fresh, err := inspectPostinstall(src, machineFlags{checkout: before.selected.Root, machine: before.view.Machine}, "nvidia-mok")
+		preview := fmt.Sprintf("Read-only administrator verification:\n  sudo -- /usr/bin/cat -- %s (public certificate; output stays private)\n  sudo -- /usr/bin/mokutil --ignore-keyring --test-key %s\nNo keys will be generated or enrolled.\n", postinstall.MOKCertificate, postinstall.MOKCertificate)
+		verified, err := rootVerification(cmd, src, before, task, preview, func(s native.Source, t postinstall.Task) postinstall.Task {
+			return postinstall.VerifyMOK(mokVerificationSource{s}, t)
+		}, yes)
 		if err != nil {
 			return err
 		}
-		if fresh.nativeDigest != before.nativeDigest {
-			return errors.New("task selection or native state changed during approval; retry verification")
-		}
-		task, err = selectedTask(fresh.view, task.ID)
-		if err != nil {
-			return err
-		}
-		if task.VerificationNeedsRoot {
-			task = postinstall.VerifyMOK(mokVerificationSource{src}, task)
-		}
+		task = verified
 	}
 	if err := renderPostinstallStatus(cmd.OutOrStdout(), postinstallView{Machine: before.view.Machine, Tasks: []postinstall.Task{task}}); err != nil {
 		return err

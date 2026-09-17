@@ -56,6 +56,7 @@ func newInternal() *cobra.Command {
 	record.Flags().StringVar(&stagePath, "stage", "", "staged receipts file written by the normal user")
 	group.AddCommand(record)
 	group.AddCommand(newInternalSystemFile())
+	group.AddCommand(newInternalFDEUKI())
 	var expected string
 	adopt := &cobra.Command{Use: "snapper-adopt", Hidden: true, Args: noArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		if os.Geteuid() != 0 {

@@ -22,12 +22,12 @@ func fdeTask(src native.Source, in Inputs) Task {
 			"The selected fde packages are applied and recorded by Nimbus.",
 		},
 		Instructions: []string{
-			"Approved setup will build and sign a Unified Kernel Image with ukify, install it with kernel-install and enroll the TPM2 device through systemd-cryptenroll.",
-			"The existing disk passphrase stays valid; enrollment adds a scoped TPM keyslot and removal targets only that slot.",
-			"Sync and upgrades never enroll a machine or change the unlock policy.",
+			"Approved setup writes /etc/nimbus/fde-uki.enabled, builds and signs /boot/efi/EFI/Linux/nimbus.efi with ukify and ensures the Nimbus UKI firmware entry.",
+			"Kernel and initramfs updates rebuild the image through the engine-provided kernel-install hook; Fedora's GRUB entries remain the fallback path.",
+			"TPM enrollment is not implemented yet: after setup the disk passphrase still unlocks the disk and sync never changes policy.",
 		},
-		Verification: "Inspection reads the mounted root, the TPM2 device, the firmware mode and the installed tools. Shim presence, EFI space and keyslots need an approved privileged check.",
-		Recovery:     "The disk passphrase always remains a valid unlock path. Removal and policy renewal are offered by the explicit task only.",
+		Verification: "Inspection reads the mounted root, the TPM2 device, the firmware mode, the hook payload, the marker, the firmware entry and the installed tools. The image content and its embedded command line need the approved read-only check.",
+		Recovery:     "The disk passphrase and Fedora's GRUB entries always remain a valid unlock and boot path. Enrollment, policy renewal and scoped removal are not implemented yet.",
 	}
 	mounts, err := src.ReadFile("/proc/mounts")
 	if err != nil {
@@ -97,7 +97,7 @@ func fdeTask(src native.Source, in Inputs) Task {
 		}
 	}
 	var missing []string
-	for _, tool := range []string{"systemd-cryptenroll", "ukify", "sbsign", "kernel-install", "dracut"} {
+	for _, tool := range []string{"systemd-cryptenroll", "ukify", "sbsign", "kernel-install", "dracut", "efibootmgr"} {
 		if _, err := src.LookPath(tool); err != nil {
 			missing = append(missing, tool)
 		}
@@ -106,8 +106,37 @@ func fdeTask(src native.Source, in Inputs) Task {
 		t.Status, t.Detail = Blocked, "The setup tools are missing ("+strings.Join(missing, ", ")+"); repair the selected fde packages with nimbus sync."
 		return t
 	}
-	t.Status = Pending
-	t.Detail = "LUKS2 root, TPM2 and the signed-UKI tools are present. Shim presence and the keyslot policy need the approved privileged check. The approved setup action is not implemented yet; no changes are offered."
+	if _, err := src.ReadFile(FDEHookPath); err != nil {
+		t.Status, t.Detail = Blocked, "The installed engine does not ship the kernel-install hook; upgrade nimbus before FDE setup."
+		return t
+	}
+	entries, err := fdeBootEntriesOutput(src)
+	if err != nil {
+		t.Detail = "The firmware boot entries could not be inspected; retry or inspect efibootmgr."
+		return t
+	}
+	ready, err := fdeMarkerReady(src)
+	if err != nil {
+		t.Status, t.Detail = Blocked, err.Error()
+		return t
+	}
+	if !ready {
+		t.Status = Pending
+		t.Detail = "LUKS2 root, TPM2 and the setup tools are present. Approved setup writes the marker, builds and signs the Nimbus image and ensures the firmware entry. TPM enrollment, policy renewal and scoped removal are not implemented yet."
+		t.Action = &Action{Kind: SetupFDE}
+		t.Reboot = true
+		return t
+	}
+	if !fdeEntryCorrect(entries) {
+		t.Status = Pending
+		t.Detail = "FDE setup is active but the firmware entry is missing or different; rerun the approved setup to repair it."
+		t.Action = &Action{Kind: SetupFDE}
+		t.Reboot = true
+		return t
+	}
+	t.Status = Unknown
+	t.VerificationNeedsRoot = true
+	t.Detail = "FDE setup is active and the firmware entry is correct; the image content needs the approved read-only check."
 	return t
 }
 

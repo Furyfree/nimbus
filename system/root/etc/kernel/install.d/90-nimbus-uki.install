@@ -1,0 +1,14 @@
+#!/bin/sh
+# Nimbus Unified Kernel Image rebuild hook.
+#
+# The engine package owns this file; it stays inert until Nimbus creates
+# /etc/nimbus/fde-uki.enabled during approved FDE setup. Fedora's native
+# kernel-install then rebuilds /boot/efi/EFI/Linux/nimbus.efi through the
+# installed engine on kernel and initramfs updates. Fedora's BLS entries,
+# shim and GRUB stay untouched as the fallback boot path.
+
+[ -e /etc/nimbus/fde-uki.enabled ] || exit 0
+case "$1" in
+    add | remove) exec /usr/bin/nimbus internal fde-uki "$@" ;;
+esac
+exit 0
