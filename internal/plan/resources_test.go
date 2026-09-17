@@ -621,13 +621,16 @@ func TestGreeterAppearanceChangeExplainsDeferredActivation(t *testing.T) {
 
 func TestPlymouthRemovalRestoresRecordedTheme(t *testing.T) {
 	b, src := resourceBuilder()
+	src.Files["/usr/share/plymouth/themes/nimbus/nimbus.plymouth"] = []byte("theme")
+	src.Files["/usr/share/plymouth/themes/text/text.plymouth"] = []byte("theme")
 	target := "/etc/grub.d/36_paper_dark"
 	have := inspect.SystemFile{Exists: true, Content: []byte("snippet"), Owner: "root", Group: "root", Mode: "0644"}
 	answerFile(src, target, have)
 	file := fileReceipt(target, have)
 	file.Triggers = []string{"grub-config", "plymouth-theme"}
 	b.in.Applied.Receipts[file.Resource] = file
-	b.in.Applied.Receipts["trigger:plymouth-theme"] = state.Receipt{Resource: "trigger:plymouth-theme", Provider: KindTrigger, Machine: "vm", Verified: true, Previous: "text", Intended: "nimbus", Timestamp: time.Unix(10, 0)}
+	receipt := state.Receipt{Resource: "trigger:plymouth-theme", Provider: KindTrigger, Machine: "vm", Verified: true, Previous: "text", Intended: "nimbus", Timestamp: time.Unix(10, 0)}
+	b.in.Applied.Receipts["trigger:plymouth-theme"] = receipt
 	trigger := func(ops []Operation) *Operation {
 		for i := range ops {
 			if ops[i].ID == "trigger:plymouth-theme" {
@@ -642,8 +645,17 @@ func TestPlymouthRemovalRestoresRecordedTheme(t *testing.T) {
 		t.Fatalf("deselected theme did not restore the recorded selection: %+v", op)
 	}
 	delete(b.in.Applied.Receipts, "trigger:plymouth-theme")
-	op = trigger(b.systemResources(nil))
-	if op == nil || op.Blocked == "" {
+	if op = trigger(b.systemResources(nil)); op == nil || op.Blocked == "" {
 		t.Fatalf("unrecorded removal was not blocked: %+v", op)
+	}
+	b.in.Applied.Receipts["trigger:plymouth-theme"] = receipt
+	delete(src.Files, "/usr/share/plymouth/themes/text/text.plymouth")
+	if op = trigger(b.systemResources(nil)); op == nil || !strings.Contains(op.Blocked, "no longer installed") {
+		t.Fatalf("missing previous theme was not blocked: %+v", op)
+	}
+	src.Files["/usr/share/plymouth/themes/text/text.plymouth"] = []byte("theme")
+	delete(src.Files, "/usr/share/plymouth/themes/nimbus/nimbus.plymouth")
+	if op = trigger(b.systemResources(nil)); op == nil || !strings.Contains(op.Blocked, "does not ship") {
+		t.Fatalf("missing payload was not blocked: %+v", op)
 	}
 }
