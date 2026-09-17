@@ -3,6 +3,7 @@
 package postinstall
 
 import (
+	"encoding/json"
 	"regexp"
 	"slices"
 	"strings"
@@ -214,9 +215,32 @@ func installerHelper(src native.Source, in Inputs, pkg definitions.ResolvedPacka
 	} else if _, err := src.LookPath(helper); err != nil {
 		t.Status, t.Detail = Blocked, "The installer helper is unavailable; repair the selected package with nimbus sync."
 	} else if id == "wowup" {
-		t.Status = Blocked
-		t.Detail = "The WoWUp COPR helper needs a standalone install command before Nimbus can offer initial installation."
-		t.Instructions = []string{"The current helper exposes prepare/apply only. Complete the standalone install flow in COPR; Nimbus will not manage application artifacts."}
+		output, err := src.Run(helper, "status", "--json")
+		if err != nil {
+			t.Detail = "The installer helper could not inspect application state; inspect its native status."
+			return t
+		}
+		var status struct {
+			Installed      bool   `json:"installed"`
+			Verified       bool   `json:"verified"`
+			CleanupPending bool   `json:"cleanup_pending"`
+			Version        string `json:"version"`
+		}
+		if json.Unmarshal(output, &status) != nil {
+			t.Detail = "Installer helper returned no recognized application status."
+			return t
+		}
+		switch {
+		case status.CleanupPending:
+			t.Status = Blocked
+			t.Detail = "WoWUp removal cleanup is pending; run wowup-cf-installer status --json and finish removal or reinstall before installing."
+		case status.Installed && status.Verified:
+			t.Status, t.Detail = Complete, "WoWUp CurseForge "+status.Version+" is installed."
+		default:
+			t.Status, t.Detail = Pending, "WoWUp CurseForge is not installed."
+			t.Instructions = append(t.Instructions, "The helper verifies the official AppImage and installs it. Installing or reinstalling the helper RPM queues the same job through systemd.")
+			t.Action = &Action{Kind: InstallApplication, Argv: []string{"sudo", "--", helper, "install", "--assumeyes"}}
+		}
 	} else {
 		output, err := src.Run(helper, "status")
 		if err != nil {

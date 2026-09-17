@@ -134,7 +134,15 @@ func TestInstallerHelpersDoNotImplyApplicationCompletion(t *testing.T) {
 			in, src := fixture(name)
 			helper := "/usr/bin/" + name
 			src.Paths[helper] = helper
-			src.Commands[helper+" status"] = []byte("Installed GitHub Copilot: not installed\n")
+			statusCommand := helper + " status"
+			wantAction := []string{"sudo", "--", helper, "install"}
+			if name == "wowup-cf-installer" {
+				statusCommand = helper + " status --json"
+				src.Commands[statusCommand] = []byte(`{"schema_version":1,"name":"wowup-cf","installed":false,"verified":false,"integrated":false}`)
+				wantAction = []string{"sudo", "--", helper, "install", "--assumeyes"}
+			} else {
+				src.Commands[statusCommand] = []byte("Installed GitHub Copilot: not installed\n")
+			}
 			guard := &readGuard{FakeSource: src}
 			got := withoutMachineTasks(Inspect(guard, in))
 			if name == "github-copilot-installer" {
@@ -144,15 +152,11 @@ func TestInstallerHelpersDoNotImplyApplicationCompletion(t *testing.T) {
 				got = slices.DeleteFunc(got, func(task Task) bool { return task.ID == "agent-proxy" })
 				guard.files = nil
 			}
-			if len(got) != 1 || (name == "github-copilot-installer" && !slices.Equal(guard.commands, []string{helper + " status"})) || len(guard.files) != 0 {
+			if len(got) != 1 || !slices.Equal(guard.commands, []string{statusCommand}) || len(guard.files) != 0 {
 				t.Fatalf("unexpected helper inspection: tasks=%+v commands=%v files=%v", got, guard.commands, guard.files)
 			}
-			if name == "github-copilot-installer" {
-				if got[0].Status != Pending || got[0].Action == nil || !slices.Equal(got[0].Action.Argv, []string{"sudo", "--", helper, "install"}) {
-					t.Fatalf("helper installation became application completion: %+v", got[0])
-				}
-			} else if got[0].Status != Blocked || got[0].Action != nil || !strings.Contains(got[0].Detail, "standalone install") {
-				t.Fatalf("offered an unsupported WoWUp command: %+v", got[0])
+			if got[0].Status != Pending || got[0].Action == nil || !slices.Equal(got[0].Action.Argv, wantAction) {
+				t.Fatalf("helper installation became application completion: %+v", got[0])
 			}
 			delete(src.Paths, helper)
 			got = slices.DeleteFunc(withoutMachineTasks(Inspect(src, in)), func(task Task) bool { return task.ID == "agent-proxy" })
@@ -439,5 +443,29 @@ func TestSingleTaskInspectionMatchesFullCatalogWithoutOtherProbes(t *testing.T) 
 	Inspect(guard, in)
 	if len(guard.commands) != 0 || len(guard.files) != 0 {
 		t.Fatalf("unrelated task probes: %v %v", guard.commands, guard.files)
+	}
+}
+
+func TestWoWUpHelperStatusStates(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		output string
+		want   Status
+		action bool
+	}{
+		{"installed", `{"schema_version":1,"name":"wowup-cf","installed":true,"verified":true,"integrated":true,"version":"2.23.1"}`, Complete, false},
+		{"unverified", `{"schema_version":1,"name":"wowup-cf","installed":true,"verified":false}`, Pending, true},
+		{"cleanup pending", `{"schema_version":1,"name":"wowup-cf","installed":true,"verified":true,"cleanup_pending":true,"version":"2.23.1"}`, Blocked, false},
+		{"unrecognized", `not json`, Unknown, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			in, src := fixture("wowup-cf-installer")
+			src.Paths["/usr/bin/wowup-cf-installer"] = "/usr/bin/wowup-cf-installer"
+			src.Commands["/usr/bin/wowup-cf-installer status --json"] = []byte(test.output)
+			got := findTask(t, Inspect(src, in), "wowup")
+			if got.Status != test.want || (got.Action != nil) != test.action {
+				t.Fatalf("got %+v, want %s action=%v", got, test.want, test.action)
+			}
+		})
 	}
 }

@@ -805,12 +805,16 @@ native/inspection split does not complete the CLI/TUI operation boundary.
 See [integration](ROADMAP.md#3-finish-workstation-integration) and
 [delivery](ROADMAP.md#5-prepare-the-desktop-trial).
 
-- [ ] Add standalone install/update commands to the WoWUp COPR helper, then
+- [x] Add standalone install/update commands to the WoWUp COPR helper, then
   connect the small post-install action and Topgrade updater. No artifact
-  adapter in Nimbus.
-- [ ] Confirm published helper interfaces and package sources. Enable WoWUp's
-  gaming selection after its helper and repository key are available. Native
-  signatures stay enabled; no separate audit of the owner's package contents.
+  adapter in Nimbus. Helper 0.2.0 (COPR build 10989485) queues installation
+  and updates through DNF and exposes `install --assumeyes`; the `wowup`
+  postinstall task offers it after approval and reads the helper's JSON
+  status. The owner tested the COPR installation on the desktop.
+- [x] Confirm published helper interfaces and package sources. The signed
+  helper RPM and its COPR project key are available.
+- [ ] Enable WoWUp's gaming selection. Native signatures stay enabled; no
+  separate audit of the owner's package contents.
 - [x] Confirm matching Nimbus/Topgrade delivery in the installed VM: engine
   0.3.1 and a custom `nimbus upgrade --system` step are present.
 - [ ] Verify installed update/constraint behavior: allowed family updates,

@@ -813,8 +813,9 @@ GUI readiness from current unlock state, which it does not inspect.
 
 Copilot uses its helper's read-only status and standalone install command.
 ProtonPlus lists native Steam runners before and after installation. These
-native results override old completion evidence. WoWUp remains blocked until
-its helper supplies standalone installation. Fingerprints and MOK retain native
+native results override old completion evidence. WoWUp uses the helper's JSON
+status and its `install --assumeyes` command; installing or reinstalling the
+helper RPM queues the same systemd job. Fingerprints and MOK retain native
 checks; MOK enrollment still requires the firmware procedure. MOK inspection
 distinguishes missing, empty, permission-denied and other unreadable certificate
 states. An explicit `nvidia-mok` run offers approved signing and enrollment:
@@ -1216,10 +1217,11 @@ The hidden `sync --no-upgrade` alias remains compatible;
 ordinary sync omits general software updates. Installed tests must cover
 repository updates, Chezmoi apply and the fresh-engine upgrade handoff.
 
-WoWUp's helper still needs standalone install/update commands and a published
-package source. Copilot helper publication and native app behavior also need
-verification. Nimbus no longer has custom app providers or Cargo/user-tool
-installation lists; Mise, Zed and Zeron use native binary bootstraps.
+WoWUp's helper publishes standalone install/update commands and a package
+source; enabling its gaming selection still remains. Copilot helper publication
+and native app behavior also need verification. Nimbus no longer has custom app
+providers or Cargo/user-tool installation lists; Mise, Zed and Zeron use native
+binary bootstraps.
 
 Bare `nimbus` prints help until the dashboard is built. GRUB assets are present
 but inactive; FDE auto-unlock is not implemented. These boot features come
