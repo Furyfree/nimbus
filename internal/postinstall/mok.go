@@ -13,13 +13,20 @@ const MOKCertificate = "/etc/pki/akmods/certs/public_key.der"
 
 func mok(src native.Source, in Inputs) Task {
 	t := Task{
-		ID: "nvidia-mok", Owner: "component:nvidia", Title: "Enroll the NVIDIA module signing key",
+		ID: "nvidia-mok", Owner: "component:nvidia", Title: "Sign NVIDIA modules and enroll their key",
 		Status: Unknown, Detail: "Secure Boot state could not be established.",
-		Prerequisites: []string{"NVIDIA and akmods packages have been applied.", "Secure Boot is enabled and the akmods public certificate exists."},
-		Instructions:  []string{"Follow /usr/share/doc/akmods/README.secureboot to inspect the generated certificate and request enrollment with mokutil.", "Complete enrollment in the firmware MOK manager at reboot; never supply the password through Nimbus."},
-		Verification:  "mokutil --ignore-keyring --test-key /etc/pki/akmods/certs/public_key.der must confirm enrollment. This does not by itself prove the NVIDIA driver loads.",
-		Recovery:      "Cancel enrollment before confirming it, or boot a working kernel and inspect the akmods Secure Boot instructions before changing keys.",
-		Reboot:        true,
+		Prerequisites: []string{"NVIDIA and akmods packages have been applied.", "Secure Boot is enabled; existing signing keys are preserved."},
+		Instructions: []string{
+			"After approval, authenticate sudo and inspect the akmods key pair with elevated access.",
+			"Only if both key files are missing: sudo -- kmodgenca -a. Never replace an existing or incomplete pair.",
+			"If modules do not match the certificate: sudo -- akmods --force --rebuild --akmod nvidia --kernels <running-kernel>.",
+			"Check every NVIDIA module's signer and certificate serial, then refresh the boot image: sudo -- dracut --force --kver <running-kernel>.",
+			"If needed: sudo -- mokutil --import /etc/pki/akmods/certs/public_key.der. Enter the temporary password in mokutil's native prompt.",
+			"Existing trust and pending requests are preserved. Reboot yourself when ready; Enroll MOK -> Continue -> Yes -> password -> Reboot (US/QWERTY keyboard).",
+		},
+		Verification: "After reboot, run nvidia-smi and mokutil --sb-state. Certificate enrollment alone does not prove the driver loads.",
+		Recovery:     "Cancel enrollment before confirming it, or boot a working kernel and inspect the akmods Secure Boot instructions before changing keys.",
+		Reboot:       true,
 	}
 	if !in.Facts.SecureBoot.Known() {
 		return t
@@ -49,10 +56,13 @@ func mok(src native.Source, in Inputs) Task {
 			return t
 		}
 	}
-	if _, err := src.LookPath("mokutil"); err != nil {
-		t.Status, t.Detail = Blocked, "mokutil is unavailable; run nimbus sync."
-		return t
+	for _, tool := range []string{"sudo", "kmodgenca", "akmods", "dracut", "mokutil", "modinfo", "nvidia-smi"} {
+		if _, err := src.LookPath(tool); err != nil {
+			t.Status, t.Detail = Blocked, tool+" is unavailable; repair the NVIDIA packages before setup."
+			return t
+		}
 	}
+	t.Action = &Action{Kind: SetupNVIDIA}
 	return VerifyMOK(src, t)
 }
 
@@ -65,7 +75,7 @@ func VerifyMOK(src native.Source, t Task) Task {
 	data, err := src.ReadFile(MOKCertificate)
 	switch {
 	case errors.Is(err, os.ErrPermission):
-		t.Status, t.Detail, t.VerificationNeedsRoot = Unknown, "Permission denied reading the akmods public certificate; run nimbus postinstall nvidia-mok for an approved read-only administrator check.", true
+		t.Status, t.Detail, t.VerificationNeedsRoot = Unknown, "Permission denied reading the akmods public certificate; approved setup inspects it with sudo before changing anything.", true
 		return t
 	case errors.Is(err, os.ErrNotExist):
 		t.Status, t.Detail = Blocked, "The akmods public certificate is missing at "+MOKCertificate+"; inspect akmods key generation before enrollment."

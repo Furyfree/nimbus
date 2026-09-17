@@ -817,9 +817,16 @@ native results override old completion evidence. WoWUp remains blocked until
 its helper supplies standalone installation. Fingerprints and MOK retain native
 checks; MOK enrollment still requires the firmware procedure. MOK inspection
 distinguishes missing, empty, permission-denied and other unreadable certificate
-states. Only an explicit task may offer approved read-only sudo verification of
-the fixed public certificate and its enrollment; no enrollment or permission
-changes are performed. Status/help/plan never authenticate. Stored verification
+states. An explicit `nvidia-mok` run offers approved signing and enrollment:
+after preview and approval it authenticates sudo, inspects the akmods key pair,
+generates one with `kmodgenca -a` only when both files are absent, rebuilds
+NVIDIA modules whose signing identifiers do not match the certificate, refreshes
+the running kernel's boot image and submits an untrusted certificate with
+`mokutil --import`. Existing keys, trust and pending requests are preserved;
+passwords stay in native prompts; Nimbus never reboots or weakens Secure Boot.
+`--plan` stays read-only, and an explicit `--mark-done` recheck of the fixed
+public certificate remains available without enrolling anything. Status/help/plan
+never authenticate. Stored verification
 is displayed as "Previously verified" when a permission-protected certificate
 prevents rechecking. Final reports put this historical result in notices, outside
 pending setup and verification problems. JSON retains the native `unknown`

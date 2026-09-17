@@ -1,5 +1,5 @@
 # NVIDIA driver from RPM Fusion with Secure Boot module signing support.
-# MOK enrollment is a manual task that arrives with the task model.
+# Run nimbus postinstall nvidia-mok for explicit signing and MOK enrollment.
 schema = 1
 id = "nvidia"
 

@@ -78,7 +78,7 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 			if task.ID == "onepassword" && !preview {
 				return runOnePassword(cmd, src, before, task, yes, false, showDiff)
 			}
-			if task.ID == "nvidia-mok" && !preview {
+			if task.ID == "nvidia-mok" && !preview && (task.Action == nil || task.Action.Kind != postinstall.SetupNVIDIA) {
 				return runMOKVerification(cmd, src, before, task, yes)
 			}
 			if task.ID == "dtu-network" && !preview && task.Action != nil && task.Action.DTUProfile != nil && len(task.Action.DTUProfile.Existing) > 0 {
@@ -100,7 +100,7 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 			if preview || task.Status == postinstall.NotApplicable {
 				return nil
 			}
-			if task.Status == postinstall.Complete {
+			if task.Status == postinstall.Complete && task.Action == nil {
 				return recordTask(before.view.Machine, task.ID+".complete", "verified")
 			}
 			if task.Status == postinstall.Blocked {
@@ -164,6 +164,10 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 				runErr = postinstall.RunVoxtypeSetup(cmd.Context(), src, cmd.OutOrStdout(), cmd.ErrOrStderr(), task)
 			} else if task.Action.Kind == postinstall.SyncHyprlandPlugins {
 				runErr = postinstall.RunHyprlandPlugins(cmd.Context(), src, cmd.OutOrStdout(), cmd.ErrOrStderr(), task)
+			} else if task.Action.Kind == postinstall.SetupNVIDIA {
+				// The helper reports enrollment and driver readiness itself; a
+				// pending reboot enrollment is a successful, deliberate state.
+				return postinstall.RunNVIDIAMOK(cmd.Context(), src, cmd.OutOrStdout(), cmd.ErrOrStderr())
 			} else {
 				argv := commands[0]
 				runErr = src.Stream(cmd.OutOrStdout(), cmd.ErrOrStderr(), argv[0], argv[1:]...)
@@ -324,6 +328,8 @@ func postinstallArgv(task postinstall.Task) ([]string, error) {
 			}
 		}
 		switch {
+		case task.ID == "nvidia-mok" && (task.Status == postinstall.Unknown || task.Status == postinstall.Pending || task.Status == postinstall.Complete) && task.Action.Kind == postinstall.SetupNVIDIA && len(task.Action.Argv) == 0:
+			return nil, nil
 		case task.ID == "onepassword" && task.Status == postinstall.Unknown && task.Action.Kind == postinstall.OpenApplication && slices.Equal(task.Action.Argv, []string{"1password"}):
 			return []string{"1password"}, nil
 		case task.ID == "fingerprint" && task.Status == postinstall.Pending && task.Action.Kind == postinstall.EnrollFingerprint && slices.Equal(task.Action.Argv, []string{"fprintd-enroll"}):
@@ -352,7 +358,7 @@ func renderPostinstall(out io.Writer, view postinstallView) error {
 			fmt.Fprintf(&b, "\n\u2713 %s\n", task.Detail)
 			continue
 		}
-		if task.ID == "nvidia-mok" && task.Status == postinstall.Unknown {
+		if task.ID == "nvidia-mok" && task.Status == postinstall.Unknown && task.Action == nil {
 			fmt.Fprintf(&b, "\n%s [%s]: Verify NVIDIA signing-key enrollment\n", task.ID, postinstallStatusLabel(task))
 			if task.PreviouslyVerified && task.VerificationNeedsRoot {
 				fmt.Fprintln(&b, "Enrollment was verified earlier; a fresh check requires sudo.")
@@ -380,7 +386,11 @@ func renderPostinstall(out io.Writer, view postinstallView) error {
 				return err
 			}
 			for _, argv := range commands {
-				fmt.Fprintf(&b, "Native action: %s\n", strings.Join(argv, " "))
+				if task.Action.Kind == postinstall.SetupNVIDIA {
+					fmt.Fprintln(&b, "Native action: NVIDIA signing and MOK enrollment as described above.")
+				} else {
+					fmt.Fprintf(&b, "Native action: %s\n", strings.Join(argv, " "))
+				}
 			}
 		}
 		fmt.Fprintf(&b, "Verification: %s\nRecovery: %s\n", task.Verification, task.Recovery)

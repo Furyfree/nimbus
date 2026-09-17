@@ -40,6 +40,7 @@ const (
 	SetAccountPicture         ActionKind = "set-account-picture"
 	SetupVoxtype              ActionKind = "setup-voxtype"
 	SetHostname               ActionKind = "set-hostname"
+	SetupNVIDIA               ActionKind = "setup-nvidia"
 )
 
 // Action describes native commands offered for explicit user selection.

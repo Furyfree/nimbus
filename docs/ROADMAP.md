@@ -760,6 +760,12 @@ still follows it. Until then, auto-unlock remains planned, not working.
 
 ### Remaining integration
 
+Deliver the explicit NVIDIA MOK helper and test it on an installation needing
+signing/enrollment. The manual desktop repair passed with Secure Boot enabled;
+the helper still needs its own installed trial. Preserve native prompts and
+keys, and leave reboot confirmation to the owner. The NVIDIA Settings autostart
+condition belongs in Chezmoi, separately from signing.
+
 Greeter passwordless-sync authorization is implemented in the ordinary approved
 init/sync plan, using the native helper for the invoking local account. The
 Fedora stable shell is now 5.1.0; retain its existing package source. Chezmoi
