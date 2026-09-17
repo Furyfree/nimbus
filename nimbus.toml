@@ -92,6 +92,12 @@ project = "furyfree/github-copilot-installer"
 key = "D092 00FC 4828 0155 1973 B03F 4A86 8CE1 F2B0 A28A"
 priority = 132
 
+[repositories.wowup-installer]
+kind = "copr"
+project = "furyfree/wowup-cf-installer"
+key = "DFB9 21CC F686 D0F8 9343 C8DC 8C7C E799 D66B 0C71"
+priority = 134
+
 [repositories.blesh]
 kind = "copr"
 project = "furyfree/blesh"

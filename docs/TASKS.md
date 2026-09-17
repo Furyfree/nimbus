@@ -896,8 +896,15 @@ See [integration](ROADMAP.md#3-finish-workstation-integration) and
   status. The owner tested the COPR installation on the desktop.
 - [x] Confirm published helper interfaces and package sources. The signed
   helper RPM and its COPR project key are available.
-- [ ] Enable WoWUp's gaming selection. Native signatures stay enabled; no
-  separate audit of the owner's package contents.
+- [x] Enable WoWUp's gaming selection (2026-09-17). `nimbus.toml` declares
+  the `wowup-installer` COPR with its pinned key and priority 134,
+  `components/wowup.toml` selects the helper, and only
+  `profiles/gaming.toml` includes it, so the laptop keeps its smaller
+  selection. Validation reports the desktop set at 22 components and 15
+  repositories; a read-only VM plan on a candidate checkout lists
+  `enable repository wowup-installer` and the package, and
+  `postinstall wowup --plan` reaches the task. Native signatures stay
+  enabled; no separate audit of the owner's package contents.
 - [x] Confirm matching Nimbus/Topgrade delivery in the installed VM: engine
   0.3.1 and a custom `nimbus upgrade --system` step are present.
 - [ ] Verify installed update/constraint behavior: allowed family updates,
