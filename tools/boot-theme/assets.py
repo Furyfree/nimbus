@@ -20,9 +20,11 @@ def png(width, height, inside, color):
             coverage = sum(inside(x + (sx + .5) / 4, y + (sy + .5) / 4)
                            for sy in range(4) for sx in range(4))
             data.extend((*color, round(255 * coverage / 16)))
+    # Level 0 stores the rows uncompressed so the bytes are identical across
+    # zlib versions; the check runs on multiple distributions.
     return (b"\x89PNG\r\n\x1a\n"
             + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
-            + chunk(b"IDAT", zlib.compress(data)) + chunk(b"IEND", b""))
+            + chunk(b"IDAT", zlib.compress(bytes(data), 0)) + chunk(b"IEND", b""))
 
 
 def lock(x, y):
