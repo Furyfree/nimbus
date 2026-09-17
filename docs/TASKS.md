@@ -395,13 +395,29 @@ refactor and TUI.
   and the selected tools are inspected without privilege, and unsupported or
   unknown setups are reported clearly. Keyslots, EFI space and enrollment
   state need an approved privileged check. No setup action is offered yet.
-- [ ] Implement approved setup: UKI build and signing with ukify,
-  kernel-install hooks and systemd-cryptenroll, then prove passphrase UKI boot
-  and a kernel update in a disposable VM before any TPM enrollment.
+- [x] Implement approved setup: the inert kernel-install hook, the marker,
+  ukify build and the `Nimbus UKI` firmware entry, then prove passphrase UKI
+  boot and a kernel update in a disposable VM (2026-09-17). A real
+  `nimbus sync` on a drill machine recorded the package receipts; the approved
+  `postinstall fde` action wrote `/etc/nimbus/fde-uki.enabled`, built
+  `/boot/efi/EFI/Linux/nimbus.efi`, replaced an earlier hand-made entry that
+  pointed at another path, and verified the image read-only. Reboots loaded
+  `Boot0009 "Nimbus UKI"` through systemd-stub (Secure Boot disabled) with the
+  embedded command line; `kernel-install add` for the second installed kernel
+  rebuilt the image through the hook, and the next boot ran that kernel.
+  Accepted limitation: the image is unsigned; the signed shim chain and MOK
+  enrollment arrive with the enrollment milestone.
+- [ ] Ship the inert kernel-install hook in the 0.6.0 engine package
+  (`nimbus.spec`); the marker stays action-written. Kernel-install skips a
+  non-executable plugin, so the task checks the installed bit and blocks with
+  an upgrade hint.
 - [ ] Add enrollment, policy renewal, status and scoped removal with explicit
   previews; reduced protection and removal default to No and a blanket `--yes`
   cannot accept them. Preserve the passphrase, unrelated keys and enrollment
-  slots.
+  slots. This milestone also implements the signed, shim-chained image and MOK
+  enrollment that Secure Boot needs, and reconciles Nimbus-initiated initramfs
+  refreshes (the NVIDIA signing flow and the Plymouth theme trigger) with the
+  image.
 - [ ] Test auto-unlock enrollment, booting, passphrase fallback, boot-change
   fallback and removal on real hardware. This scoped test precedes the TUI;
   it is separate from the later full desktop trial. No working claim yet.

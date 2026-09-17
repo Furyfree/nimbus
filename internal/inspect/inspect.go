@@ -45,7 +45,7 @@ func Inspect(src native.Source, checkoutRoot string) *Facts {
 	f.Packages = Packages(src)
 	f.Repositories = Repositories(src)
 	f.Flatpak = SystemFlatpak(src)
-	f.SecureBoot = collect(func() (string, error) { return secureBoot(src) })
+	f.SecureBoot = collect(func() (string, error) { return SecureBootState(src) })
 	f.VirtualMachine = collect(func() (bool, error) { return virtualMachine(src) })
 	f.SELinux = collect(func() (string, error) { return selinux(src) })
 	f.Firewalld = collect(func() (string, error) { return firewalld(src) })
@@ -63,7 +63,7 @@ func InspectTasks(src native.Source) *Facts {
 	return &Facts{
 		Platform:   collect(func() (Platform, error) { return platform(src) }),
 		Packages:   Packages(src),
-		SecureBoot: collect(func() (string, error) { return secureBoot(src) }),
+		SecureBoot: collect(func() (string, error) { return SecureBootState(src) }),
 		User: collect(func() (User, error) {
 			out, err := src.Run("id", "-un")
 			if err != nil {
@@ -356,9 +356,9 @@ func virtualMachine(src native.Source) (bool, error) {
 	return true, nil
 }
 
-// secureBoot reads the EFI variable: four bytes of attributes then the
+// SecureBootState reads the EFI variable: four bytes of attributes then the
 // value byte.
-func secureBoot(src native.Source) (string, error) {
+func SecureBootState(src native.Source) (string, error) {
 	data, err := src.ReadFile(SecureBootPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {

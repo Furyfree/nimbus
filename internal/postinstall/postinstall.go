@@ -42,6 +42,7 @@ const (
 	SetupVoxtype              ActionKind = "setup-voxtype"
 	SetHostname               ActionKind = "set-hostname"
 	SetupNVIDIA               ActionKind = "setup-nvidia"
+	SetupFDE                  ActionKind = "setup-fde"
 )
 
 // Action describes native commands offered for explicit user selection.

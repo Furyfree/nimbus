@@ -752,7 +752,9 @@ Secure Boot support were inspected read-only on the laptop and the disposable
 VM, and the native method and boot-change policy are settled in issue #34:
 Dracut, ukify, kernel-install and systemd-cryptenroll, PCR 7 + PCR 14 + signed
 PCR 11 with shim and PCR 7 + signed PCR 11 without. The read-only detection
-(`postinstall fde`) is implemented; setup and enrollment are not.
+(`postinstall fde`) and the UKI build path (inert kernel-install hook, ukify
+build and firmware entry, kernel-update rebuild) are implemented; TPM
+enrollment and removal are not.
 
 The action must preview the target and changes, request approval, preserve a
 working passphrase, and report unsupported setups without weakening security.

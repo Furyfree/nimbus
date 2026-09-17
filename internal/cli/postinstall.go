@@ -81,6 +81,23 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 			if task.ID == "nvidia-mok" && !preview && (task.Action == nil || task.Action.Kind != postinstall.SetupNVIDIA) {
 				return runMOKVerification(cmd, src, before, task, yes)
 			}
+			if task.ID == "fde" && !preview && task.VerificationNeedsRoot {
+				verified, err := fdeVerify(cmd, src, before, task, yes)
+				if err != nil {
+					return err
+				}
+				if verified.Status == postinstall.Complete {
+					if err := renderPostinstallStatus(cmd.OutOrStdout(), postinstallView{Machine: before.view.Machine, Tasks: []postinstall.Task{verified}}); err != nil {
+						return err
+					}
+					if err := recordTask(before.view.Machine, postinstall.FDEEvidence, "verified"); err != nil {
+						return err
+					}
+					_, err := io.WriteString(cmd.OutOrStdout(), "Completion recorded. Routine status remains unprivileged and may still need administrator verification.\n")
+					return err
+				}
+				task = verified
+			}
 			if task.ID == "dtu-network" && !preview && task.Action != nil && task.Action.DTUProfile != nil && len(task.Action.DTUProfile.Existing) > 0 {
 				fmt.Fprintln(cmd.OutOrStdout(), "Existing Wi-Fi profiles (SSID and exact UUID):")
 				for _, existing := range task.Action.DTUProfile.Existing {
@@ -168,6 +185,8 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 				// The helper reports enrollment and driver readiness itself; a
 				// pending reboot enrollment is a successful, deliberate state.
 				return postinstall.RunNVIDIAMOK(cmd.Context(), src, cmd.OutOrStdout(), cmd.ErrOrStderr())
+			} else if task.Action.Kind == postinstall.SetupFDE {
+				return runFDESetup(cmd, src, before, task)
 			} else {
 				argv := commands[0]
 				runErr = src.Stream(cmd.OutOrStdout(), cmd.ErrOrStderr(), argv[0], argv[1:]...)
@@ -296,6 +315,9 @@ func postinstallCommands(task postinstall.Task) ([][]string, error) {
 	}
 	if task.Action != nil && task.Action.Kind == postinstall.SetHostname {
 		return postinstall.HostnameCommands(task)
+	}
+	if task.Action != nil && task.Action.Kind == postinstall.SetupFDE {
+		return postinstall.FDESetupCommands(task)
 	}
 	if task.Action != nil && len(task.Action.Commands) != 0 {
 		return nil, errors.New("unexpected native command list")
