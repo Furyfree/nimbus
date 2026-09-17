@@ -185,7 +185,11 @@ func resetTask(machine, id string) error {
 	if err != nil {
 		return err
 	}
-	return store.Update("postinstall", machine, nil, []string{id + ".manual", id + ".complete"})
+	keys := []string{id + ".manual", id + ".complete"}
+	if id == "fde" {
+		keys = append(keys, postinstall.FDEEvidence)
+	}
+	return store.Update("postinstall", machine, nil, keys)
 }
 func unknownPostinstallTask(cmd *cobra.Command, name string) error {
 	message := fmt.Sprintf("unknown setup task %q", name)

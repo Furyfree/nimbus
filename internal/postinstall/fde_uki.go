@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/Furyfree/nimbus/internal/inspect"
 	"github.com/Furyfree/nimbus/internal/native"
 )
 
@@ -63,24 +64,14 @@ func fdeCmdline(src native.Source) (string, error) {
 	return strings.Join(fields, " "), nil
 }
 
-// fdeSecureBoot reports the firmware SecureBoot variable. A missing variable
-// means the firmware does not enforce signatures.
+// fdeSecureBoot reports whether the firmware enforces signatures, reusing the
+// strict efivar parsing from inspection. A missing variable is not enforcing.
 func fdeSecureBoot(src native.Source) (bool, error) {
-	names, err := src.ReadDir("/sys/firmware/efi/efivars")
+	state, err := inspect.SecureBootState(src)
 	if err != nil {
 		return false, err
 	}
-	for _, name := range names {
-		if !strings.HasPrefix(name, "SecureBoot-") {
-			continue
-		}
-		data, err := src.ReadFile("/sys/firmware/efi/efivars/" + name)
-		if err != nil {
-			return false, err
-		}
-		return len(data) > 4 && data[4] == 1, nil
-	}
-	return false, nil
+	return state == inspect.SecureBootEnabled, nil
 }
 
 // fdeUKIArgv pins the reviewed ukify invocation.

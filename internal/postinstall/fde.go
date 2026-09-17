@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/Furyfree/nimbus/internal/inspect"
@@ -100,7 +101,7 @@ func fdeTask(src native.Source, in Inputs) Task {
 		}
 	}
 	var missing []string
-	for _, tool := range []string{"systemd-cryptenroll", "ukify", "sbsign", "kernel-install", "dracut", "efibootmgr"} {
+	for _, tool := range []string{"systemd-cryptenroll", "ukify", "kernel-install", "dracut", "efibootmgr"} {
 		if _, err := src.LookPath(tool); err != nil {
 			missing = append(missing, tool)
 		}
@@ -111,6 +112,16 @@ func fdeTask(src native.Source, in Inputs) Task {
 	}
 	if _, err := src.ReadFile(FDEHookPath); err != nil {
 		t.Status, t.Detail = Blocked, "The installed engine does not ship the kernel-install hook; upgrade nimbus before FDE setup."
+		return t
+	}
+	mode, err := src.Run("stat", "--format=%a", "--", FDEHookPath)
+	if err != nil {
+		t.Detail = "The installed hook payload could not be inspected; retry"
+		return t
+	}
+	permissions, parseErr := strconv.ParseUint(strings.TrimSpace(string(mode)), 8, 32)
+	if parseErr != nil || permissions&0o111 == 0 {
+		t.Status, t.Detail = Blocked, "The installed hook payload is not executable; kernel-install would skip it. Upgrade or reinstall nimbus."
 		return t
 	}
 	entries, err := fdeBootEntriesOutput(src)
@@ -125,7 +136,7 @@ func fdeTask(src native.Source, in Inputs) Task {
 	}
 	if !ready {
 		t.Status = Pending
-		t.Detail = "LUKS2 root, TPM2 and the setup tools are present. Approved setup writes the marker, builds and signs the Nimbus image and ensures the firmware entry. TPM enrollment, policy renewal and scoped removal are not implemented yet."
+		t.Detail = "LUKS2 root, TPM2 and the setup tools are present. Approved setup writes the marker, builds the Nimbus image and ensures the firmware entry, which becomes the default boot target. Secure Boot is disabled, so the image is unsigned and the reduced protection is disclosed. TPM enrollment, policy renewal and scoped removal are not implemented yet."
 		t.Action = &Action{Kind: SetupFDE}
 		t.Reboot = true
 		return t
@@ -139,7 +150,9 @@ func fdeTask(src native.Source, in Inputs) Task {
 	}
 	t.Status = Unknown
 	t.VerificationNeedsRoot = true
-	t.Detail = "FDE setup is active and the firmware entry is correct; the image content needs the approved read-only check."
+	t.Detail = "FDE setup is active and the firmware entry is correct; the approved read-only check verifies the image content and offers a rebuild if it is stale or damaged."
+	t.Action = &Action{Kind: SetupFDE}
+	t.Reboot = true
 	return t
 }
 

@@ -32,6 +32,7 @@ func fdeFixture(t *testing.T) (Inputs, *nativetest.FakeSource) {
 		src.Paths[tool] = "/usr/bin/" + tool
 	}
 	src.Commands[nativetest.Key("efibootmgr")] = []byte("BootCurrent: 0008\nTimeout: 0 seconds\nBootOrder: 0008,0000\nBoot0008* Fedora\tHD(1,GPT,78f7ab0d-3bb7-4c71-ba1b-d8f8db372fdc,0x800,0x200000)/\\EFI\\fedora\\shimx64.efi\n")
+	src.Commands[nativetest.Key("stat", "--format=%a", "--", FDEHookPath)] = []byte("755\n")
 	return in, src
 }
 
@@ -171,12 +172,20 @@ func TestFDEInspectionStates(t *testing.T) {
 			t.Fatalf("got %+v", got)
 		}
 	})
+	t.Run("non-executable hook blocks", func(t *testing.T) {
+		in, src := fdeFixture(t)
+		src.Commands[nativetest.Key("stat", "--format=%a", "--", FDEHookPath)] = []byte("644\n")
+		got := findTask(t, Inspect(src, in), "fde")
+		if got.Status != Blocked || !strings.Contains(got.Detail, "not executable") {
+			t.Fatalf("got %+v", got)
+		}
+	})
 	t.Run("active setup needs root", func(t *testing.T) {
 		in, src := fdeFixture(t)
 		src.Files[FDEUKIMarker] = []byte(fdeMarkerText)
 		src.Commands[nativetest.Key("efibootmgr")] = []byte("BootCurrent: 0009\nBootOrder: 0009,0008\nBoot0009* Nimbus UKI\tHD(1,GPT,78f7ab0d-3bb7-4c71-ba1b-d8f8db372fdc,0x800,0x200000)/\\EFI\\Linux\\nimbus.efi\n")
 		got := findTask(t, Inspect(src, in), "fde")
-		if got.Status != Unknown || !got.VerificationNeedsRoot || got.Action != nil {
+		if got.Status != Unknown || !got.VerificationNeedsRoot || got.Action == nil || got.Action.Kind != SetupFDE {
 			t.Fatalf("got %+v", got)
 		}
 	})

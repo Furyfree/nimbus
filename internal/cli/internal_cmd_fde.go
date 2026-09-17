@@ -23,8 +23,7 @@ func newInternalFDEUKI() *cobra.Command {
 		case "add":
 			return postinstall.BuildFDEUKI(native.ExecSource{}, args[1], cmd.OutOrStdout())
 		case "remove":
-			_, err := fmt.Fprintln(cmd.ErrOrStderr(), "fde-uki remove: scoped removal is not implemented; the current image is retained")
-			return err
+			return postinstall.RemoveFDEUKI(native.ExecSource{}, args[1], cmd.OutOrStdout())
 		default:
 			return usageError{fmt.Errorf("unsupported fde-uki command %q", args[0])}
 		}

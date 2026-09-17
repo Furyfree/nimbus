@@ -439,7 +439,11 @@ func enrichPostinstall(src native.Source, s *selected, view *postinstallView) er
 	}
 	for i := range view.Tasks {
 		t := &view.Tasks[i]
-		if (t.ID == "nvidia-mok" || t.ID == "fde") && t.VerificationNeedsRoot && evidence.Has(view.Machine, t.ID+".complete", 1, "verified") {
+		evidenceID := t.ID + ".complete"
+		if t.ID == "fde" {
+			evidenceID = postinstall.FDEEvidence
+		}
+		if (t.ID == "nvidia-mok" || t.ID == "fde") && t.VerificationNeedsRoot && evidence.Has(view.Machine, evidenceID, 1, "verified") {
 			t.PreviouslyVerified = true
 			switch t.ID {
 			case "nvidia-mok":

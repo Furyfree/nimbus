@@ -396,9 +396,13 @@ refactor and TUI.
   unknown setups are reported clearly. Keyslots, EFI space and enrollment
   state need an approved privileged check. No setup action is offered yet.
 - [ ] Implement approved setup: the inert kernel-install hook, the marker,
-  ukify build and signing and the `Nimbus UKI` firmware entry, then prove
+  ukify build and the `Nimbus UKI` firmware entry, then prove
   passphrase UKI boot and a kernel update in a disposable VM before any TPM
   enrollment.
+- [ ] Ship the inert kernel-install hook in the 0.6.0 engine package
+  (`nimbus.spec`); the marker stays action-written. Kernel-install skips a
+  non-executable plugin, so the task checks the installed bit and blocks with
+  an upgrade hint.
 - [ ] Add enrollment, policy renewal, status and scoped removal with explicit
   previews; reduced protection and removal default to No and a blanket `--yes`
   cannot accept them. Preserve the passphrase, unrelated keys and enrollment

@@ -169,7 +169,7 @@ func fdeSetupFixture(t *testing.T) *fdeSetupSource {
 	base.Commands[nativetest.Key("uname", "-r")] = []byte(version + "\n")
 	base.Commands[nativetest.Key("stat", "--format=%s", "--", fdeKernelDir+"/"+version+"/vmlinuz")] = []byte("18497536\n")
 	base.Commands[nativetest.Key("stat", "--format=%s", "--", "/boot/initramfs-"+version+".img")] = []byte("47000000\n")
-	base.Commands[nativetest.Key("sudo", "-n", "--", "df", "--output=avail", "-B1", "/boot/efi")] = []byte("Avail\n995000000\n")
+	base.Commands[nativetest.Key("df", "--output=avail", "-B1", "/boot/efi")] = []byte("Avail\n995000000\n")
 	base.Commands[nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", "/etc")] = []byte("directory|root|root|755|6\n")
 	base.Commands[nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", "/etc/nimbus")] = []byte("directory|root|root|755|2\n")
 	base.Commands[nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", FDEUKIMarker)] = []byte("regular file|root|root|644|1\n")
@@ -193,12 +193,14 @@ func TestFDEHookPayloadContract(t *testing.T) {
 	for _, want := range []string{
 		"[ -e /etc/nimbus/fde-uki.enabled ] || exit 0",
 		"/usr/bin/nimbus internal fde-uki",
-		"warning:",
-		"exit 0",
+		"warning: the Nimbus kernel image was not rebuilt",
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("hook payload lacks %q", want)
 		}
+	}
+	if !strings.HasSuffix(strings.TrimSpace(script), "exit 0") {
+		t.Fatal("hook payload does not end in a successful exit, which would fail kernel updates")
 	}
 }
 
@@ -244,7 +246,7 @@ func TestRunFDESetup(t *testing.T) {
 	})
 	t.Run("insufficient space blocks before changes", func(t *testing.T) {
 		src := fdeSetupFixture(t)
-		src.Commands[nativetest.Key("sudo", "-n", "--", "df", "--output=avail", "-B1", "/boot/efi")] = []byte("Avail\n1000\n")
+		src.Commands[nativetest.Key("df", "--output=avail", "-B1", "/boot/efi")] = []byte("Avail\n1000\n")
 		var out bytes.Buffer
 		if err := RunFDESetup(t.Context(), src, &out, &out, fdeSetupTask()); err == nil || !strings.Contains(err.Error(), "bytes free") {
 			t.Fatalf("got %v", err)
@@ -313,6 +315,7 @@ func fdeVerifyFixture(t *testing.T) fdeInspectSource {
 	base.Files[FDEUKIMarker] = []byte(fdeMarkerText)
 	base.Files[fdeCmdlineFile] = []byte("root=UUID=test ro\n")
 	base.Commands[nativetest.Key("efibootmgr")] = []byte("BootCurrent: 0009\nBootOrder: 0009,0008\nBoot0009* Nimbus UKI\tHD(1,GPT," + guid + ",0x800,0x200000)/\\EFI\\Linux\\nimbus.efi\n")
+	base.Commands[nativetest.Key("stat", "--format=%s", "--", fdeKernelDir+"/6.19.10-300.fc44.x86_64/vmlinuz")] = []byte("18497536\n")
 	return fdeInspectSource{FakeSource: base}
 }
 
@@ -370,6 +373,30 @@ func TestVerifyFDE(t *testing.T) {
 		src.out = []byte(".linux:\n  size: 1 bytes\n  sha256: aa\n")
 		got := VerifyFDE(src, fdeSetupTask())
 		if got.Status == Complete || !strings.Contains(got.Detail, "lacks the .initrd section") {
+			t.Fatalf("got %+v", got)
+		}
+	})
+	t.Run("a damaged image offers repair", func(t *testing.T) {
+		for name, output := range map[string]string{
+			"mismatch":        strings.Replace(fdeInspectOutput, "%s", "root=UUID=other ro", 1),
+			"missing section": ".linux:\n  size: 1 bytes\n  sha256: aa\n",
+		} {
+			t.Run(name, func(t *testing.T) {
+				src := fdeVerifyFixture(t)
+				src.out = []byte(output)
+				got := VerifyFDE(src, fdeSetupTask())
+				if got.Status != Pending || got.Action == nil || got.Action.Kind != SetupFDE {
+					t.Fatalf("got %+v", got)
+				}
+			})
+		}
+	})
+	t.Run("an uninstalled embedded kernel offers repair", func(t *testing.T) {
+		src := fdeVerifyFixture(t)
+		src.out = []byte(strings.Replace(fdeInspectOutput, "%s", "root=UUID=test ro", 1))
+		delete(src.Commands, nativetest.Key("stat", "--format=%s", "--", fdeKernelDir+"/6.19.10-300.fc44.x86_64/vmlinuz"))
+		got := VerifyFDE(src, fdeSetupTask())
+		if got.Status != Pending || got.Action == nil || !strings.Contains(got.Detail, "no longer installed") {
 			t.Fatalf("got %+v", got)
 		}
 	})

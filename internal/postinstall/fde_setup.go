@@ -28,6 +28,10 @@ const fdeMarkerText = `# Nimbus owns this marker. Its presence activates the ker
 
 const fdeSizeSlack = 64 << 20
 
+// FDEEvidence records a verified image and stays distinct from the enrollment
+// evidence that the next milestone adds.
+const FDEEvidence = "fde.uki"
+
 // fdeMarkerReady reports whether the marker already matches the reviewed
 // content. A foreign file is never overwritten.
 func fdeMarkerReady(src native.Source) (bool, error) {
@@ -215,7 +219,7 @@ func fdeSpaceCheck(src native.Source, kernel string, out io.Writer) error {
 		}
 		need += size
 	}
-	avail, err := src.Run("sudo", "-n", "--", "df", "--output=avail", "-B1", fdeESPMount)
+	avail, err := src.Run("df", "--output=avail", "-B1", fdeESPMount)
 	if err != nil {
 		return fmt.Errorf("inspect the EFI system partition: %w", err)
 	}
@@ -235,7 +239,7 @@ func fdeSpaceCheck(src native.Source, kernel string, out io.Writer) error {
 }
 
 func validateFDESetup(task Task) error {
-	if task.ID != "fde" || task.Status != Pending || task.Action == nil || task.Action.Kind != SetupFDE {
+	if task.ID != "fde" || (task.Status != Pending && task.Status != Unknown) || task.Action == nil || task.Action.Kind != SetupFDE {
 		return errors.New("invalid FDE setup action")
 	}
 	return nil
@@ -255,7 +259,7 @@ func FDESetupCommands(task Task) ([][]string, error) {
 }
 
 // RunFDESetup runs only after the caller previews, approves, locks and
-// rechecks the task. It writes the marker, builds and signs the image and
+// rechecks the task. It writes the marker, builds the image and
 // ensures the firmware entry. It never enrolls a TPM or removes anything.
 func RunFDESetup(ctx context.Context, src native.Source, out, errOut io.Writer, task Task) error {
 	if err := validateFDESetup(task); err != nil {
@@ -265,6 +269,14 @@ func RunFDESetup(ctx context.Context, src native.Source, out, errOut io.Writer, 
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if _, err := fmt.Fprintf(out, "$ %s %s\n", name, strings.Join(args, " ")); err != nil {
+			return err
+		}
+		return src.Stream(out, errOut, name, args...)
+	}
+	// Rollback must run even when the context was cancelled after the marker
+	// was written, so the hook never stays armed without an image.
+	rollback := func(name string, args ...string) error {
 		if _, err := fmt.Fprintf(out, "$ %s %s\n", name, strings.Join(args, " ")); err != nil {
 			return err
 		}
@@ -325,7 +337,7 @@ func RunFDESetup(ctx context.Context, src native.Source, out, errOut io.Writer, 
 	}
 	if err := stream("sudo", "--", exe, "internal", "fde-uki", "add", kernel); err != nil {
 		if wroteMarker {
-			if rollbackErr := fdeRemoveMarker(src, stream, exe); rollbackErr != nil {
+			if rollbackErr := fdeRemoveMarker(src, rollback, exe); rollbackErr != nil {
 				return errors.Join(fmt.Errorf("build the Nimbus image: %w", err), fmt.Errorf("remove the FDE marker after the failed build: %w", rollbackErr))
 			}
 			return fmt.Errorf("build the Nimbus image: %w; the FDE marker was removed and the hook stays inert", err)
@@ -403,21 +415,31 @@ func VerifyFDE(src native.Source, t Task) Task {
 	out, err := src.Run(FDEUKITool, "inspect", FDEUKIPath)
 	if err != nil {
 		t.VerificationNeedsRoot = true
-		t.Detail = "The Nimbus image could not be inspected with administrator access; retry when sudo is available."
+		t.Detail = "The Nimbus image could not be read or inspected; retry when sudo is available."
 		return t
 	}
 	inspected := fdeInspect(string(out))
+	damaged := func(detail string) Task {
+		t.Status, t.Detail = Pending, detail
+		t.Action = &Action{Kind: SetupFDE}
+		t.Reboot = true
+		return t
+	}
 	for _, want := range []string{".linux:", ".initrd:", ".cmdline:", ".osrel:", ".uname:"} {
 		if !slices.Contains(inspected.sections, want) {
-			t.Detail = "The Nimbus image lacks the " + strings.TrimSuffix(want, ":") + " section; rebuild it with the approved setup."
-			return t
+			return damaged("The Nimbus image lacks the " + strings.TrimSuffix(want, ":") + " section; rebuild it with the approved setup.")
 		}
 	}
 	if inspected.cmdline != expected {
-		t.Detail = "The Nimbus image does not embed the expected command line; rebuild it with the approved setup."
-		return t
+		return damaged("The Nimbus image does not embed the expected command line; rebuild it with the approved setup.")
 	}
-	t.Status, t.Detail = Complete, "The Nimbus image parses, embeds the expected command line and its firmware entry is correct. TPM enrollment and automatic unlock are still not configured."
+	if !fdeVersionRE.MatchString(inspected.uname) {
+		return damaged("The Nimbus image does not identify its kernel release; rebuild it with the approved setup.")
+	}
+	if _, err := src.Run("stat", "--format=%s", "--", fdeKernelDir+"/"+inspected.uname+"/vmlinuz"); err != nil {
+		return damaged("The Nimbus image embeds kernel " + inspected.uname + ", whose kernel package is no longer installed; rebuild it for an installed kernel with the approved setup.")
+	}
+	t.Status, t.Detail = Complete, "The Nimbus image parses, embeds the expected command line for an installed kernel and its firmware entry is correct. TPM enrollment and automatic unlock are still not configured."
 	return t
 }
 

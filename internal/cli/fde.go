@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"io"
 
@@ -29,10 +28,10 @@ func rootVerification(cmd *cobra.Command, src native.Source, before *postinstall
 	}
 	if !yes {
 		if !postinstallTerminal(cmd.InOrStdin()) {
-			return task, usageError{errors.New("administrator verification requires a terminal or explicit --yes; use --plan to inspect it")}
+			return task, usageError{fmt.Errorf("administrator verification requires a terminal or explicit --yes; use --plan to inspect it")}
 		}
 		if !approver(cmd.InOrStdin(), cmd.OutOrStdout(), "") {
-			return task, errors.New("verification declined; completion was not recorded")
+			return task, fmt.Errorf("verification declined; completion was not recorded")
 		}
 	}
 	if err := src.Stream(cmd.OutOrStdout(), cmd.ErrOrStderr(), "sudo", "-v"); err != nil {
@@ -43,7 +42,7 @@ func rootVerification(cmd *cobra.Command, src native.Source, before *postinstall
 		return task, err
 	}
 	if fresh.nativeDigest != before.nativeDigest {
-		return task, errors.New("task selection or native state changed during approval; retry verification")
+		return task, fmt.Errorf("task selection or native state changed during approval; retry verification")
 	}
 	freshTask, err := selectedTask(fresh.view, task.ID)
 	if err != nil {
@@ -55,31 +54,13 @@ func rootVerification(cmd *cobra.Command, src native.Source, before *postinstall
 	return verify(src, freshTask), nil
 }
 
-func runFDEVerification(cmd *cobra.Command, src native.Source, before *postinstallSnapshot, task postinstall.Task, yes bool) error {
-	if task.VerificationNeedsRoot {
-		preview := fmt.Sprintf("Read-only administrator verification:\n  sudo -- ukify inspect %s (image sections and embedded command line)\nNo changes will be made.\n", postinstall.FDEUKIPath)
-		verified, err := rootVerification(cmd, src, before, task, preview, func(s native.Source, t postinstall.Task) postinstall.Task {
-			return postinstall.VerifyFDE(fdeVerificationSource{s}, t)
-		}, yes)
-		if err != nil {
-			return err
-		}
-		task = verified
-	}
-	if err := renderPostinstallStatus(cmd.OutOrStdout(), postinstallView{Machine: before.view.Machine, Tasks: []postinstall.Task{task}}); err != nil {
-		return err
-	}
-	if task.Status == postinstall.NotApplicable {
-		return nil
-	}
-	if task.Status != postinstall.Complete {
-		return fmt.Errorf("completion not recorded: %s", task.Detail)
-	}
-	if err := recordTask(before.view.Machine, task.ID+".complete", "verified"); err != nil {
-		return err
-	}
-	_, err := io.WriteString(cmd.OutOrStdout(), "Completion recorded. Routine status remains unprivileged and may still need administrator verification.\n")
-	return err
+// fdeVerify runs the approved read-only checks; a damaged or stale image
+// comes back Pending with the repair action so the caller can offer it.
+func fdeVerify(cmd *cobra.Command, src native.Source, before *postinstallSnapshot, task postinstall.Task, yes bool) (postinstall.Task, error) {
+	preview := fmt.Sprintf("Read-only administrator verification:\n  sudo -- ukify inspect %s (sections, kernel release and embedded command line)\nNo changes will be made.\n", postinstall.FDEUKIPath)
+	return rootVerification(cmd, src, before, task, preview, func(s native.Source, t postinstall.Task) postinstall.Task {
+		return postinstall.VerifyFDE(fdeVerificationSource{s}, t)
+	}, yes)
 }
 
 func runFDESetup(cmd *cobra.Command, src native.Source, before *postinstallSnapshot, task postinstall.Task) error {
@@ -93,7 +74,7 @@ func runFDESetup(cmd *cobra.Command, src native.Source, before *postinstallSnaps
 	if verified.Status != postinstall.Complete {
 		return fmt.Errorf("setup finished but verification did not complete: %s", verified.Detail)
 	}
-	if err := recordTask(before.view.Machine, task.ID+".complete", "verified"); err != nil {
+	if err := recordTask(before.view.Machine, postinstall.FDEEvidence, "verified"); err != nil {
 		return err
 	}
 	_, err := io.WriteString(cmd.OutOrStdout(), "Reboot to boot the Nimbus image. Completion recorded; routine status may need administrator verification for the image content.\n")
