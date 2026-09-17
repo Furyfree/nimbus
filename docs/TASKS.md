@@ -395,10 +395,18 @@ refactor and TUI.
   and the selected tools are inspected without privilege, and unsupported or
   unknown setups are reported clearly. Keyslots, EFI space and enrollment
   state need an approved privileged check. No setup action is offered yet.
-- [ ] Implement approved setup: the inert kernel-install hook, the marker,
-  ukify build and the `Nimbus UKI` firmware entry, then prove
-  passphrase UKI boot and a kernel update in a disposable VM before any TPM
-  enrollment.
+- [x] Implement approved setup: the inert kernel-install hook, the marker,
+  ukify build and the `Nimbus UKI` firmware entry, then prove passphrase UKI
+  boot and a kernel update in a disposable VM (2026-09-17). A real
+  `nimbus sync` on a drill machine recorded the package receipts; the approved
+  `postinstall fde` action wrote `/etc/nimbus/fde-uki.enabled`, built
+  `/boot/efi/EFI/Linux/nimbus.efi`, replaced an earlier hand-made entry that
+  pointed at another path, and verified the image read-only. Reboots loaded
+  `Boot0009 "Nimbus UKI"` through systemd-stub (Secure Boot disabled) with the
+  embedded command line; `kernel-install add` for the second installed kernel
+  rebuilt the image through the hook, and the next boot ran that kernel.
+  Accepted limitation: the image is unsigned; the signed shim chain and MOK
+  enrollment arrive with the enrollment milestone.
 - [ ] Ship the inert kernel-install hook in the 0.6.0 engine package
   (`nimbus.spec`); the marker stays action-written. Kernel-install skips a
   non-executable plugin, so the task checks the installed bit and blocks with
