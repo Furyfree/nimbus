@@ -1623,20 +1623,26 @@ changed.
 Implemented in source; not released as a package.
 
 - [x] Add the `voxtype` postinstall task, selected with the Voxtype package.
-  Read-only inspection runs `voxtype info models --json --engine whisper` and
-  reads `systemctl --user` unit state; Nimbus never reads model files, the home
-  or recordings. Package presence without a verified receipt stays blocked.
+  Read-only inspection runs `voxtype info models --json --engine whisper`,
+  reads the model from the applied `~/.config/voxtype/config.toml`
+  (`[whisper].model`) and reads `systemctl --user` unit state; Nimbus never
+  reads model files, recordings or other home data. Package presence without a
+  verified receipt stays blocked.
 - [x] Offer one approved native workflow: `voxtype setup --download --model
-  small` when the catalog reports the model missing, then `systemctl --user
-  enable --now voxtype.service`. An existing model only needs enablement.
-  `--plan` stays read-only; the digest recheck and operation lock cover
-  execution; completion is verified by re-inspection, never by the commands.
-- [x] Reject forged or reordered workflows. The task keeps the fixed `small`
-  model that the managed Chezmoi config selects; no model paths are guessed.
+  <configured>` when the catalog reports that model missing, then `systemctl
+  --user enable --now voxtype.service`. An existing model only needs
+  enablement. `--plan` stays read-only; the digest recheck and operation lock
+  cover execution; completion is verified by re-inspection, never by the
+  commands.
+- [x] Read the model from the managed config so the desktop and laptop
+  download different models (Furyfree/nimbus#69); a missing, model-less or
+  invalid config blocks with guidance instead of guessing.
+- [x] Reject forged or reordered workflows. The model name is
+  shape-validated and no model paths are guessed.
 - [x] Tests cover a missing package, a missing binary, an unreadable catalog,
-  an unlisted model, disabled/enabled unit states, forged actions, and a CLI
-  preview plus approved run where the native catalog and unit state change.
-  `just check` passes.
+  an unlisted model, disabled/enabled unit states, forged actions, a missing
+  or invalid config, a per-machine model, and a CLI preview plus approved run
+  where the native catalog and unit state change. `just check` passes.
 - [ ] Release the task in a package and run it on the laptop (owner present).
 
 ## Persistent hostname, 2026-09-17

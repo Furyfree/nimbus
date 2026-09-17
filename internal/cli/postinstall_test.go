@@ -454,6 +454,9 @@ func TestPostinstallVoxtypePreviewAndApproval(t *testing.T) {
 	src.Commands[key] = append(src.Commands[key], []byte("voxtype|0|1.0.1|0.3.fc44|x86_64|voxtype|User\n")...)
 	src.Paths["voxtype"] = "/usr/bin/voxtype"
 	src.Paths["systemctl"] = "/usr/bin/systemctl"
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	src.Files[filepath.Join(configHome, "voxtype", "config.toml")] = []byte("[whisper]\nmodel = \"small\"\n")
 	src.Commands[nativetest.Key("voxtype", "info", "models", "--json", "--engine", "whisper")] = []byte(
 		`{"engines":{"whisper":{"models":[{"name":"small","installed":false},{"name":"medium","installed":false}]}}}`)
 	unit := func(verb, state string, code int) {
