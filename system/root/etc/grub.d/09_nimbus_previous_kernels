@@ -59,7 +59,6 @@ cat << EOF
 insmod blscfg
 set blsdir=/loader/entries-nimbus
 blscfg $entry
-set blsdir=/loader/entries
 EOF
 
 # With a single entry the mirror already is the whole menu.
