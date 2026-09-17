@@ -9,9 +9,10 @@ Existing local code is a candidate, not proof that the new contract is shipped.
 
 ## Next steps
 
-Publish the validated DTU native-label verification correction as 0.5.10.
-The owner confirmed the desktop command accepts the existing certificate;
-see [TASKS](TASKS.md#dtu-native-selinux-verification-correction).
+Release 0.5.10 publishes the DTU native-label verification correction. The
+owner confirmed the desktop command accepts the existing certificate, and the
+signed package is installed on the workstation; see
+[TASKS](TASKS.md#dtu-native-selinux-verification-correction).
 
 Release 0.5.9 corrects the terminal-test process-exit race that blocked the
 0.5.7 COPR build and a separate interrupt-readiness race exposed during 0.5.8

@@ -1430,9 +1430,11 @@ Archive SHA-256:
 COPR recipe `9bc0221` selects the reviewed archive. The complete packaging gate
 passed in an offline Fedora container using a copied checkout with no host
 mounts. [Publication](https://github.com/Furyfree/copr/actions/runs/34899644892)
-was dispatched for Nimbus only. Handoff remains after COPR submission without
-monitoring completion; published-RPM availability and signature checks remain
-pending. No workstation package installation was changed during publication.
+was dispatched for Nimbus only. The owner's workstation installed
+`nimbus-0.5.10-0.1.fc44.x86_64` from the COPR project; the RPM signature key
+`DD1D48E2CA0E9F6A` matches the pinned fingerprint
+`8FF8E546C3ABE44146CFA411DD1D48E2CA0E9F6A`, and `nimbus version` reports
+0.5.10. No workstation package installation was changed during publication.
 
 ## Terminal interrupt buffered-output correction
 
