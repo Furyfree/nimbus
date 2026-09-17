@@ -375,9 +375,14 @@ refactor and TUI.
   console is clean and the menu still renders.
 - [ ] Verify the Windows-present menu on the dual-booting desktop and boot the
   older kernel end to end; the VM had no Windows entry.
-- Accepted limitation: an older kernel whose initramfs was built before
+- Accepted limitations: an older kernel whose initramfs was built before
   activation keeps the default Plymouth prompt until its next rebuild; the
-  GRUB menu stays themed.
+  GRUB menu stays themed. BIOS-only systems are untested (EFI verified). The
+  explicit `set timeout=5` intentionally overrides `GRUB_TIMEOUT`,
+  `menu_auto_hide` and `systemctl reboot --boot-loader-menu`. If the engine
+  does not ship the payload, or the recorded previous Plymouth theme is gone,
+  the plan blocks with guidance instead of running triggers that cannot
+  succeed.
 - [ ] Inspect the Fedora/LUKS2 boot path, TPM and Secure Boot support; choose
   the native auto-unlock method and boot-change policy before implementation.
 - [ ] Add explicit post-install preview and approval for FDE auto-unlock,

@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/native"
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
@@ -35,6 +37,19 @@ type ResourceChange struct {
 	Previous string `json:"previous"`
 	Enabled  *bool  `json:"enabled,omitempty"`
 	Running  *bool  `json:"running,omitempty"`
+}
+
+var plymouthThemeName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// plymouthThemeAvailable reports whether the native theme module file exists;
+// /usr/share is readable without privilege. The name comes from a recorded
+// receipt, so it is validated before it becomes a path.
+func plymouthThemeAvailable(src native.Source, theme string) bool {
+	if !plymouthThemeName.MatchString(theme) {
+		return false
+	}
+	_, err := src.ReadFile("/usr/share/plymouth/themes/" + theme + "/" + theme + ".plymouth")
+	return err == nil
 }
 
 func encodeResource(v any) string { data, _ := json.Marshal(v); return string(data) }
@@ -261,16 +276,23 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 					op.Blocked = "existing greeter state directory has foreign ownership or mode; explicit migration required"
 				}
 			}
-			if id == "plymouth-theme" && removalTrigger[id] && !selectedTrigger[id] {
-				// The selection returns to what was observed before the
-				// install; that value lives in the previous trigger receipt.
-				previous := receipt.Previous
-				if !ok || previous == "" {
-					op.Blocked = "no recorded previous Plymouth theme; select the boot-theme component to record it before removal"
-				} else {
-					op.Action = ActionRemove
-					op.Summary = "restore the previous Plymouth theme"
-					op.Steps = []Step{{Description: "restore the previous Plymouth theme", Argv: []string{"plymouth-set-default-theme", "-R", previous}, Privileged: true}}
+			if id == "plymouth-theme" {
+				switch {
+				case !plymouthThemeAvailable(b.in.Source, "nimbus"):
+					op.Blocked = "the installed engine does not ship the boot-theme payload; upgrade nimbus or deselect boot-theme"
+				case removalTrigger[id] && !selectedTrigger[id]:
+					// The selection returns to what was observed before the
+					// install; that value lives in the previous trigger receipt.
+					previous := receipt.Previous
+					if !ok || previous == "" {
+						op.Blocked = "no recorded previous Plymouth theme; select the boot-theme component to record it before removal"
+					} else if !plymouthThemeAvailable(b.in.Source, previous) {
+						op.Blocked = "the recorded previous Plymouth theme " + previous + " is no longer installed; set a theme manually with plymouth-set-default-theme before removing boot-theme"
+					} else {
+						op.Action = ActionRemove
+						op.Summary = "restore the previous Plymouth theme"
+						op.Steps = []Step{{Description: "restore the previous Plymouth theme", Argv: []string{"plymouth-set-default-theme", "-R", previous}, Privileged: true}}
+					}
 				}
 			}
 			ops = append(ops, op)
