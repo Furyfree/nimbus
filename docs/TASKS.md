@@ -360,9 +360,16 @@ refactor and TUI.
   and select `boot-theme` in the `common` profile in the release change. The
   component stays deselected on physical machines until then, so an older
   engine is never asked to run triggers whose payload it lacks.
-- [ ] Verify installed unlock and fallback through actual boots: Fedora-only
-  and Windows-present menus, Fedora default, five-second timeout, older
-  kernels, LUKS passphrase prompt and theme removal, in a disposable VM first.
+- [x] Verify the VM boot path (2026-09-17, disposable Fedora 44 with Secure
+  Boot and LUKS): the themed GRUB menu rendered the NIMBUS header, monospace
+  fonts and the five-second countdown with both installed kernels listed; the
+  Plymouth disk-unlock screen rendered the theme (owner-verified); removing
+  `/etc/nimbus/boot-theme.enabled` and rerunning the triggers restored
+  Fedora's default menu, the `text` Plymouth theme and a theme-free initramfs;
+  re-activation was repeatable. The payload was copied from the candidate
+  checkout because the 0.5.10 package does not ship it yet.
+- [ ] Verify the Windows-present menu on the dual-booting desktop and boot the
+  older kernel end to end; the VM had no Windows entry.
 - [ ] Inspect the Fedora/LUKS2 boot path, TPM and Secure Boot support; choose
   the native auto-unlock method and boot-change policy before implementation.
 - [ ] Add explicit post-install preview and approval for FDE auto-unlock,
