@@ -1465,3 +1465,24 @@ Validation on 2026-09-15:
 
 This is an unpublished source correction; no release or installed engine was
 changed.
+
+## Voxtype postinstall setup, 2026-09-17
+
+Implemented in source; not released as a package.
+
+- [x] Add the `voxtype` postinstall task, selected with the Voxtype package.
+  Read-only inspection runs `voxtype info models --json --engine whisper` and
+  reads `systemctl --user` unit state; Nimbus never reads model files, the home
+  or recordings. Package presence without a verified receipt stays blocked.
+- [x] Offer one approved native workflow: `voxtype setup --download --model
+  small` when the catalog reports the model missing, then `systemctl --user
+  enable --now voxtype.service`. An existing model only needs enablement.
+  `--plan` stays read-only; the digest recheck and operation lock cover
+  execution; completion is verified by re-inspection, never by the commands.
+- [x] Reject forged or reordered workflows. The task keeps the fixed `small`
+  model that the managed Chezmoi config selects; no model paths are guessed.
+- [x] Tests cover a missing package, a missing binary, an unreadable catalog,
+  an unlisted model, disabled/enabled unit states, forged actions, and a CLI
+  preview plus approved run where the native catalog and unit state change.
+  `just check` passes.
+- [ ] Release the task in a package and run it on the laptop (owner present).
