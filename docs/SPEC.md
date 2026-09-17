@@ -1050,7 +1050,11 @@ runs before Fedora's `10_linux`: it maintains a Nimbus-owned mirror of the one
 default BLS entry under `/boot/loader/entries-nimbus` through
 `nimbus internal boot-menu`, then uses the blscfg module's own filters. Fedora's
 flat menu returns whenever the engine, the marker or the mirror is unavailable,
-and removing the marker removes the mirror.
+and removing the marker removes the mirror. The engine also ships a
+marker-gated dracut module (`/usr/lib/dracut/modules.d/40nimbus-plymouth`) that
+adds the label plugin, `fc-match`, fontconfig configuration and the monospace
+font to the initramfs while the marker exists; the `plymouth-theme` trigger
+rebuilds the initramfs, and deselection rebuilds it without them.
 The matching Plymouth theme styles native disk-unlock prompts without changing
 encryption or automatic-unlock policy. The engine package ships the payload
 under `/boot/grub2/themes/nimbus` and `/usr/share/plymouth/themes/nimbus` plus
