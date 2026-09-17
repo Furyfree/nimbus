@@ -8,15 +8,20 @@ import (
 	"github.com/Furyfree/nimbus/internal/native/nativetest"
 )
 
+const voxtypeConfig = "/home/tester/.config/voxtype/config.toml"
+
 func voxtypeFixture(t *testing.T) (Inputs, *nativetest.FakeSource) {
 	t.Helper()
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "/home/tester")
 	in, src := fixture("voxtype")
 	if src.ExitCodes == nil {
 		src.ExitCodes = map[string]int{}
 	}
 	src.Paths["voxtype"] = "/usr/bin/voxtype"
 	src.Paths["systemctl"] = "/usr/bin/systemctl"
-	setVoxtypeCatalog(t, src, false)
+	setVoxtypeConfig(t, src, "small")
+	setVoxtypeCatalog(t, src, "small", false)
 	// Fedora presets leave the user unit disabled, which systemctl reports as
 	// a non-zero exit with the state on stdout.
 	setUnit(t, src, "is-enabled", "disabled", 1)
@@ -24,14 +29,21 @@ func voxtypeFixture(t *testing.T) (Inputs, *nativetest.FakeSource) {
 	return in, src
 }
 
-func setVoxtypeCatalog(t *testing.T, src *nativetest.FakeSource, installed bool) {
+func setVoxtypeConfig(t *testing.T, src *nativetest.FakeSource, model string) {
+	t.Helper()
+	src.Files[voxtypeConfig] = []byte("engine = \"whisper\"\nstate_file = \"auto\"\n" +
+		"[hotkey]\nenabled = false\n" +
+		"[whisper]\nmode = \"local\"\nmodel = \"" + model + "\"\nlanguage = [\"en\", \"da\"]\n")
+}
+
+func setVoxtypeCatalog(t *testing.T, src *nativetest.FakeSource, model string, installed bool) {
 	t.Helper()
 	state := "false"
 	if installed {
 		state = "true"
 	}
 	src.Commands[nativetest.Key("voxtype", "info", "models", "--json", "--engine", "whisper")] = []byte(
-		`{"engines":{"whisper":{"models":[{"name":"small","installed":` + state + `},{"name":"medium","installed":false}]}},"verified":false}`)
+		`{"engines":{"whisper":{"models":[{"name":"` + model + `","installed":` + state + `},{"name":"medium","installed":false}]}},"verified":false}`)
 }
 
 func setUnit(t *testing.T, src *nativetest.FakeSource, verb, state string, code int) {
@@ -62,7 +74,7 @@ func TestVoxtypeSetupStates(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			in, src := voxtypeFixture(t)
 			if test.installed {
-				setVoxtypeCatalog(t, src, true)
+				setVoxtypeCatalog(t, src, "small", true)
 			}
 			if test.enabled != "" {
 				setUnit(t, src, "is-enabled", test.enabled, 0)
@@ -91,6 +103,54 @@ func TestVoxtypeSetupStates(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestVoxtypeUsesTheConfiguredModel(t *testing.T) {
+	t.Run("desktop selects its own model", func(t *testing.T) {
+		in, src := voxtypeFixture(t)
+		setVoxtypeConfig(t, src, "large-v3-turbo")
+		setVoxtypeCatalog(t, src, "large-v3-turbo", false)
+		got := findTask(t, Inspect(src, in), "voxtype")
+		download := []string{"voxtype", "setup", "--download", "--model", "large-v3-turbo"}
+		if got.Status != Pending || got.Action == nil || !equalCommands(got.Action.Commands, [][]string{download, voxtypeEnableCommand()}) {
+			t.Fatalf("got %+v", got)
+		}
+		if _, err := VoxtypeCommands(got); err != nil {
+			t.Fatalf("offered action was rejected: %v", err)
+		}
+	})
+	t.Run("config missing", func(t *testing.T) {
+		in, src := voxtypeFixture(t)
+		delete(src.Files, voxtypeConfig)
+		got := findTask(t, Inspect(src, in), "voxtype")
+		if got.Status != Blocked || got.Action != nil {
+			t.Fatalf("got %+v", got)
+		}
+	})
+	t.Run("config without a model", func(t *testing.T) {
+		in, src := voxtypeFixture(t)
+		src.Files[voxtypeConfig] = []byte("[whisper]\nlanguage = [\"en\"]\n")
+		got := findTask(t, Inspect(src, in), "voxtype")
+		if got.Status != Blocked || got.Action != nil {
+			t.Fatalf("got %+v", got)
+		}
+	})
+	t.Run("invalid model name", func(t *testing.T) {
+		in, src := voxtypeFixture(t)
+		setVoxtypeConfig(t, src, "large v3")
+		got := findTask(t, Inspect(src, in), "voxtype")
+		if got.Status != Blocked || got.Action != nil {
+			t.Fatalf("got %+v", got)
+		}
+	})
+	t.Run("home unknown", func(t *testing.T) {
+		in, src := voxtypeFixture(t)
+		t.Setenv("HOME", "")
+		got := findTask(t, Inspect(src, in), "voxtype")
+		if got.Status != Blocked || got.Action != nil {
+			t.Fatalf("got %+v", got)
+		}
+	})
 }
 
 func TestVoxtypeSetupBlocksAndUnknowns(t *testing.T) {
@@ -128,7 +188,7 @@ func TestVoxtypeSetupBlocksAndUnknowns(t *testing.T) {
 	})
 	t.Run("no user session", func(t *testing.T) {
 		in, src := voxtypeFixture(t)
-		setVoxtypeCatalog(t, src, true)
+		setVoxtypeCatalog(t, src, "small", true)
 		delete(src.Commands, nativetest.Key("systemctl", "--user", "is-enabled", "voxtype.service"))
 		got := findTask(t, Inspect(src, in), "voxtype")
 		if got.Status != Unknown || got.Action != nil {
@@ -137,7 +197,7 @@ func TestVoxtypeSetupBlocksAndUnknowns(t *testing.T) {
 	})
 	t.Run("unrecognized unit state", func(t *testing.T) {
 		in, src := voxtypeFixture(t)
-		setVoxtypeCatalog(t, src, true)
+		setVoxtypeCatalog(t, src, "small", true)
 		setUnit(t, src, "is-enabled", "banana", 0)
 		got := findTask(t, Inspect(src, in), "voxtype")
 		if got.Status != Unknown || got.Action != nil {
@@ -147,7 +207,7 @@ func TestVoxtypeSetupBlocksAndUnknowns(t *testing.T) {
 }
 
 func TestVoxtypeCommandsRejectForgedActions(t *testing.T) {
-	valid := Task{ID: "voxtype", Status: Pending, Action: &Action{Kind: SetupVoxtype, Commands: [][]string{voxtypeDownloadCommand(), voxtypeEnableCommand()}}}
+	valid := Task{ID: "voxtype", Status: Pending, Action: &Action{Kind: SetupVoxtype, Commands: [][]string{voxtypeDownloadCommand("small"), voxtypeEnableCommand()}}}
 	if _, err := VoxtypeCommands(valid); err != nil {
 		t.Fatalf("valid workflow rejected: %v", err)
 	}
@@ -157,9 +217,13 @@ func TestVoxtypeCommandsRejectForgedActions(t *testing.T) {
 	}
 	for _, task := range []Task{
 		{ID: "voxtype", Status: Pending, Action: &Action{Kind: SetupVoxtype, Commands: [][]string{{"sh", "-c", "voxtype setup"}, voxtypeEnableCommand()}}},
-		{ID: "voxtype", Status: Pending, Action: &Action{Kind: SetupVoxtype, Commands: [][]string{voxtypeEnableCommand(), voxtypeDownloadCommand()}}},
+		{ID: "voxtype", Status: Pending, Action: &Action{Kind: SetupVoxtype, Commands: [][]string{voxtypeEnableCommand(), voxtypeDownloadCommand("small")}}},
 		{ID: "voxtype", Status: Complete, Action: &Action{Kind: SetupVoxtype, Commands: [][]string{voxtypeEnableCommand()}}},
 		{ID: "other", Status: Pending, Action: &Action{Kind: SetupVoxtype, Commands: [][]string{voxtypeEnableCommand()}}},
+		{ID: "voxtype", Status: Pending, Action: &Action{Kind: SetupVoxtype, Commands: [][]string{voxtypeDownloadCommand("--help"), voxtypeEnableCommand()}}},
+		{ID: "voxtype", Status: Pending, Action: &Action{Kind: SetupVoxtype, Commands: [][]string{voxtypeDownloadCommand("../x"), voxtypeEnableCommand()}}},
+		{ID: "voxtype", Status: Pending, Action: &Action{Kind: SetupVoxtype, Commands: [][]string{voxtypeDownloadCommand("Small"), voxtypeEnableCommand()}}},
+		{ID: "voxtype", Status: Pending, Action: &Action{Kind: SetupVoxtype, Commands: [][]string{{"voxtype", "setup", "--download", "--model", "small", "extra"}, voxtypeEnableCommand()}}},
 	} {
 		if _, err := VoxtypeCommands(task); err == nil {
 			t.Fatalf("forged action accepted: %+v", task)
@@ -175,7 +239,7 @@ func TestRunVoxtypeSetupStreamsApprovedWorkflow(t *testing.T) {
 	}
 	src.Commands[nativetest.Key("voxtype", "setup", "--download", "--model", "small")] = nil
 	src.Commands[nativetest.Key("systemctl", "--user", "enable", "--now", "voxtype.service")] = nil
-	task := Task{ID: "voxtype", Status: Pending, Action: &Action{Kind: SetupVoxtype, Commands: [][]string{voxtypeDownloadCommand(), voxtypeEnableCommand()}}}
+	task := Task{ID: "voxtype", Status: Pending, Action: &Action{Kind: SetupVoxtype, Commands: [][]string{voxtypeDownloadCommand("small"), voxtypeEnableCommand()}}}
 	if err := RunVoxtypeSetup(context.Background(), src, io.Discard, io.Discard, task); err != nil {
 		t.Fatalf("recorded workflow failed: %v", err)
 	}

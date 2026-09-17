@@ -5,20 +5,28 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/pelletier/go-toml/v2"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/native"
 )
 
-// The Chezmoi-managed desktop config selects the small multilingual model, and
-// the Hyprland session hook starts the unit once a model exists. The task keeps
-// that selection: it downloads the same model and makes the service persistent.
-const voxtypeModel = "small"
+// The managed Chezmoi config selects the model per machine; the task downloads
+// exactly that model. The Hyprland session hook starts the unit once a model
+// exists.
+//
+// voxtypeModelName is the accepted model identifier shape; it keeps the config
+// value from becoming an unexpected native argument.
+var voxtypeModelName = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]*$`)
 
-func voxtypeDownloadCommand() []string {
-	return []string{"voxtype", "setup", "--download", "--model", voxtypeModel}
+func voxtypeDownloadCommand(model string) []string {
+	return []string{"voxtype", "setup", "--download", "--model", model}
 }
 
 func voxtypeEnableCommand() []string {
@@ -27,16 +35,21 @@ func voxtypeEnableCommand() []string {
 
 // VoxtypeCommands validates the ordered native workflow for the current state.
 // A downloaded model only needs enablement; a missing model needs both steps.
+// The model comes from the managed config, so its name shape is re-validated
+// instead of being compared to a fixed value.
 func VoxtypeCommands(task Task) ([][]string, error) {
 	if task.ID != "voxtype" || task.Status != Pending || task.Action == nil || task.Action.Kind != SetupVoxtype || len(task.Action.Argv) != 0 {
 		return nil, errors.New("task has no supported Voxtype action")
 	}
-	expected := [][]string{voxtypeDownloadCommand(), voxtypeEnableCommand()}
-	if equalCommands(task.Action.Commands, [][]string{voxtypeEnableCommand()}) {
+	enable := voxtypeEnableCommand()
+	if equalCommands(task.Action.Commands, [][]string{enable}) {
 		return task.Action.Commands, nil
 	}
-	if equalCommands(task.Action.Commands, expected) {
-		return task.Action.Commands, nil
+	if commands := task.Action.Commands; len(commands) == 2 && len(commands[0]) == 5 &&
+		slices.Equal(commands[0][:4], []string{"voxtype", "setup", "--download", "--model"}) &&
+		voxtypeModelName.MatchString(commands[0][4]) &&
+		equalCommands(commands[1:], [][]string{enable}) {
+		return commands, nil
 	}
 	return nil, errors.New("unsupported Voxtype setup command")
 }
@@ -77,10 +90,10 @@ func voxtypeSetup(src native.Source, in Inputs, pkg definitions.ResolvedPackage)
 		ID: "voxtype", Owner: "package:" + pkg.Canonical, Title: "Set up local dictation", Status: Unknown,
 		Prerequisites: []string{
 			"The selected Voxtype package is applied and recorded by Nimbus.",
-			"The Chezmoi desktop configuration selects the same small model.",
+			"The Chezmoi configuration is applied and selects the Whisper model in ~/.config/voxtype/config.toml.",
 		},
 		Instructions: []string{
-			"Whisper model downloads need network access and are several hundred megabytes; the native tool verifies the download.",
+			"Whisper model downloads need network access and can exceed a gigabyte (large-v3-turbo is about 1.6 GB); the native tool verifies the download.",
 			"Enabling voxtype.service starts dictation at every graphical login. It is a user unit; no system service or root access is involved.",
 		},
 		Verification: "The task re-reads the native model catalog and the user unit state. Package presence alone is not completion.",
@@ -94,7 +107,12 @@ func voxtypeSetup(src native.Source, in Inputs, pkg definitions.ResolvedPackage)
 		t.Status, t.Detail = Blocked, "The Voxtype executable is unavailable; repair the selected package with nimbus sync."
 		return t
 	}
-	installed, err := voxtypeModelInstalled(src)
+	model, err := voxtypeConfiguredModel(src)
+	if err != nil {
+		t.Status, t.Detail = Blocked, err.Error()
+		return t
+	}
+	installed, err := voxtypeModelInstalled(src, model)
 	if err != nil {
 		t.Detail = err.Error()
 		return t
@@ -107,7 +125,7 @@ func voxtypeSetup(src native.Source, in Inputs, pkg definitions.ResolvedPackage)
 	switch {
 	case installed && enabled:
 		t.Status = Complete
-		t.Detail = "The " + voxtypeModel + " model is installed and voxtype.service is enabled."
+		t.Detail = "The " + model + " model is installed and voxtype.service is enabled."
 		if active {
 			t.Detail += " Dictation is running."
 		} else {
@@ -115,19 +133,65 @@ func voxtypeSetup(src native.Source, in Inputs, pkg definitions.ResolvedPackage)
 		}
 	case !installed:
 		t.Status = Pending
-		t.Detail = "The " + voxtypeModel + " Whisper model is not installed."
-		t.Action = &Action{Kind: SetupVoxtype, Commands: [][]string{voxtypeDownloadCommand(), voxtypeEnableCommand()}}
+		t.Detail = "The " + model + " Whisper model is not installed."
+		t.Action = &Action{Kind: SetupVoxtype, Commands: [][]string{voxtypeDownloadCommand(model), voxtypeEnableCommand()}}
 	default:
 		t.Status = Pending
-		t.Detail = "The " + voxtypeModel + " model is installed, but voxtype.service is not enabled."
+		t.Detail = "The " + model + " model is installed, but voxtype.service is not enabled."
 		t.Action = &Action{Kind: SetupVoxtype, Commands: [][]string{voxtypeEnableCommand()}}
 	}
 	return t
 }
 
+// voxtypeConfiguredModel reads the model the managed Chezmoi config selects.
+// The config owns the choice; Nimbus never guesses one.
+func voxtypeConfiguredModel(src native.Source) (string, error) {
+	path, err := voxtypeConfigPath()
+	if err != nil {
+		return "", err
+	}
+	data, err := src.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", errors.New("the managed Voxtype config is missing at " + path + "; apply the Chezmoi configuration first")
+		}
+		return "", errors.New("the managed Voxtype config could not be read: " + err.Error())
+	}
+	var config struct {
+		Whisper struct {
+			Model string `toml:"model"`
+		} `toml:"whisper"`
+	}
+	if err := toml.Unmarshal(data, &config); err != nil {
+		return "", errors.New("the managed Voxtype config is not valid TOML: " + err.Error())
+	}
+	model := config.Whisper.Model
+	if model == "" {
+		return "", errors.New("the managed Voxtype config does not select a [whisper] model; review " + path)
+	}
+	if !voxtypeModelName.MatchString(model) {
+		return "", errors.New("the managed Voxtype config selects an unsupported model name " + model)
+	}
+	return model, nil
+}
+
+// voxtypeConfigPath resolves the managed config through the session's absolute
+// XDG configuration directory, falling back to the user's home directory. A
+// relative XDG value is ignored, as the XDG spec requires.
+func voxtypeConfigPath() (string, error) {
+	if dir := os.Getenv("XDG_CONFIG_HOME"); filepath.IsAbs(dir) {
+		return filepath.Join(dir, "voxtype", "config.toml"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return "", errors.New("the user home directory is unknown; inspect the session environment")
+	}
+	return filepath.Join(home, ".config", "voxtype", "config.toml"), nil
+}
+
 // voxtypeModelInstalled reads the native model catalog. Its per-model check is
-// the tool's own integrity check; Nimbus never reads model files or the home.
-func voxtypeModelInstalled(src native.Source) (bool, error) {
+// the tool's own integrity check; Nimbus never reads model files.
+func voxtypeModelInstalled(src native.Source, model string) (bool, error) {
 	out, err := src.Run("voxtype", "info", "models", "--json", "--engine", "whisper")
 	if err != nil {
 		return false, errors.New("The Voxtype model catalog could not be read; run voxtype info models, then retry")
@@ -147,12 +211,12 @@ func voxtypeModelInstalled(src native.Source) (bool, error) {
 	if !ok {
 		return false, errors.New("Voxtype no longer reports the whisper engine; inspect voxtype info engines")
 	}
-	for _, model := range whisper.Models {
-		if model.Name == voxtypeModel {
-			return model.Installed, nil
+	for _, listed := range whisper.Models {
+		if listed.Name == model {
+			return listed.Installed, nil
 		}
 	}
-	return false, errors.New("The Voxtype catalog no longer lists the " + voxtypeModel + " model; review the managed config and package version")
+	return false, errors.New("The Voxtype catalog no longer lists the " + model + " model; review the managed config and package version")
 }
 
 // voxtypeUnitState reads the persistent and current unit state. Native user
