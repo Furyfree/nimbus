@@ -94,7 +94,7 @@ func TestPostinstallListingStaysReadOnlyAndAvoidsUserData(t *testing.T) {
 				}
 			}
 			for _, path := range src.files {
-				if path != inspect.OSReleasePath && path != inspect.SecureBootPath && path != filepath.Join(os.Getenv("XDG_STATE_HOME"), "nimbus", "agent-proxy.json") {
+				if path != inspect.OSReleasePath && path != inspect.SecureBootPath && path != "/proc/mounts" && path != filepath.Join(os.Getenv("XDG_STATE_HOME"), "nimbus", "agent-proxy.json") {
 					t.Fatalf("unexpected private/configuration read: %s", path)
 				}
 			}

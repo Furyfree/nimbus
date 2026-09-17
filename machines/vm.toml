@@ -12,6 +12,7 @@ profiles = [
 
 components = [
   "boot-theme",
+  "fde",
 ]
 
 packages = [

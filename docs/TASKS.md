@@ -383,11 +383,25 @@ refactor and TUI.
   does not ship the payload, or the recorded previous Plymouth theme is gone,
   the plan blocks with guidance instead of running triggers that cannot
   succeed.
-- [ ] Inspect the Fedora/LUKS2 boot path, TPM and Secure Boot support; choose
+- [x] Inspect the Fedora/LUKS2 boot path, TPM and Secure Boot support; choose
   the native auto-unlock method and boot-change policy before implementation.
-- [ ] Add explicit post-install preview and approval for FDE auto-unlock,
-  preserving passphrase access, with status and enrollment-removal instructions.
-  Unsupported setups must retain manual unlock.
+  Read-only inspection covered the laptop and the disposable VM: LUKS2 with a
+  password-only keyslot, GRUB with Secure Boot enabled, TPM2 present and ample
+  EFI space. The accepted policy lives in issue #34: Dracut, ukify,
+  kernel-install and systemd-cryptenroll with Fedora's shim/GRUB retained, and
+  PCR 7 + PCR 14 + signed PCR 11 with shim, PCR 7 + signed PCR 11 without.
+- [x] Implement the optional `fde` component and the read-only
+  `postinstall fde` detection: the mounted LUKS2 root, the TPM2 device class
+  and the selected tools are inspected without privilege, and unsupported or
+  unknown setups are reported clearly. Keyslots, EFI space and enrollment
+  state need an approved privileged check. No setup action is offered yet.
+- [ ] Implement approved setup: UKI build and signing with ukify,
+  kernel-install hooks and systemd-cryptenroll, then prove passphrase UKI boot
+  and a kernel update in a disposable VM before any TPM enrollment.
+- [ ] Add enrollment, policy renewal, status and scoped removal with explicit
+  previews; reduced protection and removal default to No and a blanket `--yes`
+  cannot accept them. Preserve the passphrase, unrelated keys and enrollment
+  slots.
 - [ ] Test auto-unlock enrollment, booting, passphrase fallback, boot-change
   fallback and removal on real hardware. This scoped test precedes the TUI;
   it is separate from the later full desktop trial. No working claim yet.

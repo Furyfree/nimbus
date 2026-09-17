@@ -960,14 +960,21 @@ enablement, live loading and applied overview configuration; appearance still
 needs user testing. No automatic setup during sync, custom plugin copies,
 cache edits or privileged completion receipts. Native disable/remove owns removal.
 
-FDE auto-unlock is a planned optional post-install action, before the dashboard.
-It must inspect the existing encryption and boot setup, show the proposed
-native enrollment and ask for approval. Preserve working passphrase access;
-provide status and enrollment-removal instructions. Unsupported setups retain
-manual unlock. Sync and upgrades must not enroll automatically. The native
-method and boot-change policy must be settled before implementation. Enrollment,
+FDE auto-unlock is an optional explicit post-install action, selected with the
+`fde` component, before the dashboard. The accepted policy uses Dracut, ukify,
+kernel-install and systemd-cryptenroll with Fedora's shim/GRUB retained; a
+bootloader replacement needs a separate decision. Secure Boot with shim uses
+PCR 7 + PCR 14 + signed PCR 11; without shim, PCR 7 + signed PCR 11; with
+Secure Boot disabled, an explicit reduced-protection confirmation binds PCR 7
+to the disabled state. PCR 11 uses signed expected measurements, not today's
+fixed value. `postinstall fde` currently inspects read-only: the mounted LUKS2
+root, the TPM2 device class, Secure Boot state and the selected tools;
+keyslots, EFI space and enrollment state need an approved privileged check.
+Setup, enrollment, renewal and scoped removal are not implemented yet. Sync
+and upgrades never enroll or change policy. Preserve the passphrase, unrelated
+keys and enrollment slots, and remove only Nimbus's enrollment. Enrollment,
 booting, passphrase fallback and removal need real-hardware validation before
-claiming support. UKI generation and broader boot-key management stay deferred.
+claiming support.
 
 ## Preview, approval and results
 
