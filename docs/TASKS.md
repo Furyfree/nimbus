@@ -356,6 +356,10 @@ refactor and TUI.
   `boot-theme` component owns `/etc/nimbus/boot-theme.enabled` with the
   `grub-config` and `plymouth-theme` triggers, and removal restores the theme
   observed before installation. Selected for the test VM only.
+- [ ] Group older kernels under "Previous kernels" through the engine payload
+  `/etc/grub.d/09_nimbus_previous_kernels` and `nimbus internal boot-menu`;
+  verify the grouped menu, the submenu entry, the flat fallback when the mirror
+  is unavailable, and removal in the VM.
 - [ ] Ship the payload and drop-in in the 0.6.0 engine package (`nimbus.spec`)
   and select `boot-theme` in the `common` profile in the release change. The
   component stays deselected on physical machines until then, so an older

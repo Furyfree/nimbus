@@ -1,0 +1,80 @@
+#!/bin/sh
+# shellcheck disable=SC2154
+# Nimbus grouped kernel menu: one default kernel at the top level and the
+# rest under "Previous kernels".
+#
+# The engine package owns this file; it stays inert until Nimbus creates
+# /etc/nimbus/boot-theme.enabled. It runs before Fedora's 10_linux during
+# grub2-mkconfig, rebuilds the Nimbus-owned mirror of the single Fedora
+# default BLS entry through the installed engine, and lists it with the
+# blscfg module's own filters: `blscfg <entry>` for the top level and
+# `blscfg non-default` inside the submenu. Fedora's plain blscfg call then
+# finds every entry already loaded and adds nothing. If the engine is
+# missing, the marker is absent or the mirror is unavailable, the script
+# emits nothing and Fedora's flat menu returns. Removing the marker removes
+# the mirror and regenerates the flat menu.
+
+mirror=/boot/loader/entries-nimbus
+
+if [ ! -f /etc/nimbus/boot-theme.enabled ]; then
+    rm -f "$mirror"/*.conf
+    rmdir "$mirror" 2>/dev/null
+    exit 0
+fi
+
+[ -x /usr/bin/nimbus ] || exit 0
+entry="$(/usr/bin/nimbus internal boot-menu 2>/dev/null)" || exit 0
+[ -n "$entry" ] || exit 0
+
+# Fedora uses the BLS parser unless GRUB_ENABLE_BLSCFG is off. Mirror the
+# same condition as 10_linux so a legacy configuration keeps its flat menu.
+if [ -z "${GRUB_ENABLE_BLSCFG}" ] && ! command -v new-kernel-pkg >/dev/null 2>&1; then
+    GRUB_ENABLE_BLSCFG="true"
+fi
+[ "${GRUB_ENABLE_BLSCFG}" = "true" ] || exit 0
+
+# Emit the same device preparation as 10_linux's BLS branch, because this
+# script runs before it.
+# shellcheck source=/dev/null
+. /usr/share/grub/grub-mkconfig_lib
+if [ "$dirname" = / ]; then
+    if [ -z "${prepare_root_cache}" ]; then
+        prepare_grub_to_access_device "$GRUB_DEVICE"
+    fi
+else
+    if [ -z "${prepare_boot_cache}" ]; then
+        prepare_grub_to_access_device "$GRUB_DEVICE_BOOT"
+    fi
+fi
+if [ -d /sys/firmware/efi ]; then
+    bootefi_device="$("${grub_probe}" --target=device /boot/efi/)"
+    prepare_grub_to_access_device_with_variable boot "$bootefi_device"
+else
+    boot_device="$("${grub_probe}" --target=device /boot/)"
+    prepare_grub_to_access_device_with_variable boot "$boot_device"
+fi
+
+cat << EOF
+
+insmod blscfg
+set blsdir=/loader/entries-nimbus
+blscfg $entry
+set blsdir=/loader/entries
+EOF
+
+# With a single entry the mirror already is the whole menu.
+entries=0
+for conf in /boot/loader/entries/*.conf; do
+    [ -e "$conf" ] || continue
+    entries=$((entries + 1))
+done
+[ "$entries" -gt 1 ] || exit 0
+
+cat << 'EOF'
+
+submenu 'Previous kernels' {
+    set blsdir=/loader/entries
+    insmod blscfg
+    blscfg non-default
+}
+EOF

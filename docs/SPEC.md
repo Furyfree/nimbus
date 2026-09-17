@@ -1043,6 +1043,14 @@ workstation need justifies a change.
 The GRUB target is the neutral Paper Dark theme, a visible five-second menu,
 Fedora as default, and native Windows discovery only where Windows exists. Preserve
 existing kernels and Fedora boot integration. This is not a bootloader rewrite.
+The menu lists the current Fedora default kernel at the top level and groups
+older kernels, including rescue entries, under a `Previous kernels` submenu.
+The engine ships an inert `/etc/grub.d/09_nimbus_previous_kernels` drop-in that
+runs before Fedora's `10_linux`: it maintains a Nimbus-owned mirror of the one
+default BLS entry under `/boot/loader/entries-nimbus` through
+`nimbus internal boot-menu`, then uses the blscfg module's own filters. Fedora's
+flat menu returns whenever the engine, the marker or the mirror is unavailable,
+and removing the marker removes the mirror.
 The matching Plymouth theme styles native disk-unlock prompts without changing
 encryption or automatic-unlock policy. The engine package ships the payload
 under `/boot/grub2/themes/nimbus` and `/usr/share/plymouth/themes/nimbus` plus
