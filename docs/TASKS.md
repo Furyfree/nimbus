@@ -483,9 +483,6 @@ manual native flow below is verified; the helper still needs its own trial.
   Hyprland, Noctalia and all three portal services work after this repair.
 - [ ] Test the new Nimbus helper itself on an installation needing enrollment;
   manual commands validate the approach, not the new implementation.
-- [ ] In Chezmoi, skip NVIDIA Settings autostart when no saved
-  `~/.nvidia-settings-rc` exists. Its failed settings restore does not mean the
-  driver failed. Keep this separate from Nimbus's signing helper.
 
 ## Installer follow-up
 
@@ -570,6 +567,10 @@ was performed during release verification. UKI/TPM auto-unlock is not included.
 - [x] Pass `just check`, `just validate` and the read-only desktop plan.
   Isolated native systemd lookup recognizes the mask and restores the original
   unit after its removal. Laptop and VM definitions omit this resource.
+- [x] Reject the Chezmoi rc-file guard (Furyfree/dotfiles#21, closed
+  2026-09-17). The mask owns the generated unit, so a guarded
+  `~/.config/autostart` override would never start; the mask stays the single
+  owner of the behavior.
 - [ ] Verify installation and next-login behavior on the NVIDIA workstation.
   The user's existing per-user mask remains independent of Nimbus ownership.
 
