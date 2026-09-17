@@ -4,17 +4,17 @@
 # The engine package owns this file; it stays inert until Nimbus creates
 # /etc/nimbus/boot-theme.enabled. The theme lives at
 # /boot/grub2/themes/nimbus on the boot filesystem, which GRUB can read before
-# the encrypted root is unlocked. Removing the marker and rerunning the
-# grub-config trigger restores Fedora's default configuration. The timeout
-# lines override Fedora's menu auto-hide so the five-second menu stays visible.
+# the encrypted root is unlocked. Fedora's signed GRUB already provides the
+# video, gfxterm, gfxmenu, png and font modules, so no insmod lines are
+# emitted: under Secure Boot it refuses to load external modules and prints
+# "prohibited by secure boot policy" for each attempt. Removing the marker
+# and rerunning the grub-config trigger restores Fedora's default
+# configuration. The timeout lines override Fedora's menu auto-hide so the
+# five-second menu stays visible.
 
 [ -f /etc/nimbus/boot-theme.enabled ] || exit 0
 
 cat << 'EOF'
-insmod all_video
-insmod gfxterm
-insmod gfxmenu
-insmod png
 loadfont $prefix/themes/nimbus/mono-16.pf2
 loadfont $prefix/themes/nimbus/mono-20.pf2
 loadfont $prefix/themes/nimbus/mono-24.pf2
