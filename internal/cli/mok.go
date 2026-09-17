@@ -26,9 +26,23 @@ func (s mokVerificationSource) Run(name string, args ...string) ([]byte, error) 
 	return s.Source.Run(name, args...)
 }
 
+// mokVerify runs the approved read-only checks. An unenrolled certificate
+// comes back Pending with the setup action so the caller can offer it on the
+// same run; Complete keeps no action so the caller records verification.
+func mokVerify(cmd *cobra.Command, src native.Source, before *postinstallSnapshot, task postinstall.Task, yes bool) (postinstall.Task, error) {
+	preview := fmt.Sprintf("Read-only administrator verification:\n  sudo -- /usr/bin/cat -- %s (public certificate; output stays private)\n  sudo -- /usr/bin/mokutil --ignore-keyring --test-key %s\nNo keys will be generated or enrolled.\n", postinstall.MOKCertificate, postinstall.MOKCertificate)
+	return rootVerification(cmd, src, before, task, preview, func(s native.Source, t postinstall.Task) postinstall.Task {
+		verified := postinstall.VerifyMOK(mokVerificationSource{s}, t)
+		if verified.Status == postinstall.Pending {
+			verified.Action = &postinstall.Action{Kind: postinstall.SetupNVIDIA}
+		}
+		return verified
+	}, yes)
+}
+
 func runMOKVerification(cmd *cobra.Command, src native.Source, before *postinstallSnapshot, task postinstall.Task, yes bool) error {
 	if task.VerificationNeedsRoot {
-		preview := fmt.Sprintf("Read-only administrator verification:\n  sudo -- /usr/bin/cat -- %s (public certificate; output stays private)\n  sudo -- /usr/bin/mokutil --ignore-keyring --test-key %s\nNo keys will be generated or enrolled.\n", postinstall.MOKCertificate, postinstall.MOKCertificate)
+		preview := fmt.Sprintf("Read-only administrator verification:\n  sudo -- /usr/bin/cat -- %s (public certificate; output stays private)\n  sudo -- /usr/bin/mokutil --ignore-keyring --test-key %s\nThis check changes nothing; an unenrolled certificate leads to the setup preview next.\n", postinstall.MOKCertificate, postinstall.MOKCertificate)
 		verified, err := rootVerification(cmd, src, before, task, preview, func(s native.Source, t postinstall.Task) postinstall.Task {
 			return postinstall.VerifyMOK(mokVerificationSource{s}, t)
 		}, yes)

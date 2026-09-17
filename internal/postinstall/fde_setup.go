@@ -117,6 +117,12 @@ func fdeEntryCorrect(entries []fdeBootEntry) bool {
 	})
 }
 
+// fdeEntryReady reports exactly one firmware entry pointing at the current
+// image; a same-label duplicate still needs cleanup.
+func fdeEntryReady(entries []fdeBootEntry) bool {
+	return len(entries) == 1 && fdeEntryCorrect(entries)
+}
+
 func fdeBootEntriesOutput(src native.Source) ([]fdeBootEntry, error) {
 	out, err := src.Run("efibootmgr")
 	if err != nil {
@@ -158,13 +164,15 @@ func fdeESPDevice(src native.Source) (string, string, error) {
 }
 
 // fdeEnsureEntry makes the firmware entry point at the current image. Only
-// same-label entries are replaced; everything else is left untouched.
+// same-label entries are replaced; everything else is left untouched. A stale
+// same-label entry is removed even when another same-label entry is correct,
+// so no shadowed duplicate keeps an earlier position in BootOrder.
 func fdeEnsureEntry(src native.Source, out, errOut io.Writer) error {
 	entries, err := fdeBootEntriesOutput(src)
 	if err != nil {
 		return err
 	}
-	if fdeEntryCorrect(entries) {
+	if fdeEntryReady(entries) {
 		_, err := fmt.Fprintln(out, "Firmware entry already points at the Nimbus image.")
 		return err
 	}
@@ -403,7 +411,7 @@ func VerifyFDE(src native.Source, t Task) Task {
 		t.Detail = "The firmware entries could not be inspected: " + err.Error()
 		return t
 	}
-	if !fdeEntryCorrect(entries) {
+	if !fdeEntryReady(entries) {
 		t.Status, t.Detail = Pending, "No correct Nimbus firmware entry was observed; rerun the approved setup to repair it."
 		return t
 	}

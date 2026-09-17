@@ -2,6 +2,7 @@ package postinstall
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
@@ -77,8 +78,15 @@ func TestHostnameTaskStates(t *testing.T) {
 	t.Run("unrecognized name", func(t *testing.T) {
 		in, src := hostnameFixture(t, "NOT A HOST")
 		got := findTask(t, Inspect(src, in), "hostname")
-		if got.Status != Unknown || got.Action != nil {
-			t.Fatalf("got %+v", got)
+		if got.Status != Pending || got.Action == nil || got.Action.Kind != SetHostname {
+			t.Fatalf("an observed name must not block the intended one: %+v", got)
+		}
+	})
+	t.Run("empty static name", func(t *testing.T) {
+		in, src := hostnameFixture(t, "")
+		got := findTask(t, Inspect(src, in), "hostname")
+		if got.Status != Pending || got.Action == nil || got.Action.Kind != SetHostname || !strings.Contains(got.Detail, "No static hostname") {
+			t.Fatalf("a fresh install must offer the intended name: %+v", got)
 		}
 	})
 }

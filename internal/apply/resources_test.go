@@ -847,18 +847,34 @@ func TestPlymouthThemeTriggerRecordsAndRestores(t *testing.T) {
 			src := &plymouthTestSource{theme: test.theme}
 			op := plan.Operation{ID: "trigger:plymouth-theme", Kind: plan.KindTrigger, Action: test.action,
 				Steps: []plan.Step{{Argv: []string{"plymouth-set-default-theme", "-R", test.target}, Privileged: true}}}
-			receipts, _, err := resourceExecutor(src).systemResource(op)
-			if err != nil || len(receipts) != 1 {
+			receipts, removed, err := resourceExecutor(src).systemResource(op)
+			if err != nil {
 				t.Fatalf("receipts=%v err=%v", receipts, err)
 			}
-			if receipts[0].Previous != test.previous || receipts[0].Intended != test.target || !receipts[0].Verified {
-				t.Fatalf("receipt=%+v", receipts[0])
+			if test.action == plan.ActionRemove {
+				if len(receipts) != 0 || !slices.Equal(removed, []string{op.ID}) {
+					t.Fatalf("a successful removal must retire the trigger receipt: receipts=%v removed=%v", receipts, removed)
+				}
+			} else {
+				if len(receipts) != 1 || receipts[0].Previous != test.previous || receipts[0].Intended != test.target || !receipts[0].Verified {
+					t.Fatalf("receipts=%v", receipts)
+				}
 			}
 			if !slices.Equal(src.streams, []string{"sudo plymouth-set-default-theme -R " + test.target}) {
 				t.Fatalf("streams=%v", src.streams)
 			}
 		})
 	}
+	t.Run("repeat apply keeps the recorded previous theme", func(t *testing.T) {
+		src := &plymouthTestSource{theme: "nimbus"}
+		op := plan.Operation{ID: "trigger:plymouth-theme", Kind: plan.KindTrigger, Action: plan.ActionRepair,
+			Resource: &plan.ResourceChange{Name: "plymouth-theme", Previous: "text"},
+			Steps:    []plan.Step{{Argv: []string{"plymouth-set-default-theme", "-R", "nimbus"}, Privileged: true}}}
+		receipts, _, err := resourceExecutor(src).systemResource(op)
+		if err != nil || len(receipts) != 1 || receipts[0].Previous != "text" {
+			t.Fatalf("receipts=%v err=%v", receipts, err)
+		}
+	})
 	t.Run("verification failure", func(t *testing.T) {
 		src := &plymouthTestSource{theme: "text", ignore: true}
 		op := plan.Operation{ID: "trigger:plymouth-theme", Kind: plan.KindTrigger, Action: plan.ActionRepair,

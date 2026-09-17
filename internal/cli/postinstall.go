@@ -78,6 +78,17 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 			if task.ID == "onepassword" && !preview {
 				return runOnePassword(cmd, src, before, task, yes, false, showDiff)
 			}
+			if task.ID == "nvidia-mok" && !preview && task.VerificationNeedsRoot {
+				// The certificate is unreadable without root, so the approved
+				// read-only check runs first; if it finds the key unenrolled,
+				// the verified task carries the setup action into the normal
+				// approval and mutation flow below.
+				verified, err := mokVerify(cmd, src, before, task, yes)
+				if err != nil {
+					return err
+				}
+				task = verified
+			}
 			if task.ID == "nvidia-mok" && !preview && (task.Action == nil || task.Action.Kind != postinstall.SetupNVIDIA) {
 				return runMOKVerification(cmd, src, before, task, yes)
 			}
@@ -350,7 +361,7 @@ func postinstallArgv(task postinstall.Task) ([]string, error) {
 			}
 		}
 		switch {
-		case task.ID == "nvidia-mok" && (task.Status == postinstall.Unknown || task.Status == postinstall.Pending || task.Status == postinstall.Complete) && task.Action.Kind == postinstall.SetupNVIDIA && len(task.Action.Argv) == 0:
+		case task.ID == "nvidia-mok" && task.Status == postinstall.Pending && task.Action.Kind == postinstall.SetupNVIDIA && len(task.Action.Argv) == 0:
 			return nil, nil
 		case task.ID == "onepassword" && task.Status == postinstall.Unknown && task.Action.Kind == postinstall.OpenApplication && slices.Equal(task.Action.Argv, []string{"1password"}):
 			return []string{"1password"}, nil
@@ -391,10 +402,15 @@ func renderPostinstall(out io.Writer, view postinstallView) error {
 			}
 			if task.VerificationNeedsRoot {
 				fmt.Fprintln(&b, "  Recheck: nimbus postinstall nvidia-mok (requests sudo)")
-				fmt.Fprintln(&b, "The task offers read-only certificate and enrollment checks after approval.")
+				fmt.Fprintln(&b, "The read-only check changes nothing; if it finds the certificate unenrolled, the same run offers setup with its own approval:")
+				if !task.PreviouslyVerified {
+					for _, instruction := range task.Instructions {
+						fmt.Fprintln(&b, instruction)
+					}
+				}
 			}
 			fmt.Fprintln(&b, "Establish enrollment status before considering enrollment changes.")
-			fmt.Fprintln(&b, "No keys are generated or enrolled. Driver loading is not verified.")
+			fmt.Fprintln(&b, "Driver loading is not verified.")
 			continue
 		}
 		fmt.Fprintf(&b, "\n%s [%s]: %s\n%s\n", task.ID, postinstallStatusLabel(task), task.Title, task.Detail)

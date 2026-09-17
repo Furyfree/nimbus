@@ -13,6 +13,7 @@ import (
 	"github.com/Furyfree/nimbus/internal/inspect"
 	"github.com/Furyfree/nimbus/internal/native/nativetest"
 	"github.com/Furyfree/nimbus/internal/state"
+	"github.com/Furyfree/nimbus/internal/version"
 )
 
 func resourceBuilder() (*builder, *nativetest.FakeSource) {
@@ -456,6 +457,38 @@ func TestTriggerRetriesAfterFileReceiptAndDeduplicates(t *testing.T) {
 	}
 }
 
+func TestEngineUpdateRetriesPayloadTriggers(t *testing.T) {
+	b, src := resourceBuilder()
+	target := "/etc/nimbus.conf"
+	have := inspect.SystemFile{Exists: true, Content: []byte("same"), Owner: "root", Group: "root", Mode: "0644"}
+	answerFile(src, target, have)
+	b.in.Resolved.Files = []definitions.ResolvedFile{{Target: target, Content: have.Content, Owner: have.Owner, Group: have.Group, Mode: have.Mode, Triggers: []string{"plymouth-theme"}}}
+	file := fileReceipt(target, have)
+	file.Triggers = []string{"plymouth-theme"}
+	b.in.Applied.Receipts[file.Resource] = file
+	src.Files["/usr/share/plymouth/themes/nimbus/nimbus.plymouth"] = []byte("theme")
+	receipt := state.Receipt{Resource: "trigger:plymouth-theme", Provider: KindTrigger, Machine: "vm", Verified: true,
+		Engine: "0.5.10", Previous: "text", Intended: "nimbus", Timestamp: time.Unix(30, 0)}
+	b.in.Applied.Receipts[receipt.Resource] = receipt
+	find := func(ops []Operation) *Operation {
+		for i := range ops {
+			if ops[i].ID == receipt.Resource {
+				return &ops[i]
+			}
+		}
+		return nil
+	}
+	op := find(b.systemResources(nil))
+	if op == nil || op.Resource == nil || op.Resource.Previous != "text" {
+		t.Fatalf("engine update did not reschedule the payload trigger: %+v", op)
+	}
+	receipt.Engine = version.Engine
+	b.in.Applied.Receipts[receipt.Resource] = receipt
+	if op = find(b.systemResources(nil)); op != nil {
+		t.Fatalf("matching engine repeated the trigger: %+v", op)
+	}
+}
+
 func TestRetirementWaitsForReplanBeforePackageRemoval(t *testing.T) {
 	b, src := resourceBuilder()
 	answerUnit(src, "demo.service", "enabled", "inactive")
@@ -655,7 +688,19 @@ func TestPlymouthRemovalRestoresRecordedTheme(t *testing.T) {
 	}
 	src.Files["/usr/share/plymouth/themes/text/text.plymouth"] = []byte("theme")
 	delete(src.Files, "/usr/share/plymouth/themes/nimbus/nimbus.plymouth")
+	if op = trigger(b.systemResources(nil)); op == nil || op.Action != ActionRemove || op.Blocked != "" ||
+		len(op.Steps) != 1 || !slices.Equal(op.Steps[0].Argv, []string{"plymouth-set-default-theme", "-R", "text"}) {
+		t.Fatalf("removal with a missing payload did not restore the recorded theme: %+v", op)
+	}
+	b.in.Resolved.Files = []definitions.ResolvedFile{{Target: target, Content: have.Content, Owner: have.Owner, Group: have.Group, Mode: have.Mode, Triggers: []string{"grub-config", "plymouth-theme"}}}
 	if op = trigger(b.systemResources(nil)); op == nil || !strings.Contains(op.Blocked, "does not ship") {
-		t.Fatalf("missing payload was not blocked: %+v", op)
+		t.Fatalf("install with a missing payload was not blocked: %+v", op)
+	}
+	b.in.Resolved.Files = nil
+	legacy := receipt
+	legacy.Previous = "nimbus"
+	b.in.Applied.Receipts["trigger:plymouth-theme"] = legacy
+	if op = trigger(b.systemResources(nil)); op == nil || !strings.Contains(op.Blocked, "nimbus itself") {
+		t.Fatalf("a nimbus previous theme was not blocked: %+v", op)
 	}
 }

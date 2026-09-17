@@ -33,12 +33,25 @@ func TriggerArgs(id string) []string {
 	case "grub-config":
 		// Fedora's EFI stub loads /boot/grub2/grub.cfg, and the BIOS path
 		// uses the same file, so one regeneration covers both; EFI is
-		// verified, BIOS remains untested.
-		return []string{"grub2-mkconfig", "-o", "/boot/grub2/grub.cfg"}
+		// verified, BIOS remains untested. --no-grubenv-update matches
+		// Fedora's own hook and keeps grub2-mkconfig from rewriting the BLS
+		// entries and /etc/kernel/cmdline from /etc/default/grub.
+		return []string{"grub2-mkconfig", "--no-grubenv-update", "-o", "/boot/grub2/grub.cfg"}
 	case "plymouth-theme":
 		return []string{"plymouth-set-default-theme", "-R", "nimbus"}
 	}
 	return nil
+}
+
+// TriggerTracksEngine marks triggers whose result depends on payload shipped
+// by the engine package. A receipt from another engine re-runs them once, so
+// an engine update reaches the initramfs and grub.cfg without a kernel event.
+func TriggerTracksEngine(id string) bool {
+	switch id {
+	case "grub-config", "plymouth-theme":
+		return true
+	}
+	return false
 }
 
 func validateResources(comp *Component, where string, errs *ErrorList) {

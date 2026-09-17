@@ -67,6 +67,20 @@ func TestFDEInspectionStates(t *testing.T) {
 			t.Fatalf("got %+v", got)
 		}
 	})
+	t.Run("mapper uuid unreadable", func(t *testing.T) {
+		in, src := fdeFixture(t)
+		delete(src.Files, "/sys/class/block/dm-0/dm/uuid")
+		if got := findTask(t, Inspect(src, in), "fde"); got.Status != Unknown {
+			t.Fatalf("a read error must not claim the root is unencrypted: %+v", got)
+		}
+	})
+	t.Run("mapper name unreadable", func(t *testing.T) {
+		in, src := fdeFixture(t)
+		delete(src.Files, "/sys/class/block/dm-0/dm/name")
+		if got := findTask(t, Inspect(src, in), "fde"); got.Status != Unknown {
+			t.Fatalf("a missing mapper must not claim the root is unencrypted: %+v", got)
+		}
+	})
 	t.Run("dm device source", func(t *testing.T) {
 		in, src := fdeFixture(t)
 		src.Files["/proc/mounts"] = []byte("/dev/dm-0 / btrfs rw 0 0\n")
@@ -196,6 +210,18 @@ func TestFDEInspectionStates(t *testing.T) {
 		got := findTask(t, Inspect(src, in), "fde")
 		if got.Status != Pending || got.Action == nil || got.Action.Kind != SetupFDE || !strings.Contains(got.Detail, "missing or different") {
 			t.Fatalf("got %+v", got)
+		}
+	})
+	t.Run("duplicate entries offer repair", func(t *testing.T) {
+		in, src := fdeFixture(t)
+		src.Files[FDEUKIMarker] = []byte(fdeMarkerText)
+		const guid = "78f7ab0d-3bb7-4c71-ba1b-d8f8db372fdc"
+		src.Commands[nativetest.Key("efibootmgr")] = []byte("BootCurrent: 0009\nBootOrder: 0009,000A\n" +
+			"Boot0009* Nimbus UKI\tHD(1,GPT," + guid + ",0x800,0x200000)/\\EFI\\Linux\\nimbus.efi\n" +
+			"Boot000A  Nimbus UKI\tHD(1,GPT," + guid + ",0x800,0x200000)/\\EFI\\Linux\\old.efi\n")
+		got := findTask(t, Inspect(src, in), "fde")
+		if got.Status != Pending || !strings.Contains(got.Detail, "missing or different") {
+			t.Fatalf("a stale duplicate was treated as ready: %+v", got)
 		}
 	})
 	t.Run("foreign marker blocks", func(t *testing.T) {

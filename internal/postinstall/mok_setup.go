@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os/exec"
 	"slices"
 	"strings"
 
@@ -54,9 +53,7 @@ func RunNVIDIAMOK(ctx context.Context, src native.Source, out, stderr io.Writer)
 		return errors.New("akmods signing key pair is incomplete; inspect /etc/pki/akmods before retrying; neither file was replaced")
 	}
 	if !certExists {
-		if err := stream("sudo", "--", "kmodgenca", "-a"); err != nil {
-			return fmt.Errorf("create akmods signing key: %w", err)
-		}
+		return errors.New("the akmods signing key pair is missing; reboot once so akmods-keygen generates it before building modules, then retry; no keys were created")
 	}
 	// Read only the public certificate. The private key stays with native tools.
 	der, err := src.Run("sudo", "-n", "--", "cat", MOKCertificate)
@@ -121,18 +118,32 @@ const (
 )
 
 func mokEnrollment(src native.Source) (mokState, error) {
-	data, err := src.Run("sudo", "-n", "--", "mokutil", "--test-key", MOKCertificate)
+	data, err := src.Run("sudo", "-n", "--", "mokutil", "--ignore-keyring", "--test-key", MOKCertificate)
+	code := 0
+	if err != nil {
+		code = -1
+		if exit, ok := errors.AsType[interface {
+			error
+			ExitCode() int
+		}](err); ok {
+			code = exit.ExitCode()
+		}
+	}
+	// mokutil --test-key exits 0 when the certificate is not enrolled and 1
+	// when it is enrolled, pending or blocked, matching VerifyMOK. The
+	// --ignore-keyring flag keeps the kernel-keyring shortcut from reporting a
+	// key that is not enrolled in the firmware.
 	switch strings.TrimSpace(string(data)) {
 	case MOKCertificate + " is already enrolled", MOKCertificate + " is already in db":
-		if err == nil {
+		if code == 1 {
 			return mokTrusted, nil
 		}
 	case MOKCertificate + " is already in the enrollment request":
-		if err == nil {
+		if code == 1 {
 			return mokRequested, nil
 		}
 	case MOKCertificate + " is not enrolled":
-		if exit, ok := errors.AsType[*exec.ExitError](err); ok && exit.ExitCode() == 1 {
+		if code == 0 {
 			return mokAbsent, nil
 		}
 	}

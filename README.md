@@ -206,7 +206,9 @@ is discarded; native prompts stay in your terminal and are not logged.
 
 MOK verification may
 offer read-only sudo commands when the public certificate cannot be read as your
-user; it never enrolls a key. Missing certificates remain blocked. Status never
+user; the same run offers signing and enrollment with its own approval when the
+check finds the certificate unenrolled. Missing certificates stay blocked until
+akmods-keygen has generated the key pair, normally at the next boot. Status never
 requests authentication. When a previously verified certificate requires sudo to
 recheck, status labels it "Previously verified" and final reports show a notice.
 Both show `nimbus postinstall nvidia-mok` to request the sudo check. Run that

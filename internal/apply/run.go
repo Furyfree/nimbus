@@ -101,7 +101,7 @@ func Run(p *plan.Plan, opts Options) *Result {
 		r.Error = err.Error()
 		return r
 	}
-	var deferredFileRemovals []string
+	var deferredRemovals []string
 	adoptedProgress := false
 	for _, op := range p.Operations {
 		if err := opts.canceled(); err != nil {
@@ -160,8 +160,9 @@ func Run(p *plan.Plan, opts Options) *Result {
 			r.Reboot = r.Reboot || receipt.Reboot
 			r.Logout = r.Logout || receipt.Logout
 		}
-		if op.Kind == plan.KindFile && op.Action == plan.ActionRemove && op.File != nil && len(op.File.Triggers) > 0 {
-			deferredFileRemovals = append(deferredFileRemovals, remove...)
+		if op.Action == plan.ActionRemove && len(remove) > 0 &&
+			(op.Kind == plan.KindTrigger || (op.Kind == plan.KindFile && op.File != nil && len(op.File.Triggers) > 0)) {
+			deferredRemovals = append(deferredRemovals, remove...)
 			remove = nil
 		}
 		st := &state.Stage{Schema: state.Schema, PlanDigest: p.Digest, Receipts: receipts, Remove: remove, Time: ex.opts.Now().UTC()}
@@ -180,12 +181,12 @@ func Run(p *plan.Plan, opts Options) *Result {
 		}
 		r.Executed = append(r.Executed, op.ID)
 	}
-	if len(deferredFileRemovals) > 0 {
-		if err := ex.opts.Record(p.Digest, &state.Stage{Schema: state.Schema, PlanDigest: p.Digest, Remove: deferredFileRemovals, Time: ex.opts.Now().UTC()}); err != nil {
-			r.Failed = deferredFileRemovals[0]
-			r.Executed = slices.DeleteFunc(r.Executed, func(id string) bool { return slices.Contains(deferredFileRemovals, id) })
+	if len(deferredRemovals) > 0 {
+		if err := ex.opts.Record(p.Digest, &state.Stage{Schema: state.Schema, PlanDigest: p.Digest, Remove: deferredRemovals, Time: ex.opts.Now().UTC()}); err != nil {
+			r.Failed = deferredRemovals[0]
+			r.Executed = slices.DeleteFunc(r.Executed, func(id string) bool { return slices.Contains(deferredRemovals, id) })
 			r.Error = "file retirement was applied but not recorded; inspect the live resource and restore its reviewed previous state before retrying: " + err.Error()
-			for _, id := range deferredFileRemovals {
+			for _, id := range deferredRemovals {
 				r.Failures = append(r.Failures, Failure{ID: id, Error: r.Error})
 			}
 			_, _ = fmt.Fprintf(ex.opts.Out, "   %s\n", r.Error)

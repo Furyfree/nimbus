@@ -822,7 +822,7 @@ checks; MOK enrollment still requires the firmware procedure. MOK inspection
 distinguishes missing, empty, permission-denied and other unreadable certificate
 states. An explicit `nvidia-mok` run offers approved signing and enrollment:
 after preview and approval it authenticates sudo, inspects the akmods key pair,
-generates one with `kmodgenca -a` only when both files are absent, rebuilds
+preserves it as akmods-keygen wrote it, rebuilds
 NVIDIA modules whose signing identifiers do not match the certificate, refreshes
 the running kernel's boot image and submits an untrusted certificate with
 `mokutil --import`. Existing keys, trust and pending requests are preserved;
@@ -977,8 +977,9 @@ The engine package ships the inert
 `/etc/kernel/install.d/90-nimbus-uki.install` hook; it does nothing until
 approved setup writes `/etc/nimbus/fde-uki.enabled`. Approved setup then builds
 a Unified Kernel Image with ukify at `/boot/efi/EFI/Linux/nimbus.efi` and
-ensures the `Nimbus UKI` firmware boot entry, which becomes the default boot
-target. Kernel updates rebuild the image through the native hook; Nimbus's own
+ensures exactly one `Nimbus UKI` firmware boot entry, which becomes the
+default boot target; a stale same-label duplicate is reported as a repair and
+replaced. Kernel updates rebuild the image through the native hook; Nimbus's own
 initramfs refreshes are reconciled in the enrollment milestone. Fedora's BLS
 entries, shim and GRUB remain the fallback path. The embedded command line
 comes from `/etc/kernel/cmdline` when present, otherwise the running command
@@ -987,8 +988,11 @@ blocks: the signed, shim-chained image and MOK enrollment are the next
 milestone. With Secure Boot disabled the image is unsigned and the task
 discloses the reduced protection. If setup cannot build the image after
 writing the marker, it removes only that marker again so the hook stays inert.
-Enrollment, policy renewal and scoped removal are not implemented yet. Sync
-and upgrades never build images, enroll or change policy. Preserve the
+Enrollment, policy renewal and scoped removal are not implemented yet. Until
+scoped removal exists, deselecting `fde` while `/etc/nimbus/fde-uki.enabled`
+exists or cannot be read blocks the plan instead of removing the component's
+packages. Sync and upgrades never build images, enroll or change policy.
+Preserve the
 passphrase, unrelated keys and enrollment slots, and remove only Nimbus's
 enrollment. Enrollment, booting, passphrase fallback and removal need
 real-hardware validation before claiming support.
@@ -1052,7 +1056,14 @@ runs before Fedora's `10_linux`: it maintains a Nimbus-owned mirror of the one
 default BLS entry under `/boot/loader/entries-nimbus` through
 `nimbus internal boot-menu`, then uses the blscfg module's own filters. Fedora's
 flat menu returns whenever the engine, the marker or the mirror is unavailable,
-and removing the marker removes the mirror. The engine also ships a
+and removing the marker removes the mirror with any temporary files. Fedora's
+grub hook regenerates
+grub.cfg only when BLS is disabled, so the engine also ships an inert
+`/etc/kernel/install.d/96-nimbus-menu.install` hook that runs after the
+boot-entry hook on kernel installs and removals and runs
+`grub2-mkconfig --no-grubenv-update`; the `09` drop-in refreshes the mirror
+during that run. It warns instead of failing the kernel transaction. The
+engine also ships a
 marker-gated dracut module (`/usr/lib/dracut/modules.d/40nimbus-plymouth`) that
 adds the label plugin, `fc-match`, fontconfig configuration and the monospace
 font to the initramfs while the marker exists; the `plymouth-theme` trigger
@@ -1063,8 +1074,15 @@ under `/boot/grub2/themes/nimbus` and `/usr/share/plymouth/themes/nimbus` plus
 the inert `/etc/grub.d/36_paper_dark` drop-in. The `boot-theme` component owns
 only `/etc/nimbus/boot-theme.enabled`; its `grub-config` and `plymouth-theme`
 triggers regenerate `grub.cfg` and reselect the Plymouth theme after approval.
+Both triggers re-run once, shown in the plan, when their receipt was written by
+another engine version, so an engine update reaches `grub.cfg` and the
+initramfs; a repeat run keeps the theme recorded before Nimbus took over.
 Removing the marker restores Fedora's default configuration and the theme
-selected before installation. Fedora boot verification remains open; see the
+selected before installation. That restore does not need the Nimbus payload,
+and the plan blocks when no usable previous theme was recorded, when it is
+Nimbus's own theme, or when it is no longer installed. The trigger receipt is
+retired only after a successful run, so a failed removal replans from the
+install receipt. Fedora boot verification remains open; see the
 [theme sources and previews](../tools/boot-theme/README.md).
 
 TTY repair is the supported direction; no extra Hyprland recovery desktop is

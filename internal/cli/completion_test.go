@@ -141,7 +141,7 @@ func TestMOKExplicitVerificationAndUnprivilegedStatus(t *testing.T) {
 				}
 			}
 			src.Files[inspect.SecureBootPath] = []byte{0, 0, 0, 0, 1}
-			for _, tool := range []string{"sudo", "kmodgenca", "akmods", "dracut", "modinfo", "nvidia-smi"} {
+			for _, tool := range []string{"sudo", "akmods", "dracut", "modinfo", "nvidia-smi"} {
 				src.Paths[tool] = "/usr/bin/" + tool
 			}
 			src.Paths["mokutil"] = "/usr/bin/mokutil"

@@ -51,7 +51,9 @@ func Mirror(src native.Source, entriesDir, grubenv, mirrorDir string) (string, e
 	}
 	chosen := ""
 	switch {
-	case slices.Contains(ids, saved):
+	// A rescue entry never leads the grouped menu; it belongs under the
+	// Previous kernels submenu even if Fedora's saved_entry names it.
+	case saved != "" && !strings.Contains(saved, "-0-rescue") && slices.Contains(ids, saved):
 		chosen = saved
 	default:
 		chosen = slices.MaxFunc(ids, compareVersions)
@@ -80,10 +82,40 @@ func grubenvValue(src native.Source, path, key string) (string, error) {
 	return "", nil
 }
 
-// rebuild replaces the mirror contents with a copy of one BLS entry. Only
-// *.conf files created by Nimbus are removed.
+// rebuild replaces the mirror contents with a copy of one BLS entry. The
+// entry is written through a temporary file and renamed into place before any
+// stale copy is removed, so a failure never leaves grub.cfg pointing at a
+// missing or truncated mirror. Only *.conf files created by Nimbus are
+// removed.
 func rebuild(entriesDir, mirrorDir, chosen string) error {
+	data, err := os.ReadFile(filepath.Join(entriesDir, chosen+".conf"))
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(mirrorDir, 0o755); err != nil {
+		return err
+	}
+	target := filepath.Join(mirrorDir, chosen+".conf")
+	tmp, err := os.CreateTemp(mirrorDir, ".nimbus-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := os.Chmod(tmpName, 0o644); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, target); err != nil {
+		_ = os.Remove(tmpName)
 		return err
 	}
 	names, err := os.ReadDir(mirrorDir)
@@ -99,11 +131,7 @@ func rebuild(entriesDir, mirrorDir, chosen string) error {
 			return err
 		}
 	}
-	data, err := os.ReadFile(filepath.Join(entriesDir, chosen+".conf"))
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(mirrorDir, chosen+".conf"), data, 0o644)
+	return nil
 }
 
 // compareVersions orders BLS ids by their Fedora version suffix: numeric

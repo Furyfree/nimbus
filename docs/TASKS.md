@@ -366,11 +366,26 @@ refactor and TUI.
   (2026-09-17). VM-verified: the top level listed only the default kernel plus
   the submenu, which held the older kernel and the rescue entry; deleting the
   mirror self-healed at the next mkconfig; a missing engine or marker restored
-  Fedora's flat menu, and marker removal deleted the mirror. The image and
-  drop-in still need the 0.6.0 `nimbus.spec` packaging step below.
+  Fedora's flat menu, and marker removal deleted the mirror. A later review
+  found that Fedora's grub hook regenerates grub.cfg only when BLS is
+  disabled, so kernel installs and removals left the mirror stale; the
+  marker-gated `/etc/kernel/install.d/96-nimbus-menu.install` hook now runs
+  after `95-set-boot-entry` and runs `grub2-mkconfig --no-grubenv-update`; the
+  `09` drop-in refreshes the mirror during that run. The earlier VM
+  add/remove verification predates the mkconfig-only hook and needs a rerun;
+  at that time the mirror, `grub.cfg` and the Nimbus UKI followed the
+  remaining kernel without any manual mkconfig. Fedora's
+  `95-set-boot-entry.install` only acts on `add`,
+  so `saved_entry` still named the removed kernel; the grouped menu boots the
+  explicit mirror entry and does not depend on `saved_entry`, but a boot after
+  a removal and the Fedora flat-menu fallback are still part of the #32 boot
+  test. The image and drop-ins still need the 0.6.0 `nimbus.spec` packaging
+  step below.
 - [ ] Ship the payload and drop-in in the 0.6.0 engine package (`nimbus.spec`),
-  including `/etc/grub.d/09_nimbus_previous_kernels` and
-  `/usr/lib/dracut/modules.d/40nimbus-plymouth`, and select `boot-theme` in
+  including `/etc/grub.d/09_nimbus_previous_kernels`,
+  `/etc/kernel/install.d/96-nimbus-menu.install` and
+  `/usr/lib/dracut/modules.d/40nimbus-plymouth`, all as `0755` plain files and
+  not `%config(noreplace)` so engine updates land, and select `boot-theme` in
   the `common` profile in the release change. The
   component stays deselected on physical machines until then, so an older
   engine is never asked to run triggers whose payload it lacks.
@@ -400,10 +415,15 @@ refactor and TUI.
   and the boot journal showed zero `fc-match` and `Fontconfig` errors. BIOS-only
   systems are untested (EFI verified). The
   explicit `set timeout=5` intentionally overrides `GRUB_TIMEOUT`,
-  `menu_auto_hide` and `systemctl reboot --boot-loader-menu`. If the engine
-  does not ship the payload, or the recorded previous Plymouth theme is gone,
-  the plan blocks with guidance instead of running triggers that cannot
-  succeed.
+  `menu_auto_hide` and `systemctl reboot --boot-loader-menu`. A missing engine
+  payload blocks installation; a removal restores the recorded previous theme
+  without the Nimbus payload and blocks only when no usable theme was
+  recorded, when it is Nimbus's own theme, or when it is no longer installed.
+  Both payload triggers re-run once, shown in the plan, when their receipt was
+  written by another engine version, so an engine update reaches the initramfs
+  and `grub.cfg`; a repeat run keeps the recorded previous theme. A successful
+  removal retires the trigger receipt only at the end of the run, so a failed
+  removal replans from the install receipt.
 - [x] Inspect the Fedora/LUKS2 boot path, TPM and Secure Boot support; choose
   the native auto-unlock method and boot-change policy before implementation.
   Read-only inspection covered the laptop and the disposable VM: LUKS2 with a
@@ -415,14 +435,17 @@ refactor and TUI.
   `postinstall fde` detection: the mounted LUKS2 root, the TPM2 device class
   and the selected tools are inspected without privilege, and unsupported or
   unknown setups are reported clearly. Keyslots, EFI space and enrollment
-  state need an approved privileged check. No setup action is offered yet.
+  state need an approved privileged check. Detection stays read-only; the
+  approved setup action is implemented in the next item.
 - [x] Implement approved setup: the inert kernel-install hook, the marker,
   ukify build and the `Nimbus UKI` firmware entry, then prove passphrase UKI
   boot and a kernel update in a disposable VM (2026-09-17). A real
   `nimbus sync` on a drill machine recorded the package receipts; the approved
   `postinstall fde` action wrote `/etc/nimbus/fde-uki.enabled`, built
   `/boot/efi/EFI/Linux/nimbus.efi`, replaced an earlier hand-made entry that
-  pointed at another path, and verified the image read-only. Reboots loaded
+  pointed at another path, and verified the image read-only. A stale
+  same-label firmware duplicate is reported as a repair and replaced, so
+  exactly one `Nimbus UKI` entry remains. Reboots loaded
   `Boot0009 "Nimbus UKI"` through systemd-stub (Secure Boot disabled) with the
   embedded command line; `kernel-install add` for the second installed kernel
   rebuilt the image through the hook, and the next boot ran that kernel.
@@ -435,7 +458,10 @@ refactor and TUI.
 - [ ] Add enrollment, policy renewal, status and scoped removal with explicit
   previews; reduced protection and removal default to No and a blanket `--yes`
   cannot accept them. Preserve the passphrase, unrelated keys and enrollment
-  slots. This milestone also implements the signed, shim-chained image and MOK
+  slots. Until scoped removal exists, deselecting `fde` while
+  `/etc/nimbus/fde-uki.enabled` exists or cannot be read blocks the plan and
+  keeps the component's packages. This milestone also implements the signed,
+  shim-chained image and MOK
   enrollment that Secure Boot needs, and reconciles Nimbus-initiated initramfs
   refreshes (the NVIDIA signing flow and the Plymouth theme trigger) with the
   image.

@@ -18,7 +18,7 @@ func mok(src native.Source, in Inputs) Task {
 		Prerequisites: []string{"NVIDIA and akmods packages have been applied.", "Secure Boot is enabled; existing signing keys are preserved."},
 		Instructions: []string{
 			"After approval, authenticate sudo and inspect the akmods key pair with elevated access.",
-			"Only if both key files are missing: sudo -- kmodgenca -a. Never replace an existing or incomplete pair.",
+			"The akmods package generates the signing key pair through akmods-keygen before it builds modules; Nimbus preserves an existing or incomplete pair and never replaces it.",
 			"If modules do not match the certificate: sudo -- akmods --force --rebuild --akmod nvidia --kernels <running-kernel>.",
 			"Check every NVIDIA module's signer and certificate serial, then refresh the boot image: sudo -- dracut --force --kver <running-kernel>.",
 			"If needed: sudo -- mokutil --import /etc/pki/akmods/certs/public_key.der. Enter the temporary password in mokutil's native prompt.",
@@ -56,14 +56,20 @@ func mok(src native.Source, in Inputs) Task {
 			return t
 		}
 	}
-	for _, tool := range []string{"sudo", "kmodgenca", "akmods", "dracut", "mokutil", "modinfo", "nvidia-smi"} {
+	for _, tool := range []string{"sudo", "akmods", "dracut", "mokutil", "modinfo", "nvidia-smi"} {
 		if _, err := src.LookPath(tool); err != nil {
 			t.Status, t.Detail = Blocked, tool+" is unavailable; repair the NVIDIA packages before setup."
 			return t
 		}
 	}
-	t.Action = &Action{Kind: SetupNVIDIA}
-	return VerifyMOK(src, t)
+	// Only an unenrolled machine offers the mutating setup; Complete records
+	// verification, Blocked explains itself and Unknown keeps the read-only
+	// root check so approval never skips the existing state.
+	verified := VerifyMOK(src, t)
+	if verified.Status == Pending {
+		verified.Action = &Action{Kind: SetupNVIDIA}
+	}
+	return verified
 }
 
 // VerifyMOK verifies only the fixed public akmods certificate after the caller
@@ -78,10 +84,10 @@ func VerifyMOK(src native.Source, t Task) Task {
 		t.Status, t.Detail, t.VerificationNeedsRoot = Unknown, "Permission denied reading the akmods public certificate; approved setup inspects it with sudo before changing anything.", true
 		return t
 	case errors.Is(err, os.ErrNotExist):
-		t.Status, t.Detail = Blocked, "The akmods public certificate is missing at "+MOKCertificate+"; inspect akmods key generation before enrollment."
+		t.Status, t.Detail = Blocked, "The akmods public certificate is missing at "+MOKCertificate+"; reboot once so akmods-keygen generates the key pair, then retry."
 		return t
 	case err != nil:
-		t.Status, t.Detail = Unknown, "The akmods public certificate could not be read: "+err.Error()
+		t.Status, t.Detail = Unknown, "The akmods public certificate could not be read: "+err.Error()+"; if akmods has not generated the key pair yet, reboot once and retry."
 		return t
 	case len(data) == 0:
 		t.Status, t.Detail = Blocked, "The akmods public certificate is empty; inspect akmods key generation before enrollment."

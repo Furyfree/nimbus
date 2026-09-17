@@ -13,6 +13,7 @@
 # five-second menu stays visible.
 
 [ -f /etc/nimbus/boot-theme.enabled ] || exit 0
+[ -f /boot/grub2/themes/nimbus/theme.txt ] || exit 0
 
 cat << 'EOF'
 loadfont $prefix/themes/nimbus/mono-16.pf2

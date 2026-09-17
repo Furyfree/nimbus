@@ -235,7 +235,7 @@ func TestMOKNativeEnrollmentStates(t *testing.T) {
 			in, src := fixture("akmod-nvidia", "akmods", "mokutil")
 			in.Resolved.Components = []definitions.ResolvedComponent{{ID: "nvidia"}}
 			in.Facts.SecureBoot.Value = inspect.SecureBootEnabled
-			for _, tool := range []string{"sudo", "kmodgenca", "dracut", "modinfo", "nvidia-smi"} {
+			for _, tool := range []string{"sudo", "dracut", "modinfo", "nvidia-smi"} {
 				src.Paths[tool] = "/usr/bin/" + tool
 			}
 			src.Files[MOKCertificate] = []byte("certificate supplied to native validator")
@@ -246,8 +246,12 @@ func TestMOKNativeEnrollmentStates(t *testing.T) {
 				src.Failures[key] = test.failure
 			}
 			got := findTask(t, Inspect(src, in), "nvidia-mok")
-			if got.Status != test.want || got.Action == nil || got.Action.Kind != SetupNVIDIA {
-				t.Fatalf("got %+v; want %s with explicit signing and enrollment setup", got, test.want)
+			if got.Status != test.want {
+				t.Fatalf("got %+v; want %s", got, test.want)
+			}
+			wantAction := test.want == Pending
+			if (got.Action != nil) != wantAction || (wantAction && got.Action.Kind != SetupNVIDIA) {
+				t.Fatalf("got %+v; want setup action=%v", got, wantAction)
 			}
 		})
 	}

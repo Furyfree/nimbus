@@ -55,17 +55,17 @@ func hostnameTask(src native.Source, in Inputs) Task {
 		return t
 	}
 	current := strings.TrimSpace(string(out))
-	if current == "" || !hostnameName.MatchString(current) {
-		t.Detail = "hostnamectl returned an unrecognized static hostname; inspect hostnamectl --static"
-		return t
-	}
 	if current == intended {
 		t.Status = Complete
 		t.Detail = "The static hostname is already " + intended + "."
 		return t
 	}
 	t.Status = Pending
-	t.Detail = "Static hostname is " + current + "; the machine " + in.Resolved.Machine + " targets " + intended + "."
+	if current == "" {
+		t.Detail = "No static hostname is set; the machine " + in.Resolved.Machine + " targets " + intended + "."
+	} else {
+		t.Detail = "Static hostname is " + current + "; the machine " + in.Resolved.Machine + " targets " + intended + "."
+	}
 	t.Action = action
 	return t
 }

@@ -41,6 +41,51 @@ func TestFDEBootEntries(t *testing.T) {
 	}
 }
 
+func TestFDEReplacesStaleSameLabelEntries(t *testing.T) {
+	const guid = "78f7ab0d-3bb7-4c71-ba1b-d8f8db372fdc"
+	output := "BootCurrent: 0009\nBootOrder: 0009,000A\n" +
+		"Boot0009* Nimbus UKI\tHD(1,GPT," + guid + ",0x800,0x200000)/\\EFI\\Linux\\nimbus.efi\n" +
+		"Boot000A  Nimbus UKI\tHD(1,GPT," + guid + ",0x800,0x200000)/\\EFI\\Linux\\old.efi\n"
+	create := nativetest.Key("sudo", "--", "efibootmgr", "-c", "-d", "/dev/vda", "-p", "1", "-L", FDEBootLabel, "-l", FDEBootLoader)
+	newSource := func() *nativetest.FakeSource {
+		return &nativetest.FakeSource{
+			Commands: map[string][]byte{
+				nativetest.Key("efibootmgr"):                                   []byte(output),
+				nativetest.Key("sudo", "--", "efibootmgr", "-b", "0009", "-B"): nil,
+				nativetest.Key("sudo", "--", "efibootmgr", "-b", "000A", "-B"): nil,
+				create: nil,
+			},
+			Failures: map[string]string{},
+			Files:    map[string][]byte{"/proc/mounts": []byte("/dev/vda1 /boot/efi vfat rw 0 0\n")},
+			Dirs:     map[string][]string{},
+			Paths:    map[string]string{},
+		}
+	}
+	t.Run("a stale duplicate is removed and recreated", func(t *testing.T) {
+		var out bytes.Buffer
+		if err := fdeEnsureEntry(newSource(), &out, &out); err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{"efibootmgr -b 0009 -B", "efibootmgr -b 000A -B", "-c -d /dev/vda -p 1"} {
+			if !strings.Contains(out.String(), want) {
+				t.Fatalf("output lacks %q:\n%s", want, out.String())
+			}
+		}
+	})
+	t.Run("a single correct entry is left alone", func(t *testing.T) {
+		src := newSource()
+		src.Commands[nativetest.Key("efibootmgr")] = []byte("BootCurrent: 0009\nBootOrder: 0009\n" +
+			"Boot0009* Nimbus UKI\tHD(1,GPT," + guid + ",0x800,0x200000)/\\EFI\\Linux\\nimbus.efi\n")
+		var out bytes.Buffer
+		if err := fdeEnsureEntry(src, &out, &out); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(out.String(), "-B") {
+			t.Fatalf("a single correct entry was replaced:\n%s", out.String())
+		}
+	})
+}
+
 func TestFDEESPDevice(t *testing.T) {
 	cases := map[string][2]string{
 		"/dev/vda1 /boot/efi vfat rw 0 0\n":                                  {"/dev/vda", "1"},

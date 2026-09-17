@@ -35,7 +35,12 @@ func fdeTask(src native.Source, in Inputs) Task {
 		t.Detail = "The mounted root could not be inspected; read /proc/mounts and retry"
 		return t
 	}
-	if !encryptedRoot(src, rootSource(string(mounts))) {
+	encrypted, err := encryptedRoot(src, rootSource(string(mounts)))
+	if err != nil {
+		t.Detail = "The root device could not be inspected; check the block devices, then retry"
+		return t
+	}
+	if !encrypted {
 		t.Status, t.Detail = NotApplicable, "The root filesystem is not a LUKS2 mapper; automatic unlock keeps the passphrase only."
 		return t
 	}
@@ -141,7 +146,7 @@ func fdeTask(src native.Source, in Inputs) Task {
 		t.Reboot = true
 		return t
 	}
-	if !fdeEntryCorrect(entries) {
+	if !fdeEntryReady(entries) {
 		t.Status = Pending
 		t.Detail = "FDE setup is active but the firmware entry is missing or different; rerun the approved setup to repair it."
 		t.Action = &Action{Kind: SetupFDE}
@@ -170,14 +175,22 @@ func rootSource(mounts string) string {
 }
 
 // encryptedRoot reports whether the mounted root device is a LUKS2 mapper.
-// The device-mapper UUID is authoritative, so any mapper name works.
-func encryptedRoot(src native.Source, source string) bool {
+// The device-mapper UUID is authoritative, so any mapper name works. A source
+// that is not a device mapper is (false, nil); a read error stays an error so
+// the caller can report Unknown instead of claiming the root is unencrypted.
+func encryptedRoot(src native.Source, source string) (bool, error) {
 	uuid, err := dmUUID(src, source)
 	if err != nil {
-		return false
+		if errors.Is(err, errNotDeviceMapper) {
+			return false, nil
+		}
+		return false, err
 	}
-	return strings.HasPrefix(strings.TrimSpace(uuid), "CRYPT-LUKS2-")
+	return strings.HasPrefix(strings.TrimSpace(uuid), "CRYPT-LUKS2-"), nil
 }
+
+// errNotDeviceMapper marks a root source that is not a device-mapper device.
+var errNotDeviceMapper = errors.New("not a device-mapper source")
 
 // dmUUID resolves the device-mapper UUID for a mapper mount source. Sysfs
 // exposes dm devices as dm-N, so /dev/mapper names are matched through
@@ -212,7 +225,7 @@ func dmUUID(src native.Source, source string) (string, error) {
 		}
 		return string(data), nil
 	}
-	return "", errors.New("not a device-mapper source")
+	return "", errNotDeviceMapper
 }
 
 // setupMode reports whether the firmware is in Setup Mode, which disables

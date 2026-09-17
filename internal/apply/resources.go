@@ -29,6 +29,13 @@ func (ex *executor) plymouthThemeTrigger(op plan.Operation) ([]state.Receipt, []
 		return nil, nil, fmt.Errorf("read the current Plymouth theme: %w", err)
 	}
 	previous := strings.TrimSpace(string(before))
+	if previous == intended && op.Resource != nil {
+		if recorded := strings.TrimSpace(op.Resource.Previous); recorded != "" {
+			// The theme was already selected by an earlier run; keep the
+			// selection observed before Nimbus took over.
+			previous = recorded
+		}
+	}
 	if err := ex.sudo(argv...); err != nil {
 		return nil, nil, err
 	}
@@ -38,6 +45,12 @@ func (ex *executor) plymouthThemeTrigger(op plan.Operation) ([]state.Receipt, []
 	}
 	if observed := strings.TrimSpace(string(after)); observed != intended {
 		return nil, nil, fmt.Errorf("Plymouth theme verification failed: expected %s, observed %s", intended, observed)
+	}
+	if op.Action == plan.ActionRemove {
+		// The install receipt carries the previous theme needed to replan a
+		// failed removal; a successful removal retires it with the other
+		// removal receipts at the end of the run.
+		return nil, []string{op.ID}, nil
 	}
 	return []state.Receipt{ex.receipt(op, plan.KindTrigger, previous, intended, "native Plymouth theme selection verified after the command")}, nil, nil
 }

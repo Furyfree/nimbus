@@ -17,7 +17,7 @@ func TestDoctorKeepsOneResourceNameAndIndentedDetails(t *testing.T) {
 	}
 }
 
-func TestMOKPreviewUsesHistoricalEvidenceWithoutEnrollmentInstructions(t *testing.T) {
+func TestMOKPreviewShowsSetupOnlyWithoutHistoricalEvidence(t *testing.T) {
 	task := postinstall.Task{ID: "nvidia-mok", Title: "Enroll key", Status: postinstall.Unknown, PreviouslyVerified: true, VerificationNeedsRoot: true, Instructions: []string{"Complete enrollment in the MOK manager."}}
 	var b bytes.Buffer
 	if err := renderPostinstall(&b, postinstallView{Machine: "vm", Tasks: []postinstall.Task{task}}); err != nil {
@@ -32,7 +32,7 @@ func TestMOKPreviewUsesHistoricalEvidenceWithoutEnrollmentInstructions(t *testin
 	if err := renderPostinstall(&b, postinstallView{Machine: "vm", Tasks: []postinstall.Task{task}}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(b.String(), "[Unable to check]") || strings.Contains(b.String(), "MOK manager") {
+	if !strings.Contains(b.String(), "[Unable to check]") || !strings.Contains(b.String(), "MOK manager") {
 		t.Fatal(b.String())
 	}
 	task.Status = postinstall.Pending

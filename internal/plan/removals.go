@@ -2,14 +2,31 @@ package plan
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"slices"
 	"strings"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/inspect"
 )
+
+// fdeMarkerPath is the marker approved FDE setup writes; it is world-readable
+// so planning stays unprivileged.
+const fdeMarkerPath = "/etc/nimbus/fde-uki.enabled"
+
+// fdeSetupActive reports whether automatic-unlock setup is armed. An
+// unreadable marker counts as active, so a read error cannot authorize
+// removal of the packages that keep the default boot path working.
+func (b *builder) fdeSetupActive() bool {
+	if b.in.Source == nil {
+		return false
+	}
+	_, err := b.in.Source.ReadFile(fdeMarkerPath)
+	return err == nil || !errors.Is(err, os.ErrNotExist)
+}
 
 // removeTransaction previews the removal of declared removes that are still
 // installed and that the install transaction does not already erase.
@@ -56,6 +73,7 @@ func (b *builder) ownedRemovals() []Operation {
 	}
 	var names, receiptIDs []string
 	var ops []Operation
+	fdeArmed := !slices.ContainsFunc(b.in.Resolved.Components, func(rc definitions.ResolvedComponent) bool { return rc.ID == "fde" }) && b.fdeSetupActive()
 	for _, id := range slices.Sorted(maps.Keys(b.in.Applied.Receipts)) {
 		r := b.in.Applied.Receipts[id]
 		if desired[id] {
@@ -68,6 +86,14 @@ func (b *builder) ownedRemovals() []Operation {
 		}
 		switch r.Provider {
 		case "dnf":
+			// Unknown ownership blocks deletion: the armed FDE marker owns
+			// the boot path, and scoped FDE removal does not exist yet.
+			if fdeArmed && slices.Contains(r.Paths, "component:fde") {
+				ops = append(ops, Operation{ID: id, Kind: KindPackage, Action: ActionRemove, Risk: RiskMedium,
+					Summary: "keep the FDE packages while automatic unlock is active",
+					Blocked: "FDE setup is active; keep the fde component selected until scoped FDE removal exists"})
+				continue
+			}
 			r.Resource = id
 			name, err := ReceiptPackage(r, b.in.Facts.Packages.Value)
 			if err != nil {

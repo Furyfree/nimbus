@@ -1,0 +1,19 @@
+#!/bin/sh
+# Nimbus "Previous kernels" mirror refresh.
+#
+# Fedora's 99-grub-mkconfig.install regenerates grub.cfg only when BLS is
+# disabled, so kernel installs and removals never rerun grub2-mkconfig on the
+# standard BLS layout. This hook runs after 95-set-boot-entry (so saved_entry
+# names the new kernel) and refreshes the Nimbus BLS mirror plus grub.cfg
+# through the installed engine. It stays inert without the boot-theme marker
+# and warns instead of failing the kernel transaction.
+
+[ -e /etc/nimbus/boot-theme.enabled ] || exit 0
+case "$1" in
+    add | remove) ;;
+    *) exit 0 ;;
+esac
+if ! /usr/sbin/grub2-mkconfig --no-grubenv-update -o /boot/grub2/grub.cfg >/dev/null 2>&1; then
+    echo "warning: the Nimbus kernel menu was not regenerated; the previous grub.cfg is retained" >&2
+fi
+exit 0

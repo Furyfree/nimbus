@@ -52,11 +52,13 @@ func (s *mokSetupSource) Run(name string, args ...string) ([]byte, error) {
 	if strings.HasPrefix(command, "sudo -n -- find ") {
 		return []byte(s.files), nil
 	}
-	if command == "sudo -n -- mokutil --test-key "+MOKCertificate {
+	if command == "sudo -n -- mokutil --ignore-keyring --test-key "+MOKCertificate {
+		// mokutil exits 0 when the certificate is not enrolled and 1 when it
+		// is enrolled, pending or blocked.
 		if s.enrollment == " is not enrolled" {
-			return []byte(MOKCertificate + s.enrollment), s.exitOne
+			return []byte(MOKCertificate + s.enrollment), nil
 		}
-		return []byte(MOKCertificate + s.enrollment), nil
+		return []byte(MOKCertificate + s.enrollment), s.exitOne
 	}
 	if strings.HasPrefix(command, "modinfo -k test-kernel -F ") {
 		if !s.signed {
@@ -81,8 +83,6 @@ func (s *mokSetupSource) Stream(_, _ io.Writer, name string, args ...string) err
 	}
 	switch command {
 	case "sudo --validate", "sudo -- dracut --force --kver test-kernel", "nvidia-smi":
-	case "sudo -- kmodgenca -a":
-		s.files = MOKCertificate + "\n" + mokPrivateKey
 	case "sudo -- akmods --force --rebuild --akmod nvidia --kernels test-kernel":
 		s.signed = !s.buildUnsigned
 		if s.cancel != nil {
@@ -113,7 +113,7 @@ func TestNVIDIAMOKSetup(t *testing.T) {
 		want    []string
 	}{
 		{"existing keys", nil, "", []string{"sudo --validate", build, dracut, enroll}},
-		{"new keys", func(s *mokSetupSource) { s.files = "" }, "", []string{"sudo --validate", "sudo -- kmodgenca -a", build, dracut, enroll}},
+		{"missing keys block", func(s *mokSetupSource) { s.files = "" }, "akmods-keygen", []string{"sudo --validate"}},
 		{"certificate only", func(s *mokSetupSource) { s.files = MOKCertificate }, "incomplete", []string{"sudo --validate"}},
 		{"private key only", func(s *mokSetupSource) { s.files = mokPrivateKey }, "incomplete", []string{"sudo --validate"}},
 		{"native authentication failure", func(s *mokSetupSource) { s.fail = "sudo --validate" }, "native failure", []string{"sudo --validate"}},
@@ -123,7 +123,7 @@ func TestNVIDIAMOKSetup(t *testing.T) {
 		{"cancel after build", nil, "context canceled", []string{"sudo --validate", build}},
 		{"public certificate unreadable", func(s *mokSetupSource) { s.fail = "sudo -n -- cat " + MOKCertificate }, "native failure", []string{"sudo --validate"}},
 		{"invalid certificate", func(s *mokSetupSource) { s.Commands["sudo -n -- cat "+MOKCertificate] = []byte("invalid") }, "invalid", []string{"sudo --validate"}},
-		{"key generation failure", func(s *mokSetupSource) { s.files = ""; s.fail = "sudo -- kmodgenca -a" }, "create akmods", []string{"sudo --validate", "sudo -- kmodgenca -a"}},
+
 		{"build failure", func(s *mokSetupSource) { s.fail = build }, "rebuild NVIDIA", []string{"sudo --validate", build}},
 		{"wrong signing certificate", func(s *mokSetupSource) { s.signed = true; s.signature = "AB:CD" }, "do not all report signatures", []string{"sudo --validate", build}},
 		{"build still unsigned", func(s *mokSetupSource) { s.buildUnsigned = true }, "do not all report signatures", []string{"sudo --validate", build}},

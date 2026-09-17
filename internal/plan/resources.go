@@ -15,6 +15,7 @@ import (
 	"github.com/Furyfree/nimbus/internal/inspect"
 	"github.com/Furyfree/nimbus/internal/native"
 	"github.com/Furyfree/nimbus/internal/state"
+	"github.com/Furyfree/nimbus/internal/version"
 )
 
 type FileChange struct {
@@ -249,6 +250,7 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 		triggerID := "trigger:" + id
 		receipt, ok := b.in.Applied.Receipts[triggerID]
 		changed := !ok || !ownedResource(receipt, triggerID, KindTrigger, b.in.Resolved.Machine)
+		changed = changed || (definitions.TriggerTracksEngine(id) && receipt.Engine != version.Engine)
 		changed = changed || slices.ContainsFunc(b.in.Resolved.Files, func(file definitions.ResolvedFile) bool {
 			if !slices.Contains(file.Triggers, id) {
 				return false
@@ -278,20 +280,30 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 			}
 			if id == "plymouth-theme" {
 				switch {
-				case !plymouthThemeAvailable(b.in.Source, "nimbus"):
-					op.Blocked = "the installed engine does not ship the boot-theme payload; upgrade nimbus or deselect boot-theme"
 				case removalTrigger[id] && !selectedTrigger[id]:
 					// The selection returns to what was observed before the
-					// install; that value lives in the previous trigger receipt.
+					// install; that value lives in the previous trigger
+					// receipt, and restoring it does not need the Nimbus
+					// payload that is being removed.
 					previous := receipt.Previous
 					if !ok || previous == "" {
 						op.Blocked = "no recorded previous Plymouth theme; select the boot-theme component to record it before removal"
+					} else if previous == "nimbus" {
+						op.Blocked = "the recorded previous Plymouth theme is nimbus itself; set another theme with plymouth-set-default-theme before removing boot-theme"
 					} else if !plymouthThemeAvailable(b.in.Source, previous) {
 						op.Blocked = "the recorded previous Plymouth theme " + previous + " is no longer installed; set a theme manually with plymouth-set-default-theme before removing boot-theme"
 					} else {
 						op.Action = ActionRemove
 						op.Summary = "restore the previous Plymouth theme"
 						op.Steps = []Step{{Description: "restore the previous Plymouth theme", Argv: []string{"plymouth-set-default-theme", "-R", previous}, Privileged: true}}
+					}
+				case !plymouthThemeAvailable(b.in.Source, "nimbus"):
+					op.Blocked = "the installed engine does not ship the boot-theme payload; upgrade nimbus or deselect boot-theme"
+				default:
+					if ok && receipt.Previous != "" {
+						// Carry the theme observed before Nimbus took over, so
+						// a repeat apply cannot overwrite it with nimbus.
+						op.Resource = &ResourceChange{Name: "plymouth-theme", Previous: receipt.Previous}
 					}
 				}
 			}

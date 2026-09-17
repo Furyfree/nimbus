@@ -17,14 +17,9 @@
 mirror=/boot/loader/entries-nimbus
 
 if [ ! -f /etc/nimbus/boot-theme.enabled ]; then
-    rm -f "$mirror"/*.conf
-    rmdir "$mirror" 2>/dev/null
+    rm -rf "$mirror"
     exit 0
 fi
-
-[ -x /usr/bin/nimbus ] || exit 0
-entry="$(/usr/bin/nimbus internal boot-menu 2>/dev/null)" || exit 0
-[ -n "$entry" ] || exit 0
 
 # Fedora uses the BLS parser unless GRUB_ENABLE_BLSCFG is off. Mirror the
 # same condition as 10_linux so a legacy configuration keeps its flat menu.
@@ -32,6 +27,10 @@ if [ -z "${GRUB_ENABLE_BLSCFG}" ] && ! command -v new-kernel-pkg >/dev/null 2>&1
     GRUB_ENABLE_BLSCFG="true"
 fi
 [ "${GRUB_ENABLE_BLSCFG}" = "true" ] || exit 0
+
+[ -x /usr/bin/nimbus ] || exit 0
+entry="$(/usr/bin/nimbus internal boot-menu 2>/dev/null)" || exit 0
+[ -n "$entry" ] || exit 0
 
 # Emit the same device preparation as 10_linux's BLS branch, because this
 # script runs before it.

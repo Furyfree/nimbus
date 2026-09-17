@@ -206,6 +206,8 @@ func TestPostinstallRebootRemainsInstructionOnly(t *testing.T) {
 func TestPostinstallRejectsForgedNativeActions(t *testing.T) {
 	for _, task := range []postinstall.Task{
 		{ID: "nvidia-mok", Status: postinstall.Blocked, Action: &postinstall.Action{Kind: postinstall.SetupNVIDIA}},
+		{ID: "nvidia-mok", Status: postinstall.Unknown, Action: &postinstall.Action{Kind: postinstall.SetupNVIDIA}},
+		{ID: "nvidia-mok", Status: postinstall.Complete, Action: &postinstall.Action{Kind: postinstall.SetupNVIDIA}},
 		{ID: "nvidia-mok", Status: postinstall.Pending, Action: &postinstall.Action{Kind: postinstall.SetupNVIDIA, Argv: []string{"sudo", "sh"}}},
 		{ID: "onepassword", Status: postinstall.Unknown, Action: &postinstall.Action{Kind: postinstall.OpenApplication, Argv: []string{"sh", "-c", "unexpected"}}},
 		{ID: "onepassword", Status: postinstall.Blocked, Action: &postinstall.Action{Kind: postinstall.OpenApplication, Argv: []string{"1password"}}},
@@ -528,11 +530,13 @@ func TestPostinstallNVIDIAMOKApprovalBoundary(t *testing.T) {
 			if err := state.Record(stateRoot, "fixture", &state.Stage{Schema: state.Schema, PlanDigest: "fixture", Receipts: receipts}); err != nil {
 				t.Fatal(err)
 			}
-			for _, name := range []string{"sudo", "kmodgenca", "akmods", "dracut", "mokutil", "modinfo", "nvidia-smi"} {
+			for _, name := range []string{"sudo", "akmods", "dracut", "mokutil", "modinfo", "nvidia-smi"} {
 				src.Paths[name] = "/usr/bin/" + name
 			}
 			src.Files[inspect.SecureBootPath] = []byte{0, 0, 0, 0, 1}
 			src.Files[postinstall.MOKCertificate] = []byte("fixture certificate")
+			enrollment := nativetest.Key("mokutil", "--ignore-keyring", "--test-key", postinstall.MOKCertificate)
+			src.Commands[enrollment] = []byte(postinstall.MOKCertificate + " is not enrolled")
 			src.Commands["mokutil --sb-state"] = []byte("SecureBoot enabled")
 			src.Commands["uname -r"] = []byte("test-kernel")
 			src.streamErr = errors.New("authentication stopped")
@@ -574,7 +578,7 @@ func TestPostinstallNVIDIAMOKApprovalBoundary(t *testing.T) {
 				}
 			}
 			if mode == "plan" {
-				for _, want := range []string{"kmodgenca -a", "akmods --force --rebuild", "dracut --force", "mokutil --import", "US/QWERTY"} {
+				for _, want := range []string{"akmods --force --rebuild", "dracut --force", "mokutil --import", "US/QWERTY"} {
 					if !strings.Contains(out.String(), want) {
 						t.Fatalf("preview omits %q: %s", want, out)
 					}
@@ -584,5 +588,55 @@ func TestPostinstallNVIDIAMOKApprovalBoundary(t *testing.T) {
 				t.Fatalf("stale ownership accepted: %v", err)
 			}
 		})
+	}
+}
+
+// The akmods certificate directory is root-only on stock Fedora, so the
+// unprivileged task cannot attach the setup action itself. The approved
+// read-only check must chain a verified-unenrolled result into the setup
+// flow instead of stopping at an unverifiable completion.
+func TestPostinstallNVIDIAMOKChainsSetupAfterRootVerification(t *testing.T) {
+	root, src := postinstallFixture(t)
+	if err := os.WriteFile(filepath.Join(root, "profiles/common.toml"), []byte("schema=1\nid='common'\ncomponents=['nvidia']\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "components/nvidia.toml"), []byte("schema=1\nid='nvidia'\npackages=['akmod-nvidia','akmods','mokutil']\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var receipts []state.Receipt
+	for _, name := range []string{"akmod-nvidia", "akmods", "mokutil"} {
+		key := nativetest.Key("dnf5", inspect.PackageQueryArgs...)
+		src.Commands[key] = append(src.Commands[key], []byte(name+"|0|1|1|x86_64|fedora|User\n")...)
+		receipts = append(receipts, state.Receipt{Schema: state.ReceiptSchema, Machine: "vm", Resource: "package:dnf:" + name, Provider: "dnf", Verified: true, Operation: "install", PlanDigest: "fixture"})
+	}
+	if err := state.Record(stateRoot, "fixture", &state.Stage{Schema: state.Schema, PlanDigest: "fixture", Receipts: receipts}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"sudo", "akmods", "dracut", "mokutil", "modinfo", "nvidia-smi"} {
+		src.Paths[name] = "/usr/bin/" + name
+	}
+	src.Files[inspect.SecureBootPath] = []byte{0, 0, 0, 0, 1}
+	src.Commands["mokutil --sb-state"] = []byte("SecureBoot enabled")
+	src.Commands["uname -r"] = []byte("test-kernel")
+	src.Commands["sudo -n -- /usr/bin/cat -- "+postinstall.MOKCertificate] = []byte("public-certificate")
+	check := nativetest.Key("sudo", "-n", "--", "/usr/bin/mokutil", "--ignore-keyring", "--test-key", postinstall.MOKCertificate)
+	src.Commands[check] = []byte(postinstall.MOKCertificate + " is not enrolled")
+	src.ExitCodes = map[string]int{check: 0}
+	src.onStream = func(command string) {
+		if command == "sudo --validate" {
+			src.streamErr = errors.New("authentication stopped")
+		}
+	}
+	withSource(t, certificateDeniedSource{src})
+	saved := postinstallTerminal
+	postinstallTerminal = func(io.Reader) bool { return true }
+	t.Cleanup(func() { postinstallTerminal = saved })
+	cmd, out := postinstallCommand(root, false, "nvidia-mok", "--yes")
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "authentication stopped") {
+		t.Fatalf("setup was not reached after root verification: %v\n%s", err, out)
+	}
+	if !slices.Equal(src.streams, []string{"sudo -v", "sudo --validate"}) {
+		t.Fatalf("streams=%v", src.streams)
 	}
 }
