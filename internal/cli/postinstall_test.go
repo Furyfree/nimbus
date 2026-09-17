@@ -211,6 +211,7 @@ func TestPostinstallRejectsForgedNativeActions(t *testing.T) {
 		{ID: "copilot", Status: postinstall.Unknown, Action: &postinstall.Action{Kind: postinstall.InstallApplication, Argv: []string{"sudo", "--", "/tmp/github-copilot-installer", "install"}}},
 		{ID: "proton-cachyos", Status: postinstall.Unknown, Action: &postinstall.Action{Kind: postinstall.InstallApplication, Argv: []string{"protonplus", "update", "all"}}},
 		{ID: "proton-cachyos", Status: postinstall.Blocked, Action: &postinstall.Action{Kind: postinstall.InstallApplication, Argv: []string{"protonplus", "install", "steam-system", "proton-cachyos", "latest"}}},
+		{ID: "voxtype", Status: postinstall.Pending, Action: &postinstall.Action{Kind: postinstall.SetupVoxtype, Commands: [][]string{{"sh", "-c", "voxtype setup"}, {"systemctl", "--user", "enable", "--now", "voxtype.service"}}}},
 	} {
 		if _, err := postinstallArgv(task); err == nil {
 			t.Fatalf("untyped action accepted: %+v", task)
@@ -432,5 +433,74 @@ func TestPostinstallNoctaliaPreviewCancellationAndFailure(t *testing.T) {
 				t.Fatal("plugin action changed receipts")
 			}
 		})
+	}
+}
+
+func TestPostinstallVoxtypePreviewAndApproval(t *testing.T) {
+	root, src := postinstallFixture(t)
+	if err := os.WriteFile(filepath.Join(root, "profiles/common.toml"), []byte("schema=1\nid='common'\npackages=['voxtype:voxtype']\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if src.ExitCodes == nil {
+		src.ExitCodes = map[string]int{}
+	}
+	key := nativetest.Key("dnf5", inspect.PackageQueryArgs...)
+	src.Commands[key] = append(src.Commands[key], []byte("voxtype|0|1.0.1|0.3.fc44|x86_64|voxtype|User\n")...)
+	src.Paths["voxtype"] = "/usr/bin/voxtype"
+	src.Paths["systemctl"] = "/usr/bin/systemctl"
+	src.Commands[nativetest.Key("voxtype", "info", "models", "--json", "--engine", "whisper")] = []byte(
+		`{"engines":{"whisper":{"models":[{"name":"small","installed":false},{"name":"medium","installed":false}]}}}`)
+	unit := func(verb, state string, code int) {
+		k := nativetest.Key("systemctl", "--user", verb, "voxtype.service")
+		src.Commands[k] = []byte(state + "\n")
+		if code != 0 {
+			src.ExitCodes[k] = code
+		}
+	}
+	unit("is-enabled", "disabled", 1)
+	unit("is-active", "inactive", 3)
+	r := state.Receipt{Schema: state.ReceiptSchema, Machine: "vm", Resource: "package:voxtype:voxtype", Provider: "dnf", Package: "voxtype.x86_64", Verified: true, Operation: "install", PlanDigest: "fixture", Timestamp: time.Unix(100, 0)}
+	if err := state.Record(stateRoot, "fixture", &state.Stage{Schema: state.Schema, PlanDigest: "fixture", Receipts: []state.Receipt{r}}); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd, out := postinstallCommand(root, false, "voxtype", "--plan")
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("preview failed: %v", err)
+	}
+	for _, want := range []string{"voxtype setup --download --model small", "systemctl --user enable --now voxtype.service"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("preview lacks %q:\n%s", want, out)
+		}
+	}
+	if len(src.streams) != 0 {
+		t.Fatalf("preview ran native commands: %v", src.streams)
+	}
+
+	savedTerminal, savedApprover := postinstallTerminal, approver
+	t.Cleanup(func() { postinstallTerminal, approver = savedTerminal, savedApprover })
+	postinstallTerminal = func(io.Reader) bool { return true }
+	approver = func(io.Reader, io.Writer, string) bool { return true }
+	downloadKey := nativetest.Key("voxtype", "setup", "--download", "--model", "small")
+	enableKey := nativetest.Key("systemctl", "--user", "enable", "--now", "voxtype.service")
+	src.Commands[downloadKey] = nil
+	src.Commands[enableKey] = nil
+	src.onStream = func(key string) {
+		if key == enableKey {
+			src.Commands[nativetest.Key("voxtype", "info", "models", "--json", "--engine", "whisper")] = []byte(
+				`{"engines":{"whisper":{"models":[{"name":"small","installed":true}]}}}`)
+			unit("is-enabled", "enabled", 0)
+			unit("is-active", "active", 0)
+		}
+	}
+	cmd, out = postinstallCommand(root, false, "voxtype")
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("approved setup failed: %v", err)
+	}
+	if !slices.Equal(src.streams, []string{downloadKey, enableKey}) {
+		t.Fatalf("native workflow mismatch: %v", src.streams)
+	}
+	if !strings.Contains(out.String(), "voxtype.service is enabled") {
+		t.Fatalf("completion was not reported:\n%s", out)
 	}
 }

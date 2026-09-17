@@ -38,6 +38,7 @@ const (
 	SyncNoctaliaPlugins       ActionKind = "sync-noctalia-plugins"
 	SyncHyprlandPlugins       ActionKind = "sync-hyprland-plugins"
 	SetAccountPicture         ActionKind = "set-account-picture"
+	SetupVoxtype              ActionKind = "setup-voxtype"
 )
 
 // Action describes native commands offered for explicit user selection.
@@ -123,6 +124,8 @@ func Inspect(src native.Source, in Inputs) []Task {
 			add("hyprland-plugins", func() Task { return hyprlandPlugins(src, in, pkg) })
 		case pkg.Name == "accountsservice" && pkg.Prefix != "flatpak":
 			add("account-picture", func() Task { return accountPicture(src, in, pkg) })
+		case pkg.Name == "voxtype":
+			add("voxtype", func() Task { return voxtypeSetup(src, in, pkg) })
 		case pkg.Name == "protonplus":
 			for _, steam := range in.Resolved.Packages {
 				if steam.Name == "steam" && steam.Prefix != "flatpak" {

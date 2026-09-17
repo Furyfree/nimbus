@@ -1,5 +1,5 @@
 # Install the packaged build with x86-64-v3 kernels and the Vulkan backend;
-# hardware trials choose model and activation.
+# nimbus postinstall voxtype downloads the model and enables the user unit.
 schema = 1
 id = "voxtype"
 requires = []

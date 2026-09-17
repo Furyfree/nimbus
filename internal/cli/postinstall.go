@@ -160,6 +160,8 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 				runErr = postinstall.RunNoctaliaLockscreen(cmd.Context(), src, cmd.OutOrStdout(), task)
 			} else if task.Action.Kind == postinstall.SyncNoctaliaPlugins {
 				runErr = postinstall.RunNoctaliaPlugins(cmd.Context(), src, cmd.OutOrStdout(), cmd.ErrOrStderr(), task)
+			} else if task.Action.Kind == postinstall.SetupVoxtype {
+				runErr = postinstall.RunVoxtypeSetup(cmd.Context(), src, cmd.OutOrStdout(), cmd.ErrOrStderr(), task)
 			} else if task.Action.Kind == postinstall.SyncHyprlandPlugins {
 				runErr = postinstall.RunHyprlandPlugins(cmd.Context(), src, cmd.OutOrStdout(), cmd.ErrOrStderr(), task)
 			} else {
@@ -284,6 +286,9 @@ func postinstallCommands(task postinstall.Task) ([][]string, error) {
 	}
 	if task.Action != nil && task.Action.Kind == postinstall.SyncNoctaliaPlugins {
 		return postinstall.NoctaliaCommands(task)
+	}
+	if task.Action != nil && task.Action.Kind == postinstall.SetupVoxtype {
+		return postinstall.VoxtypeCommands(task)
 	}
 	if task.Action != nil && len(task.Action.Commands) != 0 {
 		return nil, errors.New("unexpected native command list")

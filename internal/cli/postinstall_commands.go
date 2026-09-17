@@ -25,6 +25,7 @@ var taskDescriptions = []struct{ id, title, help string }{
 	{"onepassword", "Configure 1Password and selected SSH/Git integration", "The guided task offers SSH/Git integration when it is not selected (default: no). An explicit yes saves the choice through Chezmoi while preserving machine and profiles; --yes cannot opt in. In 1Password, sign in, unlock, and enable desktop CLI integration. If SSH is selected, enable its agent. Skip manual SSH/Git file edits: Chezmoi creates managed parent directories and applies only the selected files after a concise change summary and approval. Use --diff during guided setup to show the full private diff without a pager. Existing file-conflict prompts remain enabled. --mark-done verifies the existing selection without changing it."},
 	{"proton-cachyos", "Install Proton-CachyOS Latest for Steam", "Requires native Steam and ProtonPlus. Start Steam once, then close games. Native ProtonPlus owns runners and updates."},
 	{"tailscale-operator", "Set up Tailscale sign-in and local operator", "Requires selected Tailscale and readable daemon preferences and status. If sign-in is needed, preview and approve sudo tailscale up --operator=USER, then complete the native browser sign-in. This connects the machine; --yes cannot complete authentication. Initial setup verifies both operator and a running connection. Already signed-in machines only need the operator setting; stopped connections stay stopped. Do not use tailscale login for initial operator setup: switching profiles can clear the setting. Device approval remains in the Tailscale admin console. Status and --plan never sign in or request sudo."},
+	{"voxtype", "Set up local dictation", "Requires the selected Voxtype package and the native CLI. After approval, download the small Whisper model selected by the managed Chezmoi config and enable the user unit. The model download needs network access and is several hundred megabytes. Enabling voxtype.service starts dictation at each graphical login; no root access is involved. Nimbus never removes models or reads recordings. Status and --plan stay read-only."},
 	{"wowup", "Inspect WoWUp setup requirements", "Blocked until the selected helper supplies standalone installation."},
 }
 
@@ -141,6 +142,8 @@ func postinstallStatusDetail(task postinstall.Task) string {
 		return "Latest runner installed."
 	case "tailscale-operator":
 		return task.Detail
+	case "voxtype":
+		return "Model downloaded and user unit enabled."
 	default:
 		return task.Detail
 	}
