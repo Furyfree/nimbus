@@ -1,6 +1,7 @@
 # The complete local gate.
 check: fmt-check vet test
     python3 -I -B tools/grub/assets.py --check
+    python3 -I -B tools/boot-theme/assets.py --check
     python3 -I -B internal/postinstall/dtu/test_network.py
     git diff --check HEAD
     if command -v markdownlint >/dev/null 2>&1; then markdownlint '*.md' 'docs/**/*.md' 'tools/**/*.md'; else echo 'markdownlint not installed: skipped'; fi

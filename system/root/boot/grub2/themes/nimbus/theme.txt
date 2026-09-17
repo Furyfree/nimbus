@@ -1,0 +1,80 @@
+title-text: ""
+desktop-color: "#101010"
+terminal-font: "DejaVu Sans Mono Regular 20"
+terminal-left: "5%"
+terminal-top: "5%"
+terminal-width: "90%"
+terminal-height: "90%"
+terminal-border: "0"
+
++ label {
+    left = 20%
+    top = 6%
+    width = 60%
+    height = 30
+    text = "N I M B U S"
+    font = "DejaVu Sans Mono Regular 20"
+    align = "center"
+    color = "#eeeeee"
+}
+
++ image {
+    left = 20%
+    top = 13%
+    width = 60%
+    height = 1
+    file = "rule.png"
+}
+
++ boot_menu {
+    left = 18%
+    top = 27%
+    width = 64%
+    height = 42%
+    item_font = "DejaVu Sans Mono Regular 24"
+    item_color = "#eeeeee"
+    selected_item_color = "#eeeeee"
+    selected_item_pixmap_style = "selection_*.png"
+    item_height = 38
+    item_padding = 12
+    item_spacing = 14
+    icon_width = 0
+    icon_height = 0
+    item_icon_space = 0
+    scrollbar = true
+    scrollbar_slice = "center"
+    scrollbar_frame = "scrollbar_frame_*.png"
+    scrollbar_thumb = "scrollbar_thumb_*.png"
+    scrollbar_left_pad = 8
+}
+
++ label {
+    id = "__timeout__"
+    left = 10%
+    top = 74%
+    width = 80%
+    height = 28
+    text = "Starting the default entry in %d seconds"
+    font = "DejaVu Sans Mono Regular 20"
+    align = "center"
+    color = "#aaaaaa"
+}
+
++ image {
+    left = 20%
+    top = 85%
+    width = 60%
+    height = 1
+    file = "rule.png"
+}
+
++ label {
+    left = 8%
+    top = 91%
+    width = 84%
+    height = 24
+    text = "Up/Down: select   Enter: boot   e: edit   c: console"
+    font = "DejaVu Sans Mono Regular 16"
+    align = "center"
+    color = "#aaaaaa"
+}

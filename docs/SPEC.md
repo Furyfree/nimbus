@@ -1018,9 +1018,18 @@ and Noctalia `5.*` through native DNF policy; do not freeze unrelated libraries
 into a shared version group. Retain Fedora defaults unless a demonstrated
 workstation need justifies a change.
 
-The GRUB target is a minimal dark theme, a visible five-second menu, Fedora as
-default, and native Windows discovery only where Windows exists. Preserve
+The GRUB target is the neutral Paper Dark theme, a visible five-second menu,
+Fedora as default, and native Windows discovery only where Windows exists. Preserve
 existing kernels and Fedora boot integration. This is not a bootloader rewrite.
+The matching Plymouth theme styles native disk-unlock prompts without changing
+encryption or automatic-unlock policy. The engine package ships the payload
+under `/boot/grub2/themes/nimbus` and `/usr/share/plymouth/themes/nimbus` plus
+the inert `/etc/grub.d/36_paper_dark` drop-in. The `boot-theme` component owns
+only `/etc/nimbus/boot-theme.enabled`; its `grub-config` and `plymouth-theme`
+triggers regenerate `grub.cfg` and reselect the Plymouth theme after approval.
+Removing the marker restores Fedora's default configuration and the theme
+selected before installation. Fedora boot verification remains open; see the
+[theme sources and previews](../tools/boot-theme/README.md).
 
 TTY repair is the supported direction; no extra Hyprland recovery desktop is
 installed. Existing session files are retired through their ownership receipts
@@ -1192,6 +1201,7 @@ checks are opt-in and must be reported separately from the ordinary test gate.
 | `tools/dnf-constraints/` | Test version-family rules against native DNF |
 | `tools/dnf-sources/` | Test declared sources with signed fixture RPMs |
 | `tools/grub/` | Generate and check the small GRUB theme images |
+| `tools/boot-theme/` | Generate Plymouth assets and preview both boot themes |
 | `licenses/` | Supplemental third-party notices included in releases |
 
 Only the installation handoff participates in normal bootstrap; the other
@@ -1223,9 +1233,10 @@ and native app behavior also need verification. Nimbus no longer has custom app
 providers or Cargo/user-tool installation lists; Mise, Zed and Zeron use native
 binary bootstraps.
 
-Bare `nimbus` prints help until the dashboard is built. GRUB assets are present
-but inactive; FDE auto-unlock is not implemented. These boot features come
-before shared-operation extraction and the TUI. Installed TTY repair, legacy
+Bare `nimbus` prints help until the dashboard is built. GRUB and Plymouth
+payloads ship in the engine package; activation awaits the 0.6.0 package and
+Fedora boot verification. FDE auto-unlock is not implemented. These boot features
+come before shared-operation extraction and the TUI. Installed TTY repair, legacy
 session retirement, clean install, upgrade and hardware trials remain open.
 [TASKS.md](TASKS.md) records evidence.
 

@@ -347,9 +347,29 @@ was performed; installed-session testing remains with the owner.
 Follow the [priority order](ROADMAP.md#next-steps) before the shared-operation
 refactor and TUI.
 
-- [ ] Finish the minimal dark GRUB integration. Check appearance, Fedora-only
-  and Windows-present menus, Fedora default, five-second timeout, older kernels
-  and theme removal through actual boots.
+- [x] Prepare Paper Dark GRUB and Plymouth source themes; retain the selected
+  reference in `docs/images/`. Native QEMU/OVMF GRUB and X11 Plymouth previews
+  are documented in [the preview tool](../tools/boot-theme/README.md). These
+  are rendering checks, not installed Fedora or encrypted-boot validation.
+- [x] Implement activation in source: the theme payload and the inert
+  `/etc/grub.d/36_paper_dark` drop-in ship in the engine package, the
+  `boot-theme` component owns `/etc/nimbus/boot-theme.enabled` with the
+  `grub-config` and `plymouth-theme` triggers, and removal restores the theme
+  observed before installation. Selected for the test VM only.
+- [ ] Ship the payload and drop-in in the 0.6.0 engine package (`nimbus.spec`)
+  and select `boot-theme` in the `common` profile in the release change. The
+  component stays deselected on physical machines until then, so an older
+  engine is never asked to run triggers whose payload it lacks.
+- [x] Verify the VM boot path (2026-09-17, disposable Fedora 44 with Secure
+  Boot and LUKS): the themed GRUB menu rendered the NIMBUS header, monospace
+  fonts and the five-second countdown with both installed kernels listed; the
+  Plymouth disk-unlock screen rendered the theme (owner-verified); removing
+  `/etc/nimbus/boot-theme.enabled` and rerunning the triggers restored
+  Fedora's default menu, the `text` Plymouth theme and a theme-free initramfs;
+  re-activation was repeatable. The payload was copied from the candidate
+  checkout because the 0.5.10 package does not ship it yet.
+- [ ] Verify the Windows-present menu on the dual-booting desktop and boot the
+  older kernel end to end; the VM had no Windows entry.
 - [ ] Inspect the Fedora/LUKS2 boot path, TPM and Secure Boot support; choose
   the native auto-unlock method and boot-change policy before implementation.
 - [ ] Add explicit post-install preview and approval for FDE auto-unlock,

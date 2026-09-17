@@ -30,6 +30,12 @@ func TriggerArgs(id string) []string {
 		return []string{"sysctl", "--system"}
 	case "docker-restart":
 		return []string{"systemctl", "try-restart", "docker.service"}
+	case "grub-config":
+		// Fedora's EFI stub loads /boot/grub2/grub.cfg, and BIOS boots it
+		// directly, so one regeneration covers both.
+		return []string{"grub2-mkconfig", "-o", "/boot/grub2/grub.cfg"}
+	case "plymouth-theme":
+		return []string{"plymouth-set-default-theme", "-R", "nimbus"}
 	}
 	return nil
 }

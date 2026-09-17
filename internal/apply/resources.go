@@ -14,6 +14,34 @@ import (
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
+// plymouthThemeTrigger selects the Paper Dark theme through the native tool
+// and records the previous selection so removal restores what the install
+// replaced. The reviewed plan carries the exact command for both directions.
+func (ex *executor) plymouthThemeTrigger(op plan.Operation) ([]state.Receipt, []string, error) {
+	if len(op.Steps) != 1 || len(op.Steps[0].Argv) != 3 ||
+		op.Steps[0].Argv[0] != "plymouth-set-default-theme" || op.Steps[0].Argv[1] != "-R" {
+		return nil, nil, fmt.Errorf("Plymouth trigger plan is missing its reviewed command")
+	}
+	argv := op.Steps[0].Argv
+	intended := argv[2]
+	before, err := ex.opts.Source.Run("plymouth-set-default-theme")
+	if err != nil {
+		return nil, nil, fmt.Errorf("read the current Plymouth theme: %w", err)
+	}
+	previous := strings.TrimSpace(string(before))
+	if err := ex.sudo(argv...); err != nil {
+		return nil, nil, err
+	}
+	after, err := ex.opts.Source.Run("plymouth-set-default-theme")
+	if err != nil {
+		return nil, nil, fmt.Errorf("verify the Plymouth theme: %w", err)
+	}
+	if observed := strings.TrimSpace(string(after)); observed != intended {
+		return nil, nil, fmt.Errorf("Plymouth theme verification failed: expected %s, observed %s", intended, observed)
+	}
+	return []state.Receipt{ex.receipt(op, plan.KindTrigger, previous, intended, "native Plymouth theme selection verified after the command")}, nil, nil
+}
+
 // FilePayload binds the narrow file helper input to the reviewed plan.
 type FilePayload struct {
 	PlanDigest string          `json:"plan_digest"`
@@ -28,9 +56,13 @@ func (ex *executor) systemResource(op plan.Operation) ([]state.Receipt, []string
 		return ex.systemFile(op)
 	}
 	if op.Kind == plan.KindTrigger {
-		argv := definitions.TriggerArgs(strings.TrimPrefix(op.ID, "trigger:"))
+		id := strings.TrimPrefix(op.ID, "trigger:")
+		argv := definitions.TriggerArgs(id)
 		if len(argv) == 0 {
 			return nil, nil, fmt.Errorf("unknown trigger %s", op.ID)
+		}
+		if id == "plymouth-theme" {
+			return ex.plymouthThemeTrigger(op)
 		}
 		if op.ID == "trigger:noctalia-state-directory" {
 			if op.Resource == nil {

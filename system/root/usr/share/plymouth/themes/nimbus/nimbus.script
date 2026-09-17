@@ -1,0 +1,159 @@
+# Paper Dark: original Nimbus artwork and native Plymouth password callbacks.
+# Password callbacks receive a bullet count, never the passphrase itself.
+Window.SetBackgroundTopColor(0.062745, 0.062745, 0.062745);
+Window.SetBackgroundBottomColor(0.062745, 0.062745, 0.062745);
+
+pixel = Image("pixel.png");
+lock_image = Image("lock.png");
+bullet_image = Image("bullet.png");
+brand = Sprite();
+rule = Sprite();
+lock = Sprite();
+title = Sprite();
+hint = Sprite();
+prompt_label = Sprite();
+message = Sprite();
+answer = Sprite();
+activity = Sprite();
+for (i = 0; i < 4; i++) border[i] = Sprite();
+for (i = 0; i < 32; i++) dots[i] = Sprite();
+
+mode = "normal";
+native_prompt = "";
+question_answer = "";
+message_text = "";
+bullet_count = 0;
+frame = 0;
+screen_width = 0;
+screen_height = 0;
+
+fun centered_text(sprite, text, size, shade, y, max_width) {
+    image = Image.Text(text, shade, shade, shade, 1,
+                       "DejaVu Sans Mono " + Math.Int(size * scale), "center");
+    if (image.GetWidth() > max_width)
+        image = image.Scale(max_width,
+                            image.GetHeight() * max_width / image.GetWidth());
+    sprite.SetImage(image);
+    sprite.SetPosition(center_x - image.GetWidth() / 2, y, 10);
+}
+
+fun rectangle(sprite, x, y, width, height) {
+    sprite.SetImage(pixel.Scale(Math.Int(width), Math.Int(height)));
+    sprite.SetPosition(x, y, 5);
+}
+
+fun layout() {
+    global.screen_width = Window.GetWidth();
+    global.screen_height = Window.GetHeight();
+    global.scale = Math.Min(screen_width / 1280, screen_height / 720);
+    if (scale < 0.6) global.scale = 0.6;
+    global.center_x = Window.GetX() + screen_width / 2;
+    global.top = Window.GetY();
+    global.field_width = Math.Int(400 * scale);
+    global.field_height = Math.Int(60 * scale);
+    global.field_x = center_x - field_width / 2;
+    global.field_y = top + screen_height * 0.55;
+
+    centered_text(brand, "N I M B U S", 14, 0.933,
+                  top + screen_height * 0.065, screen_width * 0.8);
+    rectangle(rule, center_x - screen_width * 0.3,
+              top + screen_height * 0.13, screen_width * 0.6, 1);
+    lock.SetImage(lock_image.Scale(48 * scale, 64 * scale));
+    lock.SetPosition(center_x - 24 * scale, top + screen_height * 0.27, 10);
+
+    is_dialog = mode != "normal";
+    lock.SetOpacity(is_dialog);
+    rectangle(border[0], field_x, field_y, field_width, 1);
+    rectangle(border[1], field_x, field_y + field_height, field_width, 1);
+    rectangle(border[2], field_x, field_y, 1, field_height);
+    rectangle(border[3], field_x + field_width, field_y, 1, field_height + 1);
+    for (i = 0; i < 4; i++) border[i].SetOpacity(is_dialog);
+
+    if (mode == "password") {
+        heading = "Unlock encrypted disk";
+        instructions = "Enter to unlock";
+    } else if (mode == "question") {
+        heading = "Boot requires input";
+        instructions = "Enter to continue";
+    } else {
+        heading = "Starting Fedora";
+        if (Plymouth.GetMode() == "shutdown") heading = "Shutting down";
+        instructions = "";
+    }
+    centered_text(title, heading, 26, 0.933,
+                  top + screen_height * 0.42, screen_width * 0.86);
+    centered_text(hint, instructions, 14, 0.667,
+                  field_y + field_height + 28 * scale, screen_width * 0.8);
+
+    # Keep native wording visible for PINs, alternate volumes and recovery keys.
+    prompt_text = native_prompt;
+    if (prompt_text == "Unlock encrypted disk") prompt_text = "";
+    centered_text(prompt_label, prompt_text, 13, 0.667,
+                  top + screen_height * 0.77, screen_width * 0.88);
+    centered_text(message, message_text, 13, 0.933,
+                  top + screen_height * 0.86, screen_width * 0.88);
+
+    visible_dots = Math.Min(bullet_count, 32);
+    for (i = 0; i < 32; i++) {
+        dots[i].SetImage(bullet_image.Scale(10 * scale, 10 * scale));
+        dots[i].SetPosition(field_x + (20 + 11 * i) * scale,
+                            field_y + field_height / 2 - 5 * scale, 12);
+        dots[i].SetOpacity(mode == "password" && i < visible_dots);
+    }
+    centered_text(answer, question_answer, 20, 0.933,
+                  field_y + 12 * scale, field_width - 30 * scale);
+    answer.SetOpacity(mode == "question");
+    rectangle(activity, center_x - 40 * scale,
+              top + screen_height * 0.57, 80 * scale, 2);
+    activity.SetOpacity(mode == "normal");
+}
+
+fun display_password(prompt, bullets) {
+    global.mode = "password";
+    global.native_prompt = prompt;
+    global.bullet_count = bullets;
+    global.question_answer = "";
+    layout();
+}
+
+fun display_question(prompt, entry) {
+    global.mode = "question";
+    global.native_prompt = prompt;
+    global.question_answer = entry;
+    global.bullet_count = 0;
+    layout();
+}
+
+fun display_normal() {
+    global.mode = "normal";
+    global.native_prompt = "";
+    global.question_answer = "";
+    global.bullet_count = 0;
+    layout();
+}
+
+fun display_message(text) {
+    global.message_text = text;
+    layout();
+}
+
+fun hide_message(text) {
+    if (message_text == text) global.message_text = "";
+    layout();
+}
+
+fun refresh() {
+    if (screen_width != Window.GetWidth() || screen_height != Window.GetHeight())
+        layout();
+    global.frame++;
+    # An indeterminate pulse, not an invented boot-completion percentage.
+    if (mode == "normal") activity.SetOpacity(0.4 + 0.3 * (1 + Math.Sin(frame / 25)));
+}
+
+Plymouth.SetDisplayPasswordFunction(display_password);
+Plymouth.SetDisplayQuestionFunction(display_question);
+Plymouth.SetDisplayNormalFunction(display_normal);
+Plymouth.SetDisplayMessageFunction(display_message);
+Plymouth.SetHideMessageFunction(hide_message);
+Plymouth.SetRefreshFunction(refresh);
+layout();
