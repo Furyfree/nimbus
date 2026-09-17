@@ -395,9 +395,10 @@ refactor and TUI.
   and the selected tools are inspected without privilege, and unsupported or
   unknown setups are reported clearly. Keyslots, EFI space and enrollment
   state need an approved privileged check. No setup action is offered yet.
-- [ ] Implement approved setup: UKI build and signing with ukify,
-  kernel-install hooks and systemd-cryptenroll, then prove passphrase UKI boot
-  and a kernel update in a disposable VM before any TPM enrollment.
+- [ ] Implement approved setup: the inert kernel-install hook, the marker,
+  ukify build and signing and the `Nimbus UKI` firmware entry, then prove
+  passphrase UKI boot and a kernel update in a disposable VM before any TPM
+  enrollment.
 - [ ] Add enrollment, policy renewal, status and scoped removal with explicit
   previews; reduced protection and removal default to No and a blanket `--yes`
   cannot accept them. Preserve the passphrase, unrelated keys and enrollment

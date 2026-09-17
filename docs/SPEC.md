@@ -967,14 +967,26 @@ bootloader replacement needs a separate decision. Secure Boot with shim uses
 PCR 7 + PCR 14 + signed PCR 11; without shim, PCR 7 + signed PCR 11; with
 Secure Boot disabled, an explicit reduced-protection confirmation binds PCR 7
 to the disabled state. PCR 11 uses signed expected measurements, not today's
-fixed value. `postinstall fde` currently inspects read-only: the mounted LUKS2
-root, the TPM2 device class, Secure Boot state and the selected tools;
-keyslots, EFI space and enrollment state need an approved privileged check.
-Setup, enrollment, renewal and scoped removal are not implemented yet. Sync
-and upgrades never enroll or change policy. Preserve the passphrase, unrelated
-keys and enrollment slots, and remove only Nimbus's enrollment. Enrollment,
-booting, passphrase fallback and removal need real-hardware validation before
-claiming support.
+fixed value.
+
+`postinstall fde` inspects read-only: the mounted LUKS2 root, the TPM2 device
+class, Secure Boot state, the selected tools and the installed hook payload.
+The engine package ships the inert
+`/etc/kernel/install.d/90-nimbus-uki.install` hook; it does nothing until
+approved setup writes `/etc/nimbus/fde-uki.enabled`. Approved setup then builds
+and signs a Unified Kernel Image with ukify at `/boot/efi/EFI/Linux/nimbus.efi`
+and ensures the `Nimbus UKI` firmware boot entry. Kernel and initramfs updates
+rebuild the image through the native hook, while Fedora's BLS entries, shim and
+GRUB remain the fallback path. The embedded command line comes from
+`/etc/kernel/cmdline` when present, otherwise the running command line without
+`BOOT_IMAGE=` and `initrd=`. Signing uses the akmods MOK key pair when present;
+with Secure Boot enabled and no signing pair, setup blocks. With Secure Boot
+disabled the image is unsigned and the task discloses the reduced protection.
+Enrollment, policy renewal and scoped removal are not implemented yet. Sync
+and upgrades never build images, enroll or change policy. Preserve the
+passphrase, unrelated keys and enrollment slots, and remove only Nimbus's
+enrollment. Enrollment, booting, passphrase fallback and removal need
+real-hardware validation before claiming support.
 
 ## Preview, approval and results
 
