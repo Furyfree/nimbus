@@ -3,6 +3,7 @@ package postinstall
 import (
 	"context"
 	"io"
+	"path/filepath"
 	"testing"
 
 	"github.com/Furyfree/nimbus/internal/native/nativetest"
@@ -148,6 +149,16 @@ func TestVoxtypeUsesTheConfiguredModel(t *testing.T) {
 		t.Setenv("HOME", "")
 		got := findTask(t, Inspect(src, in), "voxtype")
 		if got.Status != Blocked || got.Action != nil {
+			t.Fatalf("got %+v", got)
+		}
+	})
+	t.Run("relative XDG_CONFIG_HOME falls back to home", func(t *testing.T) {
+		in, src := voxtypeFixture(t)
+		t.Setenv("XDG_CONFIG_HOME", "relative-config")
+		// A config at the relative path must be ignored; the home config wins.
+		src.Files[filepath.Join("relative-config", "voxtype", "config.toml")] = []byte("[whisper]\nmodel = \"large-v3-turbo\"\n")
+		got := findTask(t, Inspect(src, in), "voxtype")
+		if got.Status != Pending || got.Action == nil || !equalCommands(got.Action.Commands, [][]string{voxtypeDownloadCommand("small"), voxtypeEnableCommand()}) {
 			t.Fatalf("got %+v", got)
 		}
 	})
