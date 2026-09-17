@@ -23,10 +23,10 @@ func TestMergedInstallPreservesEachPackagesProvenance(t *testing.T) {
 		{Canonical: "dnf:ripgrep", Prefix: "dnf", Name: "ripgrep", Paths: []string{"component:search", "profile:common"}},
 	}}
 	source := &nativetest.FakeSource{Commands: map[string][]byte{
-		nativetest.Key("dnf5", "--assumeno", "--cacheonly", "install", "fd-find", "ripgrep"): []byte("Package Arch Version Repository Size\nInstalling:\n fd-find x86_64 1-1.fc44 fedora 1 KiB\n ripgrep x86_64 1-1.fc44 fedora 1 KiB\nTransaction Summary:\n"),
-		nativetest.Key("dnf5", "--cacheonly", "check-upgrade"):                               nil,
+		nativetest.Key("dnf5", "--assumeno", "--cacheonly", "do", "--action=install", "--from-repo=fedora", "fd-find", "ripgrep"): []byte("Package Arch Version Repository Size\nInstalling:\n fd-find x86_64 1-1.fc44 fedora 1 KiB\n ripgrep x86_64 1-1.fc44 fedora 1 KiB\nTransaction Summary:\n"),
+		nativetest.Key("dnf5", "--cacheonly", "check-upgrade"):                                                                    nil,
 	}}
-	inputs := plan.Inputs{Resolved: desired, Facts: &inspect.Facts{}, Source: source}
+	inputs := plan.Inputs{Resolved: desired, Facts: &inspect.Facts{Repositories: inspect.Section[[]inspect.Repository]{Value: []inspect.Repository{{ID: "fedora", Enabled: true}}}}, Source: source}
 	p, err := plan.Build(inputs)
 	if err != nil || !p.Complete {
 		t.Fatalf("plan: %+v, %v", p, err)
@@ -88,7 +88,7 @@ func TestUpgradeRunsTheNativeUpdatersWithVisibleOutput(t *testing.T) {
 	if result := Upgrade(opts, opts.Root); result.Error != "" {
 		t.Fatal(result.Error)
 	}
-	if !src.ran("sudo dnf5 -y upgrade") || src.ran("sudo flatpak update") {
+	if !src.ran("sudo dnf5 --setopt=cacheonly=metadata -y upgrade") || src.ran("sudo flatpak update") {
 		t.Fatalf("without flatpak on PATH only DNF upgrades:\n%s", strings.Join(src.log, "\n"))
 	}
 	src.Paths["flatpak"] = "/usr/bin/flatpak"
@@ -98,7 +98,7 @@ func TestUpgradeRunsTheNativeUpdatersWithVisibleOutput(t *testing.T) {
 	if !src.ran("sudo flatpak update --system --noninteractive") {
 		t.Fatalf("flatpak update missing:\n%s", strings.Join(src.log, "\n"))
 	}
-	src.fail["sudo dnf5 -y upgrade"] = "exit status 1"
+	src.fail["sudo dnf5 --setopt=cacheonly=metadata -y upgrade"] = "exit status 1"
 	if result := Upgrade(opts, opts.Root); result.Error == "" {
 		t.Fatal("a failed dnf5 upgrade was not reported")
 	}

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -32,11 +33,17 @@ func fixtureSource(t *testing.T, root string) *nativetest.FakeSource {
 		}
 		return data
 	}
+	// The recorded container used temporary compose repositories. Generic
+	// host tests use stable provenance; dedicated source tests exercise drift.
+	packages := read("repoquery-installed.txt")
+	for _, compose := range []string{"8053cd8c8c7f4dbba631d7ec249c6ae2", "4a577bf60dff4a90ae44c8169306ec96"} {
+		packages = bytes.ReplaceAll(packages, []byte(compose), []byte("fedora"))
+	}
 	src := &nativetest.FakeSource{
 		Commands: map[string][]byte{
 			"findmnt --noheadings --output FSTYPE --target /":                                              []byte("btrfs\n"),
 			nativetest.Key("uname", "-m"):                                                                  []byte("x86_64\n"),
-			nativetest.Key("dnf5", inspect.PackageQueryArgs...):                                            read("repoquery-installed.txt"),
+			nativetest.Key("dnf5", inspect.PackageQueryArgs...):                                            packages,
 			nativetest.Key("flatpak", "remotes", "--system", "--columns=name,url"):                         []byte(""),
 			nativetest.Key("flatpak", "list", "--system", "--app", "--columns=application,version,origin"): []byte(""),
 			nativetest.Key("systemctl", "is-active", "firewalld"):                                          []byte("active\n"),
@@ -52,6 +59,14 @@ func fixtureSource(t *testing.T, root string) *nativetest.FakeSource {
 		Dirs:  map[string][]string{inspect.RepoDir: {"fedora.repo"}},
 		Paths: map[string]string{},
 	}
+	src.Files[filepath.Join(root, "setup-notes.json")] = []byte(`{"schema":1,"notes":[{"id":"nimbus.postinstall","revision":1,"text":"Review remaining setup with nimbus postinstall status."}]}`)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	src.Commands[nativetest.Key("rpm", engineInstalledArgs...)] = []byte("nimbus-0:0.4.6-1.fc44.x86_64")
+	src.Commands[nativetest.Key("sudo", engineConfigArgs...)] = []byte("======== \"nimbus-engine\" repository configuration: ========\nenabled = 1\npkg_gpgcheck = 1\nsslverify = 1\n")
+	src.Commands[nativetest.Key("sudo", engineRefreshArgs...)] = nil
+	src.Commands[nativetest.Key("sudo", engineQueryArgs...)] = nil
+	src.Commands["sudo dnf5 --refresh --setopt=*.skip_if_unavailable=0 makecache"] = nil
+	src.Commands["dnf5 makecache"] = nil
 	src.Files[filepath.Join(inspect.RepoDir, "fedora.repo")] = read(filepath.Join("yum.repos.d", "fedora.repo"))
 	if root != "" {
 		answerMaintenanceRepository(src, root, "https://github.com/Furyfree/nimbus.git")
@@ -94,6 +109,10 @@ func fixtureSource(t *testing.T, root string) *nativetest.FakeSource {
 		src.Commands[nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", path)] = []byte("directory|root|root|755|1\n")
 	}
 	src.Commands[nativetest.Key("id", "-un")] = []byte("test\n")
+	src.Commands[nativetest.Key("getent", "--service=files", "passwd", "test")] = []byte("test:x:1000:1000::/home/test:/bin/bash\n")
+	src.Files["/etc/shells"] = []byte("/bin/bash\n/bin/zsh\n")
+	src.Commands[nativetest.Key("test", "-x", "/bin/bash")] = nil
+	src.Commands[nativetest.Key("test", "-x", "/bin/zsh")] = nil
 	src.Commands[nativetest.Key("id", "-nG", "--", "test")] = []byte("test wheel\n")
 	src.Commands[nativetest.Key("systemctl", "get-default")] = []byte("multi-user.target\n")
 	for _, unit := range []string{"snapper-cleanup.timer", "greetd.service", "bluetooth.service", "avahi-daemon.service", "cups.socket", "cups.path", "docker.service", "containerd.service", "tailscaled.service", "power-profiles-daemon.service"} {
@@ -123,7 +142,7 @@ func TestDoctorOnRepositoryCheckout(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("exit %d\n%s%s", code, out, errOut)
 	}
-	if !strings.Contains(out, "pass    platform: fedora 44 on x86_64") || !strings.Contains(out, "0 failed, 0 unknown, 10 checks") {
+	if !strings.Contains(out, "pass    platform: fedora 44 on x86_64") || !strings.Contains(out, "10 checks passed.") {
 		t.Fatalf("output:\n%s", out)
 	}
 	code, out, _ = run(t, "doctor", "--checkout", root, "--json")

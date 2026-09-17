@@ -1,6 +1,7 @@
 package postinstall
 
 import (
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -49,6 +50,12 @@ func findTask(t *testing.T, tasks []Task, id string) Task {
 	return Task{}
 }
 
+// Machine-scoped tasks exist for every machine and are not tied to a selected
+// package or component.
+func withoutMachineTasks(tasks []Task) []Task {
+	return slices.DeleteFunc(tasks, func(task Task) bool { return task.ID == "hostname" })
+}
+
 func TestSelectionAndOnePasswordPrivacy(t *testing.T) {
 	in, src := fixture("1password")
 	got := findTask(t, Inspect(src, in), "onepassword")
@@ -63,7 +70,7 @@ func TestSelectionAndOnePasswordPrivacy(t *testing.T) {
 		t.Fatalf("unexpected account inspection: %v, %v", guard.commands, guard.files)
 	}
 	in.Resolved.Packages = nil
-	if got := Inspect(guard, in); len(got) != 0 {
+	if got := withoutMachineTasks(Inspect(guard, in)); len(got) != 0 {
 		t.Fatalf("unselected installed app exposed a task: %+v", got)
 	}
 	in.Resolved = nil
@@ -123,29 +130,78 @@ func TestPackagePrerequisitesDoNotTrustOldReceipts(t *testing.T) {
 func TestInstallerHelpersDoNotImplyApplicationCompletion(t *testing.T) {
 	for _, name := range []string{"github-copilot-installer", "wowup-cf-installer"} {
 		t.Run(name, func(t *testing.T) {
+			t.Setenv("XDG_STATE_HOME", t.TempDir())
 			in, src := fixture(name)
 			helper := "/usr/bin/" + name
 			src.Paths[helper] = helper
+			src.Commands[helper+" status"] = []byte("Installed GitHub Copilot: not installed\n")
 			guard := &readGuard{FakeSource: src}
-			got := Inspect(guard, in)
-			if len(got) != 1 || len(guard.commands) != 0 || len(guard.files) != 0 {
+			got := withoutMachineTasks(Inspect(guard, in))
+			if name == "github-copilot-installer" {
+				if len(got) != 2 || len(guard.files) != 1 {
+					t.Fatalf("expected local proxy registration inspection: %+v", got)
+				}
+				got = slices.DeleteFunc(got, func(task Task) bool { return task.ID == "agent-proxy" })
+				guard.files = nil
+			}
+			if len(got) != 1 || (name == "github-copilot-installer" && !slices.Equal(guard.commands, []string{helper + " status"})) || len(guard.files) != 0 {
 				t.Fatalf("unexpected helper inspection: tasks=%+v commands=%v files=%v", got, guard.commands, guard.files)
 			}
 			if name == "github-copilot-installer" {
-				if got[0].Status != Unknown || got[0].Action == nil || !slices.Equal(got[0].Action.Argv, []string{"sudo", "--", helper, "install"}) {
+				if got[0].Status != Pending || got[0].Action == nil || !slices.Equal(got[0].Action.Argv, []string{"sudo", "--", helper, "install"}) {
 					t.Fatalf("helper installation became application completion: %+v", got[0])
 				}
 			} else if got[0].Status != Blocked || got[0].Action != nil || !strings.Contains(got[0].Detail, "standalone install") {
 				t.Fatalf("offered an unsupported WoWUp command: %+v", got[0])
 			}
 			delete(src.Paths, helper)
-			got = Inspect(src, in)
+			got = slices.DeleteFunc(withoutMachineTasks(Inspect(src, in)), func(task Task) bool { return task.ID == "agent-proxy" })
 			if got[0].Status != Blocked || got[0].Action != nil {
 				t.Fatalf("missing helper can run: %+v", got[0])
 			}
 			in.Resolved.Packages = nil
-			if got := Inspect(src, in); len(got) != 0 {
+			if got := withoutMachineTasks(Inspect(src, in)); len(got) != 0 {
 				t.Fatalf("unselected helper exposed a task: %+v", got)
+			}
+		})
+	}
+}
+
+func TestProtonCachyOSUsesNativeSetupWithoutInspectingUserData(t *testing.T) {
+	for _, mode := range []string{"ready", "no steam", "missing package", "missing receipt", "missing command", "unknown packages"} {
+		t.Run(mode, func(t *testing.T) {
+			in, src := fixture("protonplus", "steam")
+			src.Commands["protonplus list steam-system"] = []byte("Installed runners for Steam:\nNo runners installed\n")
+			switch mode {
+			case "no steam":
+				in.Resolved.Packages = in.Resolved.Packages[:1]
+			case "missing package":
+				in.Facts.Packages.Value = in.Facts.Packages.Value[:1]
+			case "missing receipt":
+				delete(in.Applied.Receipts, "package:dnf:steam")
+			case "missing command":
+				delete(src.Paths, "protonplus")
+			case "unknown packages":
+				in.Facts.Packages.Error = "rpm unavailable"
+			}
+			guard := &readGuard{FakeSource: src}
+			tasks := withoutMachineTasks(Inspect(guard, in))
+			if (len(guard.commands) > 0 && !slices.Equal(guard.commands, []string{"protonplus list steam-system"})) || len(guard.files) != 0 {
+				t.Fatalf("setup inspection accessed user data or ran commands: %v %v", guard.commands, guard.files)
+			}
+			if mode == "no steam" {
+				if len(tasks) != 0 {
+					t.Fatalf("offered Steam setup without selecting Steam: %+v", tasks)
+				}
+				return
+			}
+			task := findTask(t, tasks, "proton-cachyos")
+			if mode == "ready" {
+				if task.Status != Pending || task.Action == nil || !slices.Equal(task.Action.Argv, []string{"protonplus", "install", "steam-system", "proton-cachyos", "latest"}) {
+					t.Fatalf("unexpected setup action or assumed runner readiness: %+v", task)
+				}
+			} else if task.Action != nil || (task.Status != Blocked && task.Status != Unknown) {
+				t.Fatalf("offered setup without prerequisites: %+v", task)
 			}
 		})
 	}
@@ -154,16 +210,22 @@ func TestInstallerHelpersDoNotImplyApplicationCompletion(t *testing.T) {
 func TestMOKNativeEnrollmentStates(t *testing.T) {
 	for _, test := range []struct {
 		name, output, failure string
+		code                  int
 		want                  Status
 	}{
-		{"enrolled driver unchecked", mokCertificate + " is already enrolled", "", Pending},
-		{"firmware trust driver unchecked", mokCertificate + " is already in db", "", Pending},
-		{"request not completion", mokCertificate + " is already in the enrollment request", "", Pending},
-		{"not enrolled", mokCertificate + " is not enrolled", "exit status 1", Pending},
-		{"unexpected success", "", "", Unknown},
-		{"native error", "", "cannot read EFI variables", Unknown},
-		{"contradictory error", mokCertificate + " is already enrolled", "failed", Unknown},
-		{"foreign certificate", "/tmp/other.der is already enrolled", "", Unknown},
+		{"enrolled", MOKCertificate + " is already enrolled", "", 1, Complete},
+		{"firmware trust", MOKCertificate + " is already in db", "", 1, Complete},
+		{"request not completion", MOKCertificate + " is already in the enrollment request", "", 1, Pending},
+		{"not enrolled", MOKCertificate + " is not enrolled", "", 0, Pending},
+		{"blocked firmware", MOKCertificate + " is blocked in dbx", "", 1, Blocked},
+		{"blocked MOK", MOKCertificate + " is blocked in MokListX", "", 1, Blocked},
+		{"unexpected success", "", "", 0, Unknown},
+		{"native error", "", "cannot read EFI variables", 0, Unknown},
+		{"contradictory error", MOKCertificate + " is already enrolled", "failed", 0, Unknown},
+		{"wrong enrolled exit", MOKCertificate + " is already enrolled", "", 0, Unknown},
+		{"wrong not enrolled exit", MOKCertificate + " is not enrolled", "", 1, Unknown},
+		{"unexpected exit", MOKCertificate + " is already enrolled", "", 255, Unknown},
+		{"foreign certificate", "/tmp/other.der is already enrolled", "", 1, Unknown},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			in, src := fixture("akmod-nvidia", "akmods", "mokutil")
@@ -172,15 +234,16 @@ func TestMOKNativeEnrollmentStates(t *testing.T) {
 			for _, tool := range []string{"sudo", "kmodgenca", "dracut", "modinfo", "nvidia-smi"} {
 				src.Paths[tool] = "/usr/bin/" + tool
 			}
-			src.Files[mokCertificate] = mokTestCertificate(t)
-			key := nativetest.Key("mokutil", "--test-key", mokCertificate)
+			src.Files[MOKCertificate] = []byte("certificate supplied to native validator")
+			key := nativetest.Key("mokutil", "--ignore-keyring", "--test-key", MOKCertificate)
 			src.Commands[key] = []byte(test.output)
+			src.ExitCodes = map[string]int{key: test.code}
 			if test.failure != "" {
 				src.Failures[key] = test.failure
 			}
 			got := findTask(t, Inspect(src, in), "nvidia-mok")
 			if got.Status != test.want || got.Action == nil || got.Action.Kind != SetupNVIDIA {
-				t.Fatalf("got %+v; want %s and explicit setup", got, test.want)
+				t.Fatalf("got %+v; want %s with explicit signing and enrollment setup", got, test.want)
 			}
 		})
 	}
@@ -320,46 +383,61 @@ func TestForeignOrFailedReceiptsDoNotCreateRequirements(t *testing.T) {
 		}
 		in.Applied.Receipts[id] = r
 	}
-	if got := Inspect(src, in); len(got) != 0 {
+	if got := withoutMachineTasks(Inspect(src, in)); len(got) != 0 {
 		t.Fatalf("invalid receipts exposed tasks: %+v", got)
 	}
 }
 
-func TestMOKReadOnlyReadinessIncludesDriver(t *testing.T) {
-	for _, mode := range []string{"working", "unsigned", "unreadable"} {
-		t.Run(mode, func(t *testing.T) {
-			in, src := fixture("akmod-nvidia", "akmods", "mokutil")
-			in.Resolved.Components = []definitions.ResolvedComponent{{ID: "nvidia"}}
-			in.Facts.SecureBoot.Value = inspect.SecureBootEnabled
-			for _, tool := range []string{"sudo", "kmodgenca", "dracut", "modinfo", "nvidia-smi"} {
-				src.Paths[tool] = "/usr/bin/" + tool
-			}
-			src.Files[mokCertificate] = mokTestCertificate(t)
-			src.Commands["mokutil --test-key "+mokCertificate] = []byte(mokCertificate + " is already enrolled")
-			src.Commands["uname -r"] = []byte("test-kernel")
-			src.Commands["nvidia-smi --query-gpu=name --format=csv,noheader"] = []byte("test GPU")
-			for _, module := range []string{"nvidia", "nvidia_modeset", "nvidia_drm", "nvidia_uvm"} {
-				src.Commands["modinfo -k test-kernel -F signer "+module] = []byte("test signer")
-				src.Commands["modinfo -k test-kernel -F sig_key "+module] = []byte("12:34")
-			}
-			want := Complete
-			if mode == "unsigned" {
-				src.Commands["modinfo -k test-kernel -F signer nvidia"] = nil
-				want = Pending
-			} else if mode == "unreadable" {
-				delete(src.Files, mokCertificate)
-				want = Unknown
-			}
-			guard := &readGuard{FakeSource: src}
-			got := findTask(t, Inspect(guard, in), "nvidia-mok")
-			if got.Status != want || got.Action == nil {
-				t.Fatalf("got %+v, want %s with explicit repair still available", got, want)
-			}
-			for _, command := range guard.commands {
-				if strings.HasPrefix(command, "sudo ") {
-					t.Fatalf("inspection escalated: %s", command)
-				}
+func TestLogoutSeparatesShellChangesFromGroups(t *testing.T) {
+	for _, tc := range []struct {
+		name, boot string
+		want       Status
+	}{
+		{"later boot", "btime 200\n", Complete},
+		{"session not inspected", "btime 50\n", Unknown},
+		{"boot unavailable", "", Unknown},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in, src := fixture()
+			group := receipt("group:docker:tester", "group")
+			group.Logout, group.Intended = true, "true"
+			shell := receipt("login-shell:tester", "login-shell")
+			shell.Logout, shell.Operation, shell.Timestamp = true, "repair", time.Unix(100, 0)
+			in.Applied.Receipts[group.Resource], in.Applied.Receipts[shell.Resource] = group, shell
+			src.Commands["id -nG"], src.Commands["id -nG -- tester"] = []byte("tester docker"), []byte("tester docker")
+			src.Files["/proc/stat"] = []byte(tc.boot)
+			got := findTask(t, Inspect(src, in), "logout")
+			if got.Status != tc.want || strings.Contains(got.Detail, "group membership could not") {
+				t.Fatalf("%+v", got)
 			}
 		})
+	}
+}
+
+func TestSingleTaskInspectionMatchesFullCatalogWithoutOtherProbes(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	in, src := fixture("1password", "fprintd", "tailscale", "github-copilot-installer", "wowup-cf-installer", "noctalia", "hyprland-devel", "accountsservice", "protonplus", "steam")
+	in.Resolved.Components = append(in.Resolved.Components, definitions.ResolvedComponent{ID: "nvidia"})
+	all := Inspect(src, in)
+	if len(all) != 13 {
+		t.Fatalf("task coverage changed: %d", len(all))
+	}
+	for _, task := range all {
+		t.Run(task.ID, func(t *testing.T) {
+			scoped := in
+			scoped.Task = task.ID
+			got := Inspect(src, scoped)
+			if len(got) != 1 || !reflect.DeepEqual(got[0], task) {
+				t.Fatalf("scoped task differs: %+v vs %+v", got, task)
+			}
+		})
+	}
+	guard := &readGuard{FakeSource: src}
+	in.Task = "onepassword"
+	Inspect(guard, in)
+	if len(guard.commands) != 0 || len(guard.files) != 0 {
+		t.Fatalf("unrelated task probes: %v %v", guard.commands, guard.files)
 	}
 }

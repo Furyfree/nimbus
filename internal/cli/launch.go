@@ -52,6 +52,19 @@ func newLaunch(opts *options) *cobra.Command {
 				if err != nil {
 					return err
 				}
+				// Only a local Wayland session can delegate to its UWSM manager.
+				// Preserve argv: URLs never pass through a shell.
+				if os.Getenv("WAYLAND_DISPLAY") != "" && os.Getenv("XDG_SESSION_TYPE") == "wayland" {
+					if _, err := src.LookPath("uwsm"); err == nil {
+						if _, err := src.Run("uwsm", "check", "is-active", "compositor-only"); err == nil {
+							wrapper, err := src.LookPath("uwsm-app")
+							if err != nil {
+								return errors.New("UWSM session is active but uwsm-app is unavailable")
+							}
+							argv = append([]string{wrapper, "--"}, argv...)
+						}
+					}
+				}
 				return src.Stream(cmd.OutOrStdout(), cmd.ErrOrStderr(), argv[0], argv[1:]...)
 			},
 		}

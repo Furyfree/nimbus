@@ -216,14 +216,14 @@ func TestWriteManifestCleansTemporaryFileOnRenameFailure(t *testing.T) {
 
 func TestRenderManifestIsCanonicalAndKeepsComments(t *testing.T) {
 	existing := []byte("# Laptop.\n# Second line.\nschema = 1\nid = \"laptop\"\nprofiles = [\"common\"]\n")
-	m := &definitions.Machine{Schema: 1, ID: "laptop", Profiles: []string{"common", "development"}, Components: []string{"amd-graphics"},
+	m := &definitions.Machine{Schema: 1, ID: "laptop", Shell: "zsh", Profiles: []string{"common", "development"}, Components: []string{"amd-graphics"},
 		Packages: []string{"gimp"}, Dotfiles: &definitions.Dotfiles{Repo: "https://example.invalid/dotfiles.git"}}
 	data, err := renderManifest(existing, m)
 	if err != nil {
 		t.Fatal(err)
 	}
 	out := string(data)
-	want := "# Laptop.\n# Second line.\nschema = 1\nid = 'laptop'\nprofiles = [\n  'common',\n  'development'\n]\ncomponents = [\n  'amd-graphics'\n]\npackages = [\n  'gimp'\n]\npackage_exclusions = []\n\n[dotfiles]\nrepo = 'https://example.invalid/dotfiles.git'"
+	want := "# Laptop.\n# Second line.\nschema = 1\nid = 'laptop'\nshell = 'zsh'\nprofiles = [\n  'common',\n  'development'\n]\ncomponents = [\n  'amd-graphics'\n]\npackages = [\n  'gimp'\n]\npackage_exclusions = []\n\n[dotfiles]\nrepo = 'https://example.invalid/dotfiles.git'"
 	if out != want {
 		t.Fatalf("rendered:\n%s\nwant:\n%s", out, want)
 	}
@@ -234,7 +234,7 @@ func TestRenderManifestIsCanonicalAndKeepsComments(t *testing.T) {
 	if err := decoder.Decode(&back); err != nil {
 		t.Fatalf("decode rendered manifest: %v", err)
 	}
-	if back.Schema != m.Schema || back.ID != m.ID || back.Hardware != m.Hardware ||
+	if back.Schema != m.Schema || back.ID != m.ID || back.Hardware != m.Hardware || back.Shell != m.Shell ||
 		!slices.Equal(back.Profiles, m.Profiles) || !slices.Equal(back.Components, m.Components) ||
 		!slices.Equal(back.Packages, m.Packages) || !slices.Equal(back.PackageExclusions, m.PackageExclusions) ||
 		back.Dotfiles == nil || *back.Dotfiles != *m.Dotfiles {
@@ -442,7 +442,7 @@ func TestPickerIsUsedWhenNoIDsAreGiven(t *testing.T) {
 	if code != ExitOK || !strings.Contains(out, "already says that") {
 		t.Fatalf("empty pick: %d %q\n%s", code, errOut, out)
 	}
-	if strings.Join(offered, ",") != "amd-graphics,laptop-power" {
+	if strings.Join(offered, ",") != "dtu-network,amd-graphics,laptop-power" {
 		t.Fatalf("picker offered %v", offered)
 	}
 	if code, _, errOut := run(t, "components", "remove", "docker", "--checkout", root, "--machine", "laptop"); code != ExitFailure || !strings.Contains(errOut, "removed by removing the profile") {
@@ -518,6 +518,7 @@ func TestSelectionEditDigestSurvivesTheManifestWrite(t *testing.T) {
 	applyEnv(t)
 	root := editableCheckout(t)
 	src := fixtureSource(t, root)
+	readyRepositories(t, src, root, "blesh") // Keep Brave as the deliberate first failure.
 	answerLaptopInstall(t, src, root)
 	withSource(t, src)
 	saved := approver
@@ -595,9 +596,9 @@ func TestPackageSelectionRoundTrip(t *testing.T) {
 				}
 			}
 			src.Commands["dnf5 -q --cacheonly repoquery --available --qf %{name}|%{evr}|%{reponame}\n *demo*"] = []byte("demo|1-1|fedora\n")
-			src.Commands["dnf5 --assumeno --cacheonly install demo"] = []byte("Repositories loaded.\nPackage Arch Version Repository Size\nInstalling:\n demo x86_64 1-1 fedora 1 KiB\n\nTransaction Summary:\n")
+			src.Commands["dnf5 --assumeno --cacheonly do --action=install --from-repo=fedora demo"] = []byte("Repositories loaded.\nPackage Arch Version Repository Size\nInstalling:\n demo x86_64 1-1 fedora 1 KiB\n\nTransaction Summary:\n")
 			src.Commands["dnf5 --assumeno --cacheonly remove --no-autoremove demo.x86_64"] = []byte("Repositories loaded.\nPackage Arch Version Repository Size\nRemoving:\n demo x86_64 1-1 @System 1 KiB\n\nTransaction Summary:\n")
-			const install = "sudo dnf5 -y install demo"
+			const install = "sudo dnf5 -y do --action=install --from-repo=fedora demo"
 			const remove = "sudo dnf5 -y remove --no-autoremove demo.x86_64"
 			src.Commands[install], src.Commands[remove] = nil, nil
 			withSource(t, handoffOutputSource{Source: src, afterStream: func(name string, args []string) {

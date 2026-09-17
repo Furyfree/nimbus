@@ -13,9 +13,12 @@ packages = [
   "dnf5-plugins",
   "policycoreutils-python-utils",
   "fwupd",
+  # Keep both shells available; Chezmoi owns their configurations.
+  "bash",
   "bash-completion",
-  # Shell
+  "blesh:blesh",
   "zsh",
+  # Shell
   "terra:starship",
   "eza",
   "fzf",
@@ -55,5 +58,6 @@ packages = [
 
 components = [
   "mise",
+  "power-management",
   "tailscale",
 ]

@@ -212,8 +212,8 @@ func TestInitPromptFailureStopsBeforeReadingOrWritingSelection(t *testing.T) {
 }
 
 func TestChezmoiHandoffRequiresEveryDisclosureBeforeMutation(t *testing.T) {
-	for _, after := range []int{0, 1, 2} {
-		t.Run([]string{"initialize", "setup note", "apply"}[after], func(t *testing.T) {
+	for _, after := range []int{0, 1} {
+		t.Run([]string{"initialize", "apply"}[after], func(t *testing.T) {
 			_, src := installerFixture(t)
 			if after > 0 {
 				src.Dirs[filepath.Join(os.Getenv("HOME"), ".local", "share", "chezmoi")] = []string{".git"}
@@ -525,7 +525,7 @@ func TestInitDescribesANewMachineFromTheHardware(t *testing.T) {
 		t.Fatalf("dotfiles prompt = %q", asked)
 	}
 	manifest := strings.ReplaceAll(out, "\n+", "\n")
-	for _, want := range []string{"# mybox: HP EliteBook X G1a", "hardware = 'HP EliteBook X G1a 14 inch Notebook Next Gen AI PC'", "'common',\n  'development',\n  'hyprland-noctalia'", "'amd-graphics',\n  'laptop-power'", "[dotfiles]\nrepo = 'https://github.com/Furyfree/dotfiles.git'"} {
+	for _, want := range []string{"# mybox: HP EliteBook X G1a", "hardware = 'HP EliteBook X G1a 14 inch Notebook Next Gen AI PC'", "shell = 'bash'", "'common',\n  'development',\n  'hyprland-noctalia'", "'amd-graphics',\n  'laptop-power'", "[dotfiles]\nrepo = 'https://github.com/Furyfree/dotfiles.git'"} {
 		if !strings.Contains(manifest, want) {
 			t.Errorf("manifest lacks %q:\n%s", want, manifest)
 		}
@@ -567,7 +567,7 @@ func TestChezmoiHandoffRunsOnceWithThePromptFlags(t *testing.T) {
 	delete(src.Commands, key)
 	src.Commands[nativetest.Key("chezmoi", inspect.ChezmoiDataArgs...)] = []byte(`{"Machine":"laptop","ManagedByNimbus":true,"Profiles":["common"],"profiles":["common","unix","linux"]}`)
 	out.Reset()
-	if err := chezmoiHandoff(src, &out, "laptop", []string{"common"}, dotfiles, false); err != nil || !strings.Contains(out.String(), "chezmoi init --prompt --promptString Machine=laptop") {
+	if err := chezmoiHandoff(src, &out, "laptop", []string{"common"}, dotfiles, false); err != nil || !strings.Contains(out.String(), "chezmoi apply") {
 		t.Fatalf("initialized: %v\n%s", err, out.String())
 	}
 	out.Reset()
@@ -578,6 +578,11 @@ func TestChezmoiHandoffRunsOnceWithThePromptFlags(t *testing.T) {
 
 func TestInitOnePasswordSSHIsExplicitAndPreservesExistingSelection(t *testing.T) {
 	root, src := installerFixture(t)
+	src.Paths["op"] = "/usr/bin/op"
+	src.Paths["/opt/1Password/op-ssh-sign"] = "/opt/1Password/op-ssh-sign"
+	src.Commands["op whoami --format=json"] = []byte("{}")
+	src.Commands["env SSH_AUTH_SOCK="+filepath.Join(os.Getenv("HOME"), ".1password", "agent.sock")+" ssh-add -l"] = []byte("synthetic key")
+
 	initial := "chezmoi init --promptString Machine=vm --promptBool ManagedByNimbus=true --promptMultichoice Profiles=common --promptBool Enable 1Password SSH integration="
 	delete(src.Commands, initial+"false -- https://github.com/Furyfree/dotfiles.git")
 	src.Commands[initial+"true -- https://github.com/Furyfree/dotfiles.git"] = nil
@@ -589,7 +594,7 @@ func TestInitOnePasswordSSHIsExplicitAndPreservesExistingSelection(t *testing.T)
 	src.Dirs[filepath.Join(os.Getenv("HOME"), ".local", "share", "chezmoi")] = []string{".git"}
 	src.calls = nil
 	code, out, errOut = run(t, "init", "-y", "--checkout", root, "--machine", "vm")
-	if code != ExitOK || !strings.Contains(out, "Enable 1Password SSH integration=true") {
+	if code != ExitOK || !strings.Contains(out, "Before secret-backed rendering") {
 		t.Fatalf("existing opt-in lost: %d %s%s", code, out, errOut)
 	}
 	if slices.ContainsFunc(src.calls, func(call string) bool { return strings.HasPrefix(call, "chezmoi init") }) {

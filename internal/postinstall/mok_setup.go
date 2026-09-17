@@ -43,12 +43,12 @@ func RunNVIDIAMOK(ctx context.Context, src native.Source, out, stderr io.Writer)
 	if err := stream("sudo", "--validate"); err != nil {
 		return err
 	}
-	files, err := src.Run("sudo", "-n", "--", "find", "/etc/pki/akmods", "-maxdepth", "2", "(", "-path", mokCertificate, "-o", "-path", mokPrivateKey, ")", "-print")
+	files, err := src.Run("sudo", "-n", "--", "find", "/etc/pki/akmods", "-maxdepth", "2", "(", "-path", MOKCertificate, "-o", "-path", mokPrivateKey, ")", "-print")
 	if err != nil {
 		return fmt.Errorf("inspect akmods key files: %w; no key generation was attempted", err)
 	}
 	paths := strings.Fields(string(files))
-	certExists := slices.Contains(paths, mokCertificate)
+	certExists := slices.Contains(paths, MOKCertificate)
 	keyExists := slices.Contains(paths, mokPrivateKey)
 	if certExists != keyExists {
 		return errors.New("akmods signing key pair is incomplete; inspect /etc/pki/akmods before retrying; neither file was replaced")
@@ -59,7 +59,7 @@ func RunNVIDIAMOK(ctx context.Context, src native.Source, out, stderr io.Writer)
 		}
 	}
 	// Read only the public certificate. The private key stays with native tools.
-	der, err := src.Run("sudo", "-n", "--", "cat", mokCertificate)
+	der, err := src.Run("sudo", "-n", "--", "cat", MOKCertificate)
 	if err != nil {
 		return err
 	}
@@ -89,7 +89,7 @@ func RunNVIDIAMOK(ctx context.Context, src native.Source, out, stderr io.Writer)
 		if _, err := fmt.Fprintln(out, "Choose a temporary MOK password in the native prompt. The reboot enrollment screen uses US/QWERTY. Nimbus does not record the password."); err != nil {
 			return err
 		}
-		if err := stream("sudo", "--", "mokutil", "--import", mokCertificate); err != nil {
+		if err := stream("sudo", "--", "mokutil", "--import", MOKCertificate); err != nil {
 			return fmt.Errorf("request MOK enrollment: %w; signed modules and boot image remain; retry after correcting the error", err)
 		}
 		state, err = mokEnrollment(src)
@@ -121,17 +121,17 @@ const (
 )
 
 func mokEnrollment(src native.Source) (mokState, error) {
-	data, err := src.Run("sudo", "-n", "--", "mokutil", "--test-key", mokCertificate)
+	data, err := src.Run("sudo", "-n", "--", "mokutil", "--test-key", MOKCertificate)
 	switch strings.TrimSpace(string(data)) {
-	case mokCertificate + " is already enrolled", mokCertificate + " is already in db":
+	case MOKCertificate + " is already enrolled", MOKCertificate + " is already in db":
 		if err == nil {
 			return mokTrusted, nil
 		}
-	case mokCertificate + " is already in the enrollment request":
+	case MOKCertificate + " is already in the enrollment request":
 		if err == nil {
 			return mokRequested, nil
 		}
-	case mokCertificate + " is not enrolled":
+	case MOKCertificate + " is not enrolled":
 		if exit, ok := errors.AsType[*exec.ExitError](err); ok && exit.ExitCode() == 1 {
 			return mokAbsent, nil
 		}

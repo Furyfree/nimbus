@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -136,7 +137,7 @@ func runDoctor(cmd *cobra.Command, opts *options, override, machine string) erro
 	} else {
 		var buf bytes.Buffer
 		for _, c := range report.Checks {
-			fmt.Fprintf(&buf, "%-7s %s: %s\n", c.Status, c.ID, c.Observation)
+			writeDoctorCheck(&buf, c)
 			if c.Impact != "" {
 				fmt.Fprintf(&buf, "        impact: %s\n", c.Impact)
 			}
@@ -144,7 +145,11 @@ func runDoctor(cmd *cobra.Command, opts *options, override, machine string) erro
 				fmt.Fprintf(&buf, "        fix: %s\n", c.Remediation)
 			}
 		}
-		fmt.Fprintf(&buf, "%d failed, %d unknown, %d checks\n", report.Failed, report.Unknown, len(report.Checks))
+		if report.Failed == 0 && report.Unknown == 0 {
+			fmt.Fprintf(&buf, "\n%d checks passed.\n", len(report.Checks))
+		} else {
+			fmt.Fprintf(&buf, "\nChecks: %d passed, %d failed, %d unknown.\n", len(report.Checks)-report.Failed-report.Unknown, report.Failed, report.Unknown)
+		}
 		if _, err := out.Write(buf.Bytes()); err != nil {
 			return err
 		}
@@ -153,4 +158,20 @@ func runDoctor(cmd *cobra.Command, opts *options, override, machine string) erro
 		return reported{}
 	}
 	return nil
+}
+
+func writeDoctorCheck(buf *bytes.Buffer, c doctor.Check) {
+	observation := c.Observation
+	for _, prefix := range []string{"file:", "service:"} {
+		if resource, ok := strings.CutPrefix(c.ID, prefix); ok {
+			observation = strings.TrimPrefix(observation, resource+": ")
+		}
+	}
+	first, rest, multiline := strings.Cut(observation, "\n")
+	fmt.Fprintf(buf, "%-7s %s: %s\n", c.Status, c.ID, first)
+	if multiline {
+		for line := range strings.SplitSeq(strings.TrimSuffix(rest, "\n"), "\n") {
+			fmt.Fprintf(buf, "        %s\n", line)
+		}
+	}
 }

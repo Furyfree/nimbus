@@ -18,9 +18,10 @@ func TestPlanShowsSystemFileDiffAndNativeUnitChanges(t *testing.T) {
 	p := &plan.Plan{Machine: "vm", Complete: true, Operations: []plan.Operation{
 		{ID: "file:/etc/example", Kind: plan.KindFile, Action: plan.ActionRepair, Summary: "repair /etc/example", File: &plan.FileChange{Target: "/etc/example", Before: inspect.SystemFile{Exists: true, Content: []byte("before\n")}, After: inspect.SystemFile{Exists: true, Content: []byte("after"), Owner: "root", Group: "root", Mode: "0644"}}},
 		{ID: "service:greetd.service", Kind: plan.KindService, Action: plan.ActionRepair, Summary: "configure greetd.service", Steps: []plan.Step{{Description: "enable unit", Argv: []string{"systemctl", "enable", "--", "greetd.service"}, Privileged: true}}},
+		{ID: "login-shell:test", Kind: plan.KindShell, Action: plan.ActionRepair, Summary: "set test login shell: /bin/bash -> /bin/zsh", Steps: []plan.Step{{Description: "set the local account login shell", Argv: []string{"usermod", "--shell", "/bin/zsh", "--", "test"}, Privileged: true}}},
 	}}
 	out := string(renderPlan(p, false, false))
-	for _, want := range []string{"system resources:", "owner root, group root, mode 0644", "-before\n+after\n", "No newline at end of file", "systemctl enable -- greetd.service (privileged)"} {
+	for _, want := range []string{"system resources:", "owner root, group root, mode 0644", "-before\n+after\n", "No newline at end of file", "systemctl enable -- greetd.service (privileged)", "login shell: /bin/bash -> /bin/zsh", "usermod --shell /bin/zsh -- test (privileged)"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q:\n%s", want, out)
 		}
@@ -28,7 +29,11 @@ func TestPlanShowsSystemFileDiffAndNativeUnitChanges(t *testing.T) {
 }
 
 func TestWhyExplainsSelectedSystemResourcesWithoutInspection(t *testing.T) {
-	for _, resource := range []string{"file:/etc/greetd/nimbus.toml", "service:greetd.service", "trigger:systemd-daemon-reload", "default-target"} {
+	code, out, errOut := run(t, "why", "login-shell", "--checkout", repoRoot(t), "--machine", "vm")
+	if code != ExitOK || !strings.Contains(out, "machine:shell") {
+		t.Fatalf("login shell: %d %s %s", code, out, errOut)
+	}
+	for _, resource := range []string{"file:/etc/greetd/nimbus.toml", "service:greetd.service", "trigger:systemd-daemon-reload", "default-target", "greeter-sync"} {
 		code, out, errOut := run(t, "why", resource, "--checkout", repoRoot(t), "--machine", "vm")
 		if code != ExitOK || !strings.Contains(out, "component:hyprland-session") || !strings.Contains(out, "profile:hyprland-noctalia") {
 			t.Fatalf("%s: %d %s %s", resource, code, out, errOut)
@@ -75,7 +80,7 @@ func TestSyncResourceRetirementReportsSessionRequirements(t *testing.T) {
 					src.Commands[tc.command] = nil
 				}
 				withSource(t, handoffOutputSource{Source: src, afterStream: func(name string, args []string) {
-					if name == "chezmoi" && slices.Equal(args, []string{"apply"}) {
+					if slices.Contains(args, "makecache") || (name == "chezmoi" && slices.Equal(args, []string{"apply"})) {
 						return
 					}
 					if nativetest.Key(name, args...) != tc.command {
@@ -119,7 +124,7 @@ func TestSyncResourceRetirementReportsSessionRequirements(t *testing.T) {
 					}
 				} else {
 					_, summary, ok := strings.Cut(out, "\nsync summary:\n")
-					if !ok || !strings.Contains(summary, tc.id) || strings.Contains(summary, "Log out and log in again") != tc.logout || strings.Contains(summary, "Reboot required") != tc.reboot {
+					if !ok || !strings.Contains(summary, tc.id) || strings.Contains(summary, "Log out and back in") != tc.logout || strings.Contains(summary, "Reboot required") != tc.reboot {
 						t.Errorf("retirement closing report missing or incorrect: %s", out)
 					}
 				}

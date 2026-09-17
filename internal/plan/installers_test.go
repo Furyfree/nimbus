@@ -67,6 +67,67 @@ func TestMiseBootstrapLeavesConfiguredToolsToChezmoi(t *testing.T) {
 	}
 }
 
+func TestZeronDevelopmentBootstrapDisclosesNativeEffects(t *testing.T) {
+	c, _ := repository(t)
+	for _, development := range []bool{false, true} {
+		profiles := []string{"common"}
+		if development {
+			profiles = append(profiles, "development")
+		}
+		c.Machines["test"] = &definitions.Machine{Schema: 1, ID: "test", Profiles: profiles}
+		r, errs := definitions.Resolve(c, "test")
+		if len(errs) > 0 {
+			t.Fatal(errs)
+		}
+		for _, name := range []string{"webkit2gtk4.1", "json-glib"} {
+			selected := slices.ContainsFunc(r.Packages, func(p definitions.ResolvedPackage) bool {
+				return p.Name == name && p.Canonical == "dnf:"+name
+			})
+			if selected != development {
+				t.Fatalf("%s selection = %v with development %v", name, selected, development)
+			}
+		}
+		src, facts := readyHost(t, c)
+		home := t.TempDir()
+		facts.User = inspect.Section[inspect.User]{Value: inspect.User{Home: home}}
+		in := Inputs{Resolved: r, Facts: facts, Source: src}
+		for _, present := range []bool{false, true} {
+			if present {
+				src.Dirs[filepath.Join(home, ".local/bin")] = []string{"zeron"}
+			}
+			b := builder{in: in}
+			p := &Plan{Operations: b.userTools()}
+			op := find(p, "user:zeron")
+			if !development {
+				if op != nil {
+					t.Fatalf("Zeron selected without development: %+v", op)
+				}
+				continue
+			}
+			if op == nil {
+				t.Fatal("development lost Zeron bootstrap")
+			}
+			if present {
+				if op.Action != ActionKeep || len(op.Steps) != 0 || len(op.Notes) != 0 {
+					t.Fatalf("installed Zeron should remain native-owned: %+v", op)
+				}
+				continue
+			}
+			if op.Action != ActionInstall || op.Risk != RiskMedium {
+				t.Fatalf("installer action: %+v", op)
+			}
+			for _, effect := range []string{"zeron.service", "restarts", "loginctl enable-linger", "sudo -n", "after logout"} {
+				if !strings.Contains(strings.Join(op.Notes, " "), effect) {
+					t.Errorf("installer preview omits %q: %+v", effect, op)
+				}
+			}
+			if !slices.Equal(op.Steps[1].Argv, []string{"sh", InstallerScript}) || op.Steps[1].Privileged {
+				t.Fatalf("installer must run as the user: %+v", op)
+			}
+		}
+	}
+}
+
 type userDirectorySource struct {
 	*nativetest.FakeSource
 	readErrors map[string]error

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Furyfree/nimbus/internal/apply"
 	"github.com/Furyfree/nimbus/internal/inspect"
 	"github.com/Furyfree/nimbus/internal/native"
 	"github.com/Furyfree/nimbus/internal/native/nativetest"
@@ -113,7 +112,7 @@ func TestMaintenanceStagesAndFailures(t *testing.T) {
 			}
 			if strings.HasPrefix(mode, "dirty ") || mode == "preview" {
 				if slices.ContainsFunc(src.events, func(s string) bool {
-					return strings.Contains(s, " fetch ") || strings.Contains(s, " merge --ff-only") || strings.HasPrefix(s, "sudo ")
+					return strings.Contains(s, " fetch ") || strings.Contains(s, " merge --ff-only") || (mode == "preview" && strings.HasPrefix(s, "sudo "))
 				}) {
 					t.Fatalf("preflight/preview mutated: %v", src.events)
 				}
@@ -132,45 +131,6 @@ func TestMaintenanceStagesAndFailures(t *testing.T) {
 				t.Fatal(out)
 			}
 		})
-	}
-}
-
-func TestCombinedSyncStartsReplacementEngine(t *testing.T) {
-	root, src := installerFixture(t)
-	bin := t.TempDir()
-	executable := filepath.Join(bin, "nimbus")
-	if err := os.WriteFile(executable, []byte("#!/bin/sh\nexit 99\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	old := syncExecutable
-	syncExecutable = func() (string, error) { return executable, nil }
-	t.Cleanup(func() { syncExecutable = old })
-	t.Setenv("PATH", bin)
-	t.Setenv("NIMBUS_TEST_EXECUTABLE", executable)
-	t.Setenv(upgradeActive, "")
-	body := `#!/bin/sh
-printf '#!/bin/sh\nprintf "NEW-ENGINE\\n"\nprintf "<%%s>\\n" "$@"\nexit 17\n' > "$NIMBUS_TEST_EXECUTABLE"
-`
-	if err := os.WriteFile(filepath.Join(bin, "topgrade"), []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	code, out, errOut := run(t, "sync", "--upgrade", "--checkout", root, "--machine", "vm", "--yes", "--prune")
-	if code != 17 || !strings.Contains(out, "NEW-ENGINE") || !strings.Contains(out, "<sync>\n<--checkout>\n<"+root+">\n<--machine>\n<vm>\n<--yes>\n<--prune>") {
-		t.Fatalf("replacement handoff: %d %s%s", code, out, errOut)
-	}
-	if len(src.calls) != 0 {
-		t.Fatalf("old engine reconciled: %v", src.calls)
-	}
-	lockPath, err := apply.LockPath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	lock, err := apply.Acquire(lockPath, apply.LockInfo{})
-	if err != nil {
-		t.Fatal("lock leaked: ", err)
-	}
-	if err := lock.Release(); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -220,5 +180,43 @@ func TestSyncRejectsUnchangedChezmoiProfiles(t *testing.T) {
 	code, out, errOut := run(t, "sync", "--checkout", root, "--machine", "vm", "--yes")
 	if code != ExitFailure || !strings.Contains(out, "did not retain the requested selection") || slices.Contains(base.calls, "chezmoi apply") {
 		t.Fatalf("applied with stale selection: %d %s%s calls=%v", code, out, errOut, base.calls)
+	}
+}
+
+// Topgrade's system callback requires sources to be ready, and the user
+// configuration may add new update steps. Neither can wait until afterwards.
+func TestCombinedSyncPreparesConfigurationBeforeTopgrade(t *testing.T) {
+	for _, failSync := range []bool{false, true} {
+		t.Run(map[bool]string{false: "ordered", true: "failed-sync"}[failSync], func(t *testing.T) {
+			root, base := installerFixture(t)
+			bin := t.TempDir()
+			ready := filepath.Join(bin, "configuration-ready")
+			called := filepath.Join(bin, "topgrade-called")
+			t.Setenv("PATH", bin)
+			t.Setenv(upgradeActive, "")
+			t.Setenv("NIMBUS_TEST_READY", ready)
+			t.Setenv("NIMBUS_TEST_CALLED", called)
+			body := "#!/bin/sh\n[ -f \"$NIMBUS_TEST_READY\" ] || exit 71\nprintf yes > \"$NIMBUS_TEST_CALLED\"\nexit 23\n"
+			if err := os.WriteFile(filepath.Join(bin, "topgrade"), []byte(body), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			base.failApply = failSync
+			withSource(t, handoffOutputSource{Source: base, afterStream: func(name string, args []string) {
+				if nativetest.Key(name, args...) == "chezmoi apply" && !failSync {
+					if err := os.WriteFile(ready, []byte("ready"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}})
+			code, out, errOut := run(t, "sync", "--upgrade", "--checkout", root, "--machine", "vm", "--yes")
+			_, err := os.Stat(called)
+			if failSync {
+				if code != ExitFailure || !os.IsNotExist(err) {
+					t.Fatalf("upgrade after failed sync: %d %s%s, %v", code, out, errOut, err)
+				}
+			} else if code != 23 || err != nil {
+				t.Fatalf("upgrade ran before configuration was ready: %d %s%s, %v", code, out, errOut, err)
+			}
+		})
 	}
 }

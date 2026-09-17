@@ -102,9 +102,35 @@ Older designs are history, not active requirements; revalidate before reuse.
 
 ## Neighbouring repositories
 
-- `~/git/dotfiles` is the Chezmoi source state. It owns everything below
-  `$HOME` except the selector, works without Nimbus on Linux, macOS, and
-  Windows, and gates only Nimbus-calling targets on `managed_by_nimbus`. Its
+Nimbus owns the optional DTU eduroam CA bundle and coordinates its named,
+user-restricted NetworkManager profile through explicit `dtu-network` setup.
+Read credentials only after approval; NetworkManager owns password storage in
+its root-only system connection file. Explain storage before approval.
+Keep existing eduroam/DTUsecure profiles unless their exact UUIDs are approved
+for deletion and recreation. Preserve unrelated profiles. Ask before connecting.
+No global trust anchors. The course repository and Chezmoi own neither the
+certificate nor network credentials.
+
+The explicit lockscreen postinstall task may back up and remove only Noctalia
+lockscreen-widget overrides after approval, as SPEC defines. This does not
+authorize ordinary sync to edit runtime preferences.
+
+Nimbus may coordinate the explicitly selected local-agent proxy through native
+installer and application APIs. Chezmoi owns its static config; Nimbus owns
+private model registration evidence, never Copilot credentials or databases.
+
+Normal init/sync owns selected greeter appearance authorization through the
+native greeter CLI after approval. The greeter owns its Polkit rule; Chezmoi
+owns auto-sync preferences. Do not duplicate the rule or add a postinstall.
+
+Nimbus owns its setup-note catalog and commands. Read guidance from the selected
+Nimbus checkout; do not add a Chezmoi catalog handoff or standalone note reader.
+
+- `~/.local/share/chezmoi` is the Chezmoi source state. It owns intentional user
+  configuration below `$HOME`; Nimbus retains its selector, checkout, private
+  diagnostics and local setup evidence under `$XDG_STATE_HOME/nimbus`. Chezmoi
+  works without Nimbus on Linux, macOS and Windows, and gates only
+  Nimbus-calling targets on `managed_by_nimbus`. Its
   `PROFILES.md` owns the handoff prompt keys. Do not add a machine manifest,
   system package list, or component graph there. Chezmoi owns the native Mise
   configuration, including its Cargo tool list, and invokes `mise install`
@@ -141,8 +167,8 @@ not Fedora.
 - Do not edit live agent configuration, agent homes, authentication, or runtime
   state unless the user explicitly asks for that exact system-level change.
 - This checkout lives on the owner's workstation. Tests, validation, and
-  fixtures never read or create `~/.config/nimbus` or `/var/lib/nimbus`; they
-  use temporary directories and explicit checkout and machine inputs.
+  fixtures never read or create live Nimbus configuration, state or run records;
+  isolate HOME and XDG directories and use explicit checkout and machine inputs.
 - Run destructive system tests only in disposable Fedora virtual machines.
 
 ## Make controlled changes

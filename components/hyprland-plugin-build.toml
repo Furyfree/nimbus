@@ -1,0 +1,8 @@
+# Matching headers and their build dependencies for HyprPM-managed plugins.
+# HyprPM owns compilation, its privileged cache and plugin enablement.
+schema = 1
+id = "hyprland-plugin-build"
+
+requires = []
+conflicts = []
+packages = ["hyprland-copr:hyprland-devel"]

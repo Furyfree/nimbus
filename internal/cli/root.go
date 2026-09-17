@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/Furyfree/nimbus/internal/output"
 	"github.com/Furyfree/nimbus/internal/version"
 )
 
@@ -24,6 +25,7 @@ const (
 
 type options struct {
 	json        bool
+	verbose     bool
 	showVersion bool
 	installLog  *installLog
 }
@@ -44,7 +46,7 @@ type EnvelopeError struct {
 
 func writeJSON(w io.Writer, data, errs any) error {
 	env := Envelope{Engine: version.Engine, OutputSchema: version.OutputSchema, Data: data, Errors: errs}
-	enc := json.NewEncoder(w)
+	enc := json.NewEncoder(output.Native(w))
 	enc.SetIndent("", "  ")
 	return enc.Encode(env)
 }
@@ -81,6 +83,7 @@ func newRoot() (*cobra.Command, *options) {
 			return cmd.Help()
 		},
 	}
+	root.PersistentFlags().BoolVar(&opts.verbose, "verbose", false, "show full plans and diagnostic report details")
 	root.PersistentFlags().BoolVarP(&opts.json, "json", "j", false, "render the result as versioned JSON")
 	// Nimbus runs as the user and escalates per command; only the hidden
 	// internal actions may run as root.
@@ -99,14 +102,22 @@ func newRoot() (*cobra.Command, *options) {
 		return cmd.Root().Help()
 	}})
 	root.SetUsageTemplate(strings.Replace(root.UsageTemplate(), `(or .IsAvailableCommand (eq .Name "help"))`, `.IsAvailableCommand`, 1))
-	root.AddCommand(newInternal(), newComponents(opts), newDoctor(opts), newFiles(opts), newInit(opts), newLaunch(opts), newManaged(opts), newPackages(opts), newPostinstall(opts), newProfiles(opts), newStatus(opts), newSync(opts), newUnmanaged(opts), newUpgrade(opts), newValidate(opts), newVersion(opts), newWhy(opts))
+	root.AddCommand(newInternal(), newComponents(opts), newDoctor(opts), newFiles(opts), newInit(opts), newLaunch(opts), newManaged(opts), newPackages(opts), newPostinstall(opts), newProfiles(opts), newStatus(opts), newSetupNotes(opts), newSync(opts), newUnmanaged(opts), newUpgrade(opts), newValidate(opts), newVersion(opts), newWhy(opts))
 	return root, opts
 }
 
 // New builds the command tree.
 func New() *cobra.Command {
-	root, _ := newRoot()
+	root, opts := newRoot()
+	root.SetOut(coloredOutput(os.Stdout, opts))
+	root.SetErr(coloredOutput(os.Stderr, opts))
 	return root
+}
+
+var terminalColors = output.ColorEnabled
+
+func coloredOutput(w io.Writer, opts *options) io.Writer {
+	return output.ColorWriter(w, func() bool { return !opts.json && terminalColors(w) })
 }
 
 // Execute runs the tree and returns the process exit code. Usage errors exit
@@ -114,6 +125,7 @@ func New() *cobra.Command {
 // Delegated Topgrade failures retain their native exit status.
 func Execute(args []string, stdout, stderr io.Writer) int {
 	root, opts := newRoot()
+	stdout, stderr = coloredOutput(stdout, opts), coloredOutput(stderr, opts)
 	root.SetArgs(args)
 	root.SetOut(stdout)
 	root.SetErr(stderr)

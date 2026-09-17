@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Furyfree/nimbus/internal/native"
+	"github.com/Furyfree/nimbus/internal/output"
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
@@ -87,6 +88,7 @@ var (
 		}
 		reader := bufio.NewReader(in)
 		line, err := reader.ReadString('\n')
+		output.AfterPrompt(out)
 		if err != nil && (!errors.Is(err, io.EOF) || strings.TrimSpace(line) == "") {
 			return false
 		}

@@ -31,6 +31,10 @@ func (b *builder) packages() []Operation {
 			continue
 		}
 		if inst, ok := InstalledPackage(p.Name, b.in.Applied.Receipts["package:"+p.Canonical], b.in.Facts.Packages.Value); ok {
+			if b.sourceNote(p, inst) != "" {
+				adopt = append(adopt, b.repairPackageSource(p, inst))
+				continue
+			}
 			op := Operation{ID: "package:" + p.Canonical, Kind: KindPackage, Action: ActionAdopt, Risk: RiskLow,
 				Summary: fmt.Sprintf("adopt %s %s, already installed", p.Name, inst.EVR()), Paths: p.Paths, Resolved: map[string]string{p.Name: inst.ID()}}
 			if receipt, managed := b.in.Applied.Receipts[op.ID]; managed && receipt.Package == inst.ID() {
@@ -41,9 +45,6 @@ func (b *builder) packages() []Operation {
 				if _, err := ReceiptPackage(receipt, b.in.Facts.Packages.Value); err != nil {
 					op.Blocked = err.Error()
 				}
-			}
-			if note := b.sourceNote(p, inst); note != "" {
-				op.Notes = append(op.Notes, note)
 			}
 			adopt = append(adopt, op)
 			continue
@@ -76,9 +77,7 @@ func PackageName(id string) string {
 	return id[strings.LastIndexByte(id, ':')+1:]
 }
 
-// sourceNote says when an installed desired package comes from a
-// repository other than the one its prefix names. The package is adopted
-// or kept either way; the owner sees where it came from.
+// sourceNote identifies recorded provenance outside the declared family.
 func (b *builder) sourceNote(p definitions.ResolvedPackage, inst inspect.Package) string {
 	from := inst.FromRepo
 	// The installer and local files record no repository worth noting.
@@ -110,18 +109,18 @@ func (b *builder) installTransaction(pkgs []definitions.ResolvedPackage) Operati
 	slices.Sort(names)
 	slices.Sort(items)
 	paths := slices.Sorted(maps.Keys(pathSet))
-	args := []string{"install"}
 	removes := map[string]bool{}
 	for _, r := range b.in.Resolved.Removes {
 		removes[r] = true
 	}
-	if len(removes) > 0 {
-		args = append(args, "--allowerasing")
-	}
-	args = append(args, names...)
 	op := Operation{ID: "packages:install", Kind: KindPackage, Action: ActionInstall, Risk: RiskLow,
-		Summary: fmt.Sprintf("install %d packages through one DNF transaction", len(names)), Paths: paths, Items: items, ItemPaths: itemPaths,
-		Steps: []Step{{Description: "install through DNF", Argv: append([]string{"dnf5", "-y"}, args...), Privileged: true}}}
+		Summary: fmt.Sprintf("install %d packages through one DNF transaction", len(names)), Paths: paths, Items: items, ItemPaths: itemPaths, PackageSources: b.packageSources()}
+	args, err := b.installSourceArgs(pkgs)
+	if err != nil {
+		op.Blocked = err.Error()
+		return op
+	}
+	op.Steps = []Step{{Description: "install through DNF with declared sources", Argv: append([]string{"dnf5", "-y"}, args...), Privileged: true}}
 	if b.waitsForRepositories(&op) {
 		return op
 	}
@@ -169,6 +168,18 @@ func (b *builder) installTransaction(pkgs []definitions.ResolvedPackage) Operati
 		op.Resolved[n] = inspect.PackageID(provider.Name, provider.Arch)
 		op.Notes = append(op.Notes, fmt.Sprintf("%s resolves to the package %s", n, provider.Name))
 	}
+	for name, id := range op.Resolved {
+		ids, err := b.enabledPackageRepos(byName[name].Prefix)
+		if err != nil {
+			op.Blocked = err.Error()
+			return op
+		}
+		op.PackageSources.add(id, ids)
+	}
+	if err := op.PackageSources.CheckTransaction(tx); err != nil {
+		op.Blocked = err.Error()
+		return op
+	}
 	var problems, needed []string
 	upgraded := map[string]bool{}
 	for _, row := range tx.Packages {
@@ -185,10 +196,6 @@ func (b *builder) installTransaction(pkgs []definitions.ResolvedPackage) Operati
 					continue
 				}
 				wanted = true
-				p := byName[n]
-				if !slices.Contains(b.expectedRepos(p.Prefix), row.Repository) {
-					problems = append(problems, fmt.Sprintf("%s would come from repository %s, not %s", row.Name, row.Repository, strings.Join(b.expectedRepos(p.Prefix), " or ")))
-				}
 			}
 			if !wanted && row.Section == "installing" {
 				problems = append(problems, "would install "+row.Name+", which nothing selects")

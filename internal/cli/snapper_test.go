@@ -53,7 +53,9 @@ func (s *snapshotSource) Run(name string, args ...string) ([]byte, error) {
 
 func (s *snapshotSource) Stream(out, errOut io.Writer, name string, args ...string) error {
 	key := nativetest.Key(name, args...)
-	s.mutations = append(s.mutations, key)
+	if !slices.Contains(args, "makecache") {
+		s.mutations = append(s.mutations, key)
+	}
 	err := s.installerSource.Stream(out, errOut, name, args...)
 	if err == nil && key == "sudo systemctl set-default graphical.target" {
 		s.Commands["systemctl get-default"] = []byte("graphical.target\n")
@@ -123,7 +125,7 @@ func TestSnapshotBoundaries(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			root, src := snapshotFixture(t)
 			args := []string{"upgrade", "--system", "--checkout", root, "--machine", "vm", "--yes", "--json"}
-			want := []string{beforeSnapshot, "sudo dnf5 -y upgrade", afterSnapshot, cleanupSnapshots}
+			want := []string{beforeSnapshot, "sudo dnf5 --setopt=cacheonly=metadata -y upgrade", afterSnapshot, cleanupSnapshots}
 			codeWant := ExitOK
 			switch mode {
 			case "sync":
@@ -215,7 +217,7 @@ type interruptedSnapshotSource struct {
 
 func (s *interruptedSnapshotSource) Stream(out, errOut io.Writer, name string, args ...string) error {
 	key := nativetest.Key(name, args...)
-	if key != "sudo dnf5 -y upgrade" && key != "sudo systemctl set-default graphical.target" {
+	if key != "sudo dnf5 --setopt=cacheonly=metadata -y upgrade" && key != "sudo systemctl set-default graphical.target" {
 		return s.snapshotSource.Stream(out, errOut, name, args...)
 	}
 	s.mutations = append(s.mutations, key)
@@ -235,7 +237,7 @@ func TestSnapshotInterrupt(t *testing.T) {
 	if mode := os.Getenv("NIMBUS_TEST_SNAPSHOT_INTERRUPT"); mode != "" {
 		root, src := snapshotFixture(t)
 		args := []string{"upgrade", "--system", "--checkout", root, "--machine", "vm", "--yes"}
-		nativeCommand := "sudo dnf5 -y upgrade"
+		nativeCommand := "sudo dnf5 --setopt=cacheonly=metadata -y upgrade"
 		if mode == "sync" {
 			path := filepath.Join(root, "components/snapper.toml")
 			data, err := os.ReadFile(path)

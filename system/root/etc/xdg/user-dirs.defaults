@@ -1,0 +1,14 @@
+# Fedora's native XDG defaults plus the workstation's additional directories.
+# Values are relative to each user's home. Existing user overrides are retained.
+DESKTOP=Desktop
+DOWNLOAD=Downloads
+TEMPLATES=Templates
+PUBLICSHARE=Public
+DOCUMENTS=Documents
+MUSIC=Music
+PICTURES=Pictures
+VIDEOS=Videos
+PROJECTS=Projects
+SCREENSHOTS=Pictures/Screenshots
+WALLPAPERS=Pictures/Wallpapers
+RECORDINGS=Videos/Recordings

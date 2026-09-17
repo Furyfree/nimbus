@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 
+	"github.com/Furyfree/nimbus/internal/output"
 	"github.com/spf13/cobra"
 
 	"github.com/Furyfree/nimbus/internal/plan"
@@ -32,6 +34,12 @@ func newUpgrade(opts *options) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if sf.systemUpgrade {
 				if os.Getenv(upgradeActive) != "" {
+					if os.Getenv("NIMBUS_UPGRADE_VERBOSE") == "true" {
+						opts.verbose = true
+					}
+					if os.Getenv(maintenanceReport) != "" && os.Getenv("NIMBUS_UPGRADE_YES") == "true" {
+						sf.yes = true
+					}
 					if flags.checkout == "" {
 						flags.checkout = os.Getenv("NIMBUS_UPGRADE_CHECKOUT")
 					}
@@ -41,6 +49,12 @@ func newUpgrade(opts *options) *cobra.Command {
 				}
 				if len(args) != 0 {
 					return usageError{errors.New("--system does not accept Topgrade arguments")}
+				}
+				if path := os.Getenv(maintenanceReport); path != "" && os.Getenv(upgradeActive) != "" && !sf.plan {
+					var result syncResult
+					sf.result = &result
+					err := runSync(cmd, opts, flags, sf)
+					return errors.Join(err, writeUpgradeReport(path, &result))
 				}
 				return runSync(cmd, opts, flags, sf)
 			}
@@ -60,17 +74,29 @@ func newUpgrade(opts *options) *cobra.Command {
 	return cmd
 }
 
-func runTopgrade(cmd *cobra.Command, args []string, preview bool, flags machineFlags) error {
+func runTopgrade(cmd *cobra.Command, args []string, preview bool, flags machineFlags, yes ...bool) (retErr error) {
 	if os.Getenv(upgradeActive) != "" {
 		return errors.New("recursive upgrade refused: configure Topgrade's Nimbus system step as nimbus upgrade --system")
 	}
 	if preview {
-		_, err := fmt.Fprintf(cmd.OutOrStdout(), "Run Topgrade with its user configuration: %q\nTopgrade selects its native update steps and prompts. Their transactions are determined when they run.\nIts Nimbus system callback takes root snapshots and cleans up when Snapper is selected.\n", append([]string{"topgrade"}, args...))
+		_, err := fmt.Fprintf(cmd.OutOrStdout(), "Run Topgrade with its user configuration:\n  $ %s\nNative steps determine their updates when executed.\n", strings.Join(append([]string{"topgrade"}, args...), " "))
 		return err
 	}
+	if os.Getenv(maintenanceReport) == "" {
+		identity := flags
+		if selected, err := maintenanceSelection(flags); err == nil {
+			identity = selected
+		}
+		record, err := beginRunRecord("upgrade", identity.machine)
+		if err != nil {
+			return fmt.Errorf("start run record: %w", err)
+		}
+		defer func() { retErr = finishRunRecord(cmd.ErrOrStderr(), record, &syncResult{}, "Topgrade", retErr) }()
+	}
 	child := exec.CommandContext(cmd.Context(), "topgrade", args...)
-	child.Env = append(os.Environ(), upgradeActive+"=1", "NIMBUS_UPGRADE_CHECKOUT="+flags.checkout, "NIMBUS_UPGRADE_MACHINE="+flags.machine)
-	child.Stdin, child.Stdout, child.Stderr = cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr()
+	verbose, _ := cmd.Flags().GetBool("verbose")
+	child.Env = append(os.Environ(), fmt.Sprintf("NIMBUS_UPGRADE_VERBOSE=%t", verbose), upgradeActive+"=1", "NIMBUS_UPGRADE_CHECKOUT="+flags.checkout, "NIMBUS_UPGRADE_MACHINE="+flags.machine, fmt.Sprintf("NIMBUS_UPGRADE_YES=%t", len(yes) > 0 && yes[0]))
+	child.Stdin, child.Stdout, child.Stderr = cmd.InOrStdin(), output.Native(cmd.OutOrStdout()), output.Native(cmd.ErrOrStderr())
 	return runChild(child)
 }
 
@@ -94,6 +120,10 @@ func systemUpgradePlan(p *plan.Plan) *plan.Plan {
 	copy := *p
 	copy.Operations = nil
 	copy.Complete = true
+	if p.Updates.Unavailable != "" {
+		copy.Complete = false
+		copy.Operations = append(copy.Operations, plan.Operation{ID: "upgrade:dnf", Kind: plan.KindPackage, Action: plan.ActionRepair, Summary: "check source-constrained DNF updates", Blocked: p.Updates.Unavailable})
+	}
 	if p.Snapshots != nil && (p.Snapshots.Setup || len(p.Snapshots.Changes()) > 0) {
 		snapshots := *p.Snapshots
 		snapshots.Blocked = "run nimbus sync first to configure root snapshots and retention"
@@ -101,6 +131,12 @@ func systemUpgradePlan(p *plan.Plan) *plan.Plan {
 		copy.Complete = false
 	}
 	for _, op := range p.Operations {
+		if op.Kind == plan.KindPackage && op.Action == plan.ActionRepair {
+			op.Blocked = "run nimbus sync first: " + op.Summary
+			copy.Operations = append(copy.Operations, op)
+			copy.Complete = false
+			continue
+		}
 		if op.Kind != plan.KindRepository && op.Kind != plan.KindFlatpakRemote && op.Kind != plan.KindDNFConfig && !plan.IsConstraintOperation(op) {
 			continue
 		}

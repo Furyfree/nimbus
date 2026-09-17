@@ -7,6 +7,8 @@ requires = []
 conflicts = []
 # Build prerequisites for tools declared in the global Chezmoi configuration.
 packages = [
+  # Preserve the native terminal while Chezmoi records Mise installation output.
+  "util-linux-script",
   "gcc",
   "gcc-c++",
   "clang",

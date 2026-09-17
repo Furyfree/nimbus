@@ -1,11 +1,13 @@
-// Package postinstall inspects setup tasks and runs their approved native actions.
-// Inspection never mutates the system or stores a completion receipt.
+// Package postinstall inspects manual setup with read-only observations.
+// Native action runners require caller approval and never store completion receipts.
 package postinstall
 
 import (
+	"regexp"
 	"slices"
 	"strings"
 
+	"github.com/Furyfree/nimbus/internal/agentproxy"
 	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/inspect"
 	"github.com/Furyfree/nimbus/internal/native"
@@ -25,34 +27,56 @@ const (
 type ActionKind string
 
 const (
-	OpenApplication    ActionKind = "open-application"
-	EnrollFingerprint  ActionKind = "enroll-fingerprint"
-	InstallApplication ActionKind = "install-application"
-	SetupNVIDIA        ActionKind = "setup-nvidia"
+	RestoreNoctaliaLockscreen ActionKind = "restore-noctalia-lockscreen"
+	OpenApplication           ActionKind = "open-application"
+	EnrollFingerprint         ActionKind = "enroll-fingerprint"
+	InstallApplication        ActionKind = "install-application"
+	SetTailscaleOperator      ActionKind = "set-tailscale-operator"
+	LoginTailscale            ActionKind = "login-tailscale"
+	ConfigureDTUNetwork       ActionKind = "configure-dtu-network"
+	InstallDTUCertificate     ActionKind = "install-dtu-certificate"
+	SyncNoctaliaPlugins       ActionKind = "sync-noctalia-plugins"
+	SyncHyprlandPlugins       ActionKind = "sync-hyprland-plugins"
+	SetAccountPicture         ActionKind = "set-account-picture"
+	SetupVoxtype              ActionKind = "setup-voxtype"
+	SetHostname               ActionKind = "set-hostname"
+	SetupNVIDIA               ActionKind = "setup-nvidia"
 )
 
-// Action is a fixed native command or NVIDIA setup offered for explicit selection.
+// Action describes native commands offered for explicit user selection.
+// Argv is used for a single command; Commands is an ordered native workflow.
 type Action struct {
-	Kind ActionKind `json:"kind"`
-	Argv []string   `json:"argv,omitempty"`
+	DTUProfile *DTUProfile       `json:"dtu_profile,omitempty"`
+	DTU        *DTUCertificate   `json:"dtu,omitempty"`
+	Lockscreen *LockscreenRepair `json:"lockscreen,omitempty"`
+	Hyprland   *HyprlandSetup    `json:"hyprland,omitempty"`
+	Kind       ActionKind        `json:"kind"`
+	Argv       []string          `json:"argv,omitempty"`
+	Commands   [][]string        `json:"commands,omitempty"`
+	User       string            `json:"user,omitempty"`
+	Hostname   string            `json:"hostname,omitempty"`
+	Picture    *AccountPicture   `json:"picture,omitempty"`
 }
 
 type Task struct {
-	ID            string   `json:"id"`
-	Owner         string   `json:"owner"`
-	Title         string   `json:"title"`
-	Status        Status   `json:"status"`
-	Detail        string   `json:"detail"`
-	Prerequisites []string `json:"prerequisites,omitempty"`
-	Instructions  []string `json:"instructions"`
-	Verification  string   `json:"verification"`
-	Recovery      string   `json:"recovery"`
-	Action        *Action  `json:"action,omitempty"`
-	Reboot        bool     `json:"reboot,omitzero"`
-	Logout        bool     `json:"logout,omitzero"`
+	PreviouslyVerified    bool     `json:"previously_verified,omitzero"`
+	VerificationNeedsRoot bool     `json:"verification_needs_root,omitzero"`
+	ID                    string   `json:"id"`
+	Owner                 string   `json:"owner"`
+	Title                 string   `json:"title"`
+	Status                Status   `json:"status"`
+	Detail                string   `json:"detail"`
+	Prerequisites         []string `json:"prerequisites,omitempty"`
+	Instructions          []string `json:"instructions"`
+	Verification          string   `json:"verification"`
+	Recovery              string   `json:"recovery"`
+	Action                *Action  `json:"action,omitempty"`
+	Reboot                bool     `json:"reboot,omitzero"`
+	Logout                bool     `json:"logout,omitzero"`
 }
 
 type Inputs struct {
+	Task     string // Empty inspects the complete checklist; a task ID inspects only its prerequisites.
 	Resolved *definitions.Resolved
 	Facts    inspect.Facts
 	Applied  state.Applied
@@ -66,22 +90,110 @@ func Inspect(src native.Source, in Inputs) []Task {
 	if in.Resolved == nil {
 		return result
 	}
+	add := func(id string, check func() Task) {
+		if in.Task == "" || in.Task == id {
+			result = append(result, check())
+		}
+	}
 	for _, pkg := range in.Resolved.Packages {
 		switch {
 		case pkg.Name == "1password" && pkg.Prefix == "onepassword":
-			result = append(result, onePassword(src, in, pkg))
+			add("onepassword", func() Task { return onePassword(src, in, pkg) })
 		case pkg.Name == "fprintd" && pkg.Prefix == "dnf":
-			result = append(result, fingerprint(src, in, pkg))
+			add("fingerprint", func() Task { return fingerprint(src, in, pkg) })
+		case pkg.Name == "tailscale" && pkg.Prefix != "flatpak":
+			add("tailscale-operator", func() Task { return tailscaleOperator(src, in, pkg) })
 		case pkg.Name == "github-copilot-installer" || pkg.Name == "wowup-cf-installer":
-			result = append(result, installerHelper(src, in, pkg))
+			id := "copilot"
+			if pkg.Name == "wowup-cf-installer" {
+				id = "wowup"
+			}
+			add(id, func() Task { return installerHelper(src, in, pkg) })
+			if pkg.Name == "github-copilot-installer" && (in.Task == "" || in.Task == "agent-proxy") {
+				observed := agentproxy.Inspect(src, in.Resolved.Machine)
+				status := Pending
+				if observed.Status == "configured" {
+					status = Complete
+				}
+				if observed.Status == "blocked" {
+					status = Unknown
+				}
+				result = append(result, Task{ID: "agent-proxy", Owner: "agent-proxy", Title: "Connect Copilot to local agents", Status: status, Detail: observed.Detail, Instructions: []string{"Run nimbus postinstall agent-proxy for approved native setup and model refresh."}, Verification: "Local registration and installation files; runtime access is checked only by the explicit task.", Recovery: "Retry the task with Copilot open. Existing models are retained when discovery fails."})
+			}
+		case pkg.Name == "noctalia" && pkg.Prefix != "flatpak":
+			add("noctalia-plugins", func() Task { return noctaliaPlugins(src, in, pkg) })
+			add("noctalia-lockscreen", func() Task { return noctaliaLockscreen(src, in, pkg) })
+		case pkg.Name == "hyprland-devel" && pkg.Prefix != "flatpak":
+			add("hyprland-plugins", func() Task { return hyprlandPlugins(src, in, pkg) })
+		case pkg.Name == "accountsservice" && pkg.Prefix != "flatpak":
+			add("account-picture", func() Task { return accountPicture(src, in, pkg) })
+		case pkg.Name == "voxtype":
+			add("voxtype", func() Task { return voxtypeSetup(src, in, pkg) })
+		case pkg.Name == "protonplus":
+			for _, steam := range in.Resolved.Packages {
+				if steam.Name == "steam" && steam.Prefix != "flatpak" {
+					add("proton-cachyos", func() Task { return protonCachyOS(src, in, pkg, steam) })
+					break
+				}
+			}
 		}
 	}
 	if slices.ContainsFunc(in.Resolved.Components, func(c definitions.ResolvedComponent) bool { return c.ID == "nvidia" }) {
-		result = append(result, mok(src, in))
+		add("nvidia-mok", func() Task { return mok(src, in) })
 	}
-	result = append(result, sessionTasks(src, in)...)
+	if slices.ContainsFunc(in.Resolved.Components, func(c definitions.ResolvedComponent) bool { return c.ID == "dtu-network" }) {
+		add("dtu-network", func() Task { return dtuNetwork(src, in) })
+	}
+	add("hostname", func() Task { return hostnameTask(src, in) })
+	if in.Task == "" {
+		result = append(result, sessionTasks(src, in)...)
+	}
 	slices.SortFunc(result, func(a, b Task) int { return strings.Compare(a.ID, b.ID) })
 	return result
+}
+
+func protonCachyOS(src native.Source, in Inputs, proton, steam definitions.ResolvedPackage) Task {
+	t := Task{
+		ID: "proton-cachyos", Owner: "package:" + proton.Canonical,
+		Title: "Install Proton-CachyOS Latest for Steam", Status: Unknown,
+		Detail:        "ProtonPlus owns the compatibility tool and its rolling updates. Package presence does not prove that a runner is installed or current.",
+		Prerequisites: []string{"Start native Steam once to create its user directories, then close running games."},
+		Instructions: []string{
+			"Install the rolling Latest entry through ProtonPlus. Restart Steam afterwards to make the compatibility tool available.",
+			"For an existing Latest installation, use protonplus update steam-system proton-cachyos. ProtonPlus preferences control background updates.",
+		},
+		Verification: "Use protonplus list steam-system and check ProtonPlus for updates. Nimbus does not query remote releases or read Steam account data during inspection.",
+		Recovery:     "Use ProtonPlus to retry a failed download or remove the compatibility tool. Nimbus does not remove Steam data or runner files.",
+	}
+	for _, pkg := range []definitions.ResolvedPackage{proton, steam} {
+		if status, detail := packageReady(in, pkg); status != Complete {
+			t.Status, t.Detail = status, detail
+			return t
+		}
+	}
+	if _, err := src.LookPath("protonplus"); err != nil {
+		t.Status, t.Detail = Blocked, "ProtonPlus is unavailable; repair the selected package with nimbus sync."
+		return t
+	}
+	output, err := src.Run("protonplus", "list", "steam-system")
+	if err != nil {
+		t.Detail = "ProtonPlus could not inspect Steam runners; start Steam once, then inspect protonplus list steam-system."
+		return t
+	}
+	listing := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(string(output), "")
+	if !strings.HasPrefix(listing, "Installed runners for Steam:\n") {
+		t.Detail = "Unrecognized ProtonPlus runner listing; inspect protonplus list steam-system."
+		return t
+	}
+	for line := range strings.SplitSeq(listing, "\n") {
+		if strings.TrimSpace(line) == "Proton-CachyOS Latest" {
+			t.Status, t.Detail = Complete, "ProtonPlus lists Proton-CachyOS Latest for native Steam."
+			return t
+		}
+	}
+	t.Status, t.Detail = Pending, "Proton-CachyOS Latest is not installed for native Steam."
+	t.Action = &Action{Kind: InstallApplication, Argv: []string{"protonplus", "install", "steam-system", "proton-cachyos", "latest"}}
+	return t
 }
 
 func installerHelper(src native.Source, in Inputs, pkg definitions.ResolvedPackage) Task {
@@ -106,7 +218,31 @@ func installerHelper(src native.Source, in Inputs, pkg definitions.ResolvedPacka
 		t.Detail = "The WoWUp COPR helper needs a standalone install command before Nimbus can offer initial installation."
 		t.Instructions = []string{"The current helper exposes prepare/apply only. Complete the standalone install flow in COPR; Nimbus will not manage application artifacts."}
 	} else {
-		t.Instructions = append(t.Instructions, "The helper downloads the latest stable release and asks DNF to install it. Native prompts remain enabled.")
+		output, err := src.Run(helper, "status")
+		if err != nil {
+			t.Detail = "The installer helper could not inspect application state; inspect its native status."
+			return t
+		}
+		found := false
+		for line := range strings.SplitSeq(string(output), "\n") {
+			if value, ok := strings.CutPrefix(line, "Installed GitHub Copilot: "); ok {
+				found = true
+				if value != "not installed" && regexp.MustCompile(`^[0-9][A-Za-z0-9.+~^-]*$`).MatchString(value) {
+					t.Status, t.Detail = Complete, "GitHub Copilot "+value+" is installed."
+					return t
+				}
+				if value != "not installed" {
+					t.Detail = "Unrecognized Copilot installation identity."
+					return t
+				}
+			}
+		}
+		if !found {
+			t.Detail = "Installer helper returned no recognized application status."
+			return t
+		}
+		t.Status, t.Detail = Pending, "GitHub Copilot is not installed."
+		t.Instructions = append(t.Instructions, "The helper selects and verifies the application release, then asks DNF to install it. Native prompts remain enabled.")
 		t.Action = &Action{Kind: InstallApplication, Argv: []string{"sudo", "--", helper, "install"}}
 	}
 	return t

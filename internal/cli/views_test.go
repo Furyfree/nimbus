@@ -19,11 +19,11 @@ func TestOwnershipViews(t *testing.T) {
 	base := []string{"--checkout", root, "--machine", "desktop"}
 
 	code, out, _ := run(t, append([]string{"managed"}, base...)...)
-	if code != ExitOK || !strings.Contains(out, "adopt      dnf:dnf5-plugins 5.") || strings.Contains(out, "unmanaged") {
+	if code != ExitOK || !strings.Contains(out, "adopt      dnf:dnf5-plugins 5.") || !strings.Contains(out, "adopt      dnf:bash ") || strings.Contains(out, "unmanaged") {
 		t.Fatalf("managed before any apply lists adoptable packages: %d\n%s", code, out)
 	}
 	code, out, _ = run(t, append([]string{"unmanaged"}, base...)...)
-	if code != ExitOK || !strings.Contains(out, "unmanaged  dnf:gzip.x86_64 1.14-2.fc44") || strings.Contains(out, "dnf5-plugins") || !strings.Contains(out, "unmanaged  dnf:bash.x86_64") {
+	if code != ExitOK || !strings.Contains(out, "unmanaged  dnf:gzip.x86_64 1.14-2.fc44") || strings.Contains(out, "dnf5-plugins") || strings.Contains(out, "dnf:bash.x86_64") {
 		t.Fatalf("unmanaged: %d\n%s", code, out)
 	}
 	code, out, _ = run(t, append([]string{"packages", "installed", "z"}, base...)...)

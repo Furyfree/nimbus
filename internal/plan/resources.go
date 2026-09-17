@@ -50,7 +50,7 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 	selected := map[string]bool{}
 	pendingPackages := ""
 	for _, op := range earlier {
-		if op.Kind == KindPackage && op.Action == ActionInstall {
+		if op.Kind == KindPackage && (op.Action == ActionInstall || op.Action == ActionRepair) {
 			pendingPackages = op.ID
 		}
 	}
@@ -101,6 +101,9 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 		if op.Action != ActionKeep && op.Action != ActionAdopt {
 			op.Steps = []Step{{Description: "atomically install the reviewed file and restore its SELinux label", Argv: []string{"nimbus", "internal", "system-file", "--plan", "<plan-digest>", "--payload", "<approved-file-change>"}, Privileged: true}, {Description: "restore SELinux file context", Argv: []string{"restorecon", "--", file.Target}, Privileged: true}}
 		}
+		if definitions.GreeterAppearanceTarget(file.Target) && (op.Action == ActionInstall || op.Action == ActionRepair || op.File.ActivationChanged) {
+			op.Notes = append(op.Notes, "Use the new greeter configuration after reboot; Nimbus does not restart the active display manager.")
+		}
 		if pendingPackages != "" {
 			op.After = pendingPackages
 		}
@@ -150,6 +153,8 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 		}
 		ops = append(ops, op)
 	}
+	ops = append(ops, b.loginShell(pendingPackages)...)
+	ops = append(ops, b.greeterSync(pendingPackages)...)
 	if target := b.in.Resolved.DefaultTarget; target != "" {
 		id := "default-target"
 		selected[id] = true

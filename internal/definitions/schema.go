@@ -45,7 +45,9 @@ type Machine struct {
 	ID     string `toml:"id"`
 	// Hardware is a substring of the DMI product or board name that
 	// identifies this machine, so init can propose it on that hardware.
-	Hardware           string            `toml:"hardware,omitempty"`
+	Hardware string `toml:"hardware,omitempty"`
+	// Shell selects the invoking user's default login shell.
+	Shell              string            `toml:"shell,omitempty"`
 	Profiles           []string          `toml:"profiles"`
 	Components         []string          `toml:"components"`
 	Packages           []string          `toml:"packages"`
@@ -69,16 +71,17 @@ type Profile struct {
 
 // Component is components/<id>.toml.
 type Component struct {
-	Schema        int           `toml:"schema"`
-	ID            string        `toml:"id"`
-	Requires      []string      `toml:"requires"`
-	Conflicts     []string      `toml:"conflicts"`
-	Packages      []string      `toml:"packages"`
-	Removes       []string      `toml:"removes"`
-	Files         []FileDecl    `toml:"files"`
-	Services      []ServiceDecl `toml:"services"`
-	Groups        []GroupDecl   `toml:"groups"`
-	DefaultTarget string        `toml:"default_target"`
+	Schema                  int           `toml:"schema"`
+	ID                      string        `toml:"id"`
+	Requires                []string      `toml:"requires"`
+	Conflicts               []string      `toml:"conflicts"`
+	Packages                []string      `toml:"packages"`
+	Removes                 []string      `toml:"removes"`
+	Files                   []FileDecl    `toml:"files"`
+	Services                []ServiceDecl `toml:"services"`
+	Groups                  []GroupDecl   `toml:"groups"`
+	DefaultTarget           string        `toml:"default_target"`
+	GreeterPasswordlessSync bool          `toml:"greeter_passwordless_sync"`
 	// Detect says which hardware makes init propose this component.
 	Detect *Detect `toml:"detect"`
 	// Installer is a user-scope tool the maker's installer script places
@@ -91,6 +94,9 @@ type Component struct {
 type Installer struct {
 	URL    string `toml:"url"`
 	Binary string `toml:"binary"`
+	// Effects disclose additional installer changes before approval. They
+	// describe upstream behavior, not commands Nimbus runs independently.
+	Effects []string `toml:"effects"`
 }
 
 // Detect is a hardware rule: the chassis kind, "laptop" or "desktop", or

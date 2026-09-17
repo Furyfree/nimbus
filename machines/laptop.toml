@@ -1,6 +1,7 @@
 # HP EliteBook X G1a: AMD integrated graphics.
 schema = 1
 id = "laptop"
+shell = "zsh"
 hardware = "EliteBook X G1a"
 
 profiles = [
@@ -12,6 +13,7 @@ profiles = [
 ]
 
 components = [
+  "dtu-network",
   "amd-graphics",
   "laptop-power",
 ]

@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/Furyfree/nimbus/internal/output"
 )
 
 // Source provides native command execution and filesystem access. Callers
@@ -58,6 +60,7 @@ func (ExecSource) RunLogged(log io.Writer, name string, args ...string) ([]byte,
 // Stream runs name with args attached to the given writers and to this
 // process's stdin, which sudo and interactive prompts need.
 func (ExecSource) Stream(stdout, stderr io.Writer, name string, args ...string) error {
+	stdout, stderr = output.Native(stdout), output.Native(stderr)
 	cmd := exec.Command(name, args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = stdout

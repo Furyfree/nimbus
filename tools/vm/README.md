@@ -80,3 +80,22 @@ existing selector with a different checkout or origin without changing it.
 Testing the public shell/RPM bootstrap is
 a separate packaging drill; a direct binary candidate does not prove COPR
 publication or signed RPM installation.
+
+## DTU NetworkManager fixture
+
+From the repository root, run the guided DTU helper against a real, isolated
+Fedora NetworkManager instance with absent and non-saving secret agents:
+
+~~~sh
+docker build -f tools/vm/dtu/Dockerfile -t nimbus-dtu-test .
+docker run --rm --network none --cap-drop ALL nimbus-dtu-test
+~~~
+
+There are no host mounts or credentials. The test verifies native profile
+acceptance, refusal of unapproved replacement, approved deletion/recreation,
+unrelated profile preservation, off-campus setup with autoconnect enabled and
+a clear network-not-found message, password storage in a root:root 0600 keyfile,
+persistence after a settings update and daemon restart, and credential-file
+removal when deleting the profile. It does not test Wi-Fi, desktop-user Polkit
+authorization, Internet access or reboot reconnection. The local image remains
+until explicitly removed.

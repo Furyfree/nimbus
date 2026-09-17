@@ -1,0 +1,331 @@
+package postinstall
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/Furyfree/nimbus/internal/apply"
+	"github.com/Furyfree/nimbus/internal/definitions"
+	"github.com/Furyfree/nimbus/internal/native/nativetest"
+)
+
+func dtuFixture(t *testing.T) (Inputs, *nativetest.FakeSource, []byte) {
+	t.Helper()
+	in, src := fixture("NetworkManager", "NetworkManager-wifi", "policycoreutils", "libselinux-utils", "python3", "python3-dbus")
+	in.Resolved.Components = []definitions.ResolvedComponent{{ID: "dtu-network"}}
+	src.Commands[nativetest.Key(DTUProfileCommand("inspect")[0], DTUProfileCommand("inspect")[1:]...)] = []byte(`{"observed":"` + strings.Repeat("a", 64) + `","configured":true,"connected":false}`)
+	src.Dirs = map[string][]string{"/": {"etc"}, "/etc": {"NetworkManager"}, "/etc/NetworkManager": {}}
+	for _, dir := range []string{"/etc", "/etc/NetworkManager", dtuCertificateDir} {
+		src.Commands["stat --format=%F|%U|%G|%a|%h -- "+dir] = []byte("directory|root|root|755|2")
+		src.Commands["stat --format=%U|%G|%a -- "+dir] = []byte("root|root|755")
+	}
+	for _, name := range []string{"stat", "/usr/sbin/getenforce", "/usr/sbin/matchpathcon", "/usr/sbin/restorecon"} {
+		src.Paths[name] = name
+	}
+	src.Commands["/usr/sbin/getenforce"] = []byte("Enforcing\n")
+	for _, path := range []string{dtuCertificateDir, DTUCertificatePath} {
+		src.Commands["/usr/sbin/matchpathcon -n -- "+path] = []byte("system_u:object_r:NetworkManager_etc_t:s0\n")
+		src.Commands["stat --format=%C -- "+path] = []byte("unconfined_u:object_r:NetworkManager_etc_t:s0\n")
+		src.Commands["/usr/sbin/matchpathcon -V -- "+path] = []byte(path + " verified.\n")
+	}
+	data, err := os.ReadFile("dtu/ca.pem")
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousNow, previousLoad := dtuNow, dtuLoad
+	t.Cleanup(func() { dtuNow, dtuLoad = previousNow, previousLoad })
+	dtuNow = func() time.Time { return time.Date(2026, 9, 14, 0, 0, 0, 0, time.UTC) }
+	dtuLoad = func(context.Context) ([]byte, error) {
+		t.Fatal("unexpected certificate load during inspection")
+		return nil, nil
+	}
+	t.Setenv("TMPDIR", t.TempDir())
+	return in, src, data
+}
+
+func dtuInstalled(src *nativetest.FakeSource, data []byte) {
+	src.Dirs["/etc/NetworkManager"] = []string{"certs"}
+	src.Dirs[dtuCertificateDir] = []string{"dtu-eduroam.pem"}
+	src.Files[DTUCertificatePath] = data
+	src.Commands["stat --format=%F|%U|%G|%a|%h -- "+DTUCertificatePath] = []byte("regular file|root|root|644|1")
+}
+
+func dtuWrongLabel(src *nativetest.FakeSource, path string) {
+	got := "unconfined_u:object_r:user_tmp_t:s0"
+	src.Commands["stat --format=%C -- "+path] = []byte(got)
+	key := "/usr/sbin/matchpathcon -V -- " + path
+	src.Commands[key] = []byte(fmt.Sprintf("%s has context %s, should be system_u:object_r:NetworkManager_etc_t:s0\n", path, got))
+	if src.ExitCodes == nil {
+		src.ExitCodes = map[string]int{}
+	}
+	src.ExitCodes[key] = 1
+}
+
+func TestDTUInspectionIsOfflineAndNativeStateIsAuthoritative(t *testing.T) {
+	for _, mode := range []string{"missing", "matching", "wrong owner", "wrong mode", "verification failure", "unrecognized verification", "inconsistent verification", "wrong label", "wrong directory label", "disabled SELinux", "unknown file", "expired", "unknown SELinux", "unreadable", "unsafe parent", "symlink", "missing package", "unselected", "root"} {
+		t.Run(mode, func(t *testing.T) {
+			in, src, data := dtuFixture(t)
+			want := Pending
+			if mode != "missing" {
+				dtuInstalled(src, data)
+			}
+			switch mode {
+			case "matching":
+				want = Complete
+			case "wrong owner":
+				src.Commands["stat --format=%F|%U|%G|%a|%h -- "+DTUCertificatePath] = []byte("regular file|alice|root|644|1")
+			case "verification failure":
+				src.Commands["/usr/sbin/matchpathcon -V -- "+DTUCertificatePath] = []byte(DTUCertificatePath + " error: Permission denied")
+				src.Failures["/usr/sbin/matchpathcon -V -- "+DTUCertificatePath] = "PRIVATE DO NOT RENDER"
+				want = Unknown
+			case "unrecognized verification":
+				src.Commands["/usr/sbin/matchpathcon -V -- "+DTUCertificatePath] = nil
+				want = Unknown
+			case "inconsistent verification":
+				dtuWrongLabel(src, DTUCertificatePath)
+				src.Commands["stat --format=%C -- "+DTUCertificatePath] = []byte("changed")
+				want = Unknown
+			case "wrong mode":
+				src.Commands["stat --format=%F|%U|%G|%a|%h -- "+DTUCertificatePath] = []byte("regular file|root|root|600|1")
+			case "wrong label":
+				dtuWrongLabel(src, DTUCertificatePath)
+			case "wrong directory label":
+				dtuWrongLabel(src, dtuCertificateDir)
+			case "disabled SELinux":
+				src.Commands["/usr/sbin/getenforce"] = []byte("Disabled")
+				want = Complete
+			case "unknown file":
+				src.Files[DTUCertificatePath] = []byte("PRIVATE DO NOT RENDER")
+				want = Blocked
+			case "expired":
+				dtuNow = func() time.Time { return time.Date(2028, 1, 1, 0, 0, 0, 0, time.UTC) }
+				want = Blocked
+			case "unknown SELinux":
+				src.Commands["/usr/sbin/getenforce"] = []byte("unexpected")
+				want = Unknown
+			case "unreadable":
+				src.Failures["stat --format=%F|%U|%G|%a|%h -- "+DTUCertificatePath] = "PRIVATE DO NOT RENDER"
+				want = Unknown
+			case "unsafe parent":
+				src.Commands["stat --format=%U|%G|%a -- "+dtuCertificateDir] = []byte("root|root|777")
+				want = Unknown
+			case "symlink":
+				src.Commands["stat --format=%F|%U|%G|%a|%h -- "+DTUCertificatePath] = []byte("symbolic link|root|root|777|1")
+				want = Unknown
+			case "missing package":
+				in.Facts.Packages.Value = nil
+				want = Blocked
+			case "unselected":
+				in.Resolved.Components = nil
+			case "root":
+				in.Facts.User.Value.Name = "root"
+				want = Blocked
+			}
+			tasks := withoutMachineTasks(Inspect(src, in))
+			if mode == "unselected" {
+				if len(tasks) != 0 {
+					t.Fatal(tasks)
+				}
+				return
+			}
+			task := dtuCertificateTask(src, in)
+			if task.Status != want || (task.Action != nil) != (want == Pending) {
+				t.Fatalf("unexpected task: %+v", task)
+			}
+			for scenario, detail := range map[string]string{"wrong owner": "ownership is alice:root", "wrong mode": "permissions are 0600", "wrong label": "SELinux label needs repair on " + DTUCertificatePath, "wrong directory label": "SELinux label needs repair on " + dtuCertificateDir, "verification failure": "cannot verify the SELinux label"} {
+				if mode == scenario && !strings.Contains(task.Detail, detail) {
+					t.Fatalf("missing precise reason %q: %s", detail, task.Detail)
+				}
+			}
+			encoded, _ := json.Marshal(task)
+			if bytes.Contains(encoded, []byte("PRIVATE")) || bytes.Contains(encoded, []byte("BEGIN CERTIFICATE")) {
+				t.Fatal("file contents leaked")
+			}
+		})
+	}
+}
+
+type dtuSource struct {
+	*nativetest.FakeSource
+	t       *testing.T
+	data    []byte
+	mode    string
+	streams []string
+	staged  string
+}
+
+func (s *dtuSource) Stream(_, _ io.Writer, name string, args ...string) error {
+	s.streams = append(s.streams, nativetest.Key(name, args...))
+	if name != "sudo" || args[0] != "--" {
+		s.t.Fatal("unexpected native mutation")
+	}
+	if strings.Contains(strings.Join(args, " "), "internal system-file") {
+		s.staged = args[len(args)-1]
+		data, err := os.ReadFile(s.staged)
+		if err != nil {
+			s.t.Fatal(err)
+		}
+		info, err := os.Stat(s.staged)
+		if err != nil || info.Mode().Perm() != 0600 {
+			s.t.Fatal("unsafe staging")
+		}
+		var payload apply.FilePayload
+		if err := json.Unmarshal(data, &payload); err != nil {
+			s.t.Fatal(err)
+		}
+		if payload.Change.Target != DTUCertificatePath || !bytes.Equal(payload.Change.After.Content, s.data) || payload.Change.After.Mode != "0644" || payload.Change.After.Owner != "root" || payload.Change.After.Group != "root" {
+			s.t.Fatal("wrong file payload")
+		}
+		if s.mode == "write failure" {
+			return errors.New("fixture write failure")
+		}
+		if s.mode != "no effect" {
+			dtuInstalled(s.FakeSource, s.data)
+		}
+		if s.mode == "wrong owner" {
+			s.Commands["stat --format=%F|%U|%G|%a|%h -- "+DTUCertificatePath] = []byte("regular file|alice|root|644|1")
+		}
+		if s.mode == "wrong mode" {
+			s.Commands["stat --format=%F|%U|%G|%a|%h -- "+DTUCertificatePath] = []byte("regular file|root|root|600|1")
+		}
+		if s.mode == "changed after write" {
+			s.Files[DTUCertificatePath] = []byte("foreign")
+		}
+		return nil
+	}
+	if nativetest.Key(name, args...) != "sudo -- /usr/sbin/restorecon -- "+dtuCertificateDir+" "+DTUCertificatePath {
+		s.t.Fatal("unexpected label target")
+	}
+	if s.mode == "label failure" {
+		return errors.New("fixture label failure")
+	}
+	if s.mode == "label no effect" {
+		dtuWrongLabel(s.FakeSource, DTUCertificatePath)
+	}
+	if s.mode == "verification failure" {
+		s.Commands["/usr/sbin/matchpathcon -V -- "+DTUCertificatePath] = nil
+		s.Failures["/usr/sbin/matchpathcon -V -- "+DTUCertificatePath] = "PRIVATE DO NOT RENDER"
+	}
+	return nil
+}
+
+func TestDTUInstallationDriftAndVerification(t *testing.T) {
+	for _, mode := range []string{"success", "disabled SELinux", "bundle load failure", "wrong checksum", "canceled", "drift", "write failure", "label failure", "label no effect", "verification failure", "wrong owner", "wrong mode", "no effect", "changed after write"} {
+		t.Run(mode, func(t *testing.T) {
+			in, base, data := dtuFixture(t)
+			if mode == "disabled SELinux" {
+				base.Commands["/usr/sbin/getenforce"] = []byte("Disabled")
+			}
+			task := dtuCertificateTask(base, in)
+			src := &dtuSource{FakeSource: base, t: t, data: data, mode: mode}
+			fetched := 0
+			dtuLoad = func(context.Context) ([]byte, error) {
+				fetched++
+				switch mode {
+				case "bundle load failure":
+					return nil, errors.New("offline")
+				case "wrong checksum":
+					return []byte("not the certificate"), nil
+				case "drift":
+					dtuInstalled(base, []byte("foreign"))
+				}
+				return data, nil
+			}
+			ctx := t.Context()
+			if mode == "canceled" {
+				canceled, cancel := context.WithCancel(ctx)
+				cancel()
+				ctx = canceled
+			}
+			err := RunDTUCertificate(ctx, src, io.Discard, io.Discard, task)
+			success := mode == "success" || mode == "disabled SELinux"
+			if (err == nil) != success {
+				t.Fatalf("result: %v", err)
+			}
+			for scenario, detail := range map[string]string{"wrong owner": "ownership is alice:root", "wrong mode": "permissions are 0600", "label no effect": "SELinux label needs repair on " + DTUCertificatePath, "verification failure": "cannot verify the SELinux label", "no effect": "missing after installation", "changed after write": "checksum changed after installation"} {
+				if mode == scenario && (err == nil || !strings.Contains(err.Error(), detail)) {
+					t.Fatalf("missing precise failure %q: %v", detail, err)
+				}
+			}
+			if mode == "canceled" && fetched != 0 {
+				t.Fatal("bundle load after cancellation")
+			}
+			if (mode == "bundle load failure" || mode == "wrong checksum" || mode == "canceled" || mode == "drift") && len(src.streams) != 0 {
+				t.Fatal("mutation before validation")
+			}
+			if mode == "disabled SELinux" && len(src.streams) != 1 {
+				t.Fatal("labeling on disabled SELinux")
+			}
+			if src.staged != "" {
+				if _, err := os.Stat(filepath.Dir(src.staged)); !errors.Is(err, os.ErrNotExist) {
+					t.Fatal("staged payload remains")
+				}
+			}
+			if success && dtuCertificateTask(base, in).Status != Complete {
+				t.Fatal("install did not converge")
+			}
+		})
+	}
+}
+
+func TestDTUBundledCertificateAndKnownUpgrade(t *testing.T) {
+	in, src, _ := dtuFixture(t)
+	data, err := loadDTUCertificate(t.Context())
+	if err != nil || validateDTUCertificate(data, dtuNow()) != nil {
+		t.Fatal("invalid embedded certificate", err)
+	}
+	old, err := os.ReadFile("testdata/dtu-eduroam.pem")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dtuInstalled(src, old)
+	if task := dtuCertificateTask(src, in); task.Status != Pending || task.Action == nil {
+		t.Fatal("known old certificate cannot be upgraded", task)
+	}
+}
+
+func TestDTUCertificatePinValidityAndForgedActions(t *testing.T) {
+	in, src, data := dtuFixture(t)
+	if err := validateDTUCertificate(data, dtuNow()); err != nil {
+		t.Fatal(err)
+	}
+	for _, now := range []time.Time{time.Date(2010, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2027, 12, 2, 11, 29, 11, 0, time.UTC)} {
+		if validateDTUCertificate(data, now) == nil {
+			t.Fatal("accepted outside bundle validity")
+		}
+	}
+	for _, payload := range [][]byte{nil, []byte("<html>error</html>"), append(bytes.Clone(data), 'x')} {
+		if validateDTUCertificate(payload, dtuNow()) == nil {
+			t.Fatal("accepted unpinned data")
+		}
+	}
+	for _, mode := range []string{"id", "kind", "digest", "argv", "commands", "status"} {
+		task := dtuCertificateTask(src, in)
+		switch mode {
+		case "id":
+			task.ID = "other"
+		case "kind":
+			task.Action.Kind = OpenApplication
+		case "digest":
+			task.Action.DTU.Observed = "invalid"
+		case "argv":
+			task.Action.Argv = []string{"touch", "/tmp/other"}
+		case "commands":
+			task.Action.Commands = [][]string{{"true"}}
+		case "status":
+			task.Status = Complete
+		}
+		if _, err := DTUCommands(task); err == nil {
+			t.Fatal("accepted forged action", mode)
+		}
+	}
+}

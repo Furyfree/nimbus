@@ -1,0 +1,59 @@
+{
+  "schema": 1,
+  "notes": [
+    {
+      "id": "nimbus.postinstall",
+      "revision": 1,
+      "text": "Review remaining setup with nimbus postinstall status; task help explains prerequisites and native actions.",
+      "profiles": []
+    },
+    {
+      "id": "dotfiles.shell",
+      "revision": 1,
+      "text": "Open a new terminal after installation to load shell and Mise configuration.",
+      "profiles": [],
+      "requires_dotfiles": true
+    },
+    {
+      "id": "dotfiles.agents",
+      "revision": 1,
+      "text": "Mise installs the agent CLIs and AI Usage. Sign into Claude, Grok and Codex, then connect Codex and OpenRouter in OpenCode. See the Chezmoi README first-login checklist.",
+      "profiles": [],
+      "requires_dotfiles": true
+    },
+    {
+      "id": "dotfiles.onepassword",
+      "revision": 1,
+      "text": "Open 1Password, sign in and enable Integrate with 1Password CLI in Settings > Developer. Enable the SSH agent only when you opt into SSH integration. Skip manual SSH/Git file edits; Chezmoi owns them.",
+      "profiles": [],
+      "requires_dotfiles": true
+    },
+    {
+      "id": "dotfiles.noctalia",
+      "revision": 1,
+      "text": "Log into the Noctalia desktop to generate colors. Existing GUI overrides take precedence over managed settings; see Chezmoi's NOCTALIA.md.",
+      "profiles": [
+        "hyprland-noctalia"
+      ],
+      "requires_dotfiles": true
+    },
+    {
+      "id": "dotfiles.brave",
+      "revision": 1,
+      "text": "Select Use GTK in Brave Appearance settings to follow the desktop theme.",
+      "profiles": [
+        "hyprland-noctalia"
+      ],
+      "requires_dotfiles": true
+    },
+    {
+      "id": "dotfiles.fastmail",
+      "revision": 1,
+      "text": "Add calendar credentials in Noctalia; they stay in the local keyring. See Chezmoi's NOCTALIA.md for DAV settings.",
+      "profiles": [
+        "hyprland-noctalia"
+      ],
+      "requires_dotfiles": true
+    }
+  ]
+}

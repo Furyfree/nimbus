@@ -46,6 +46,31 @@ func TestPlanRemovesDeclaredPackages(t *testing.T) {
 	}
 }
 
+func TestSwitchingToZshKeepsSystemBash(t *testing.T) {
+	c, r := repository(t)
+	c.Machines["desktop"].Shell = "zsh"
+	desired, errs := definitions.Resolve(c, "desktop")
+	if len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	// Keep the package fixture's isolation from unrelated system resources.
+	r.Packages = desired.Packages
+	src, facts := readyHost(t, c)
+	in := Inputs{Resolved: r, Root: c.Definitions(), Definitions: c.Digest(), Facts: facts,
+		Applied: applied("package:dnf:bash"), Source: src}
+	p := answerInstall(t, src, in, nil)
+	if op := find(p, "package:dnf:bash"); op == nil || op.Action != ActionKeep {
+		t.Fatalf("system Bash must stay installed: %+v", op)
+	}
+	if op := find(p, "packages:remove-owned"); op != nil {
+		t.Fatalf("shell switch schedules removal: %+v", op)
+	}
+	op := find(p, "packages:install")
+	if op == nil || op.Blocked != "" || !slices.Contains(op.Items, "dnf:zsh") || !slices.Contains(op.ItemPaths["dnf:zsh"], "machine:shell") {
+		t.Fatalf("missing reviewed Zsh install: %+v", op)
+	}
+}
+
 func TestAppliedStateShapesThePlan(t *testing.T) {
 	c, r := repository(t)
 	src, f := readyHost(t, c)

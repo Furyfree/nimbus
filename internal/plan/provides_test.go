@@ -70,8 +70,8 @@ func TestProvidesRequireEvidenceForTheReviewedPackage(t *testing.T) {
 							desired.Packages = append(desired.Packages, definitions.ResolvedPackage{Canonical: "dnf:" + name, Prefix: "dnf", Name: name})
 						}
 						src := &nativetest.FakeSource{Commands: map[string][]byte{
-							nativetest.Key("dnf5", append([]string{"--assumeno", "--cacheonly", "install"}, tt.requests...)...): previewText(rows),
-							nativetest.Key("dnf5", "--cacheonly", "check-upgrade"):                                              nil,
+							nativetest.Key("dnf5", append([]string{"--assumeno", "--cacheonly", "do", "--action=install", "--from-repo=fedora"}, tt.requests...)...): previewText(rows),
+							nativetest.Key("dnf5", "--cacheonly", "check-upgrade"): nil,
 						}, Failures: map[string]string{}}
 						for request, evidence := range tt.evidence {
 							key := nativetest.Key("dnf5", "--cacheonly", "repoquery", "--available", "--whatprovides", request, "--queryformat", "%{name}|%{arch}|%{evr}|%{repoid}\\n")
@@ -80,7 +80,7 @@ func TestProvidesRequireEvidenceForTheReviewedPackage(t *testing.T) {
 								src.Failures[key] = tt.queryErr
 							}
 						}
-						p, err := Build(Inputs{Resolved: desired, Facts: &inspect.Facts{}, Source: src})
+						p, err := Build(Inputs{Resolved: desired, Facts: &inspect.Facts{Repositories: inspect.Section[[]inspect.Repository]{Value: []inspect.Repository{{ID: "fedora", Enabled: true}}}}, Source: src})
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -119,10 +119,10 @@ Operation aborted by the user.
 		desired.Packages = append(desired.Packages, definitions.ResolvedPackage{Canonical: "dnf:" + name, Prefix: "dnf", Name: name})
 	}
 	src := &nativetest.FakeSource{Commands: map[string][]byte{
-		nativetest.Key("dnf5", "--assumeno", "--cacheonly", "install", "clang", "gcc", "gcc-c++", "make"): []byte(preview),
-		nativetest.Key("dnf5", "--cacheonly", "check-upgrade"):                                            nil,
+		nativetest.Key("dnf5", "--assumeno", "--cacheonly", "do", "--action=install", "--from-repo=fedora,updates", "clang", "gcc", "gcc-c++", "make"): []byte(preview),
+		nativetest.Key("dnf5", "--cacheonly", "check-upgrade"): nil,
 	}}
-	p, err := Build(Inputs{Resolved: desired, Facts: &inspect.Facts{}, Source: src})
+	p, err := Build(Inputs{Resolved: desired, Facts: &inspect.Facts{Repositories: inspect.Section[[]inspect.Repository]{Value: []inspect.Repository{{ID: "fedora", Enabled: true}, {ID: "updates", Enabled: true}}}}, Source: src})
 	if err != nil {
 		t.Fatal(err)
 	}

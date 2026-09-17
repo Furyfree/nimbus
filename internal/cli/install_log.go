@@ -299,7 +299,16 @@ type installSource struct {
 // Chezmoi, arbitrary maker scripts, shell commands and credential tools are
 // metadata-only; their output may include rendered secrets.
 func publicInstallCommand(name string, args []string) bool {
+	if name == inspect.GreeterBinary {
+		return len(args) == 3 && args[0] == "passwordless-sync" && (args[1] == "status" || args[1] == "enable")
+	}
+	if name == inspect.GreeterHelper {
+		return slices.Equal(args, []string{"--supports", "secure-sync-v1"})
+	}
 	if name == "sudo" {
+		if len(args) > 1 && args[0] == "--" && args[1] == inspect.GreeterBinary {
+			return publicInstallCommand(args[1], args[2:])
+		}
 		if len(args) == 0 {
 			return false
 		}
@@ -315,6 +324,9 @@ func publicInstallCommand(name string, args []string) bool {
 	if name == "systemd-tmpfiles" {
 		return slices.Equal(args, []string{"--create", "/etc/tmpfiles.d/nimbus-noctalia-greeter.conf"})
 	}
+	if name == "dnf5" && slices.ContainsFunc(args, func(arg string) bool { return strings.HasPrefix(arg, "--dump-") }) {
+		return false
+	}
 	return slices.Contains([]string{"dnf5", "rpm", "rpmkeys", "gpg", "flatpak"}, name)
 }
 
@@ -327,14 +339,17 @@ func (s installSource) Run(name string, args ...string) ([]byte, error) {
 	s.log.event("command start %s (inspection)", label)
 	var output []byte
 	var err error
-	if exec, ok := s.Source.(native.ExecSource); ok && publicInstallCommand(name, args) {
-		output, err = exec.RunLogged(s.log, name, args...)
-	} else {
-		output, err = s.Source.Run(name, args...)
-		if publicInstallCommand(name, args) {
-			_, _ = s.log.Write(output)
+	err = native.Activity(s.terminal, label, func() error {
+		if exec, ok := s.Source.(native.ExecSource); ok && publicInstallCommand(name, args) {
+			output, err = exec.RunLogged(s.log, name, args...)
+		} else {
+			output, err = s.Source.Run(name, args...)
+			if publicInstallCommand(name, args) {
+				_, _ = s.log.Write(output)
+			}
 		}
-	}
+		return err
+	})
 	s.log.commandEnd(label, start, err)
 	probe := name == "sudo" && slices.Equal(args, []string{"-n", "-v"}) ||
 		name == "systemctl" && len(args) > 0 && args[0] == "is-active"
@@ -349,10 +364,15 @@ func (s installSource) Stream(out, errOut io.Writer, name string, args ...string
 	}
 	s.log.event("command start %s", label)
 	out, errOut = unlogged(out), unlogged(errOut)
-	if publicInstallCommand(name, args) {
-		out, errOut = installWriter{out, s.log}, installWriter{errOut, s.log}
+	var err error
+	if executor, ok := s.Source.(native.ExecSource); ok && publicInstallCommand(name, args) {
+		err = executor.StreamLogged(out, errOut, s.log, name, args...)
+	} else {
+		if publicInstallCommand(name, args) {
+			out, errOut = installWriter{out, s.log}, installWriter{errOut, s.log}
+		}
+		err = s.Source.Stream(out, errOut, name, args...)
 	}
-	err := s.Source.Stream(out, errOut, name, args...)
 	s.log.commandEnd(label, start, err)
 	return s.commandError(name, args, err, true)
 }

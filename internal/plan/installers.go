@@ -34,6 +34,12 @@ func (b *builder) userTools() []Operation {
 			op.Action, op.Summary = ActionKeep, fmt.Sprintf("%s is installed at ~/%s", in.Component, in.Installer.Binary)
 		} else {
 			op.Action, op.Summary = ActionInstall, fmt.Sprintf("install %s from %s as the user", in.Component, in.Installer.URL)
+			for _, effect := range in.Installer.Effects {
+				op.Notes = append(op.Notes, in.Component+" installer: "+effect)
+			}
+			if len(in.Installer.Effects) > 0 {
+				op.Risk = RiskMedium
+			}
 			op.Steps = []Step{
 				{Description: "download " + in.Installer.URL + " to the stage directory and show its sha256"},
 				{Description: "run the installer as the user", Argv: []string{"sh", InstallerScript}},

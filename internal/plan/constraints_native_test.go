@@ -1,6 +1,8 @@
 package plan
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,22 +28,30 @@ func TestNativeDNFConstraints(t *testing.T) {
 	if len(r.Constraints) != 2 {
 		t.Fatal("expected the selected desktop version families")
 	}
-	dir := t.TempDir()
+	var policy []byte
 	for _, f := range r.Files {
 		if f.Target == definitions.VersionlockPath {
-			if err := os.WriteFile(filepath.Join(dir, "versionlock.toml"), f.Content, 0644); err != nil {
-				t.Fatal(err)
-			}
+			policy = f.Content
 		}
 	}
-	if err := os.WriteFile(filepath.Join(dir, "20-nimbus.conf"), []byte(DNFDropIn(definitions.Root{}, r.Constraints...)), 0644); err != nil {
-		t.Fatal(err)
-	}
-	script, err := filepath.Abs(filepath.Join("..", "..", "tools", "dnf-constraints", "verify.py"))
+	script, err := os.ReadFile(filepath.Join("..", "..", "tools", "dnf-constraints", "verify.py"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.CommandContext(t.Context(), "docker", "run", "--rm", "--network", "none", "-v", dir+":/policy:ro", "-v", script+":/verify.py:ro", image, "python3", "/verify.py")
+	input, err := json.Marshal(map[string]string{"script": string(script), "policy": string(policy), "config": string(DNFDropIn(definitions.Root{}, r.Constraints...))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Transfer fixtures through stdin; never relabel or expose host files to the
+	// container, and do not depend on an image's default entrypoint.
+	loader := `import json,sys,pathlib
+payload=json.load(sys.stdin)
+pathlib.Path('/policy').mkdir()
+pathlib.Path('/policy/versionlock.toml').write_text(payload['policy'])
+pathlib.Path('/policy/20-nimbus.conf').write_text(payload['config'])
+exec(compile(payload['script'],'verify.py','exec'))`
+	cmd := exec.CommandContext(t.Context(), "docker", "run", "--rm", "--network", "none", "-i", "--entrypoint", "python3", image, "-c", loader)
+	cmd.Stdin = bytes.NewReader(input)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("native DNF constraints: %v\n%s", err, out)

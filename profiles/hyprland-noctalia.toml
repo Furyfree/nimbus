@@ -14,8 +14,10 @@ packages = [
   "celluloid",
   "mpv",
   "obs-studio",
-  "pinta",
+  "flatpak:com.github.PintaProject.Pinta",
   "zathura",
+  # Zathura's core needs a format plugin to read PDFs.
+  "zathura-pdf-poppler",
   "libreoffice",
   "gnome-disk-utility",
   "flatseal",
@@ -51,7 +53,7 @@ packages = [
   "libnotify",
   "socat",
   "terra:gpu-screen-recorder",
-  "terra:librepods",
+  "librepods:librepods",
 ]
 
 components = [

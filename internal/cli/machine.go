@@ -12,6 +12,7 @@ import (
 
 	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/output"
 	"github.com/Furyfree/nimbus/internal/plan"
 	"github.com/Furyfree/nimbus/internal/selector"
 )
@@ -92,6 +93,7 @@ var (
 			return "", err
 		}
 		line, err := bufio.NewReader(in).ReadString('\n')
+		output.AfterPrompt(out)
 		if err != nil && (!errors.Is(err, io.EOF) || strings.TrimSpace(line) == "") {
 			return "", err
 		}
@@ -168,7 +170,7 @@ func newMachineDialog(in io.Reader, out io.Writer, c *definitions.Checkout, hw i
 	if err != nil {
 		return nil, err
 	}
-	m := &definitions.Machine{Schema: definitions.CurrentSchema, ID: id, Hardware: hw.Product, Profiles: slices.Sorted(slices.Values(profiles)), Components: slices.Sorted(slices.Values(components)), Packages: []string{}, PackageExclusions: []string{}}
+	m := &definitions.Machine{Schema: definitions.CurrentSchema, ID: id, Hardware: hw.Product, Shell: "bash", Profiles: slices.Sorted(slices.Values(profiles)), Components: slices.Sorted(slices.Values(components)), Packages: []string{}, PackageExclusions: []string{}}
 	switch {
 	case f.noDotfiles:
 	case f.dotfiles != "":

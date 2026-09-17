@@ -75,6 +75,12 @@ func resolveResources(c *Checkout, r *Resolved, errs *ErrorList) {
 	units, groups := map[string]string{}, map[string]string{}
 	for _, rc := range r.Components {
 		comp := c.Components[rc.ID]
+		if comp.GreeterPasswordlessSync {
+			if r.GreeterPasswordlessSync != "" {
+				errs.Add("components/"+rc.ID+".toml", "greeter_passwordless_sync has more than one owner")
+			}
+			r.GreeterPasswordlessSync = rc.ID
+		}
 		for _, s := range comp.Services {
 			if prev, ok := units[s.Unit]; ok {
 				errs.Add("components/"+rc.ID+".toml", "service %s also belongs to %s", s.Unit, prev)
@@ -99,10 +105,23 @@ func resolveResources(c *Checkout, r *Resolved, errs *ErrorList) {
 			r.DefaultTarget = comp.DefaultTarget
 		}
 	}
+	if r.GreeterPasswordlessSync != "" {
+		for _, name := range []string{"noctalia", "noctalia-greeter"} {
+			if !slices.ContainsFunc(r.Packages, func(p ResolvedPackage) bool { return p.Name == name }) {
+				errs.Add("components/"+r.GreeterPasswordlessSync+".toml", "greeter_passwordless_sync requires selected package %s", name)
+			}
+		}
+	}
 	slices.SortFunc(r.Services, func(a, b ResolvedService) int { return cmp.Compare(a.Unit, b.Unit) })
 	slices.SortFunc(r.Groups, func(a, b ResolvedGroup) int {
 		return cmp.Compare(a.Name+":"+a.User, b.Name+":"+b.User)
 	})
+}
+
+// GreeterAppearanceTarget identifies files whose changes require a new greetd
+// mount namespace. Restarting the active display manager is never automatic.
+func GreeterAppearanceTarget(target string) bool {
+	return target == "/etc/noctalia/greeter.toml" || target == "/etc/systemd/system/greetd.service.d/nimbus.conf"
 }
 
 // LegacyRecoveryTarget permits cleanup of the two retired session files.

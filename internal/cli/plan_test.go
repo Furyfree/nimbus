@@ -13,6 +13,25 @@ import (
 	"github.com/Furyfree/nimbus/internal/snapper"
 )
 
+func TestSourceReviewShowsIncomingAndOutgoingPackages(t *testing.T) {
+	tx := &plan.Transaction{Download: "1 MiB", Packages: []plan.TxPackage{
+		{Name: "steam", Arch: "x86_64", EVR: "1-1", Repository: "rpmfusion-nonfree", Section: "reinstalling"},
+		{Name: "steam", Arch: "x86_64", EVR: "1-1", Repository: "nimbus-terra", Section: plan.SectionReplaced},
+	}}
+	p := &plan.Plan{Machine: "test", Complete: true, Operations: []plan.Operation{{ID: "package:rpmfusion-nonfree:steam", Kind: plan.KindPackage, Action: plan.ActionRepair, Summary: "correct Steam source", Transaction: tx}}}
+	for _, out := range []string{string(renderPlan(p, false, false)), string(renderPlan(&plan.Plan{Updates: plan.Updates{Transaction: tx}}, false, true))} {
+		for _, want := range []string{"reinstalling: steam.x86_64 1-1 (rpmfusion-nonfree)", "replaced: steam.x86_64 1-1 (nimbus-terra)", "download: 1 MiB"} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("preview omitted %q:\n%s", want, out)
+			}
+		}
+	}
+	upgrade := systemUpgradePlan(p)
+	if upgrade.Complete || !strings.Contains(upgrade.Operations[0].Blocked, "run nimbus sync first") {
+		t.Fatalf("upgrade bypassed source repair: %+v", upgrade)
+	}
+}
+
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", ".."))
@@ -41,8 +60,16 @@ func TestPlanRendersSectionsAndReportsIncomplete(t *testing.T) {
 			t.Errorf("plan output lacks %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "sudo ") || strings.Contains(out, "sha256:") {
+	if strings.Contains(out, "sha256:") {
 		t.Fatalf("the plan is for reading, not commands and digests:\n%s", out)
+	}
+	// Vendor side effects must also be visible in the ordinary approval view,
+	// including when another operation prevents this plan from proceeding.
+	preview := strings.Join(strings.Fields(out), " ")
+	for _, effect := range []string{"zeron installer:", "zeron.service", "loginctl enable-linger", "sudo -n", "after logout"} {
+		if !strings.Contains(preview, effect) {
+			t.Errorf("installer disclosure missing %q:\n%s", effect, out)
+		}
 	}
 	if strings.Contains(out, "prune ") {
 		t.Fatal("prune section shown without --prune")
@@ -113,6 +140,23 @@ func TestStatusCountsRetainedSourcesAsManaged(t *testing.T) {
 	}
 }
 
+func TestStatusSeparatesPackageWorkFromSystemChecksAndChanges(t *testing.T) {
+	s := &selected{Resolved: &definitions.Resolved{Machine: "vm"}}
+	p := &plan.Plan{Machine: "vm", Complete: true, Operations: []plan.Operation{
+		{ID: "packages:install", Kind: plan.KindPackage, Action: plan.ActionInstall, Items: []string{"dnf:git", "dnf:curl"}},
+		{ID: "flatpak:org.example.App", Kind: plan.KindFlatpak, Action: plan.ActionInstall},
+		{ID: "package:rpmfusion-nonfree:steam", Kind: plan.KindPackage, Action: plan.ActionRepair},
+		{ID: "greeter-sync:test", Kind: plan.KindGreeterSync, Action: plan.ActionRepair},
+		{ID: "file:/etc/example", Kind: plan.KindFile, Action: plan.ActionInstall},
+		{ID: "service:example.service", Kind: plan.KindService, Action: plan.ActionEnable},
+		{ID: "group:example:test", Kind: plan.KindGroup, Action: plan.ActionInstall},
+	}}
+	st := summarize(s, p)
+	if st.ToInstall != 4 || st.Pending != 4 || st.Blocked != 0 || !st.Complete {
+		t.Fatalf("package work and system work must be counted separately: %+v", st)
+	}
+}
+
 func TestStatusReportsSnapperDriftWithoutMutation(t *testing.T) {
 	for _, mode := range []string{"unchanged", "settings", "setup"} {
 		t.Run(mode, func(t *testing.T) {
@@ -180,12 +224,12 @@ func TestPlanReadsTheCacheAndARunRefreshesIt(t *testing.T) {
 	withSource(t, src)
 	// Plan-only never refreshes: the failure is not even reached.
 	code, out, errOut := run(t, "sync", "-p", "--checkout", root, "--machine", "laptop")
-	if code != ExitFailure || strings.Contains(errOut, "metadata") || !strings.Contains(out, "from the local metadata cache") {
+	if code != ExitFailure || strings.Contains(errOut, "metadata") || !strings.Contains(out, "Cached metadata") {
 		t.Fatalf("sync -p: %d %q\n%s", code, errOut, out)
 	}
-	// A run refreshes first; a failed refresh is reported, not fatal.
+	// A run refreshes first; a failed refresh stops the run.
 	code, out, errOut = run(t, "sync", "-y", "-n", "--checkout", root, "--machine", "laptop")
-	if code != ExitFailure || !strings.Contains(errOut, "metadata not refreshed: no network") {
+	if code != ExitFailure || !strings.Contains(out+errOut, "metadata refresh failed: no network") {
 		t.Fatalf("sync without network: %d %q\n%s", code, errOut, out)
 	}
 }

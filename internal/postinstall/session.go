@@ -77,16 +77,30 @@ func rebootTask(src native.Source, receipts []state.Receipt) Task {
 
 func logoutTask(src native.Source, in Inputs, receipts []state.Receipt) Task {
 	t := Task{
-		ID: "logout", Owner: "nimbus", Title: "Refresh session group membership",
+		ID: "logout", Owner: "nimbus", Title: "Refresh changed session settings",
 		Status: Unknown, Detail: "Receipts request a fresh login, but current group membership could not be established.", Logout: true,
-		Prerequisites: []string{"Nimbus has a verified group change receipt for the invoking user."},
+		Prerequisites: []string{"Nimbus has a verified change receipt requiring a new session."},
 		Instructions:  []string{"Save your work, log out of the desktop, and log back in.", "Other already-running sessions may also need to be restarted."},
-		Verification:  "The invoking process has each selected group recorded as requiring a new login.",
+		Verification:  "Check current groups directly. A later boot proves other recorded session changes have activated; otherwise session activation remains unverified.",
 		Recovery:      "Use password login on a TTY if the graphical session cannot start; inspect groups before changing configuration.",
 	}
 	if !in.Facts.User.Known() || in.Facts.User.Value.Name == "" {
 		return t
 	}
+	// Group membership can be checked directly. Other session changes (such as
+	// the login shell) are known active after a later boot; otherwise avoid
+	// claiming anything about an uninspected desktop session's start time.
+	var sessionChanges []state.Receipt
+	var groupReceipts []state.Receipt
+	for _, receipt := range receipts {
+		if receipt.Provider == "group" {
+			groupReceipts = append(groupReceipts, receipt)
+		} else {
+			sessionChanges = append(sessionChanges, receipt)
+		}
+	}
+	sessionVerified := len(sessionChanges) == 0 || rebootTask(src, sessionChanges).Status == Complete
+	receipts = groupReceipts
 	var groups []string
 	for _, receipt := range receipts {
 		parts := strings.Split(receipt.Resource, ":")
@@ -94,6 +108,9 @@ func logoutTask(src native.Source, in Inputs, receipts []state.Receipt) Task {
 			return t
 		}
 		groups = append(groups, parts[1])
+	}
+	if len(groups) == 0 {
+		return sessionLogoutResult(t, sessionVerified)
 	}
 	out, err := src.Run("id", "-nG")
 	if err != nil || len(strings.Fields(string(out))) == 0 {
@@ -117,6 +134,14 @@ func logoutTask(src native.Source, in Inputs, receipts []state.Receipt) Task {
 			return t
 		}
 	}
-	t.Status, t.Detail, t.Logout = Complete, "The invoking process has the recorded groups. Other already-running sessions were not inspected.", false
+	return sessionLogoutResult(t, sessionVerified)
+}
+
+func sessionLogoutResult(t Task, verified bool) Task {
+	if verified {
+		t.Status, t.Detail, t.Logout = Complete, "Recorded groups are active; other recorded session changes predate the current boot. Other sessions were not inspected.", false
+	} else {
+		t.Status, t.Detail = Unknown, "A recorded session change (such as the login shell) needs a fresh login; the session start has not been verified. Group checks alone cannot clear this notice."
+	}
 	return t
 }

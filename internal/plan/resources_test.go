@@ -176,7 +176,7 @@ func TestServicePlanningRetainsObservationFailures(t *testing.T) {
 			src.Failures[nativetest.Key("readlink", "--", "/etc/systemd/system/display-manager.service")] = "ownership inspection unavailable"
 			if tc.pending {
 				b.in.Resolved.Packages = []definitions.ResolvedPackage{{Name: "greetd", Prefix: "dnf", Canonical: "dnf:greetd"}}
-				src.Commands[nativetest.Key("dnf5", "--assumeno", "--cacheonly", "install", "greetd")] = previewText([]TxPackage{{Name: "greetd", Arch: "x86_64", EVR: "1-1", Repository: "fedora", Section: "installing"}})
+				src.Commands[nativetest.Key("dnf5", "--assumeno", "--cacheonly", "do", "--action=install", "--from-repo=fedora", "greetd")] = previewText([]TxPackage{{Name: "greetd", Arch: "x86_64", EVR: "1-1", Repository: "fedora", Section: "installing"}})
 			}
 			p, err := Build(b.in)
 			if err != nil {
@@ -599,5 +599,21 @@ func TestRetiredRecoveryFilesRequireUnchangedOwnership(t *testing.T) {
 				t.Fatalf("completed cleanup repeated: %+v", ops)
 			}
 		})
+	}
+}
+
+func TestGreeterAppearanceChangeExplainsDeferredActivation(t *testing.T) {
+	for _, target := range []string{"/etc/noctalia/greeter.toml", "/etc/systemd/system/greetd.service.d/nimbus.conf", "/etc/other.conf"} {
+		b, _ := resourceBuilder()
+		b.in.Resolved.Files = []definitions.ResolvedFile{{Target: target, Content: []byte("new"), Owner: "root", Group: "root", Mode: "0644"}}
+		op := b.systemResources(nil)[0]
+		if op.Blocked != "" || strings.Contains(strings.Join(op.Notes, " "), "after reboot") != definitions.GreeterAppearanceTarget(target) {
+			t.Fatalf("activation plan: %+v", op)
+		}
+		for _, step := range op.Steps {
+			if strings.Contains(strings.Join(step.Argv, " "), "restart") {
+				t.Fatal("restarts display manager")
+			}
+		}
 	}
 }

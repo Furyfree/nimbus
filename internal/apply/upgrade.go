@@ -10,6 +10,7 @@ import (
 
 	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/plan"
 )
 
 // Upgrade brings the installed system current through the native tools,
@@ -29,7 +30,15 @@ func Upgrade(opts Options, root definitions.Root) *Result {
 		r.Failures = append(r.Failures, Failure{ID: r.Failed, Error: r.Error})
 		return r
 	}
-	installed, err := ex.packageTransaction([]string{"dnf5", "-y", "upgrade"}, opts.UpgradePreview)
+	command := opts.UpgradeCommand
+	if len(command) == 0 {
+		command = []string{"upgrade"}
+	}
+	var policies []plan.PackageSources
+	if opts.PackageSources != nil {
+		policies = append(policies, opts.PackageSources)
+	}
+	installed, err := ex.packageTransaction(append([]string{"dnf5", "--setopt=cacheonly=metadata", "-y"}, command...), opts.UpgradePreview, policies...)
 	if err == nil {
 		for _, c := range opts.Constraints {
 			found := false

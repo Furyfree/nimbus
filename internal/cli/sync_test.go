@@ -90,7 +90,7 @@ func TestSyncReportsFailedReadOnlyResults(t *testing.T) {
 		flags        syncFlags
 	}{
 		{"plan", "plan for vm", syncFlags{plan: true}},
-		{"cache note", "from the local metadata cache", syncFlags{plan: true}},
+		{"cache note", "Cached metadata", syncFlags{plan: true}},
 		{"unchanged", "nothing to do;", syncFlags{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -196,7 +196,7 @@ func TestSyncStopsWhenReplannedOutputFails(t *testing.T) {
 				t.Fatal(err)
 			}
 			src.Files[inspect.DNFDropInPath] = []byte(plan.DNFDropIn(checkout.Definitions()))
-			src.Commands["dnf5 --assumeno --cacheonly install demo"] = []byte("Repositories loaded.\nPackage Arch Version Repository Size\nInstalling:\n demo x86_64 1-1 fedora 1 KiB\n\nTransaction Summary:\n")
+			src.Commands["dnf5 --assumeno --cacheonly do --action=install --from-repo=fedora demo"] = []byte("Repositories loaded.\nPackage Arch Version Repository Size\nInstalling:\n demo x86_64 1-1 fedora 1 KiB\n\nTransaction Summary:\n")
 			out := &previewErrorWriter{after: -1, err: syscall.ENOSPC}
 			saved := newRecorder
 			t.Cleanup(func() { newRecorder = saved })
@@ -206,6 +206,7 @@ func TestSyncStopsWhenReplannedOutputFails(t *testing.T) {
 					if err := record(digest, st); err != nil {
 						return err
 					}
+					src.Commands["dnf5 --assumeno --cacheonly do --action=install --from-repo=fedora demo"] = []byte("Repositories loaded.\nPackage Arch Version Repository Size\nInstalling:\n demo x86_64 2-1 fedora 1 KiB\n\nTransaction Summary:\n")
 					out.after = 0
 					return nil
 				}
@@ -228,7 +229,7 @@ func TestSyncStopsWhenReplannedOutputFails(t *testing.T) {
 			} else if !errors.Is(err, syscall.ENOSPC) {
 				t.Fatalf("output failure = %v", err)
 			}
-			if slices.Contains(src.calls, "sudo dnf5 -y install demo") {
+			if slices.Contains(src.calls, "sudo dnf5 -y do --action=install --from-repo=fedora demo") {
 				t.Fatalf("installed packages after failed replan output: %v", src.calls)
 			}
 			applied, err := state.Read(stateRoot)
@@ -326,6 +327,7 @@ func TestSyncIncompletePlanIsRefused(t *testing.T) {
 func TestSyncStopsAtTheFirstFailedOperation(t *testing.T) {
 	root := applyEnv(t)
 	src := fixtureSource(t, root)
+	readyRepositories(t, src, root, "blesh") // Keep Brave as the deliberate first failure.
 	answerLaptopInstall(t, src, root)
 	key := filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), "nimbus", "stage", "key-brave.asc")
 	if src.Failures == nil {
@@ -358,6 +360,7 @@ func TestSyncStopsAtTheFirstFailedOperation(t *testing.T) {
 func TestSyncJSONReportsFailureWithExitOne(t *testing.T) {
 	root := applyEnv(t)
 	src := fixtureSource(t, root)
+	readyRepositories(t, src, root, "blesh") // Keep Brave as the deliberate first failure.
 	answerLaptopInstall(t, src, root)
 	withSource(t, src)
 	code, out, _ := run(t, "sync", "-n", "--checkout", root, "--machine", "laptop", "--json", "--yes")
@@ -437,7 +440,7 @@ func TestSyncShowsNewlyResolvedErasureBeforeExecuting(t *testing.T) {
 		t.Fatal(err)
 	}
 	src.Files[inspect.DNFDropInPath] = []byte(plan.DNFDropIn(checkout.Definitions()))
-	preview := "dnf5 --assumeno --cacheonly install demo"
+	preview := "dnf5 --assumeno --cacheonly do --action=install --from-repo=fedora demo"
 	initial := "Repositories loaded.\nPackage Arch Version Repository Size\nInstalling:\n demo x86_64 1-1 fedora 1 KiB\n"
 	src.Commands[preview] = []byte(initial + "\nTransaction Summary:\n")
 	saved := newRecorder
@@ -455,10 +458,10 @@ func TestSyncShowsNewlyResolvedErasureBeforeExecuting(t *testing.T) {
 	code, out, errOut := run(t, "sync", "--checkout", root, "--machine", "vm", "-n", "-y")
 	// The fake rejects the eventual package mutation; the post-preparation plan
 	// must already have exposed the newly resolved removal and retained its note.
-	if code != ExitFailure || !strings.Contains(out, "updated plan after completed operations:") || !strings.Contains(out, "unexpected-app") || !strings.Contains(out, "replanned packages:install:") {
+	if code != ExitFailure || !strings.Contains(out, "Changes to the remaining plan:") || !strings.Contains(out, "unexpected-app") || !strings.Contains(out, "updated plan: install 1 packages") {
 		t.Fatalf("unseen replan: %d %s%s", code, out, errOut)
 	}
-	if strings.Index(out, "unexpected-app") > strings.Index(out, "$ sudo dnf5 -y install demo") {
+	if strings.Index(out, "unexpected-app") > strings.Index(out, "$ sudo dnf5 -y do --action=install --from-repo=fedora demo") {
 		t.Fatal("erasure was shown only after execution")
 	}
 }

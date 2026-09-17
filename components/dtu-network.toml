@@ -1,0 +1,7 @@
+# Explicit Linux eduroam setup; sync installs prerequisites only.
+schema = 1
+id = "dtu-network"
+requires = []
+conflicts = []
+packages = ["NetworkManager", "NetworkManager-wifi", "policycoreutils", "libselinux-utils", "python3", "python3-dbus"]
+removes = []

@@ -1,21 +1,14 @@
-# Laptop display, power, battery, and fingerprint reader.
+# Laptop brightness and fingerprint reader, with shared power management.
 schema = 1
 id = "laptop-power"
 
-requires = []
+requires = ["power-management"]
 conflicts = []
 packages = [
   "brightnessctl",
-  "power-profiles-daemon",
-  "upower",
   "fprintd",
 ]
 removes = []
 
 [detect]
 chassis = "laptop"
-
-[[services]]
-unit = "power-profiles-daemon.service"
-enabled = true
-running = true

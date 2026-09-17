@@ -198,7 +198,7 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 		return rerrs[0]
 	}
 	trial := &selected{Root: root, Checkout: c, Resolved: r}
-	p, _, err := planWithState(trial, src, false)
+	p, _, err := planWithState(trial, src, false, false)
 	if err != nil {
 		return err
 	}
@@ -216,7 +216,7 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 			return err
 		}
 	}
-	if _, err := out.Write(renderPlan(p, false, false)); err != nil {
+	if _, err := out.Write(renderPlanView(p, false, false, !opts.verbose)); err != nil {
 		return fmt.Errorf("show installation plan: %w", err)
 	}
 	if _, err := fmt.Fprintln(out, "\nFrom the local metadata cache. Applying creates installation logs and runs the setup shown above."); err != nil {
@@ -237,6 +237,20 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	if err := cmd.Context().Err(); err != nil {
 		return err
 	}
+	systemResult := syncResult{Verbose: opts.verbose}
+	record, err := beginRunRecord("init", machine)
+	if err != nil {
+		return fmt.Errorf("start run record: %w", err)
+	}
+	record.Commit = p.Checkout.Commit
+	defer func() {
+		for _, step := range systemResult.Steps {
+			if step.DurationMS > 0 && slices.Contains([]string{"selection", "system installation", "dotfiles and tools"}, step.Name) {
+				record.Phases = append(record.Phases, runPhase{Name: step.Name, DurationMS: step.DurationMS})
+			}
+		}
+		retErr = finishRunRecord(cmd.ErrOrStderr(), record, &systemResult, "installation", retErr)
+	}()
 	log, err := openInstallLog()
 	if err != nil {
 		return fmt.Errorf("start installation log: %w", err)
@@ -278,7 +292,6 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	src = installSource{src, log, oldErr}
 	stageStarted := time.Now()
 	steps := []runStep{{Name: "selection", Status: "skipped"}, {Name: "system installation", Status: "skipped"}, {Name: "dotfiles and tools", Status: "skipped"}}
-	notes := &setupNoteWriter{out: oldOut}
 	active := 0
 	defer func() {
 		if retErr != nil && steps[active].Status != "failed" {
@@ -289,7 +302,16 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 		}
 		steps[active].DurationMS = time.Since(stageStarted).Milliseconds()
 		log.event("stage end name=%s status=%s elapsed_ms=%d", steps[active].Name, steps[active].Status, steps[active].DurationMS)
-		if err := errors.Join(renderRunSummary(out, "init", steps), notes.render(out)); err != nil {
+		systemResult.Steps = append(steps, systemResult.Steps...)
+		inspectFinal(newSource(), trial, &systemResult, retErr == nil, true)
+		if retErr != nil || opts.verbose {
+			systemResult.Notices = append(systemResult.Notices, "Run record: "+record.path)
+		}
+		err := systemResult.renderNamed(out, "init")
+		if err == nil {
+			err = rememberNotes(machine, systemResult.Notes)
+		}
+		if err != nil {
 			if errors.Is(retErr, reported{}) {
 				retErr = err
 			} else {
@@ -328,7 +350,7 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	} else if err != nil || latestSelector == nil || *latestSelector != *existingSelector {
 		return errors.New("selector changed during initialization; run init again")
 	}
-	freshPlan, _, err := planWithState(trial, src, false)
+	freshPlan, _, err := planWithState(trial, src, false, false)
 	if err != nil {
 		return err
 	}
@@ -360,7 +382,7 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	stageStarted = time.Now()
 	active = 1
 	flags := machineFlags{checkout: root, machine: machine}
-	if err := runSyncWith(cmd, opts, flags, syncFlags{yes: true, definitionsDigest: c.Digest(), approvedDigest: p.Digest, approvedCheckout: &p.Checkout}, lock); err != nil {
+	if err := runSyncWith(cmd, opts, flags, syncFlags{result: &systemResult, yes: true, definitionsDigest: c.Digest(), approvedDigest: p.Digest, approvedCheckout: &p.Checkout}, lock); err != nil {
 		for i := 2; i < len(steps); i++ {
 			steps[i].Detail = "system installation did not complete"
 		}
@@ -379,7 +401,7 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	stageStarted = time.Now()
 	active = 2
 	if m.Dotfiles != nil {
-		if err := chezmoiHandoff(src, notes, machine, r.Profiles, m.Dotfiles, f.onePasswordSSH); err != nil {
+		if err := chezmoiHandoff(src, oldOut, machine, r.Profiles, m.Dotfiles, f.onePasswordSSH); err != nil {
 			return err
 		}
 		steps[2].Status = "succeeded"

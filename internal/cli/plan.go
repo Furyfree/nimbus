@@ -24,9 +24,15 @@ const planWidth = 80
 
 // renderPlan writes the plan the way an installer shows its work: what
 // will be prepared, installed, upgraded, and removed, then problems. The
-// update list is plan's information; apply passes listUpdates false and
-// gets one line.
+// update list belongs to explicit upgrade/status inspection; configuration
+// reconciliation does not query it.
 func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
+	return renderPlanView(p, prune, listUpdates, false)
+}
+func renderExecutionPlan(p *plan.Plan, prune, listUpdates bool) []byte {
+	return renderPlanView(p, prune, listUpdates, true)
+}
+func renderPlanView(p *plan.Plan, prune, listUpdates, compact bool) []byte {
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "plan for %s", p.Machine)
 	if p.Checkout.Commit != "" {
@@ -44,7 +50,9 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 		case p.Snapshots.Setup:
 			fmt.Fprintln(&b, "Snapper: initialize root snapshots after this first sync. This setup run has no before snapshot.")
 		default:
-			fmt.Fprintln(&b, "Snapper: before/after root snapshots for system changes, then native number cleanup; no snapshots for previews or unchanged sync.")
+			if systemChanges(p) || listUpdates {
+				fmt.Fprintln(&b, "Snapper: snapshot system changes and apply configured retention.")
+			}
 		}
 		if storage := p.Snapshots.Reuse; storage != nil {
 			fmt.Fprintln(&b, "Snapper: reuse the empty mounted /.snapshots subvolume.")
@@ -56,15 +64,15 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 			fmt.Fprintf(&b, "Snapper settings: %s\n", strings.Join(changes, ", "))
 		}
 	}
-	if p.RepositoryReconciliation != "" {
-		fmt.Fprintf(&b, "%s\n", p.RepositoryReconciliation)
+	if p.RepositoryReconciliation != "" && (systemChanges(p) || listUpdates) {
+		fmt.Fprintln(&b, "After package changes: reconcile duplicate package sources.")
 	}
 
-	var sources, problems, notes, userTools []string
+	var sources, corrections, problems, notes, userTools []string
 	var resources []plan.Operation
 	var installTx *plan.Operation
 	var pendingNames, flatpaks, removals []string
-	adopted, kept := 0, 0
+	adopted, kept, matchingFiles := 0, 0, 0
 	noted := map[string]bool{}
 	for i := range p.Operations {
 		op := &p.Operations[i]
@@ -75,6 +83,9 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 		// The same note from several operations, such as every crate
 		// waiting for the Rust runtime, is shown once.
 		for _, n := range op.Notes {
+			if compact && ((op.Action == plan.ActionKeep && plan.IsConstraintOperation(*op)) || op.Kind == plan.KindGreeterSync) {
+				continue
+			}
 			if !noted[n] {
 				noted[n] = true
 				notes = append(notes, n)
@@ -85,6 +96,10 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 			kept++
 			continue
 		case plan.ActionAdopt:
+			if compact && op.Kind == plan.KindFile {
+				matchingFiles++
+				continue
+			}
 			adopted++
 			if isSystemResource(op.Kind) {
 				resources = append(resources, *op)
@@ -105,6 +120,14 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 			sources = append(sources, summary)
 		case op.ID == "packages:install":
 			installTx = op
+		case op.Kind == plan.KindPackage && op.Action == plan.ActionRepair:
+			corrections = append(corrections, op.Summary)
+			if op.After != "" {
+				corrections = append(corrections, "  after "+describeAfter(p, op.After))
+			}
+			if op.Transaction != nil {
+				writeSourceTransactionInto(&corrections, op.Transaction)
+			}
 		case op.Kind == plan.KindPackage && op.Action == plan.ActionInstall:
 			pendingNames = append(pendingNames, plan.PackageName(op.ID))
 		case op.Kind == plan.KindFlatpak && op.Action == plan.ActionInstall:
@@ -175,6 +198,12 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 		fmt.Fprintf(&b, "\ninstall %d packages (exact versions once sources are prepared):\n", len(names))
 		writeWrapped(&b, "  ", names, ", ", ",", "  ")
 	}
+	if len(corrections) > 0 {
+		b.WriteString("\npackage source corrections:\n")
+		for _, line := range corrections {
+			fmt.Fprintf(&b, "  %s\n", line)
+		}
+	}
 	if len(flatpaks) > 0 {
 		slices.Sort(flatpaks)
 		writeWrapped(&b, fmt.Sprintf("\ninstall %d Flatpaks: ", len(flatpaks)), flatpaks, ", ", ",", "  ")
@@ -197,6 +226,10 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 				if !bytes.Equal(op.File.Before.Content, op.File.After.Content) {
 					b.WriteString(acceptanceDiff(op.File.Target, op.File.Before.Content, op.File.After.Content))
 				}
+			}
+			if compact && op.Kind == plan.KindGreeterSync {
+				fmt.Fprintln(&b, "    Administrator verification; enable only if missing. Use --verbose for native commands.")
+				continue
 			}
 			for _, step := range op.Steps {
 				if op.File != nil {
@@ -229,6 +262,9 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 	if adopted+kept > 0 {
 		b.WriteString("\n")
 	}
+	if matchingFiles > 0 {
+		fmt.Fprintf(&b, "Refresh ownership records for %d matching files; contents unchanged (paths: sync --plan).\n", matchingFiles)
+	}
 	if adopted > 0 {
 		fmt.Fprintf(&b, "adopt %d already installed\n", adopted)
 	}
@@ -260,7 +296,7 @@ func renderPlan(p *plan.Plan, prune, listUpdates bool) []byte {
 
 func isSystemResource(kind string) bool {
 	switch kind {
-	case plan.KindFile, plan.KindService, plan.KindGroup, plan.KindTarget, plan.KindTrigger:
+	case plan.KindGreeterSync, plan.KindFile, plan.KindService, plan.KindGroup, plan.KindShell, plan.KindTarget, plan.KindTrigger:
 		return true
 	}
 	return false
@@ -292,8 +328,27 @@ func writeTransactionInto(lines *[]string, tx *plan.Transaction) {
 	}
 }
 
+// Source reviews must show incoming and outgoing RPM identities and repositories.
+func writeSourceTransactionInto(lines *[]string, tx *plan.Transaction) {
+	for _, row := range tx.Packages {
+		*lines = append(*lines, fmt.Sprintf("  %s: %s.%s %s (%s)", row.Section, row.Name, row.Arch, row.EVR, row.Repository))
+	}
+	if tx.Download != "" {
+		*lines = append(*lines, "  download: "+tx.Download)
+	}
+}
+
 // writeUpdates renders cached information for the native system upgrade.
 func writeUpdates(b *bytes.Buffer, u plan.Updates) {
+	if u.Transaction != nil && u.Unavailable == "" && len(u.Transaction.Packages) > 0 {
+		fmt.Fprintln(b, "\nupgrade the system (declared RPM sources enforced, system Flatpak updates):")
+		var lines []string
+		writeSourceTransactionInto(&lines, u.Transaction)
+		for _, line := range lines {
+			fmt.Fprintln(b, line)
+		}
+		return
+	}
 	switch {
 	case u.Unavailable != "":
 		fmt.Fprintf(b, "\nupgrade the system (dnf5 upgrade, flatpak update): %s\n", u.Unavailable)
@@ -429,8 +484,10 @@ func summarize(s *selected, p *plan.Plan) statusResult {
 			st.Repositories++
 		case op.ID == "packages:install":
 			st.ToInstall += len(op.Items)
-		default:
+		case op.Kind == plan.KindPackage || op.Kind == plan.KindFlatpak:
 			st.ToInstall++
+		default:
+			st.Pending++
 		}
 	}
 	return st

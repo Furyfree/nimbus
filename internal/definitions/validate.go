@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/Furyfree/nimbus/internal/version"
 )
@@ -337,6 +338,11 @@ func validateComponent(c *Checkout, comp *Component, errs *ErrorList) {
 		if in.Binary == "" || !cleanRelativePath(in.Binary) {
 			errs.Add(where, "installer.binary must be a clean path relative to the home directory")
 		}
+		for _, effect := range in.Effects {
+			if strings.TrimSpace(effect) == "" || strings.IndexFunc(effect, unicode.IsControl) >= 0 {
+				errs.Add(where, "installer.effects must contain nonempty single-line descriptions without control characters")
+			}
+		}
 	}
 	seen := map[string]bool{}
 	for _, name := range comp.Removes {
@@ -381,6 +387,9 @@ func validateComponent(c *Checkout, comp *Component, errs *ErrorList) {
 
 func validateMachine(c *Checkout, m *Machine, errs *ErrorList) {
 	where := "machines/" + m.ID + ".toml"
+	if m.Shell != "" && m.Shell != "bash" && m.Shell != "zsh" {
+		errs.Add(where, "shell must be bash or zsh when set")
+	}
 	if err := ValidateID(m.ID); err != nil {
 		errs.Add(where, "id: %v", err)
 	}

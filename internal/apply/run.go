@@ -20,9 +20,12 @@ import (
 // Options are everything the executor needs beyond the plan. Every side
 // effect goes through one of these so tests replace them.
 type Options struct {
+	Compact        bool
 	Context        context.Context
 	Constraints    []definitions.PackageConstraint
 	UpgradePreview *plan.Transaction
+	UpgradeCommand []string
+	PackageSources plan.PackageSources
 
 	Source native.Source
 	// Fetch downloads a URL. Apply is the one command allowed to reach the
@@ -99,6 +102,7 @@ func Run(p *plan.Plan, opts Options) *Result {
 		return r
 	}
 	var deferredFileRemovals []string
+	adoptedProgress := false
 	for _, op := range p.Operations {
 		if err := opts.canceled(); err != nil {
 			r.Failed, r.Error = op.ID, err.Error()
@@ -111,7 +115,25 @@ func Run(p *plan.Plan, opts Options) *Result {
 		if op.Action == plan.ActionKeep {
 			continue
 		}
-		if _, err := fmt.Fprintf(ex.opts.Out, "-> %s\n", op.Summary); err != nil {
+		summary := op.Summary
+		if opts.Compact && op.Kind == plan.KindFile && op.Action == plan.ActionAdopt {
+			summary = ""
+			if !adoptedProgress {
+				count := 0
+				for _, candidate := range p.Operations {
+					if candidate.Kind == plan.KindFile && candidate.Action == plan.ActionAdopt && candidate.After == "" {
+						count++
+					}
+				}
+				summary = fmt.Sprintf("refresh ownership records for %d matching files", count)
+				adoptedProgress = true
+			}
+		}
+		var progressErr error
+		if summary != "" || !(opts.Compact && op.Kind == plan.KindFile && op.Action == plan.ActionAdopt) {
+			_, progressErr = fmt.Fprintf(ex.opts.Out, "-> %s\n", summary)
+		}
+		if err := progressErr; err != nil {
 			r.Failed, r.Error = op.ID, "write operation progress: "+err.Error()
 			r.Failures = append(r.Failures, Failure{ID: op.ID, Error: r.Error})
 			return r
@@ -132,7 +154,7 @@ func Run(p *plan.Plan, opts Options) *Result {
 		}
 		if op.Resource != nil && op.Resource.Before != op.Resource.After {
 			r.Reboot = r.Reboot || op.Kind == plan.KindTarget
-			r.Logout = r.Logout || op.Kind == plan.KindGroup
+			r.Logout = r.Logout || op.Kind == plan.KindGroup || op.Kind == plan.KindShell
 		}
 		for _, receipt := range receipts {
 			r.Reboot = r.Reboot || receipt.Reboot
@@ -184,7 +206,17 @@ type executor struct {
 // sudo runs one privileged native command with its output on the terminal,
 // so DNF's and Flatpak's own progress stays visible.
 func (ex *executor) sudo(argv ...string) error {
-	if _, err := fmt.Fprintf(ex.opts.Out, "   $ sudo %s\n", strings.Join(argv, " ")); err != nil {
+	progress := "   $ sudo " + strings.Join(argv, " ") + "\n"
+	if ex.opts.Compact && len(progress) > 240 && slices.Contains(argv, "--action=upgrade") {
+		groups := 0
+		for _, arg := range argv {
+			if strings.HasPrefix(arg, "--from-repo=") {
+				groups++
+			}
+		}
+		progress = fmt.Sprintf("   DNF upgrade with %d declared source groups; native progress follows.\n", groups)
+	}
+	if _, err := io.WriteString(ex.opts.Out, progress); err != nil {
 		return fmt.Errorf("write command progress: %w", err)
 	}
 	errOut := cmp.Or(ex.opts.ErrOut, ex.opts.Out)
@@ -201,7 +233,7 @@ func (ex *executor) execute(op plan.Operation) (receipts []state.Receipt, remove
 	switch {
 	case (op.Kind == plan.KindRepository || op.Kind == plan.KindFlatpakRemote) && (op.Action == plan.ActionRemove || op.Action == plan.ActionRetire):
 		return ex.sourceRetirement(op)
-	case op.Kind == plan.KindFile || op.Kind == plan.KindService || op.Kind == plan.KindGroup || op.Kind == plan.KindTarget || op.Kind == plan.KindTrigger:
+	case op.Kind == plan.KindGreeterSync || op.Kind == plan.KindFile || op.Kind == plan.KindService || op.Kind == plan.KindGroup || op.Kind == plan.KindShell || op.Kind == plan.KindTarget || op.Kind == plan.KindTrigger:
 		return ex.systemResource(op)
 	case op.Kind == plan.KindUser:
 		return nil, nil, ex.userTool(op)
@@ -246,7 +278,7 @@ func (ex *executor) execute(op plan.Operation) (receipts []state.Receipt, remove
 		r := ex.receipt(op, "dnf", "installed "+inst.EVR()+" ("+inst.FromRepo+")", "installed", "dnf5 repoquery --installed lists it")
 		r.Package = inst.ID()
 		return []state.Receipt{r}, nil, nil
-	case op.ID == "packages:install":
+	case op.ID == "packages:install" || (op.Kind == plan.KindPackage && op.Action == plan.ActionRepair):
 		return ex.installTransaction(op)
 	case op.Kind == plan.KindPackage && (op.Action == plan.ActionRemove || op.Action == plan.ActionPrune):
 		return ex.removeTransaction(op)
