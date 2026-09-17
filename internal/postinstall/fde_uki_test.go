@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -18,7 +19,7 @@ func fdeBuildSource() *nativetest.FakeSource {
 	return src
 }
 
-func fdeStagedTarget(t *testing.T, target string) {
+func fdeStagedTarget(t *testing.T, target string, size int64) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		t.Fatal(err)
@@ -27,7 +28,7 @@ func fdeStagedTarget(t *testing.T, target string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := file.Truncate(fdeMinimumSize + 1); err != nil {
+	if err := file.Truncate(size); err != nil {
 		t.Fatal(err)
 	}
 	if err := file.Close(); err != nil {
@@ -54,17 +55,20 @@ func TestFDECmdline(t *testing.T) {
 
 func TestBuildFDEUKI(t *testing.T) {
 	const version = "6.19.10-300.fc44.x86_64"
-	base := []string{
-		"build",
-		"--linux=" + fdeKernelDir + "/" + version + "/vmlinuz",
-		"--initrd=/boot/initramfs-" + version + ".img",
-		"--cmdline=root=UUID=test ro",
+	argvFor := func(target string) []string {
+		return []string{
+			"build",
+			"--linux=" + fdeKernelDir + "/" + version + "/vmlinuz",
+			"--initrd=/boot/initramfs-" + version + ".img",
+			"--cmdline=root=UUID=test ro",
+			"--output=" + target + ".new",
+		}
 	}
-	t.Run("unsigned when signature enforcement is off", func(t *testing.T) {
+	t.Run("installs atomically", func(t *testing.T) {
 		src := fdeBuildSource()
 		target := filepath.Join(t.TempDir(), "EFI", "Linux", "nimbus.efi")
-		fdeStagedTarget(t, target)
-		src.Commands[nativetest.Key("ukify", append(base, "--output="+target+".new")...)] = []byte{}
+		fdeStagedTarget(t, target, fdeMinimumSize+1)
+		src.Commands[nativetest.Key(FDEUKITool, argvFor(target)...)] = []byte{}
 		if err := buildFDEUKI(src, version, io.Discard, target); err != nil {
 			t.Fatal(err)
 		}
@@ -75,27 +79,56 @@ func TestBuildFDEUKI(t *testing.T) {
 			t.Fatal("staged image remains")
 		}
 	})
-	t.Run("signed with the akmods pair", func(t *testing.T) {
+	t.Run("enforcement off without signing", func(t *testing.T) {
 		src := fdeBuildSource()
-		src.Files[mokPrivateKey] = []byte("PRIVATE")
-		src.Files[MOKCertificate] = []byte("DER")
 		src.Dirs["/sys/firmware/efi/efivars"] = []string{"SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"}
-		src.Files["/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"] = []byte{6, 0, 0, 0, 1}
+		src.Files["/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"] = []byte{6, 0, 0, 0, 0}
 		target := filepath.Join(t.TempDir(), "EFI", "Linux", "nimbus.efi")
-		fdeStagedTarget(t, target)
-		argv := append(base, "--output="+target+".new", "--secureboot-private-key="+mokPrivateKey, "--secureboot-certificate="+MOKCertificate)
-		src.Commands[nativetest.Key("ukify", argv...)] = []byte{}
+		fdeStagedTarget(t, target, fdeMinimumSize+1)
+		src.Commands[nativetest.Key(FDEUKITool, argvFor(target)...)] = []byte{}
 		if err := buildFDEUKI(src, version, io.Discard, target); err != nil {
 			t.Fatal(err)
 		}
 	})
-	t.Run("enforcement without a key blocks", func(t *testing.T) {
+	t.Run("enforcement without a shim chain blocks", func(t *testing.T) {
 		src := fdeBuildSource()
 		src.Dirs["/sys/firmware/efi/efivars"] = []string{"SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"}
 		src.Files["/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"] = []byte{6, 0, 0, 0, 1}
 		err := buildFDEUKI(src, version, io.Discard, filepath.Join(t.TempDir(), "nimbus.efi"))
-		if err == nil || !strings.Contains(err.Error(), "enroll a MOK signing key") {
+		if err == nil || !strings.Contains(err.Error(), "shim chain") {
 			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("a failed build leaves the previous image", func(t *testing.T) {
+		src := fdeBuildSource()
+		target := filepath.Join(t.TempDir(), "EFI", "Linux", "nimbus.efi")
+		fdeStagedTarget(t, target, 1)
+		if err := os.Rename(target+".new", target); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(target, []byte("current image"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		src.Failures[nativetest.Key(FDEUKITool, argvFor(target)...)] = "ukify failed"
+		if err := buildFDEUKI(src, version, io.Discard, target); err == nil {
+			t.Fatal("expected a ukify failure")
+		}
+		data, err := os.ReadFile(target)
+		if err != nil || string(data) != "current image" {
+			t.Fatalf("previous image changed: %q, %v", data, err)
+		}
+	})
+	t.Run("an undersized image is rejected", func(t *testing.T) {
+		src := fdeBuildSource()
+		target := filepath.Join(t.TempDir(), "EFI", "Linux", "nimbus.efi")
+		fdeStagedTarget(t, target, 10)
+		src.Commands[nativetest.Key(FDEUKITool, argvFor(target)...)] = []byte{}
+		err := buildFDEUKI(src, version, io.Discard, target)
+		if err == nil || !strings.Contains(err.Error(), "implausibly small") {
+			t.Fatalf("got %v", err)
+		}
+		if _, err := os.Stat(target); !os.IsNotExist(err) {
+			t.Fatal("an undersized image was moved into place")
 		}
 	})
 	t.Run("gate and version are enforced", func(t *testing.T) {
@@ -108,5 +141,57 @@ func TestBuildFDEUKI(t *testing.T) {
 		if err := buildFDEUKI(src, version, io.Discard, filepath.Join(t.TempDir(), "nimbus.efi")); err == nil || !strings.Contains(err.Error(), "marker is absent") {
 			t.Fatalf("got %v", err)
 		}
+		src = fdeBuildSource()
+		src.Files[FDEUKIMarker] = []byte("foreign")
+		if err := buildFDEUKI(src, version, io.Discard, filepath.Join(t.TempDir(), "nimbus.efi")); err == nil || !strings.Contains(err.Error(), "unfamiliar content") {
+			t.Fatalf("got %v", err)
+		}
 	})
+}
+
+// fdeStreamRecorder records the native commands streamed by a test.
+type fdeStreamRecorder struct {
+	*nativetest.FakeSource
+	streams []string
+}
+
+func (s *fdeStreamRecorder) Stream(_, _ io.Writer, name string, args ...string) error {
+	s.streams = append(s.streams, nativetest.Key(name, args...))
+	return s.FakeSource.Stream(nil, nil, name, args...)
+}
+
+func TestRemoveFDEUKI(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		removed string
+		rebuild bool
+	}{
+		{"the embedded kernel is rebuilt for the running one", "6.19.10-300.fc44.x86_64", true},
+		{"another kernel is kept", "7.2.5-200.fc44.x86_64", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := fdeBuildSource()
+			target := filepath.Join(t.TempDir(), "EFI", "Linux", "nimbus.efi")
+			fdeStagedTarget(t, target, fdeMinimumSize+1)
+			src.Commands[nativetest.Key(FDEUKITool, "inspect", target)] = []byte(fdeInspectOutput)
+			src.Commands[nativetest.Key("uname", "-r")] = []byte("6.19.10-300.fc44.x86_64\n")
+			if tc.rebuild {
+				src.Commands[nativetest.Key(FDEUKITool, "build",
+					"--linux="+fdeKernelDir+"/6.19.10-300.fc44.x86_64/vmlinuz",
+					"--initrd=/boot/initramfs-6.19.10-300.fc44.x86_64.img",
+					"--cmdline=root=UUID=test ro",
+					"--output="+target+".new")] = []byte{}
+			}
+			recorder := &fdeStreamRecorder{FakeSource: src}
+			if err := removeFDEUKI(recorder, tc.removed, io.Discard, target); err != nil {
+				t.Fatal(err)
+			}
+			built := slices.ContainsFunc(recorder.streams, func(stream string) bool {
+				return strings.Contains(stream, "build")
+			})
+			if built != tc.rebuild {
+				t.Fatalf("rebuild recorded=%v, want %v", built, tc.rebuild)
+			}
+		})
+	}
 }

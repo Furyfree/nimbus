@@ -974,14 +974,17 @@ class, Secure Boot state, the selected tools and the installed hook payload.
 The engine package ships the inert
 `/etc/kernel/install.d/90-nimbus-uki.install` hook; it does nothing until
 approved setup writes `/etc/nimbus/fde-uki.enabled`. Approved setup then builds
-and signs a Unified Kernel Image with ukify at `/boot/efi/EFI/Linux/nimbus.efi`
-and ensures the `Nimbus UKI` firmware boot entry. Kernel and initramfs updates
-rebuild the image through the native hook, while Fedora's BLS entries, shim and
-GRUB remain the fallback path. The embedded command line comes from
-`/etc/kernel/cmdline` when present, otherwise the running command line without
-`BOOT_IMAGE=` and `initrd=`. Signing uses the akmods MOK key pair when present;
-with Secure Boot enabled and no signing pair, setup blocks. With Secure Boot
-disabled the image is unsigned and the task discloses the reduced protection.
+a Unified Kernel Image with ukify at `/boot/efi/EFI/Linux/nimbus.efi` and
+ensures the `Nimbus UKI` firmware boot entry, which becomes the default boot
+target. Kernel updates rebuild the image through the native hook; Nimbus's own
+initramfs refreshes are reconciled in the enrollment milestone. Fedora's BLS
+entries, shim and GRUB remain the fallback path. The embedded command line
+comes from `/etc/kernel/cmdline` when present, otherwise the running command
+line without `BOOT_IMAGE=` and `initrd=`. With Secure Boot enabled the task
+blocks: the signed, shim-chained image and MOK enrollment are the next
+milestone. With Secure Boot disabled the image is unsigned and the task
+discloses the reduced protection. If setup cannot build the image after
+writing the marker, it removes only that marker again so the hook stays inert.
 Enrollment, policy renewal and scoped removal are not implemented yet. Sync
 and upgrades never build images, enroll or change policy. Preserve the
 passphrase, unrelated keys and enrollment slots, and remove only Nimbus's

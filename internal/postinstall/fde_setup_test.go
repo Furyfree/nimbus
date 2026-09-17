@@ -64,13 +64,16 @@ func TestFDEESPDevice(t *testing.T) {
 // fdeSetupSource replays the privileged setup and simulates its effects.
 type fdeSetupSource struct {
 	*nativetest.FakeSource
-	t       *testing.T
-	streams []string
-	staged  string
-	digest  string
-	built   string
-	entry   bool
-	stale   bool
+	t          *testing.T
+	streams    []string
+	staged     string
+	digest     string
+	removals   int
+	built      string
+	buildFails bool
+	entryFails bool
+	entry      bool
+	stale      bool
 }
 
 func (s *fdeSetupSource) Run(name string, args ...string) ([]byte, error) {
@@ -122,15 +125,30 @@ func (s *fdeSetupSource) Stream(_, _ io.Writer, name string, args ...string) err
 			}
 		}
 		if payload.PlanDigest != s.digest || s.digest == "" {
-			s.t.Fatal("payload is not bound to the approved digest")
+			s.t.Fatal("payload is not bound to the inspected digest")
 		}
-		if payload.Change.Target != FDEUKIMarker || !bytes.Equal(payload.Change.After.Content, []byte(fdeMarkerText)) || payload.Change.After.Mode != "0644" || payload.Change.After.Owner != "root" || payload.Change.After.Group != "root" {
+		if payload.Change.Target != FDEUKIMarker {
+			s.t.Fatal("wrong file payload target")
+		}
+		if !payload.Change.After.Exists {
+			s.removals++
+			delete(s.Files, FDEUKIMarker)
+			break
+		}
+		if !bytes.Equal(payload.Change.After.Content, []byte(fdeMarkerText)) || payload.Change.After.Mode != "0644" || payload.Change.After.Owner != "root" || payload.Change.After.Group != "root" {
 			s.t.Fatal("wrong file payload")
 		}
 		s.Files[FDEUKIMarker] = []byte(fdeMarkerText)
+		s.Dirs["/etc/nimbus"] = []string{"fde-uki.enabled"}
 	case strings.Contains(joined, "internal fde-uki"):
+		if s.buildFails {
+			return errors.New("fixture build failure")
+		}
 		s.built = args[len(args)-1]
 	case args[1] == "efibootmgr" && strings.Contains(joined, " -c "):
+		if s.entryFails {
+			return errors.New("fixture entry failure")
+		}
 		s.entry = true
 	case args[1] == "efibootmgr" && strings.Contains(joined, " -B"):
 	default:
@@ -145,13 +163,16 @@ func fdeSetupFixture(t *testing.T) *fdeSetupSource {
 	base := &nativetest.FakeSource{Commands: map[string][]byte{}, Failures: map[string]string{}, Files: map[string][]byte{}, Dirs: map[string][]string{}, Paths: map[string]string{}}
 	base.Files["/proc/mounts"] = []byte("/dev/mapper/luks-1234[/root] / btrfs rw 0 0\n/dev/vda1 /boot/efi vfat rw 0 0\n")
 	base.Dirs["/"] = []string{"etc"}
-	base.Dirs["/etc"] = []string{"kernel"}
+	base.Dirs["/etc"] = []string{"kernel", "nimbus"}
+	base.Dirs["/etc/nimbus"] = []string{}
 	base.Dirs["/sys/firmware/efi/efivars"] = []string{}
 	base.Commands[nativetest.Key("uname", "-r")] = []byte(version + "\n")
 	base.Commands[nativetest.Key("stat", "--format=%s", "--", fdeKernelDir+"/"+version+"/vmlinuz")] = []byte("18497536\n")
 	base.Commands[nativetest.Key("stat", "--format=%s", "--", "/boot/initramfs-"+version+".img")] = []byte("47000000\n")
 	base.Commands[nativetest.Key("sudo", "-n", "--", "df", "--output=avail", "-B1", "/boot/efi")] = []byte("Avail\n995000000\n")
 	base.Commands[nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", "/etc")] = []byte("directory|root|root|755|6\n")
+	base.Commands[nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", "/etc/nimbus")] = []byte("directory|root|root|755|2\n")
+	base.Commands[nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", FDEUKIMarker)] = []byte("regular file|root|root|644|1\n")
 	src := &fdeSetupSource{FakeSource: base, t: t}
 	src.Files[fdeCmdlineFile] = []byte("root=UUID=test ro\n")
 	return src
@@ -159,6 +180,26 @@ func fdeSetupFixture(t *testing.T) *fdeSetupSource {
 
 func fdeSetupTask() Task {
 	return Task{ID: "fde", Owner: "component:fde", Title: "Set up TPM automatic disk unlock", Status: Pending, Action: &Action{Kind: SetupFDE}}
+}
+
+// The engine payload is a contract: the marker gate must stay inert, and a
+// failed build must not fail the kernel update while telling the user.
+func TestFDEHookPayloadContract(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "system", "root", "etc", "kernel", "install.d", "90-nimbus-uki.install"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(data)
+	for _, want := range []string{
+		"[ -e /etc/nimbus/fde-uki.enabled ] || exit 0",
+		"/usr/bin/nimbus internal fde-uki",
+		"warning:",
+		"exit 0",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("hook payload lacks %q", want)
+		}
+	}
 }
 
 func TestRunFDESetup(t *testing.T) {
@@ -214,6 +255,41 @@ func TestRunFDESetup(t *testing.T) {
 			}
 		}
 	})
+	t.Run("secure boot blocks before changes", func(t *testing.T) {
+		src := fdeSetupFixture(t)
+		src.Dirs["/sys/firmware/efi/efivars"] = []string{"SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"}
+		src.Files["/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"] = []byte{6, 0, 0, 0, 1}
+		var out bytes.Buffer
+		if err := RunFDESetup(t.Context(), src, &out, &out, fdeSetupTask()); err == nil || !strings.Contains(err.Error(), "shim chain") {
+			t.Fatalf("got %v", err)
+		}
+		if src.staged != "" || src.built != "" {
+			t.Fatalf("mutated under Secure Boot: %q", src.streams)
+		}
+	})
+	t.Run("a failed build removes the new marker", func(t *testing.T) {
+		src := fdeSetupFixture(t)
+		src.buildFails = true
+		var out bytes.Buffer
+		err := RunFDESetup(t.Context(), src, &out, &out, fdeSetupTask())
+		if err == nil || !strings.Contains(err.Error(), "marker was removed") {
+			t.Fatalf("got %v", err)
+		}
+		if src.removals != 1 {
+			t.Fatalf("marker removal not recorded: %d", src.removals)
+		}
+		if _, exists := src.Files[FDEUKIMarker]; exists {
+			t.Fatal("marker remains after the failed build")
+		}
+	})
+	t.Run("an entry failure is reported", func(t *testing.T) {
+		src := fdeSetupFixture(t)
+		src.entryFails = true
+		var out bytes.Buffer
+		if err := RunFDESetup(t.Context(), src, &out, &out, fdeSetupTask()); err == nil || !strings.Contains(err.Error(), "create firmware entry") {
+			t.Fatalf("got %v", err)
+		}
+	})
 }
 
 // fdeInspectSource replays the privileged ukify inspection.
@@ -224,7 +300,7 @@ type fdeInspectSource struct {
 }
 
 func (s fdeInspectSource) Run(name string, args ...string) ([]byte, error) {
-	if name == "ukify" {
+	if name == FDEUKITool {
 		return s.out, s.err
 	}
 	return s.FakeSource.Run(name, args...)
@@ -257,6 +333,8 @@ const fdeInspectOutput = `.sbat:
 .uname:
   size: 100 bytes
   sha256: ee
+  text:
+    6.19.10-300.fc44.x86_64
 .initrd:
   size: 47000000 bytes
   sha256: ff
@@ -274,6 +352,14 @@ func TestVerifyFDE(t *testing.T) {
 	t.Run("command line mismatch", func(t *testing.T) {
 		src := fdeVerifyFixture(t)
 		src.out = []byte(strings.Replace(fdeInspectOutput, "%s", "root=UUID=other ro", 1))
+		got := VerifyFDE(src, fdeSetupTask())
+		if got.Status == Complete || !strings.Contains(got.Detail, "does not embed") {
+			t.Fatalf("got %+v", got)
+		}
+	})
+	t.Run("an extended command line is not a match", func(t *testing.T) {
+		src := fdeVerifyFixture(t)
+		src.out = []byte(strings.Replace(fdeInspectOutput, "%s", "root=UUID=test ro init=/bin/sh", 1))
 		got := VerifyFDE(src, fdeSetupTask())
 		if got.Status == Complete || !strings.Contains(got.Detail, "does not embed") {
 			t.Fatalf("got %+v", got)

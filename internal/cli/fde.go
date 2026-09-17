@@ -15,8 +15,8 @@ import (
 type fdeVerificationSource struct{ native.Source }
 
 func (s fdeVerificationSource) Run(name string, args ...string) ([]byte, error) {
-	if name == "ukify" && len(args) == 2 && args[0] == "inspect" && args[1] == postinstall.FDEUKIPath {
-		return s.Source.Run("sudo", "-n", "--", "/usr/bin/ukify", args[0], args[1])
+	if name == postinstall.FDEUKITool && len(args) == 2 && args[0] == "inspect" && args[1] == postinstall.FDEUKIPath {
+		return s.Source.Run("sudo", "-n", "--", postinstall.FDEUKITool, args[0], args[1])
 	}
 	return s.Source.Run(name, args...)
 }
@@ -49,6 +49,9 @@ func rootVerification(cmd *cobra.Command, src native.Source, before *postinstall
 	if err != nil {
 		return task, err
 	}
+	if !freshTask.VerificationNeedsRoot {
+		return freshTask, nil
+	}
 	return verify(src, freshTask), nil
 }
 
@@ -79,7 +82,7 @@ func runFDEVerification(cmd *cobra.Command, src native.Source, before *postinsta
 	return err
 }
 
-func runFDESetup(cmd *cobra.Command, src native.Source, before *postinstallSnapshot, task postinstall.Task, yes bool) error {
+func runFDESetup(cmd *cobra.Command, src native.Source, before *postinstallSnapshot, task postinstall.Task) error {
 	if err := postinstall.RunFDESetup(cmd.Context(), src, cmd.OutOrStdout(), cmd.ErrOrStderr(), task); err != nil {
 		return fmt.Errorf("postinstall fde action failed: %w", err)
 	}

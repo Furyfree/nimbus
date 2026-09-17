@@ -4,11 +4,16 @@
 # The engine package owns this file; it stays inert until Nimbus creates
 # /etc/nimbus/fde-uki.enabled during approved FDE setup. Fedora's native
 # kernel-install then rebuilds /boot/efi/EFI/Linux/nimbus.efi through the
-# installed engine on kernel and initramfs updates. Fedora's BLS entries,
-# shim and GRUB stay untouched as the fallback boot path.
+# installed engine on kernel updates. Fedora's BLS entries, shim and GRUB
+# stay untouched as the fallback boot path. A failed rebuild warns instead
+# of failing the kernel update: the previous image still boots.
 
 [ -e /etc/nimbus/fde-uki.enabled ] || exit 0
 case "$1" in
-    add | remove) exec /usr/bin/nimbus internal fde-uki "$@" ;;
+    add | remove) ;;
+    *) exit 0 ;;
 esac
+if ! /usr/bin/nimbus internal fde-uki "$@"; then
+    echo "warning: the Nimbus kernel image was not rebuilt; the previous image and Fedora's GRUB entries remain" >&2
+fi
 exit 0

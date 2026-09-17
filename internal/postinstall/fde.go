@@ -22,8 +22,8 @@ func fdeTask(src native.Source, in Inputs) Task {
 			"The selected fde packages are applied and recorded by Nimbus.",
 		},
 		Instructions: []string{
-			"Approved setup writes /etc/nimbus/fde-uki.enabled, builds and signs /boot/efi/EFI/Linux/nimbus.efi with ukify and ensures the Nimbus UKI firmware entry.",
-			"Kernel and initramfs updates rebuild the image through the engine-provided kernel-install hook; Fedora's GRUB entries remain the fallback path.",
+			"Approved setup writes /etc/nimbus/fde-uki.enabled, builds /boot/efi/EFI/Linux/nimbus.efi with ukify and ensures the Nimbus UKI firmware entry, which becomes the default boot target.",
+			"Kernel updates rebuild the image through the engine-provided kernel-install hook; Fedora's GRUB entries remain selectable as the fallback path.",
 			"TPM enrollment is not implemented yet: after setup the disk passphrase still unlocks the disk and sync never changes policy.",
 		},
 		Verification: "Inspection reads the mounted root, the TPM2 device, the firmware mode, the hook payload, the marker, the firmware entry and the installed tools. The image content and its embedded command line need the approved read-only check.",
@@ -49,6 +49,9 @@ func fdeTask(src native.Source, in Inputs) Task {
 			t.Status, t.Detail = NotApplicable, "The firmware is in Setup Mode; enroll Secure Boot keys before automatic unlock."
 			return t
 		}
+		t.Status = Blocked
+		t.Detail = "Secure Boot is enabled. The signed shim-chained image and MOK enrollment are the next milestone; disable Secure Boot only if you accept the reduced protection, or wait for that work."
+		return t
 	case inspect.SecureBootDisabled:
 	case inspect.SecureBootUnavailable:
 		t.Status, t.Detail = NotApplicable, "EFI Secure Boot state is unavailable; this setup keeps the passphrase only."
@@ -79,7 +82,7 @@ func fdeTask(src native.Source, in Inputs) Task {
 		t.Status, t.Detail = NotApplicable, "The TPM is not version 2; automatic unlock keeps the passphrase only."
 		return t
 	}
-	for _, name := range []string{"systemd-ukify", "sbsigntools"} {
+	for _, name := range []string{"systemd-ukify", "sbsigntools", "efibootmgr"} {
 		found := false
 		for _, pkg := range in.Resolved.Packages {
 			if pkg.Name != name {

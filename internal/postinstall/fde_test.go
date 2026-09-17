@@ -13,12 +13,12 @@ const setupModeVar = "/sys/firmware/efi/efivars/SetupMode-8be4df61-93ca-11d2-aa0
 
 func fdeFixture(t *testing.T) (Inputs, *nativetest.FakeSource) {
 	t.Helper()
-	in, src := fixture("systemd-ukify", "sbsigntools")
+	in, src := fixture("systemd-ukify", "sbsigntools", "efibootmgr")
 	if src.Dirs == nil {
 		src.Dirs = map[string][]string{}
 	}
 	in.Resolved.Components = []definitions.ResolvedComponent{{ID: "fde"}}
-	in.Facts.SecureBoot.Value = inspect.SecureBootEnabled
+	in.Facts.SecureBoot.Value = inspect.SecureBootDisabled
 	src.Files["/proc/mounts"] = []byte("/dev/mapper/luks-1234[/root] / btrfs rw,relatime 0 0\n/dev/vda1 /boot/efi vfat rw 0 0\n")
 	src.Dirs["/sys/class/block"] = []string{"dm-0", "vda"}
 	src.Files["/sys/class/block/dm-0/dm/name"] = []byte("luks-1234\n")
@@ -96,6 +96,7 @@ func TestFDEInspectionStates(t *testing.T) {
 	})
 	t.Run("setup mode", func(t *testing.T) {
 		in, src := fdeFixture(t)
+		in.Facts.SecureBoot.Value = inspect.SecureBootEnabled
 		src.Files[setupModeVar] = []byte{6, 0, 0, 0, 1}
 		if got := findTask(t, Inspect(src, in), "fde"); got.Status != NotApplicable {
 			t.Fatalf("got %+v", got)
@@ -103,15 +104,17 @@ func TestFDEInspectionStates(t *testing.T) {
 	})
 	t.Run("setup mode unreadable", func(t *testing.T) {
 		in, src := fdeFixture(t)
+		in.Facts.SecureBoot.Value = inspect.SecureBootEnabled
 		delete(src.Dirs, "/sys/firmware/efi/efivars")
 		if got := findTask(t, Inspect(src, in), "fde"); got.Status != Unknown {
 			t.Fatalf("got %+v", got)
 		}
 	})
-	t.Run("secure boot disabled still offered", func(t *testing.T) {
+	t.Run("secure boot enabled blocks", func(t *testing.T) {
 		in, src := fdeFixture(t)
-		in.Facts.SecureBoot.Value = inspect.SecureBootDisabled
-		if got := findTask(t, Inspect(src, in), "fde"); got.Status != Pending {
+		in.Facts.SecureBoot.Value = inspect.SecureBootEnabled
+		got := findTask(t, Inspect(src, in), "fde")
+		if got.Status != Blocked || got.Action != nil || !strings.Contains(got.Detail, "next milestone") {
 			t.Fatalf("got %+v", got)
 		}
 	})

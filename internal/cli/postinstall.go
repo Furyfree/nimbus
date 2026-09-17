@@ -172,7 +172,7 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 				// pending reboot enrollment is a successful, deliberate state.
 				return postinstall.RunNVIDIAMOK(cmd.Context(), src, cmd.OutOrStdout(), cmd.ErrOrStderr())
 			} else if task.Action.Kind == postinstall.SetupFDE {
-				return runFDESetup(cmd, src, before, task, yes)
+				return runFDESetup(cmd, src, before, task)
 			} else {
 				argv := commands[0]
 				runErr = src.Stream(cmd.OutOrStdout(), cmd.ErrOrStderr(), argv[0], argv[1:]...)

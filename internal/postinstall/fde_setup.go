@@ -87,7 +87,7 @@ func fdeBootEntries(output string) []fdeBootEntry {
 			continue
 		}
 		label, device, ok := strings.Cut(rest, "\t")
-		if !ok || !strings.EqualFold(strings.TrimSpace(label), FDEBootLabel) {
+		if !ok || strings.TrimSpace(label) != FDEBootLabel {
 			continue
 		}
 		entries = append(entries, fdeBootEntry{ID: id, Loader: fdeLoaderPath(device)})
@@ -96,12 +96,14 @@ func fdeBootEntries(output string) []fdeBootEntry {
 }
 
 // fdeLoaderPath normalizes the loader file path in an efibootmgr device path.
+// Long device-path forms may contain earlier ")/" pairs, so only the last one
+// separates the ESP from the loader file.
 func fdeLoaderPath(device string) string {
-	_, rest, ok := strings.Cut(device, ")/")
-	if !ok {
+	index := strings.LastIndex(device, ")/")
+	if index < 0 {
 		return ""
 	}
-	return strings.TrimPrefix(strings.ReplaceAll(rest, "/", `\`), `\`)
+	return strings.TrimPrefix(strings.ReplaceAll(device[index+2:], "/", `\`), `\`)
 }
 
 func fdeEntryCorrect(entries []fdeBootEntry) bool {
@@ -247,6 +249,7 @@ func FDESetupCommands(task Task) ([][]string, error) {
 	return [][]string{
 		{"sudo", "--", "nimbus", "internal", "system-file", "--plan", "<approved-digest>", "--payload", "<verified-marker-change>"},
 		{"sudo", "--", "nimbus", "internal", "fde-uki", "add", "<running-kernel>"},
+		{"sudo", "--", "efibootmgr", "-b", "<stale-nimbus-entry>", "-B"},
 		{"sudo", "--", "efibootmgr", "-c", "-d", "<esp-disk>", "-p", "<esp-partition>", "-L", FDEBootLabel, "-l", FDEBootLoader},
 	}, nil
 }
@@ -270,6 +273,13 @@ func RunFDESetup(ctx context.Context, src native.Source, out, errOut io.Writer, 
 	if err := stream("sudo", "--validate"); err != nil {
 		return err
 	}
+	secure, err := fdeSecureBoot(src)
+	if err != nil {
+		return fmt.Errorf("read the Secure Boot state: %w", err)
+	}
+	if secure {
+		return errors.New("Secure Boot is enabled; the signed shim chain is not implemented yet, and no changes were made")
+	}
 	kernelOut, err := src.Run("uname", "-r")
 	if err != nil {
 		return err
@@ -285,6 +295,11 @@ func RunFDESetup(ctx context.Context, src native.Source, out, errOut io.Writer, 
 	if err != nil {
 		return err
 	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	wroteMarker := false
 	if !ready {
 		change, digest, err := fdeMarkerChange(src)
 		if err != nil {
@@ -303,19 +318,18 @@ func RunFDESetup(ctx context.Context, src native.Source, out, errOut io.Writer, 
 		if err := os.WriteFile(staged, payload, 0600); err != nil {
 			return err
 		}
-		exe, err := os.Executable()
-		if err != nil {
-			return err
-		}
 		if err := stream("sudo", "--", exe, "internal", "system-file", "--plan", digest, "--payload", staged); err != nil {
 			return fmt.Errorf("write the FDE marker: %w", err)
 		}
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		return err
+		wroteMarker = true
 	}
 	if err := stream("sudo", "--", exe, "internal", "fde-uki", "add", kernel); err != nil {
+		if wroteMarker {
+			if rollbackErr := fdeRemoveMarker(src, stream, exe); rollbackErr != nil {
+				return errors.Join(fmt.Errorf("build the Nimbus image: %w", err), fmt.Errorf("remove the FDE marker after the failed build: %w", rollbackErr))
+			}
+			return fmt.Errorf("build the Nimbus image: %w; the FDE marker was removed and the hook stays inert", err)
+		}
 		return fmt.Errorf("build the Nimbus image: %w", err)
 	}
 	if err := fdeEnsureEntry(src, out, errOut); err != nil {
@@ -323,6 +337,38 @@ func RunFDESetup(ctx context.Context, src native.Source, out, errOut io.Writer, 
 	}
 	_, err = fmt.Fprintln(out, "Reboot when ready to boot the Nimbus image. Fedora's GRUB entries and the disk passphrase remain the fallback path.")
 	return err
+}
+
+// fdeRemoveMarker reverses only the marker this run wrote, bound to its
+// observed content and metadata.
+func fdeRemoveMarker(src native.Source, stream func(string, ...string) error, exe string) error {
+	have, err := inspect.ObserveFile(src, FDEUKIMarker)
+	if err != nil {
+		return err
+	}
+	if !have.Exists || string(have.Content) != fdeMarkerText {
+		return errors.New("the marker changed after the failed build; inspect it manually")
+	}
+	change := plan.FileChange{Target: FDEUKIMarker, Before: have, After: inspect.SystemFile{}}
+	data, err := json.Marshal(change)
+	if err != nil {
+		return err
+	}
+	digest := fmt.Sprintf("%x", sha256.Sum256(data))
+	payload, err := json.Marshal(apply.FilePayload{PlanDigest: digest, Change: change})
+	if err != nil {
+		return err
+	}
+	dir, err := os.MkdirTemp("", "nimbus-fde-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	staged := filepath.Join(dir, "marker-removal.json")
+	if err := os.WriteFile(staged, payload, 0600); err != nil {
+		return err
+	}
+	return stream("sudo", "--", exe, "internal", "system-file", "--plan", digest, "--payload", staged)
 }
 
 // VerifyFDE performs the approved read-only checks that unprivileged
@@ -354,20 +400,20 @@ func VerifyFDE(src native.Source, t Task) Task {
 		t.Detail = "The expected command line could not be observed: " + err.Error()
 		return t
 	}
-	out, err := src.Run("ukify", "inspect", FDEUKIPath)
+	out, err := src.Run(FDEUKITool, "inspect", FDEUKIPath)
 	if err != nil {
 		t.VerificationNeedsRoot = true
 		t.Detail = "The Nimbus image could not be inspected with administrator access; retry when sudo is available."
 		return t
 	}
-	sections, cmdline := fdeInspect(string(out))
-	for _, want := range []string{".linux:", ".initrd:", ".cmdline:", ".osrel:"} {
-		if !slices.Contains(sections, want) {
+	inspected := fdeInspect(string(out))
+	for _, want := range []string{".linux:", ".initrd:", ".cmdline:", ".osrel:", ".uname:"} {
+		if !slices.Contains(inspected.sections, want) {
 			t.Detail = "The Nimbus image lacks the " + strings.TrimSuffix(want, ":") + " section; rebuild it with the approved setup."
 			return t
 		}
 	}
-	if !strings.Contains(cmdline, expected) {
+	if inspected.cmdline != expected {
 		t.Detail = "The Nimbus image does not embed the expected command line; rebuild it with the approved setup."
 		return t
 	}
@@ -375,21 +421,42 @@ func VerifyFDE(src native.Source, t Task) Task {
 	return t
 }
 
-// fdeInspect extracts section names and the embedded command line from ukify
-// inspect output.
-func fdeInspect(output string) ([]string, string) {
-	var sections, cmdline []string
-	inCmdline := false
+// fdeInspectResult captures the expected sections and the embedded command
+// line and kernel release from ukify inspect output.
+type fdeInspectResult struct {
+	sections []string
+	cmdline  string
+	uname    string
+}
+
+// fdeInspect extracts section names and the text payloads Nimbus verifies.
+func fdeInspect(output string) fdeInspectResult {
+	var result fdeInspectResult
+	section, inText := "", false
+	var text []string
+	flush := func() {
+		switch section {
+		case ".cmdline:":
+			result.cmdline = strings.TrimSpace(strings.Join(text, " "))
+		case ".uname:":
+			result.uname = strings.TrimSpace(strings.Join(text, " "))
+		}
+		text = nil
+	}
 	for line := range strings.SplitSeq(output, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, ".") && strings.HasSuffix(trimmed, ":") {
-			sections = append(sections, trimmed)
-			inCmdline = trimmed == ".cmdline:"
+			flush()
+			section, inText = trimmed, false
+			result.sections = append(result.sections, trimmed)
 			continue
 		}
-		if inCmdline {
-			cmdline = append(cmdline, trimmed)
+		if !inText {
+			inText = trimmed == "text:"
+			continue
 		}
+		text = append(text, trimmed)
 	}
-	return sections, strings.Join(cmdline, " ")
+	flush()
+	return result
 }

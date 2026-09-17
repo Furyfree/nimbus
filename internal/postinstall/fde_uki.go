@@ -23,19 +23,11 @@ const (
 	fdeESPMount    = "/boot/efi"
 	fdeCmdlineFile = "/etc/kernel/cmdline"
 	fdeKernelDir   = "/usr/lib/modules"
+	FDEUKITool     = "/usr/bin/ukify"
 	fdeMinimumSize = 8 << 20
 )
 
 var fdeVersionRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*$`)
-
-// fdeImageSize is a seam so tests can pin the atomic-install contract.
-var fdeImageSize = func(path string) (int64, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return 0, err
-	}
-	return info.Size(), nil
-}
 
 // fdeCmdline selects the embedded command line: the native /etc/kernel/cmdline
 // when present, otherwise the running command line without boot-loader
@@ -71,23 +63,6 @@ func fdeCmdline(src native.Source) (string, error) {
 	return strings.Join(fields, " "), nil
 }
 
-type fdeSigning struct {
-	key  string
-	cert string
-}
-
-// fdeSigningPair returns the akmods MOK key pair when both halves exist. The
-// private key is only probed for existence; its content is never retained.
-func fdeSigningPair(src native.Source) *fdeSigning {
-	if _, err := src.ReadFile(mokPrivateKey); err != nil {
-		return nil
-	}
-	if _, err := src.ReadFile(MOKCertificate); err != nil {
-		return nil
-	}
-	return &fdeSigning{key: mokPrivateKey, cert: MOKCertificate}
-}
-
 // fdeSecureBoot reports the firmware SecureBoot variable. A missing variable
 // means the firmware does not enforce signatures.
 func fdeSecureBoot(src native.Source) (bool, error) {
@@ -109,20 +84,25 @@ func fdeSecureBoot(src native.Source) (bool, error) {
 }
 
 // fdeUKIArgv pins the reviewed ukify invocation.
-func fdeUKIArgv(version, cmdline, output string, signing *fdeSigning) []string {
-	argv := []string{
+func fdeUKIArgv(version, cmdline, output string) []string {
+	return []string{
 		"build",
 		"--linux=" + fdeKernelDir + "/" + version + "/vmlinuz",
 		"--initrd=/boot/initramfs-" + version + ".img",
 		"--cmdline=" + cmdline,
 		"--output=" + output,
 	}
-	if signing != nil {
-		argv = append(argv,
-			"--secureboot-private-key="+signing.key,
-			"--secureboot-certificate="+signing.cert)
+}
+
+// fdeSyncFile flushes a staged image before it replaces the booted one, so a
+// crash cannot leave a truncated default boot path on the FAT partition.
+func fdeSyncFile(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
 	}
-	return argv
+	defer func() { _ = file.Close() }()
+	return file.Sync()
 }
 
 // BuildFDEUKI rebuilds the firmware image for one kernel through native
@@ -136,43 +116,92 @@ func buildFDEUKI(src native.Source, version string, out io.Writer, target string
 	if !fdeVersionRE.MatchString(version) {
 		return fmt.Errorf("invalid kernel version %q", version)
 	}
-	if _, err := src.ReadFile(FDEUKIMarker); err != nil {
-		return errors.New("the FDE marker is absent; approved setup has not enabled image builds")
-	}
-	cmdline, err := fdeCmdline(src)
+	ready, err := fdeMarkerReady(src)
 	if err != nil {
 		return err
 	}
-	signing := fdeSigningPair(src)
+	if !ready {
+		return errors.New("the FDE marker is absent; approved setup has not enabled image builds")
+	}
 	secure, err := fdeSecureBoot(src)
 	if err != nil {
 		return fmt.Errorf("read the Secure Boot state: %w", err)
 	}
-	if secure && signing == nil {
-		return errors.New("Secure Boot is enabled and no akmods signing key pair exists; enroll a MOK signing key before building a bootable image")
+	if secure {
+		return errors.New("Secure Boot is enabled; the signed shim chain is not implemented yet, so no image was built")
+	}
+	cmdline, err := fdeCmdline(src)
+	if err != nil {
+		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return err
 	}
 	temp := target + ".new"
 	defer func() { _ = os.Remove(temp) }()
-	argv := fdeUKIArgv(version, cmdline, temp, signing)
+	argv := fdeUKIArgv(version, cmdline, temp)
 	if _, err := fmt.Fprintf(out, "ukify %s\n", strings.Join(argv, " ")); err != nil {
 		return err
 	}
-	if err := src.Stream(out, out, "ukify", argv...); err != nil {
+	if err := src.Stream(out, out, FDEUKITool, argv...); err != nil {
 		return fmt.Errorf("ukify failed: %w", err)
 	}
-	size, err := fdeImageSize(temp)
+	info, err := os.Stat(temp)
 	if err != nil {
 		return fmt.Errorf("ukify produced no image: %w", err)
 	}
-	if size < fdeMinimumSize {
-		return fmt.Errorf("ukify image is implausibly small (%d bytes); the previous image is unchanged", size)
+	if info.Size() < fdeMinimumSize {
+		return fmt.Errorf("ukify image is implausibly small (%d bytes); the previous image is unchanged", info.Size())
+	}
+	if err := fdeSyncFile(temp); err != nil {
+		return err
 	}
 	if err := os.Rename(temp, target); err != nil {
 		return err
 	}
+	if dir, err := os.Open(filepath.Dir(target)); err == nil {
+		_ = dir.Sync()
+		_ = dir.Close()
+	}
 	_, err = fmt.Fprintf(out, "Installed %s for kernel %s.\n", target, version)
 	return err
+}
+
+// RemoveFDEUKI reconciles the image when a kernel is removed: if the image
+// embeds that kernel, it is rebuilt for the running kernel so the default
+// boot entry does not reference a kernel without modules.
+func RemoveFDEUKI(src native.Source, version string, out io.Writer) error {
+	return removeFDEUKI(src, version, out, FDEUKIPath)
+}
+
+func removeFDEUKI(src native.Source, version string, out io.Writer, target string) error {
+	ready, err := fdeMarkerReady(src)
+	if err != nil {
+		return err
+	}
+	if !ready {
+		return nil
+	}
+	if !fdeVersionRE.MatchString(version) {
+		return fmt.Errorf("invalid kernel version %q", version)
+	}
+	inspected, err := src.Run(FDEUKITool, "inspect", target)
+	if err != nil {
+		return fmt.Errorf("inspect the current image: %w", err)
+	}
+	if fdeInspect(string(inspected)).uname != version {
+		return nil
+	}
+	running, err := src.Run("uname", "-r")
+	if err != nil {
+		return err
+	}
+	kernel := strings.TrimSpace(string(running))
+	if !fdeVersionRE.MatchString(kernel) {
+		return fmt.Errorf("cannot determine a safe running kernel release %q", kernel)
+	}
+	if _, err := fmt.Fprintf(out, "The Nimbus image embedded kernel %s; rebuilding it for %s.\n", version, kernel); err != nil {
+		return err
+	}
+	return buildFDEUKI(src, kernel, out, target)
 }
