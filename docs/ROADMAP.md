@@ -865,9 +865,8 @@ scoped FDE auto-unlock hardware test happens earlier, as described above.
 | Work | Reason to keep it separate |
 | --- | --- |
 | Boot archives and automatic whole-system restore | Beyond native Snapper |
-| UKI generation and broader boot-key management | Separate boot design |
 | Hibernation and disk-backed swap | Needs hardware and storage validation |
-| Windows VM setup and lifecycle | Native Windows covers the immediate need |
+| Windows VM setup and lifecycle | Planned as #33 for 0.7.x |
 | Home Assistant integration | Owner wants to understand it first |
 | Additional desktop profiles | Add only for a maintained, demonstrated need |
 | Performance changes | Measure an actual problem before adding machinery |
@@ -877,11 +876,11 @@ Revisit [UWSM app launching](https://github.com/Vladimir-csp/uwsm) for browser
 and webapp commands: terminal independence, session environment, logout cleanup
 and behavior outside UWSM. This is separate from choosing the UWSM login session.
 
-If Windows VM work is reopened, retain the owner's preferences: official
-Microsoft media, capacity shown before setup, editable defaults of Windows 11
-Pro with 4 vCPUs, 8 GiB RAM and 128 GiB disk, and separate data deletion.
-Revalidate the backend then; the previous container/media research is not a
-current implementation requirement.
+Windows VM work is planned in #33 for 0.7.x; retain the owner's preferences:
+official Microsoft media, capacity shown before setup, editable defaults of
+Windows 11 Pro with 4 vCPUs, 8 GiB RAM and 128 GiB disk, and separate data
+deletion. Revalidate the backend then; the previous container/media research is
+not a current implementation requirement.
 
 ## Hardware trial
 

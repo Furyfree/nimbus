@@ -378,9 +378,9 @@ refactor and TUI.
   `95-set-boot-entry.install` only acts on `add`,
   so `saved_entry` still named the removed kernel; the grouped menu boots the
   explicit mirror entry and does not depend on `saved_entry`, but a boot after
-  a removal and the Fedora flat-menu fallback are still part of the #32 boot
-  test. The image and drop-ins still need the 0.6.0 `nimbus.spec` packaging
-  step below.
+  a removal and the Fedora flat-menu fallback are still part of the bare-metal
+  validation in #40. The image and drop-ins still need the 0.6.0 `nimbus.spec`
+  packaging step below.
 - [ ] Ship the payload and drop-in in the 0.6.0 engine package (`nimbus.spec`),
   including `/etc/grub.d/09_nimbus_previous_kernels`,
   `/etc/kernel/install.d/96-nimbus-menu.install` and
