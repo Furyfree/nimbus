@@ -54,6 +54,11 @@ func (ExecSource) StreamLogged(stdout, stderr io.Writer, log io.Writer, name str
 		return err
 	}
 	defer term.Restore(int(os.Stdin.Fd()), state)
+	// Subscribe before the child starts: a window resize arriving right after
+	// start must not be lost to a scheduling gap between Start and Notify.
+	resizes := make(chan os.Signal, 1)
+	signal.Notify(resizes, syscall.SIGWINCH)
+	defer signal.Stop(resizes)
 	cmd := exec.Command(name, args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = slave, slave, slave
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
@@ -61,9 +66,6 @@ func (ExecSource) StreamLogged(stdout, stderr io.Writer, log io.Writer, name str
 		return err
 	}
 	_ = slave.Close()
-	resizes := make(chan os.Signal, 1)
-	signal.Notify(resizes, syscall.SIGWINCH)
-	defer signal.Stop(resizes)
 	done := make(chan struct{})
 	var workers sync.WaitGroup
 	workers.Go(func() {

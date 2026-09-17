@@ -89,6 +89,20 @@ time.sleep(20)'
 	if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 130 {
 		t.Fatalf("expected interrupted child exit 130, got %v", err)
 	}
+	// Cancellation must reap the terminal child, not leave it as a zombie.
+	tasks, err := os.ReadDir("/proc/self/task")
+	if err != nil {
+		t.Fatalf("inspect tasks: %v", err)
+	}
+	for _, task := range tasks {
+		data, err := os.ReadFile(filepath.Join("/proc/self/task", task.Name(), "children"))
+		if err != nil {
+			continue
+		}
+		if children := strings.TrimSpace(string(data)); children != "" {
+			t.Fatalf("child processes remain after cancellation: %s", children)
+		}
+	}
 }
 func TestLoggedTTYProgressPrivacyResizeAndCancellation(t *testing.T) {
 	for _, tool := range []string{"python3", "stty"} {
@@ -116,6 +130,8 @@ def until(marker):
         if select.select([master],[],[],0.1)[0]: output+=os.read(master,65536)
 try:
     until(b'READY')
+    raw=termios.tcgetattr(master)
+    assert not raw[3]&termios.ICANON and not raw[3]&termios.ECHO,repr(raw)
     fcntl.ioctl(master,termios.TIOCSWINSZ,struct.pack('HHHH',37,111,0,0))
     os.kill(pid,signal.SIGWINCH)
     time.sleep(0.1)
@@ -133,6 +149,10 @@ try:
         if select.select([master],[],[],0.1)[0]:
             try: output+=os.read(master,65536)
             except OSError: pass
+    # The parent terminal must come back restored (canonical input, echo) so
+    # the invoking shell keeps its foreground behavior after the child exits.
+    restored=termios.tcgetattr(master)
+    assert restored[3]&termios.ICANON and restored[3]&termios.ECHO,repr(restored)
     log=open(sys.argv[2],'rb').read()
     assert b'READY' in log and b'WAITING' in log,log
     assert b'INTERRUPTED' in log,log
