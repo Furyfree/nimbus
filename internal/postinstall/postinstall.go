@@ -146,6 +146,9 @@ func Inspect(src native.Source, in Inputs) []Task {
 		add("dtu-network", func() Task { return dtuNetwork(src, in) })
 	}
 	add("hostname", func() Task { return hostnameTask(src, in) })
+	if slices.ContainsFunc(in.Resolved.Components, func(c definitions.ResolvedComponent) bool { return c.ID == "fde" }) {
+		add("fde", func() Task { return fdeTask(src, in) })
+	}
 	if in.Task == "" {
 		result = append(result, sessionTasks(src, in)...)
 	}

@@ -746,11 +746,13 @@ an independent test safeguard.
 
 ### FDE auto-unlock second
 
-Add an optional post-install action for the existing LUKS2 installation.
-First inspect Fedora's boot path, encryption, TPM and Secure Boot support;
-choose and document the native enrollment method and boot-change policy before
-implementation. Do not assume a UKI migration is required. Broad UKI generation
-and boot-key management remain deferred.
+Add an optional post-install action for the existing LUKS2 installation,
+selected with the `fde` component. Fedora's boot path, encryption, TPM and
+Secure Boot support were inspected read-only on the laptop and the disposable
+VM, and the native method and boot-change policy are settled in issue #34:
+Dracut, ukify, kernel-install and systemd-cryptenroll, PCR 7 + PCR 14 + signed
+PCR 11 with shim and PCR 7 + signed PCR 11 without. The read-only detection
+(`postinstall fde`) is implemented; setup and enrollment are not.
 
 The action must preview the target and changes, request approval, preserve a
 working passphrase, and report unsupported setups without weakening security.

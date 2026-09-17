@@ -1,0 +1,15 @@
+# Optional TPM automatic disk unlock: signed Unified Kernel Images and a
+# scoped systemd-cryptenroll keyslot. The postinstall task inspects read-only
+# first; enrollment, renewal and removal stay explicit and never run from sync.
+schema = 1
+id = "fde"
+
+requires = []
+conflicts = []
+
+packages = [
+  "systemd-ukify",
+  "sbsigntools",
+]
+
+removes = []
