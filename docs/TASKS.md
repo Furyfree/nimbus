@@ -1409,8 +1409,16 @@ verify the version, all machine definitions and command help. The owner will
 update and test the laptop through Nimbus; release work made no laptop or live
 desktop configuration changes.
 
-- [ ] Review terminal-cancellation and foreground-restoration test timing/reaping;
-  successful retries do not establish that those intermittent failures are fixed.
+- [x] Review terminal-cancellation and foreground-restoration test timing and
+  reaping (2026-09-17). Production `StreamLogged` now subscribes to SIGWINCH
+  before starting the child, closing a window where a resize arriving right
+  after start could be lost; the PTY test asserts that the parent terminal
+  returns to canonical input with echo, that no child remains unreaped, and it
+  keeps the privacy, resize and exit-130 checks. Removing `term.Restore` fails
+  the restoration assertion deterministically, so the check has teeth. 300
+  repetitions and 60 with `-race` passed, on top of the earlier 500-repetition
+  evidence for the unbuffered readiness writes. No retry-based evidence is
+  used.
 
 ## Version 0.5.7 publication
 
