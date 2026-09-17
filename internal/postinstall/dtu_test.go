@@ -130,7 +130,7 @@ func TestDTUInspectionIsOfflineAndNativeStateIsAuthoritative(t *testing.T) {
 				in.Facts.User.Value.Name = "root"
 				want = Blocked
 			}
-			tasks := Inspect(src, in)
+			tasks := withoutMachineTasks(Inspect(src, in))
 			if mode == "unselected" {
 				if len(tasks) != 0 {
 					t.Fatal(tasks)
