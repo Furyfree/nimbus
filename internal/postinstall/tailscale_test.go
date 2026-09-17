@@ -82,7 +82,7 @@ func TestTailscaleOperatorPrerequisites(t *testing.T) {
 				src.Failures["/usr/bin/tailscale debug prefs"] = "local daemon unavailable"
 			}
 			guard := &readGuard{FakeSource: src}
-			tasks := Inspect(guard, in)
+			tasks := withoutMachineTasks(Inspect(guard, in))
 			if mode == "unselected" {
 				if len(tasks) != 0 || len(guard.commands) != 0 {
 					t.Fatalf("inspected an unselected capability: %+v", tasks)

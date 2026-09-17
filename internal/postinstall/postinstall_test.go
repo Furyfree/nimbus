@@ -50,6 +50,12 @@ func findTask(t *testing.T, tasks []Task, id string) Task {
 	return Task{}
 }
 
+// Machine-scoped tasks exist for every machine and are not tied to a selected
+// package or component.
+func withoutMachineTasks(tasks []Task) []Task {
+	return slices.DeleteFunc(tasks, func(task Task) bool { return task.ID == "hostname" })
+}
+
 func TestSelectionAndOnePasswordPrivacy(t *testing.T) {
 	in, src := fixture("1password")
 	got := findTask(t, Inspect(src, in), "onepassword")
@@ -64,7 +70,7 @@ func TestSelectionAndOnePasswordPrivacy(t *testing.T) {
 		t.Fatalf("unexpected account inspection: %v, %v", guard.commands, guard.files)
 	}
 	in.Resolved.Packages = nil
-	if got := Inspect(guard, in); len(got) != 0 {
+	if got := withoutMachineTasks(Inspect(guard, in)); len(got) != 0 {
 		t.Fatalf("unselected installed app exposed a task: %+v", got)
 	}
 	in.Resolved = nil
@@ -130,7 +136,7 @@ func TestInstallerHelpersDoNotImplyApplicationCompletion(t *testing.T) {
 			src.Paths[helper] = helper
 			src.Commands[helper+" status"] = []byte("Installed GitHub Copilot: not installed\n")
 			guard := &readGuard{FakeSource: src}
-			got := Inspect(guard, in)
+			got := withoutMachineTasks(Inspect(guard, in))
 			if name == "github-copilot-installer" {
 				if len(got) != 2 || len(guard.files) != 1 {
 					t.Fatalf("expected local proxy registration inspection: %+v", got)
@@ -149,12 +155,12 @@ func TestInstallerHelpersDoNotImplyApplicationCompletion(t *testing.T) {
 				t.Fatalf("offered an unsupported WoWUp command: %+v", got[0])
 			}
 			delete(src.Paths, helper)
-			got = slices.DeleteFunc(Inspect(src, in), func(task Task) bool { return task.ID == "agent-proxy" })
+			got = slices.DeleteFunc(withoutMachineTasks(Inspect(src, in)), func(task Task) bool { return task.ID == "agent-proxy" })
 			if got[0].Status != Blocked || got[0].Action != nil {
 				t.Fatalf("missing helper can run: %+v", got[0])
 			}
 			in.Resolved.Packages = nil
-			if got := Inspect(src, in); len(got) != 0 {
+			if got := withoutMachineTasks(Inspect(src, in)); len(got) != 0 {
 				t.Fatalf("unselected helper exposed a task: %+v", got)
 			}
 		})
@@ -179,7 +185,7 @@ func TestProtonCachyOSUsesNativeSetupWithoutInspectingUserData(t *testing.T) {
 				in.Facts.Packages.Error = "rpm unavailable"
 			}
 			guard := &readGuard{FakeSource: src}
-			tasks := Inspect(guard, in)
+			tasks := withoutMachineTasks(Inspect(guard, in))
 			if (len(guard.commands) > 0 && !slices.Equal(guard.commands, []string{"protonplus list steam-system"})) || len(guard.files) != 0 {
 				t.Fatalf("setup inspection accessed user data or ran commands: %v %v", guard.commands, guard.files)
 			}
@@ -374,7 +380,7 @@ func TestForeignOrFailedReceiptsDoNotCreateRequirements(t *testing.T) {
 		}
 		in.Applied.Receipts[id] = r
 	}
-	if got := Inspect(src, in); len(got) != 0 {
+	if got := withoutMachineTasks(Inspect(src, in)); len(got) != 0 {
 		t.Fatalf("invalid receipts exposed tasks: %+v", got)
 	}
 }
@@ -412,7 +418,7 @@ func TestSingleTaskInspectionMatchesFullCatalogWithoutOtherProbes(t *testing.T) 
 	in, src := fixture("1password", "fprintd", "tailscale", "github-copilot-installer", "wowup-cf-installer", "noctalia", "hyprland-devel", "accountsservice", "protonplus", "steam")
 	in.Resolved.Components = append(in.Resolved.Components, definitions.ResolvedComponent{ID: "nvidia"})
 	all := Inspect(src, in)
-	if len(all) != 12 {
+	if len(all) != 13 {
 		t.Fatalf("task coverage changed: %d", len(all))
 	}
 	for _, task := range all {

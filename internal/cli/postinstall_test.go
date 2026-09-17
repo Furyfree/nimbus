@@ -212,6 +212,7 @@ func TestPostinstallRejectsForgedNativeActions(t *testing.T) {
 		{ID: "proton-cachyos", Status: postinstall.Unknown, Action: &postinstall.Action{Kind: postinstall.InstallApplication, Argv: []string{"protonplus", "update", "all"}}},
 		{ID: "proton-cachyos", Status: postinstall.Blocked, Action: &postinstall.Action{Kind: postinstall.InstallApplication, Argv: []string{"protonplus", "install", "steam-system", "proton-cachyos", "latest"}}},
 		{ID: "voxtype", Status: postinstall.Pending, Action: &postinstall.Action{Kind: postinstall.SetupVoxtype, Commands: [][]string{{"sh", "-c", "voxtype setup"}, {"systemctl", "--user", "enable", "--now", "voxtype.service"}}}},
+		{ID: "hostname", Status: postinstall.Pending, Action: &postinstall.Action{Kind: postinstall.SetHostname, Hostname: "nimbus-laptop", Argv: []string{"sudo", "--", "/usr/bin/hostnamectl", "set-hostname", "other"}}},
 	} {
 		if _, err := postinstallArgv(task); err == nil {
 			t.Fatalf("untyped action accepted: %+v", task)

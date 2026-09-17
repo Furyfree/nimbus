@@ -394,6 +394,17 @@ the preference and package deselection does not reset it. Revoke it through
 `sudo tailscale set --operator=` or explicitly choose another operator;
 `tailscale down` disconnects without removing the operator.
 
+Every machine exposes `postinstall hostname`. The machine ID derives the
+persistent name `nimbus-<id>`, for example `nimbus-laptop`. Read the static
+hostname through `hostnamectl`; a matching name is complete, and repeated
+syncs change nothing. Otherwise preview
+`sudo -- /usr/bin/hostnamectl set-hostname NAME` and explain that
+NetworkManager then keeps the static name stable across Wi-Fi changes and
+reboots. Ask the user to close browsers first: Chromium can refuse a profile
+whose lock names another hostname. Never delete profile locks or browser data.
+Verify the static name after the action; the transient DHCP name is never the
+completion check. An invalid derived name offers no action.
+
 The explicit `dtu-network` component selects NetworkManager, Python with
 native DBus bindings and SELinux tools on desktop and laptop. Sync installs
 prerequisites only. Its explicit Linux postinstall installs

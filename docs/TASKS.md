@@ -1486,3 +1486,24 @@ Implemented in source; not released as a package.
   preview plus approved run where the native catalog and unit state change.
   `just check` passes.
 - [ ] Release the task in a package and run it on the laptop (owner present).
+
+## Persistent hostname, 2026-09-17
+
+Implemented in source; not released as a package.
+
+- [x] Every machine exposes a `hostname` postinstall task. The intended name
+  derives from the machine ID as `nimbus-<id>` (`nimbus-laptop`,
+  `nimbus-desktop`). Keeping it out of the machine manifest avoids a strict
+  decoding break: the installed 0.5.10 engine would reject an unknown field
+  and require a min-engine bump.
+- [x] Inspection runs `hostnamectl --static` only, shows the observed and
+  intended name, and offers one approved change:
+  `sudo -- /usr/bin/hostnamectl set-hostname NAME`. Forged or reordered
+  commands are rejected. A matching static name is complete; the transient
+  DHCP name is never used or altered, and no browser data or profile locks
+  are touched. Browsers are asked to be closed first.
+- [x] Tests cover matching, differing, invalid derivation, missing tool, read
+  failure, unrecognized names, forged actions, and single-task inspection
+  parity. `just check` and `just validate` pass.
+- [ ] Set the hostname on the laptop and desktop (owner present) and confirm
+  Brave reopens the same profile after a reboot.

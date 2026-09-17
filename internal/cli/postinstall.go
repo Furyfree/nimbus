@@ -290,6 +290,9 @@ func postinstallCommands(task postinstall.Task) ([][]string, error) {
 	if task.Action != nil && task.Action.Kind == postinstall.SetupVoxtype {
 		return postinstall.VoxtypeCommands(task)
 	}
+	if task.Action != nil && task.Action.Kind == postinstall.SetHostname {
+		return postinstall.HostnameCommands(task)
+	}
 	if task.Action != nil && len(task.Action.Commands) != 0 {
 		return nil, errors.New("unexpected native command list")
 	}

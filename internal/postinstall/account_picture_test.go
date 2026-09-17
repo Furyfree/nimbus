@@ -100,7 +100,7 @@ func TestAccountPictureReadiness(t *testing.T) {
 				in.Resolved.Packages = nil
 			}
 			guard := &readGuard{FakeSource: src}
-			tasks := Inspect(guard, in)
+			tasks := withoutMachineTasks(Inspect(guard, in))
 			if mode == "unselected" {
 				if len(tasks) != 0 || len(guard.commands) != 0 || len(guard.files) != 0 {
 					t.Fatal("unselected account inspected")

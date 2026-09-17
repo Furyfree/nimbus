@@ -39,6 +39,7 @@ const (
 	SyncHyprlandPlugins       ActionKind = "sync-hyprland-plugins"
 	SetAccountPicture         ActionKind = "set-account-picture"
 	SetupVoxtype              ActionKind = "setup-voxtype"
+	SetHostname               ActionKind = "set-hostname"
 )
 
 // Action describes native commands offered for explicit user selection.
@@ -52,6 +53,7 @@ type Action struct {
 	Argv       []string          `json:"argv,omitempty"`
 	Commands   [][]string        `json:"commands,omitempty"`
 	User       string            `json:"user,omitempty"`
+	Hostname   string            `json:"hostname,omitempty"`
 	Picture    *AccountPicture   `json:"picture,omitempty"`
 }
 
@@ -141,6 +143,7 @@ func Inspect(src native.Source, in Inputs) []Task {
 	if slices.ContainsFunc(in.Resolved.Components, func(c definitions.ResolvedComponent) bool { return c.ID == "dtu-network" }) {
 		add("dtu-network", func() Task { return dtuNetwork(src, in) })
 	}
+	add("hostname", func() Task { return hostnameTask(src, in) })
 	if in.Task == "" {
 		result = append(result, sessionTasks(src, in)...)
 	}
