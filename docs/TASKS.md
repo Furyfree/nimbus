@@ -61,8 +61,13 @@ candidate on the laptop; the installed release remains unchanged.
   trial.
 - [x] Owner authorized committing and pushing DTU setup to main alongside the
   separate Pinta Flatpak change. Package release remains separate.
-- [ ] Update the RPM licence metadata and include `licenses/GEANT-CAT.txt` when
-  packaging this separately licensed CAT adaptation.
+- [x] Update the RPM licence metadata and include `licenses/GEANT-CAT.txt` when
+  packaging this separately licensed CAT adaptation. The copr recipe declares
+  `LicenseRef-GEANT-CAT` and ships the notice (copr 086f342, PR #14); an
+  offline container build from a Nimbus `main` vendor archive verified the
+  licence expression and `/usr/share/licenses/nimbus/GEANT-CAT.txt`. It takes
+  effect with the 0.6.0 release archive, which contains the file since commit
+  `96ddee1`; the published 0.5.10 package is unchanged.
 
 The following certificate-only evidence predates this addition; it does not
 establish that the new guided connection flow works on campus.
