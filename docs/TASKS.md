@@ -717,12 +717,15 @@ was performed by this audit.
   `system/root/etc/xdg/user-dirs.defaults`: Projects, Screenshots, Wallpapers
   and Recordings. Fedora's installed 0.18 updater creates all four correctly
   in an isolated home. Preserve the standard Fedora defaults too.
-- [ ] Resolve explicit ownership migration for the existing package-owned
-  `/etc/xdg/user-dirs.defaults` before selecting the prepared file resource.
-  The file is unselected for 0.4.1: the planner correctly blocks replacement
-  without a Nimbus receipt.
-  `files accept` requires prior ownership and cannot adopt this file. Chezmoi
-  already manages the working per-user paths and creates their folders.
+- [x] Resolve the `/etc/xdg/user-dirs.defaults` ownership question (2026-09-17):
+  Chezmoi owns the per-user file and directory creation, so the unselected
+  prepared asset is removed instead of migrated. `~/.config/user-dirs.dirs`
+  carries the standard entries plus Projects, Screenshots, Wallpapers and
+  Recordings, and the Files hook creates every declared directory before
+  login-time `xdg-user-dirs-update` can reset missing paths to home. Fedora
+  44's xdg-user-dirs also no longer ships the system defaults path, so no
+  package-owned file exists to adopt. `files accept` keeps requiring prior
+  ownership for every other managed file.
 - [ ] Complete system reconciliation after the unreleased engine and local
   changes are ready for delivery. The requested sync stopped at dirty-repo
   preflight; no repository fetch, system mutation or user apply ran through
@@ -740,12 +743,13 @@ was performed by this audit.
   resolution in a disposable Fedora container selects both new COPRs;
   the transaction was declined. Workstation installation remains untested.
 
-The native XDG file extends Fedora's installed `user-dirs.defaults`; upstream
-[documents its role](https://www.freedesktop.org/wiki/Software/xdg-user-dirs/).
+The native XDG user directories are owned by Chezmoi, including their folders
+and the per-user file; Nimbus ships no system defaults. Upstream
+[documents the file's role](https://www.freedesktop.org/wiki/Software/xdg-user-dirs/).
 A comparison with
 [CachyOS-Settings](https://github.com/CachyOS/CachyOS-Settings)
-did not justify extra system policy. Existing user overrides remain owned by
-Chezmoi. SSH server access stays unmanaged, and the Windows VM stays deferred.
+did not justify extra system policy. SSH server access stays unmanaged, and the
+Windows VM stays deferred.
 
 ### Engine and integration work
 

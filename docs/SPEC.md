@@ -58,11 +58,13 @@ Use `system/root/etc/` for the existing generic `/etc` file provider. Other
 locations, such as GRUB assets under `/boot`, need an explicit supported
 installation/removal path; they are not arbitrary file-copy destinations.
 Prefer native configuration drop-ins over replacing package-owned files.
-The prepared XDG user-directory defaults extend the native Fedora file with
-Projects, Screenshots, Wallpapers and Recordings. Because Fedora already owns
-that path, the prepared file remains unselected until explicit ownership
-migration is supported. The generic provider must continue to reject an
-unowned existing file.
+User-directory defaults belong to Chezmoi: it writes
+`~/.config/user-dirs.dirs` with the standard entries plus Projects,
+Screenshots, Wallpapers and Recordings, and its Files hook creates every
+declared directory before login-time `xdg-user-dirs-update` can reset missing
+paths to home. Nimbus ships and owns no `/etc/xdg/user-dirs.defaults`, so the
+generic provider's rule that an unowned existing file is never replaced is
+unaffected.
 
 Shell, editor, browser, desktop, Noctalia and per-user systemd configuration
 below the home directory belong to Chezmoi. Vendor-generated service units,
