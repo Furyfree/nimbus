@@ -364,7 +364,8 @@ refactor and TUI.
   Fedora's flat menu, and marker removal deleted the mirror. The image and
   drop-in still need the 0.6.0 `nimbus.spec` packaging step below.
 - [ ] Ship the payload and drop-in in the 0.6.0 engine package (`nimbus.spec`),
-  including `/etc/grub.d/09_nimbus_previous_kernels`, and select `boot-theme` in
+  including `/etc/grub.d/09_nimbus_previous_kernels` and
+  `/usr/lib/dracut/modules.d/40nimbus-plymouth`, and select `boot-theme` in
   the `common` profile in the release change. The
   component stays deselected on physical machines until then, so an older
   engine is never asked to run triggers whose payload it lacks.
@@ -385,11 +386,14 @@ refactor and TUI.
   older kernel end to end; the VM had no Windows entry.
 - Accepted limitations: an older kernel whose initramfs was built before
   activation keeps the default Plymouth prompt until its next rebuild; the
-  GRUB menu stays themed. Observed 2026-09-17: booting 7.2.5 through GRUB
-  showed the text-mode disk-unlock prompt although `lsinitrd` shows the nimbus
-  theme in that initramfs, while the UKI path showed the themed prompt;
-  investigate the Plymouth handover before claiming the graphical prompt on
-  every boot path. BIOS-only systems are untested (EFI verified). The
+  GRUB menu stays themed. The Paper Dark text rendering needs the label plugin
+  and fontconfig inside the initramfs; the engine's marker-gated dracut module
+  `40nimbus-plymouth` adds `label-freetype.so`, `fc-match`, fontconfig and the
+  monospace font, and creates the writable xdg fontconfig cache on the initrd
+  root (`/usr` is read-only there). Verified 2026-09-17 in the VM: the
+  previously intermittent text-mode unlock prompt rendered the themed screen,
+  and the boot journal showed zero `fc-match` and `Fontconfig` errors. BIOS-only
+  systems are untested (EFI verified). The
   explicit `set timeout=5` intentionally overrides `GRUB_TIMEOUT`,
   `menu_auto_hide` and `systemctl reboot --boot-loader-menu`. If the engine
   does not ship the payload, or the recorded previous Plymouth theme is gone,
