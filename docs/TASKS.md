@@ -1433,3 +1433,33 @@ mounts. [Publication](https://github.com/Furyfree/copr/actions/runs/34899644892)
 was dispatched for Nimbus only. Handoff remains after COPR submission without
 monitoring completion; published-RPM availability and signature checks remain
 pending. No workstation package installation was changed during publication.
+
+## Terminal interrupt buffered-output correction
+
+The interrupt fixture could re-enter Python's buffered stdout: Ctrl+C could
+arrive after WAITING reached the parent but before its `print` finished, and
+the handler called `print` again. Both markers now use `os.write`. Terminal
+I/O, resize, private-input exclusion, INTERRUPTED and exit 130 assertions,
+and the existing deadlines are unchanged. No production code changed.
+
+Validation on 2026-09-15:
+
+- A controlled reproducer delays the raw readiness write's return while the
+  buffered writer holds its lock. The original fixture fails with a reentrant
+  call in all 10 trials; the correction returns INTERRUPTED and exit 130 in
+  all 10. The original also passed 200 ordinary repetitions, illustrating why
+  repetition alone is insufficient evidence for this race.
+- `TestLoggedTTYProgressPrivacyResizeAndCancellation` passes 500 repetitions
+  locally with Go 1.27.1 and 500 with Fedora's Go 1.26.8; both use Python 3.14.7.
+- `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 just check` and
+  `just validate` pass. The first unisolated gate stalled in the VM-staging
+  fixture's Git signing through 1Password; no signing settings were changed.
+- Fedora's vendored `go test -mod=vendor ./...`, binary build and checkout
+  validation pass as a dedicated unprivileged test user, with networking
+  disabled, copied source and no host mounts. Initial container checks lacked
+  the test user's identity/group; supplying them resolved those failures.
+  Native DNF opt-in tests and the native Chezmoi first-install trial were
+  skipped; subprocess-only helpers run through their parent tests.
+
+This is an unpublished source correction; no release or installed engine was
+changed.

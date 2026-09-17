@@ -67,18 +67,20 @@ func TestLoggedTTYChild(t *testing.T) {
 	defer log.Close()
 	// The process that receives Ctrl+C must announce its own readiness. A shell
 	// printing WAITING before spawning sleep races with delivery of the interrupt.
+	// Both Python writes bypass buffered stdout: Ctrl+C can arrive while the
+	// readiness write is still returning, and buffered writers are not reentrant.
 	body := `test -t 0 && test -t 1 || exit 91
 stty -echo
 printf 'READY\n'
 read answer
 test "$answer" = 'synthetic-private-answer' || exit 92
 stty size
-exec python3 -c 'import signal,sys,time
+exec python3 -c 'import os,signal,sys,time
 def interrupted(*args):
-    print("INTERRUPTED", flush=True)
+    os.write(1, b"INTERRUPTED\n")
     sys.exit(130)
 signal.signal(signal.SIGINT, interrupted)
-print("WAITING", flush=True)
+os.write(1, b"WAITING\n")
 time.sleep(20)'
 `
 	stdout := output.ColorWriter(os.Stdout, func() bool { return true })
