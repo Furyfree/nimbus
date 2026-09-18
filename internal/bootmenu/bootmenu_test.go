@@ -218,6 +218,35 @@ func TestPreviousKernelsPayloadContract(t *testing.T) {
 	}
 }
 
+// The Paper Dark drop-in must not attempt loadfont under Secure Boot: GRUB's
+// shim-lock verifier refuses the font file type and prints an error for each
+// call, so the faces load only when shim_lock is unset.
+func TestPaperDarkFontGuard(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "system", "root", "etc", "grub.d", "36_paper_dark"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(data)
+	guard := "if [ \"$shim_lock\" != \"y\" ]; then"
+	start := strings.Index(script, guard)
+	if start < 0 {
+		t.Fatal("payload lacks the shim_lock font guard")
+	}
+	end := strings.Index(script[start:], "\nfi\n")
+	if end < 0 {
+		t.Fatal("payload lacks the guarded block end")
+	}
+	guarded := script[start : start+end]
+	for _, font := range []string{"mono-16.pf2", "mono-20.pf2", "mono-24.pf2"} {
+		if !strings.Contains(guarded, font) {
+			t.Fatalf("font %s is loaded outside the shim_lock guard", font)
+		}
+	}
+	if strings.Count(script, "loadfont $prefix") != 3 {
+		t.Fatal("unexpected loadfont lines in the payload")
+	}
+}
+
 // The menu hook regenerates grub.cfg on kernel installs and removals, because
 // Fedora's own grub hook only runs when BLS is disabled. It must stay inert
 // without the marker and warn instead of failing the kernel transaction; the
