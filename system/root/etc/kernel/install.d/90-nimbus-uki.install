@@ -13,7 +13,9 @@ case "$1" in
     add | remove) ;;
     *) exit 0 ;;
 esac
-if ! /usr/bin/nimbus internal fde-uki "$@"; then
+# kernel-install passes the entry directory and kernel image after the version;
+# the engine needs only the verb and the kernel version.
+if ! /usr/bin/nimbus internal fde-uki "$1" "$2"; then
     echo "warning: the Nimbus kernel image was not rebuilt; the previous image and Fedora's GRUB entries remain" >&2
 fi
 exit 0

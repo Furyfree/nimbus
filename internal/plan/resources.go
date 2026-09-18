@@ -306,8 +306,8 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 						op.Resource = &ResourceChange{Name: "plymouth-theme", Previous: receipt.Previous}
 					}
 				}
-				if op.Blocked == "" && b.fdeSetupActive() {
-					op.Notes = append(op.Notes, "Plymouth regenerates the running kernel's initramfs; the signed Nimbus image is rebuilt for the running kernel afterwards because FDE is enabled.")
+				if op.Blocked == "" && b.fdeMarkerInstalled() {
+					op.Notes = append(op.Notes, "Plymouth regenerates the running kernel's initramfs; the signed Nimbus image is rebuilt for the running kernel afterwards unless it already targets another kernel, because FDE is enabled.")
 				}
 			}
 			ops = append(ops, op)

@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"io"
+	"strings"
 	"testing"
 
 	"github.com/Furyfree/nimbus/internal/native/nativetest"
@@ -9,6 +11,23 @@ import (
 
 // The verification wrapper must send only the fixed image inspection through
 // sudo; everything else passes through untouched.
+func TestInternalFDEUKIAcceptsReconcileFlag(t *testing.T) {
+	for _, args := range [][]string{
+		{"add", "6.19.10-300.fc44.x86_64", "--only-if-current"},
+		{"add", "6.19.10-300.fc44.x86_64"},
+		{"remove", "6.19.10-300.fc44.x86_64"},
+	} {
+		cmd := newInternalFDEUKI()
+		cmd.SetArgs(args)
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		err := cmd.Execute()
+		if err == nil || !strings.Contains(err.Error(), "must run as root") {
+			t.Fatalf("args %v: parse failed before the root check: %v", args, err)
+		}
+	}
+}
+
 func TestFDEVerificationSourceAllowlist(t *testing.T) {
 	base := &nativetest.FakeSource{
 		Commands: map[string][]byte{

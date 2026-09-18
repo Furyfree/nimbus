@@ -369,8 +369,16 @@ func buildFDEUKI(src native.Source, version string, out io.Writer, target string
 		return errors.New("the FDE marker is absent; approved setup has not enabled image builds")
 	}
 	if onlyIfCurrent {
-		if current, err := src.Run(FDEUKITool, "inspect", target); err == nil {
-			if embedded := fdeInspect(string(current)).uname; embedded != "" && embedded != version {
+		if _, statErr := os.Stat(target); statErr == nil {
+			current, err := src.Run(FDEUKITool, "inspect", target)
+			if err != nil {
+				return fmt.Errorf("the existing image could not be inspected; it was not replaced: %w", err)
+			}
+			embedded := fdeInspect(string(current)).uname
+			if embedded == "" {
+				return errors.New("the existing image does not identify its kernel; it was not replaced")
+			}
+			if embedded != version {
 				_, err := fmt.Fprintf(out, "the image already targets kernel %s; it was not rebuilt for %s\n", embedded, version)
 				return err
 			}

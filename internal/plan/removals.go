@@ -36,6 +36,16 @@ func (b *builder) fdeSetupActive() bool {
 	return err == nil || !errors.Is(err, os.ErrNotExist)
 }
 
+// fdeMarkerInstalled reports whether the marker holds the exact content the
+// approved setup writes; only then do reconciles rebuild the image.
+func (b *builder) fdeMarkerInstalled() bool {
+	if b.in.Source == nil {
+		return false
+	}
+	data, err := b.in.Source.ReadFile(FDEMarkerPath)
+	return err == nil && string(data) == FDEMarkerText
+}
+
 // removeTransaction previews the removal of declared removes that are still
 // installed and that the install transaction does not already erase.
 func (b *builder) removeTransaction(installTx *Transaction) (Operation, bool) {

@@ -164,9 +164,19 @@ func TestFDEUnlockOption(t *testing.T) {
 }
 
 func TestBuildFDEUKICurrent(t *testing.T) {
+	existing := func(t *testing.T, target string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(target, []byte("existing"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	t.Run("skips an image built for another kernel", func(t *testing.T) {
 		src := fdeBuildSource(t)
 		target := filepath.Join(t.TempDir(), "EFI", "Linux", "nimbus.efi")
+		existing(t, target)
 		src.Commands[nativetest.Key(FDEUKITool, "inspect", target)] =
 			[]byte(strings.Replace(fdeInspectOutput, "6.19.10-300.fc44.x86_64", "6.20.1-300.fc44.x86_64", 1))
 		var out bytes.Buffer
@@ -175,6 +185,28 @@ func TestBuildFDEUKICurrent(t *testing.T) {
 		}
 		if !strings.Contains(out.String(), "already targets kernel 6.20.1-300.fc44.x86_64") {
 			t.Fatalf("got %q", out.String())
+		}
+	})
+	t.Run("an uninspectable image is not replaced", func(t *testing.T) {
+		src := fdeBuildSource(t)
+		target := filepath.Join(t.TempDir(), "EFI", "Linux", "nimbus.efi")
+		existing(t, target)
+		if err := buildFDEUKI(src, fdeTestVersion, io.Discard, target, true); err == nil ||
+			!strings.Contains(err.Error(), "could not be inspected") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("a missing image is built", func(t *testing.T) {
+		src := fdeBuildSource(t)
+		target := filepath.Join(t.TempDir(), "EFI", "Linux", "nimbus.efi")
+		fdeStagedTarget(t, target, fdeMinimumSize+1)
+		src.Commands[nativetest.Key(FDEUKITool, fdeBuildArgv(target, false)...)] = []byte{}
+		src.Commands[nativetest.Key(FDEUKITool, "inspect", target+".new")] = []byte(fdeStagedText)
+		if err := buildFDEUKI(src, fdeTestVersion, io.Discard, target, true); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(target); err != nil {
+			t.Fatalf("image was not moved into place: %v", err)
 		}
 	})
 }

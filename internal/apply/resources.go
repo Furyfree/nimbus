@@ -58,7 +58,7 @@ func (ex *executor) plymouthThemeTrigger(op plan.Operation) ([]state.Receipt, []
 	}
 	verification := "native Plymouth theme selection verified after the command"
 	if rebuilt {
-		verification += "; signed Nimbus image rebuilt for the running kernel"
+		verification += "; signed Nimbus image reconciled for the running kernel"
 	}
 	return []state.Receipt{ex.receipt(op, plan.KindTrigger, previous, intended, verification)}, nil, nil
 }

@@ -15,6 +15,7 @@ import (
 // hook and approved setup call. It validates the marker gate itself; there is
 // no arbitrary file or command input.
 func newInternalFDEUKI() *cobra.Command {
+	var onlyIfCurrent bool
 	cmd := &cobra.Command{Use: "fde-uki", Hidden: true, Args: cobra.RangeArgs(1, 3), RunE: func(cmd *cobra.Command, args []string) error {
 		if os.Geteuid() != 0 {
 			return errors.New("internal fde-uki must run as root through kernel-install or approved setup")
@@ -35,11 +36,11 @@ func newInternalFDEUKI() *cobra.Command {
 			}
 			return postinstall.WriteFDEEnrollment(args[1], args[2])
 		case "add":
-			if len(args) == 3 && args[2] == "--only-if-current" {
-				return postinstall.BuildFDEUKICurrent(native.ExecSource{}, args[1], cmd.OutOrStdout())
-			}
 			if len(args) != 2 {
 				return usageError{errors.New("internal fde-uki add needs a kernel release")}
+			}
+			if onlyIfCurrent {
+				return postinstall.BuildFDEUKICurrent(native.ExecSource{}, args[1], cmd.OutOrStdout())
 			}
 			return postinstall.BuildFDEUKI(native.ExecSource{}, args[1], cmd.OutOrStdout())
 		case "remove":
@@ -51,5 +52,6 @@ func newInternalFDEUKI() *cobra.Command {
 			return usageError{fmt.Errorf("unsupported fde-uki command %q", args[0])}
 		}
 	}}
+	cmd.Flags().BoolVar(&onlyIfCurrent, "only-if-current", false, "skip the rebuild when the image already targets another kernel")
 	return cmd
 }

@@ -879,7 +879,7 @@ func TestPlymouthThemeTriggerRecordsAndRestores(t *testing.T) {
 			if test.action == plan.ActionRepair {
 				fdeSrc := &plymouthTestSource{theme: test.theme, marker: true}
 				receipts, _, err := resourceExecutor(fdeSrc).systemResource(op)
-				if err != nil || len(receipts) != 1 || !strings.Contains(receipts[0].Verification, "signed Nimbus image rebuilt") {
+				if err != nil || len(receipts) != 1 || !strings.Contains(receipts[0].Verification, "signed Nimbus image reconciled") {
 					t.Fatalf("receipts=%v err=%v", receipts, err)
 				}
 				if len(fdeSrc.streams) != 2 || !strings.Contains(fdeSrc.streams[1], "internal fde-uki add 6.19.10-300.fc44.x86_64 --only-if-current") {

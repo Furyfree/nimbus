@@ -731,7 +731,13 @@ func VerifyFDE(src native.Source, t Task) Task {
 		t.Detail = "The embedded initramfs could not be compared with /boot: " + err.Error()
 		return t
 	}
-	if fields := strings.Fields(string(sum)); len(fields) > 0 && !strings.EqualFold(fields[0], inspected.initrd) {
+	fields := strings.Fields(string(sum))
+	if len(fields) == 0 {
+		t.VerificationNeedsRoot = true
+		t.Detail = "The embedded initramfs could not be compared with /boot: sha256sum returned no digest."
+		return t
+	}
+	if !strings.EqualFold(fields[0], inspected.initrd) {
 		return damaged("The Nimbus image embeds an initramfs that differs from /boot; rebuild it with the approved setup.")
 	}
 	tokens, err := fdeTokens(src)

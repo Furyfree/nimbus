@@ -679,6 +679,10 @@ func TestPlymouthTriggerDisclosesFDEImageRebuild(t *testing.T) {
 	if !disclosed(trigger(b.systemResources(nil))) {
 		t.Fatal("the FDE rebuild was not disclosed with the marker")
 	}
+	src.Files[FDEMarkerPath] = []byte("foreign\n")
+	if disclosed(trigger(b.systemResources(nil))) {
+		t.Fatal("the FDE rebuild was disclosed for a foreign marker")
+	}
 }
 
 func TestPlymouthRemovalRestoresRecordedTheme(t *testing.T) {
