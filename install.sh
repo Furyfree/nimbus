@@ -298,11 +298,19 @@ if [ -e "${CHECKOUT}" ]; then
   got="$(normalize "${remote}")"
   [ "$(printf '%s' "${got}" | tr '[:upper:]' '[:lower:]')" = "${ORIGIN_ID}" ] || fail "${CHECKOUT} does not match the Nimbus origin; it is left untouched"
   current="$(git -C "${real}" branch --show-current 2>/dev/null || true)"
-  if [ -n "${current}" ] && [ "${current}" != "${branch}" ]; then
-    [ -z "$(git -C "${real}" status --porcelain)" ] || fail "${CHECKOUT} has local changes; commit or stash them before switching channel"
-    say "switching ${CHECKOUT} from ${current} to ${branch}"
-    installer_run git -C "${real}" fetch origin "${branch}"
-    installer_run git -C "${real}" switch "${branch}"
+  if [ -n "${current}" ]; then
+    [ -z "$(git -C "${real}" status --porcelain)" ] || fail "${CHECKOUT} has local changes; commit or stash them before installing"
+    if [ "${current}" != "${branch}" ]; then
+      say "switching ${CHECKOUT} from ${current} to ${branch}"
+      installer_run git -C "${real}" fetch origin "${branch}"
+      installer_run git -C "${real}" switch "${branch}"
+    else
+      # The installer always runs the channel's current code, not a stale
+      # checkout; sync continues to own ordinary updates.
+      installer_run git -C "${real}" fetch origin "${branch}"
+      installer_run git -C "${real}" merge --ff-only "origin/${branch}" ||
+        fail "${CHECKOUT} has local commits on ${current}; update or reset it before installing"
+    fi
   fi
   say "reusing the existing checkout at ${real}"
 else

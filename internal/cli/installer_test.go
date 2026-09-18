@@ -563,6 +563,7 @@ func TestInstallerAcceptsOnlyCheckoutRoots(t *testing.T) {
 		t.Fatal("missing checkout boundary")
 	}
 	home := t.TempDir()
+	remote := filepath.Join(home, "remote.git")
 	repo := filepath.Join(home, "repo")
 	worktree := filepath.Join(home, "linked")
 	git := func(args ...string) {
@@ -573,10 +574,13 @@ func TestInstallerAcceptsOnlyCheckoutRoots(t *testing.T) {
 			t.Fatalf("git %v: %v %s", args, err, out)
 		}
 	}
+	git("init", "--bare", remote)
 	git("init", repo)
 	git("-C", repo, "branch", "-m", "main")
 	git("-C", repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-m", "fixture")
 	git("-C", repo, "remote", "add", "origin", "https://github.com/Furyfree/nimbus.git")
+	git("-C", repo, "config", "url.file://"+remote+".insteadOf", "https://github.com/Furyfree/nimbus.git")
+	git("-C", repo, "push", "origin", "main")
 	git("-C", repo, "worktree", "add", "--detach", worktree)
 	nested := filepath.Join(repo, "nested")
 	if err := os.Mkdir(nested, 0700); err != nil {
