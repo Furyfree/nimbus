@@ -71,6 +71,7 @@ func fdeDevice(src native.Source) (string, string, error) {
 type fdeToken struct {
 	ID      string
 	Keyslot string
+	Slots   int
 }
 
 type fdeLUKSMetadata struct {
@@ -107,7 +108,7 @@ func fdeLUKSState(src native.Source) ([]fdeToken, map[string]string, map[string]
 		if token.Type != "systemd-tpm2" {
 			continue
 		}
-		observed := fdeToken{ID: tokenID}
+		observed := fdeToken{ID: tokenID, Slots: len(token.Keyslots)}
 		if len(token.Keyslots) > 0 {
 			observed.Keyslot = token.Keyslots[0]
 		}
@@ -168,6 +169,16 @@ func numericID(value string) bool {
 		}
 	}
 	return true
+}
+
+// fdeBootNextID returns the one-shot BootNext entry id, if set.
+func fdeBootNextID(output string) string {
+	for line := range strings.SplitSeq(output, "\n") {
+		if rest, ok := strings.CutPrefix(line, "BootNext:"); ok {
+			return strings.ToUpper(strings.TrimSpace(rest))
+		}
+	}
+	return ""
 }
 
 // fdeBootCurrentID returns the firmware's current boot entry id.

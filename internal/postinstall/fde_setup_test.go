@@ -568,6 +568,24 @@ func TestRunFDERemove(t *testing.T) {
 			t.Fatalf("got %v", err)
 		}
 	})
+	t.Run("a token bound to several keyslots is refused", func(t *testing.T) {
+		src := fdeRemoveFixture(t, `{"tokens":{"0":{"type":"systemd-tpm2","keyslots":["1","2"]}},"keyslots":{"0":{"type":"luks2"},"1":{"type":"luks2"},"2":{"type":"luks2"}}}`)
+		if err := RunFDERemove(t.Context(), src, io.Discard, io.Discard, task); err == nil || !strings.Contains(err.Error(), "refusing to wipe") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("a pending BootNext entry is cleared with its entry", func(t *testing.T) {
+		src := fdeRemoveFixture(t, "")
+		src.Commands[nativetest.Key("efibootmgr")] = []byte("BootCurrent: 0009\nBootNext: 0009\nBootOrder: 0009,0008\n" +
+			"Boot0008* Fedora\tHD(1,GPT,78f7ab0d-3bb7-4c71-ba1b-d8f8db372fdc,0x800,0x200000)/\\EFI\\fedora\\shimx64.efi\n" +
+			"Boot0009* Nimbus UKI\tHD(1,GPT,78f7ab0d-3bb7-4c71-ba1b-d8f8db372fdc,0x800,0x200000)/\\EFI\\Linux\\nimbus.efi\n")
+		if err := RunFDERemove(t.Context(), src, io.Discard, io.Discard, task); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(strings.Join(src.streams, "\n"), "efibootmgr -N") {
+			t.Fatalf("BootNext was not cleared: %v", src.streams)
+		}
+	})
 	t.Run("setup without a token removes the boot path only", func(t *testing.T) {
 		src := fdeRemoveFixture(t, `{"tokens":{},"keyslots":{"0":{"type":"luks2"}}}`)
 		var out bytes.Buffer

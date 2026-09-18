@@ -81,7 +81,8 @@ func RunFDERemove(ctx context.Context, src native.Source, out, errOut io.Writer,
 		return err
 	}
 	if len(tokens) > 0 {
-		if len(tokens) > 1 || !owned || record.Keyslot != tokens[0].Keyslot || record.Token != tokens[0].ID || record.UUID != uuid {
+		if len(tokens) > 1 || tokens[0].Slots != 1 || !owned ||
+			record.Keyslot != tokens[0].Keyslot || record.Token != tokens[0].ID || record.UUID != uuid {
 			return fmt.Errorf("the TPM token is not the one Nimbus recorded; refusing to wipe it (%s)", tokens[0].Keyslot)
 		}
 		other, err := fdeOtherUnlockExists(src, record.Keyslot)
@@ -94,13 +95,20 @@ func RunFDERemove(ctx context.Context, src native.Source, out, errOut io.Writer,
 	}
 	// The boot path is disarmed before the token is wiped, so a partial
 	// failure can never leave the Nimbus entry as the default without its key.
-	entries, err := fdeBootEntriesOutput(src)
+	raw, err := src.Run("efibootmgr")
 	if err != nil {
-		return err
+		return fmt.Errorf("inspect the firmware entries: %w", err)
 	}
+	entries := fdeBootEntries(string(raw))
+	bootNext := fdeBootNextID(string(raw))
 	for _, entry := range fdeNimbusEntries(entries) {
 		if err := stream("sudo", "--", "efibootmgr", "-b", entry.ID, "-B"); err != nil {
 			return fmt.Errorf("remove the Nimbus firmware entry %s: %w", entry.ID, err)
+		}
+		if strings.EqualFold(bootNext, entry.ID) {
+			if err := stream("sudo", "--", "efibootmgr", "-N"); err != nil {
+				return fmt.Errorf("clear the pending BootNext entry: %w", err)
+			}
 		}
 	}
 	if err := stream("sudo", "--", "rm", "-f", FDEUKIMarker); err != nil {
