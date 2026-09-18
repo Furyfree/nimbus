@@ -799,6 +799,7 @@ func TestGreeterAppearanceAdoptionOnlyRequestsRebootForChangedActivation(t *test
 type plymouthTestSource struct {
 	theme   string
 	ignore  bool
+	marker  bool
 	streams []string
 }
 
@@ -806,11 +807,17 @@ func (s *plymouthTestSource) Run(name string, args ...string) ([]byte, error) {
 	if name == "plymouth-set-default-theme" && len(args) == 0 {
 		return []byte(s.theme + "\n"), nil
 	}
+	if s.marker && name == "uname" && len(args) == 1 && args[0] == "-r" {
+		return []byte("6.19.10-300.fc44.x86_64\n"), nil
+	}
 	return nil, fmt.Errorf("unexpected run: %s %v", name, args)
 }
 
 func (s *plymouthTestSource) Stream(_, _ io.Writer, name string, args ...string) error {
 	s.streams = append(s.streams, nativetest.Key(name, args...))
+	if name == "sudo" && len(args) == 6 && args[1] == "internal" && args[2] == "fde-uki" && args[3] == "add" {
+		return nil
+	}
 	if name != "sudo" || len(args) != 3 || args[0] != "plymouth-set-default-theme" || args[1] != "-R" {
 		return fmt.Errorf("unexpected stream: %s %v", name, args)
 	}
@@ -820,8 +827,14 @@ func (s *plymouthTestSource) Stream(_, _ io.Writer, name string, args ...string)
 	return nil
 }
 
-func (s *plymouthTestSource) ReadFile(string) ([]byte, error) {
-	return nil, errors.New("unexpected read")
+func (s *plymouthTestSource) ReadFile(path string) ([]byte, error) {
+	if path != plan.FDEMarkerPath {
+		return nil, fmt.Errorf("unexpected read: %s", path)
+	}
+	if s.marker {
+		return []byte(plan.FDEMarkerText), nil
+	}
+	return nil, os.ErrNotExist
 }
 
 func (s *plymouthTestSource) ReadDir(string) ([]string, error) {
@@ -862,6 +875,16 @@ func TestPlymouthThemeTriggerRecordsAndRestores(t *testing.T) {
 			}
 			if !slices.Equal(src.streams, []string{"sudo plymouth-set-default-theme -R " + test.target}) {
 				t.Fatalf("streams=%v", src.streams)
+			}
+			if test.action == plan.ActionRepair {
+				fdeSrc := &plymouthTestSource{theme: test.theme, marker: true}
+				receipts, _, err := resourceExecutor(fdeSrc).systemResource(op)
+				if err != nil || len(receipts) != 1 || !strings.Contains(receipts[0].Verification, "signed Nimbus image rebuilt") {
+					t.Fatalf("receipts=%v err=%v", receipts, err)
+				}
+				if len(fdeSrc.streams) != 2 || !strings.Contains(fdeSrc.streams[1], "internal fde-uki add 6.19.10-300.fc44.x86_64 --only-if-current") {
+					t.Fatalf("streams=%v", fdeSrc.streams)
+				}
 			}
 		})
 	}

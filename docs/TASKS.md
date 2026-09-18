@@ -491,13 +491,14 @@ signed 11 and the observed clean-boot PCR 12/13 values, only while
   credential refuses to unseal.
 - [ ] 3.3 renewal, scoped removal, status and the failure matrix in the VM.
   In source: status offers renewal when the recorded literal PCR 7/12/13/14
-  values no longer match, `postinstall fde --renew` adds the new slot before
-  wiping the recorded one, and the record is rewritten from root-observed
-  state.
+  values are missing or no longer match, the offered task adds the new slot
+  before wiping the recorded one, and the record is rewritten from
+  root-observed state.
 - [ ] 3.4 rebuild the UKI after Plymouth and NVIDIA initramfs refreshes,
   plan-visible. In source: the Plymouth trigger and the NVIDIA dracut refresh
   invoke the approved internal rebuild for the running kernel when the marker
-  exists, and the plan carries the note.
+  exists, disclosed by a plan note or the postinstall preview, and skipped
+  when the image already targets another kernel.
 - [ ] 3.5 laptop, then desktop with both MOKs enrolled before TPM enrollment.
 
 VM-only gates still open: `--tpm2-signature` at enrollment time (omit if

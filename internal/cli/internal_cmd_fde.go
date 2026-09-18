@@ -35,6 +35,9 @@ func newInternalFDEUKI() *cobra.Command {
 			}
 			return postinstall.WriteFDEEnrollment(args[1], args[2])
 		case "add":
+			if len(args) == 3 && args[2] == "--only-if-current" {
+				return postinstall.BuildFDEUKICurrent(native.ExecSource{}, args[1], cmd.OutOrStdout())
+			}
 			if len(args) != 2 {
 				return usageError{errors.New("internal fde-uki add needs a kernel release")}
 			}

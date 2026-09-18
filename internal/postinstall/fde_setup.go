@@ -20,11 +20,7 @@ import (
 	"github.com/Furyfree/nimbus/internal/plan"
 )
 
-const fdeMarkerText = `# Nimbus owns this marker. Its presence activates the kernel-install
-# hook /etc/kernel/install.d/90-nimbus-uki.install, which rebuilds
-# /boot/efi/EFI/Linux/nimbus.efi for new kernels through the installed
-# engine. Removing the file stops rebuilds and keeps the current image.
-`
+const fdeMarkerText = plan.FDEMarkerText
 
 const fdeSizeSlack = 64 << 20
 
@@ -726,12 +722,17 @@ func VerifyFDE(src native.Source, t Task) Task {
 	if _, err := src.Run("stat", "--format=%s", "--", fdeKernelDir+"/"+inspected.uname+"/vmlinuz"); err != nil {
 		return damaged("The Nimbus image embeds kernel " + inspected.uname + ", whose kernel package is no longer installed; rebuild it for an installed kernel with the approved setup.")
 	}
-	if inspected.initrd != "" {
-		if sum, err := src.Run("sudo", "-n", "--", "sha256sum", "/boot/initramfs-"+inspected.uname+".img"); err == nil {
-			if fields := strings.Fields(string(sum)); len(fields) > 0 && !strings.EqualFold(fields[0], inspected.initrd) {
-				return damaged("The Nimbus image embeds an initramfs older than /boot; rebuild it with the approved setup.")
-			}
-		}
+	if inspected.initrd == "" {
+		return damaged("The Nimbus image does not identify its initramfs; rebuild it with the approved setup.")
+	}
+	sum, err := src.Run("sudo", "-n", "--", "sha256sum", "/boot/initramfs-"+inspected.uname+".img")
+	if err != nil {
+		t.VerificationNeedsRoot = true
+		t.Detail = "The embedded initramfs could not be compared with /boot: " + err.Error()
+		return t
+	}
+	if fields := strings.Fields(string(sum)); len(fields) > 0 && !strings.EqualFold(fields[0], inspected.initrd) {
+		return damaged("The Nimbus image embeds an initramfs that differs from /boot; rebuild it with the approved setup.")
 	}
 	tokens, err := fdeTokens(src)
 	if err != nil {
@@ -747,10 +748,16 @@ func VerifyFDE(src native.Source, t Task) Task {
 	}
 	entryID, _ := fdeCorrectEntryID(entries, secure)
 	switch {
-	case len(tokens) == 1 && owned && record.Keyslot == tokens[0].Keyslot && record.Token == tokens[0].ID:
-		if !strings.EqualFold(fdeBootCurrentID(string(bootOutput)), entryID) {
+	case len(tokens) == 1 && owned && tokens[0].Slots == 1 && record.Keyslot == tokens[0].Keyslot && record.Token == tokens[0].ID:
+		current := fdeBootCurrentID(string(bootOutput))
+		if current == "" {
+			t.VerificationNeedsRoot = true
+			t.Detail = "The current firmware boot entry could not be determined; verify the Nimbus entry with root access."
+			return t
+		}
+		if !strings.EqualFold(current, entryID) {
 			t.Status = Complete
-			t.Detail = "The recorded TPM keyslot is present. This boot used the Fedora entry, where the policy does not apply; reboot through the Nimbus image to unlock automatically."
+			t.Detail = "The recorded TPM keyslot is present. This boot used another firmware entry, where the policy does not apply; reboot through the Nimbus image to unlock automatically."
 			return t
 		}
 		match, err := fdePCRsMatch(src, record)
@@ -763,11 +770,14 @@ func VerifyFDE(src native.Source, t Task) Task {
 			t.Status = Pending
 			t.Action = &Action{Kind: RenewFDE}
 			t.Reboot = true
-			t.Detail = "The measured boot state changed, so the TPM policy no longer matches. Renew the enrollment; until then the disk passphrase unlocks."
+			t.Detail = "The recorded measured state is missing or differs from this boot, so the TPM policy no longer matches. Renew the enrollment to record the current values; until then the disk passphrase unlocks."
 			return t
 		}
 		t.Status = Complete
-		t.Detail = "The signed Nimbus image is booting and the recorded TPM keyslot matches the measured state. Reboots unlock automatically; the disk passphrase remains the fallback."
+		t.Detail = "The signed Nimbus image is booting and the recorded TPM keyslot matches the recorded measured state. Reboots unlock automatically; the disk passphrase remains the fallback."
+	case len(tokens) == 1 && (!owned || tokens[0].Slots != 1):
+		t.Status = Blocked
+		t.Detail = "A systemd-tpm2 token exists that Nimbus does not own as a single-key slot; " + orphanHint(tokens[0])
 	case len(tokens) > 1:
 		t.Status = Blocked
 		t.Detail = "More than one systemd-tpm2 token exists; inspect the LUKS2 tokens before changing enrollment."

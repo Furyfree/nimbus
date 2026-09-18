@@ -345,7 +345,7 @@ func runFDEEnrollment(ctx context.Context, src native.Source, out, errOut io.Wri
 	case renew:
 		if len(before) != 1 || before[0].Slots != 1 || !owned ||
 			record.Keyslot != before[0].Keyslot || record.Token != before[0].ID || record.UUID != uuid {
-			return errors.New("the observed TPM token is not the one Nimbus recorded; rerun without renewal to re-inspect")
+			return errors.New("the observed TPM token is not the single recorded token; inspect the LUKS2 tokens and the ownership record before renewing")
 		}
 		wipe = record.Keyslot
 	case len(before) > 1:
@@ -392,7 +392,10 @@ func runFDEEnrollment(ctx context.Context, src native.Source, out, errOut io.Wri
 		recordErr = src.Stream(out, errOut, recordArgs[0], recordArgs[1:]...)
 	}
 	if recordErr != nil {
-		return fmt.Errorf("the token is enrolled but its ownership record could not be written (%w); rerun this task to record it", recordErr)
+		if renew {
+			return fmt.Errorf("the new token in keyslot %s is enrolled and the recorded slot %s was wiped, but its ownership record could not be written (%w); finish with: sudo %s internal fde-uki record %s %s", after[0].Keyslot, record.Keyslot, recordErr, exe, after[0].Keyslot, after[0].ID)
+		}
+		return fmt.Errorf("the token in keyslot %s is enrolled but its ownership record could not be written (%w); finish with: sudo %s internal fde-uki record %s %s", after[0].Keyslot, recordErr, exe, after[0].Keyslot, after[0].ID)
 	}
 	if renew {
 		_, err = fmt.Fprintln(out, "TPM automatic unlock renewed and recorded. Reboot to verify that the disk unlocks without the passphrase; the disk passphrase remains the fallback.")
@@ -417,15 +420,9 @@ func WriteFDEEnrollment(keyslot, token string) error {
 	if err != nil {
 		return err
 	}
-	found := false
-	for _, observed := range tokens {
-		if observed.ID == token && observed.Keyslot == keyslot && observed.Slots == 1 {
-			found = true
-			break
-		}
-	}
+	found := len(tokens) == 1 && tokens[0].ID == token && tokens[0].Keyslot == keyslot && tokens[0].Slots == 1
 	if !found {
-		return fmt.Errorf("no single systemd-tpm2 token %s in keyslot %s was observed; the record was not written", token, keyslot)
+		return fmt.Errorf("no lone systemd-tpm2 token %s in keyslot %s was observed; the record was not written", token, keyslot)
 	}
 	values, err := fdePCRValues(fdeRootSource)
 	if err != nil {
@@ -494,18 +491,21 @@ func fdePCRValues(src native.Source) (map[string]string, error) {
 	return values, nil
 }
 
-// fdePCRsMatch reports whether the current literal PCR values match the
-// enrollment record. A record without values (older schema) always matches.
+// fdePCRsMatch reports whether the current literal PCR values match every
+// value the record captured. A record without the full set (older schema or
+// a partial write) does not match, so status can offer renewal and the
+// record is rewritten with the observed values.
 func fdePCRsMatch(src native.Source, record FDEEnrollment) (bool, error) {
 	if len(record.PCRValues) == 0 {
-		return true, nil
+		return false, nil
 	}
 	current, err := fdePCRValues(src)
 	if err != nil {
 		return false, err
 	}
-	for pcr, value := range record.PCRValues {
-		if current[pcr] != value {
+	for _, pcr := range []string{"7", "12", "13", "14"} {
+		value, ok := record.PCRValues[pcr]
+		if !ok || current[pcr] != value {
 			return false, nil
 		}
 	}

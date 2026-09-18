@@ -13,13 +13,14 @@ import (
 
 	"github.com/Furyfree/nimbus/internal/inspect"
 	"github.com/Furyfree/nimbus/internal/native"
+	"github.com/Furyfree/nimbus/internal/plan"
 )
 
 // The engine package ships the inert kernel-install hook; approved setup owns
 // only the marker, the key material and the single image the firmware entry
 // points at.
 const (
-	FDEUKIMarker   = "/etc/nimbus/fde-uki.enabled"
+	FDEUKIMarker   = plan.FDEMarkerPath
 	FDEUKIPath     = "/boot/efi/EFI/Linux/nimbus.efi"
 	FDEHookPath    = "/etc/kernel/install.d/90-nimbus-uki.install"
 	FDEBootLabel   = "Nimbus UKI"
@@ -335,21 +336,28 @@ func FDEUKIRebuildArgv(src native.Source, version string) ([]string, error) {
 	if err != nil || !ready {
 		return nil, err
 	}
-	exe, err := os.Executable()
+	exe, err := fdeExecutable()
 	if err != nil {
 		return nil, err
 	}
-	return []string{"sudo", "--", exe, "internal", "fde-uki", "add", version}, nil
+	return []string{"sudo", "--", exe, "internal", "fde-uki", "add", version, "--only-if-current"}, nil
 }
 
 // BuildFDEUKI rebuilds the firmware image for one kernel through native
 // ukify. It runs as root from the kernel-install hook and from approved
 // setup, and never changes firmware entries or enrollment.
 func BuildFDEUKI(src native.Source, version string, out io.Writer) error {
-	return buildFDEUKI(src, version, out, FDEUKIPath)
+	return buildFDEUKI(src, version, out, FDEUKIPath, false)
 }
 
-func buildFDEUKI(src native.Source, version string, out io.Writer, target string) error {
+// BuildFDEUKICurrent rebuilds the image only when it does not already embed a
+// different kernel. Initramfs reconciles use it so they cannot replace an
+// image the kernel-install hook built for a newer installed kernel.
+func BuildFDEUKICurrent(src native.Source, version string, out io.Writer) error {
+	return buildFDEUKI(src, version, out, FDEUKIPath, true)
+}
+
+func buildFDEUKI(src native.Source, version string, out io.Writer, target string, onlyIfCurrent bool) error {
 	if !fdeVersionRE.MatchString(version) {
 		return fmt.Errorf("invalid kernel version %q", version)
 	}
@@ -359,6 +367,14 @@ func buildFDEUKI(src native.Source, version string, out io.Writer, target string
 	}
 	if !ready {
 		return errors.New("the FDE marker is absent; approved setup has not enabled image builds")
+	}
+	if onlyIfCurrent {
+		if current, err := src.Run(FDEUKITool, "inspect", target); err == nil {
+			if embedded := fdeInspect(string(current)).uname; embedded != "" && embedded != version {
+				_, err := fmt.Fprintf(out, "the image already targets kernel %s; it was not rebuilt for %s\n", embedded, version)
+				return err
+			}
+		}
 	}
 	secure, err := fdeSecureBoot(src)
 	if err != nil {
@@ -456,5 +472,5 @@ func removeFDEUKI(src native.Source, version string, out io.Writer, target strin
 	if _, err := fmt.Fprintf(out, "The Nimbus image embedded kernel %s; rebuilding it for %s.\n", version, kernel); err != nil {
 		return err
 	}
-	return buildFDEUKI(src, kernel, out, target)
+	return buildFDEUKI(src, kernel, out, target, false)
 }

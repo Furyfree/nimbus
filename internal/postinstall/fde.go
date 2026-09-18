@@ -143,9 +143,9 @@ func fdeTask(src native.Source, in Inputs) Task {
 		t.Status = Pending
 		t.fdeSecure = secure
 		if secure {
-			t.Detail = "LUKS2 root, TPM2, Secure Boot and the setup tools are present. Approved setup generates the key pair, requests MOK enrollment, builds and signs the Nimbus image and ensures the shim-chained firmware entry, which becomes the default boot target. TPM enrollment follows after the first reboot into the image; explicit removal clears the enrollment while keeping the disk passphrase. Policy renewal is not implemented yet."
+			t.Detail = "LUKS2 root, TPM2, Secure Boot and the setup tools are present. Approved setup generates the key pair, requests MOK enrollment, builds and signs the Nimbus image and ensures the shim-chained firmware entry, which becomes the default boot target. TPM enrollment follows after the first reboot into the image; explicit removal clears the enrollment while keeping the disk passphrase. Status offers policy renewal when the measured state changes."
 		} else {
-			t.Detail = "LUKS2 root, TPM2 and the setup tools are present. Approved setup writes the marker, builds the Nimbus image and ensures the firmware entry, which becomes the default boot target. Secure Boot is disabled, so the image is unsigned and the reduced protection is disclosed. TPM enrollment follows after the first reboot into the image; explicit removal clears the enrollment while keeping the disk passphrase. Policy renewal is not implemented yet."
+			t.Detail = "LUKS2 root, TPM2 and the setup tools are present. Approved setup writes the marker, builds the Nimbus image and ensures the firmware entry, which becomes the default boot target. Secure Boot is disabled, so the image is unsigned and the reduced protection is disclosed. TPM enrollment follows after the first reboot into the image; explicit removal clears the enrollment while keeping the disk passphrase. Status offers policy renewal when the measured state changes."
 		}
 		t.Action = &Action{Kind: SetupFDE}
 		t.Reboot = true

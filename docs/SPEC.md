@@ -1010,15 +1010,15 @@ status reports an unknown or foreign TPM token as an explicit problem.
 Explicit removal (`postinstall fde --remove`) wipes only the recorded slot,
 removes the Nimbus firmware entry, image, marker and key material, keeps the
 disk passphrase, and never uses `--wipe-slot=tpm2` or `all`; it requires
-interactive confirmation and `--yes` cannot accept it. Renewal
-(`postinstall fde --renew`) is offered when status runs on the Nimbus entry
-and the recorded literal PCR 7, 12, 13 and 14 values no longer match the
-observed ones; it enrolls the same policy into a new keyslot and wipes only
+interactive confirmation and `--yes` cannot accept it. Renewal is offered
+as the verified task's action when status runs on the Nimbus entry and the
+recorded literal PCR 7, 12, 13 and 14 values are missing or no longer match
+the observed ones; it enrolls the same policy into a new keyslot and wipes only
 the recorded slot, then rewrites the ownership record through root
 observation. The preview shows both commands, and the passphrase remains the
-fallback. Sync and upgrades never build images, enroll or change
-policy. While the marker exists, deselecting `fde` blocks the plan instead of
-removing the component's packages; run the removal first. Enrollment,
+fallback. Sync and upgrades never enroll or change unlock policy. While the
+marker exists, deselecting `fde` blocks the plan instead of removing the
+component's packages; run the removal first. Enrollment,
 booting, passphrase fallback, renewal and removal need real-hardware
 validation before claiming support.
 
@@ -1095,7 +1095,9 @@ font to the initramfs while the marker exists; the `plymouth-theme` trigger
 rebuilds the initramfs, and deselection rebuilds it without them. When the
 FDE marker exists, the Plymouth trigger and the NVIDIA MOK dracut refresh
 also rebuild the running kernel's signed image in the same approved action,
-shown as a plan note.
+shown in the plan or the postinstall preview. The rebuild is skipped when the
+image already targets a different kernel, leaving a pending kernel update to
+the native hook.
 The matching Plymouth theme styles native disk-unlock prompts without changing
 encryption or automatic-unlock policy. The engine package ships the payload
 under `/boot/grub2/themes/nimbus` and `/usr/share/plymouth/themes/nimbus` plus

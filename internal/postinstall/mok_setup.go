@@ -84,11 +84,11 @@ func RunNVIDIAMOK(ctx context.Context, src native.Source, out, stderr io.Writer)
 	}
 	rebuild, err := FDEUKIRebuildArgv(src, kernel)
 	if err != nil {
-		return fmt.Errorf("inspect the FDE marker: %w; enrollment was not changed", err)
+		return fmt.Errorf("the initramfs was regenerated but the FDE marker could not be read: %w; enrollment was not changed", err)
 	}
 	if rebuild != nil {
 		if err := stream(rebuild[0], rebuild[1:]...); err != nil {
-			return fmt.Errorf("rebuild the signed Nimbus image after the initramfs refresh: %w; enrollment was not changed", err)
+			return fmt.Errorf("the initramfs was regenerated but the signed Nimbus image could not be rebuilt: %w; the previous image and the disk passphrase remain; enrollment was not changed", err)
 		}
 	}
 	if state == mokAbsent {

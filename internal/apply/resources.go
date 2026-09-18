@@ -46,7 +46,8 @@ func (ex *executor) plymouthThemeTrigger(op plan.Operation) ([]state.Receipt, []
 	if observed := strings.TrimSpace(string(after)); observed != intended {
 		return nil, nil, fmt.Errorf("Plymouth theme verification failed: expected %s, observed %s", intended, observed)
 	}
-	if err := ex.rebuildFDEUKI(); err != nil {
+	rebuilt, err := ex.rebuildFDEUKI()
+	if err != nil {
 		return nil, nil, err
 	}
 	if op.Action == plan.ActionRemove {
@@ -55,32 +56,45 @@ func (ex *executor) plymouthThemeTrigger(op plan.Operation) ([]state.Receipt, []
 		// removal receipts at the end of the run.
 		return nil, []string{op.ID}, nil
 	}
-	return []state.Receipt{ex.receipt(op, plan.KindTrigger, previous, intended, "native Plymouth theme selection verified after the command")}, nil, nil
+	verification := "native Plymouth theme selection verified after the command"
+	if rebuilt {
+		verification += "; signed Nimbus image rebuilt for the running kernel"
+	}
+	return []state.Receipt{ex.receipt(op, plan.KindTrigger, previous, intended, verification)}, nil, nil
 }
 
 // rebuildFDEUKI refreshes the signed image after Plymouth regenerated the
-// initramfs, when approved setup marked the machine FDE-enabled. The Plymouth
-// trigger's plan note discloses the rebuild before approval.
-func (ex *executor) rebuildFDEUKI() error {
-	if _, err := os.Stat("/etc/nimbus/fde-uki.enabled"); err != nil {
-		return nil
+// initramfs, when the approved marker is present with its known content. The
+// Plymouth trigger's plan note discloses the rebuild before approval. The
+// rebuild is skipped when the image already targets a different kernel, so a
+// pending kernel update is left to the kernel-install hook.
+func (ex *executor) rebuildFDEUKI() (bool, error) {
+	data, err := ex.opts.Source.ReadFile(plan.FDEMarkerPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read the FDE marker: %w", err)
+	}
+	if string(data) != plan.FDEMarkerText {
+		return false, nil
 	}
 	kernelOut, err := ex.opts.Source.Run("uname", "-r")
 	if err != nil {
-		return fmt.Errorf("read the running kernel to rebuild the Nimbus image: %w", err)
+		return false, fmt.Errorf("read the running kernel to rebuild the Nimbus image: %w", err)
 	}
 	kernel := strings.TrimSpace(string(kernelOut))
 	if kernel == "" || strings.ContainsAny(kernel, "/\\ \t\r\n") {
-		return errors.New("cannot determine a safe running kernel release")
+		return false, errors.New("cannot determine a safe running kernel release")
 	}
 	exe, err := os.Executable()
 	if err != nil {
-		return err
+		return false, err
 	}
-	if err := ex.sudo(exe, "internal", "fde-uki", "add", kernel); err != nil {
-		return fmt.Errorf("Plymouth regenerated the initramfs but the signed Nimbus image could not be rebuilt; the disk passphrase still unlocks: %w", err)
+	if err := ex.sudo(exe, "internal", "fde-uki", "add", kernel, "--only-if-current"); err != nil {
+		return false, fmt.Errorf("Plymouth regenerated the initramfs but the signed Nimbus image could not be rebuilt; the disk passphrase still unlocks: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 // FilePayload binds the narrow file helper input to the reviewed plan.

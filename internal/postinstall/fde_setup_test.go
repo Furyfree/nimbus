@@ -652,14 +652,24 @@ func TestRunFDERenew(t *testing.T) {
 	t.Run("a foreign token is refused", func(t *testing.T) {
 		src := fdeRemoveFixture(t, `{"tokens":{"9":{"type":"systemd-tpm2","keyslots":["2"]}},"keyslots":{"0":{"type":"luks2"},"2":{"type":"luks2"}}}`)
 		err := RunFDERenew(t.Context(), src, io.Discard, io.Discard, task)
-		if err == nil || !strings.Contains(err.Error(), "not the one Nimbus recorded") {
+		if err == nil || !strings.Contains(err.Error(), "single recorded token") {
 			t.Fatalf("got %v", err)
 		}
 	})
 	t.Run("a multi-slot token is refused", func(t *testing.T) {
 		src := fdeRemoveFixture(t, `{"tokens":{"0":{"type":"systemd-tpm2","keyslots":["1","2"]}},"keyslots":{"0":{"type":"luks2"},"1":{"type":"luks2"},"2":{"type":"luks2"}}}`)
 		err := RunFDERenew(t.Context(), src, io.Discard, io.Discard, task)
-		if err == nil || !strings.Contains(err.Error(), "not the one Nimbus recorded") {
+		if err == nil || !strings.Contains(err.Error(), "single recorded token") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("a record write failure names the recovery command", func(t *testing.T) {
+		src := fdeRemoveFixture(t, "")
+		src.nextToken = `{"tokens":{"1":{"type":"systemd-tpm2","keyslots":["2"]}},"keyslots":{"0":{"type":"luks2"},"2":{"type":"luks2"}}}`
+		src.Failures[nativetest.Key("sudo", "--", "/usr/bin/nimbus", "internal", "fde-uki", "record", "2", "1")] = "exit status 1"
+		err := RunFDERenew(t.Context(), src, io.Discard, io.Discard, task)
+		if err == nil || !strings.Contains(err.Error(), "recorded slot 1 was wiped") ||
+			!strings.Contains(err.Error(), "sudo /usr/bin/nimbus internal fde-uki record 2 1") {
 			t.Fatalf("got %v", err)
 		}
 	})
@@ -868,6 +878,8 @@ func fdeVerifyFixture(t *testing.T) fdeInspectSource {
 	base.Dirs["/sys/firmware/efi/efivars"] = []string{}
 	base.Commands[nativetest.Key("efibootmgr")] = []byte("BootCurrent: 0009\nBootOrder: 0009,0008\nBoot0009* Nimbus UKI\tHD(1,GPT," + guid + ",0x800,0x200000)/\\EFI\\Linux\\nimbus.efi\n")
 	base.Commands[nativetest.Key("stat", "--format=%s", "--", fdeKernelDir+"/"+fdeTestVersion+"/vmlinuz")] = []byte("18497536\n")
+	base.Commands[nativetest.Key("sudo", "-n", "--", "sha256sum", "/boot/initramfs-"+fdeTestVersion+".img")] =
+		[]byte("ff  /boot/initramfs-" + fdeTestVersion + ".img\n")
 	return fdeInspectSource{FakeSource: base}
 }
 
@@ -921,8 +933,13 @@ func fdeStubEnrollment(t *testing.T, src *nativetest.FakeSource, slot string) {
 	t.Cleanup(func() { fdeExecutable = previous })
 	src.Commands[nativetest.Key("sudo", "-n", "--", "cryptsetup", "luksDump", "--dump-json-metadata", "/dev/disk/by-uuid/1")] =
 		[]byte(`{"tokens":{"0":{"type":"systemd-tpm2","keyslots":["` + slot + `"]}}}`)
+	values := map[string]string{}
+	for _, pcr := range []string{"7", "12", "13", "14"} {
+		values[pcr] = "aa" + pcr
+		src.Files["/sys/class/tpm/tpm0/pcr-sha256/"+pcr] = []byte("aa" + pcr + "\n")
+	}
 	record := FDEEnrollment{Schema: 1, Device: "/dev/disk/by-uuid/1", UUID: "1", Keyslot: slot, Token: "0",
-		PCRs: "7+14+12+13+11", Fingerprint: "sha256:x"}
+		PCRs: "7+14+12+13+11", Fingerprint: "sha256:x", PCRValues: values}
 	data, err := json.Marshal(record)
 	if err != nil {
 		t.Fatal(err)
@@ -981,6 +998,59 @@ func TestVerifyFDE(t *testing.T) {
 			t.Fatalf("got %+v", got)
 		}
 	})
+	t.Run("a record without captured values offers renewal", func(t *testing.T) {
+		src := fdeVerifyFixture(t)
+		src.out = []byte(strings.Replace(fdeInspectOutput, "%s", fdeTestCmdline, 1))
+		fdeStubEnrollment(t, src.FakeSource, "1")
+		record := FDEEnrollment{Schema: 1, Device: "/dev/disk/by-uuid/1", UUID: "1", Keyslot: "1", Token: "0",
+			PCRs: "7+14+12+13+11", Fingerprint: "sha256:x"}
+		data, err := json.Marshal(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src.Commands[nativetest.Key("sudo", "-n", "--", "/usr/bin/nimbus", "internal", "fde-uki", "state")] = data
+		got := VerifyFDE(src, fdeSetupTask())
+		if got.Status != Pending || got.Action == nil || got.Action.Kind != RenewFDE {
+			t.Fatalf("got %+v", got)
+		}
+	})
+	t.Run("a partial record offers renewal", func(t *testing.T) {
+		src := fdeVerifyFixture(t)
+		src.out = []byte(strings.Replace(fdeInspectOutput, "%s", fdeTestCmdline, 1))
+		fdeStubEnrollment(t, src.FakeSource, "1")
+		record := FDEEnrollment{Schema: 1, Device: "/dev/disk/by-uuid/1", UUID: "1", Keyslot: "1", Token: "0",
+			PCRs: "7+14+12+13+11", Fingerprint: "sha256:x", PCRValues: map[string]string{"7": "aa7"}}
+		data, err := json.Marshal(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src.Commands[nativetest.Key("sudo", "-n", "--", "/usr/bin/nimbus", "internal", "fde-uki", "state")] = data
+		got := VerifyFDE(src, fdeSetupTask())
+		if got.Status != Pending || got.Action == nil || got.Action.Kind != RenewFDE {
+			t.Fatalf("got %+v", got)
+		}
+	})
+	t.Run("an unknown boot entry needs root verification", func(t *testing.T) {
+		src := fdeVerifyFixture(t)
+		src.out = []byte(strings.Replace(fdeInspectOutput, "%s", fdeTestCmdline, 1))
+		fdeStubEnrollment(t, src.FakeSource, "1")
+		src.Commands[nativetest.Key("efibootmgr")] = []byte("BootOrder: 0009,0008\nBoot0009* Nimbus UKI\tHD(1,GPT,78f7ab0d-3bb7-4c71-ba1b-d8f8db372fdc,0x800,0x200000)/\\EFI\\Linux\\nimbus.efi\n")
+		got := VerifyFDE(src, fdeSetupTask())
+		if got.Status != Unknown || !got.VerificationNeedsRoot {
+			t.Fatalf("got %+v", got)
+		}
+	})
+	t.Run("a multi-slot token blocks", func(t *testing.T) {
+		src := fdeVerifyFixture(t)
+		src.out = []byte(strings.Replace(fdeInspectOutput, "%s", fdeTestCmdline, 1))
+		fdeStubEnrollment(t, src.FakeSource, "1")
+		src.Commands[nativetest.Key("sudo", "-n", "--", "cryptsetup", "luksDump", "--dump-json-metadata", "/dev/disk/by-uuid/1")] =
+			[]byte(`{"tokens":{"0":{"type":"systemd-tpm2","keyslots":["1","2"]}},"keyslots":{"0":{"type":"luks2"},"1":{"type":"luks2"},"2":{"type":"luks2"}}}`)
+		got := VerifyFDE(src, fdeSetupTask())
+		if got.Status != Blocked || !strings.Contains(got.Detail, "single-key slot") {
+			t.Fatalf("got %+v", got)
+		}
+	})
 	t.Run("a stale embedded initramfs is rebuildable", func(t *testing.T) {
 		src := fdeVerifyFixture(t)
 		src.out = []byte(strings.Replace(fdeInspectOutput, "%s", fdeTestCmdline, 1))
@@ -988,7 +1058,7 @@ func TestVerifyFDE(t *testing.T) {
 		src.Commands[nativetest.Key("sudo", "-n", "--", "sha256sum", "/boot/initramfs-"+fdeTestVersion+".img")] =
 			[]byte("001122  /boot/initramfs-" + fdeTestVersion + ".img\n")
 		got := VerifyFDE(src, fdeSetupTask())
-		if got.Status != Pending || got.Action == nil || got.Action.Kind != SetupFDE || !strings.Contains(got.Detail, "older than /boot") {
+		if got.Status != Pending || got.Action == nil || got.Action.Kind != SetupFDE || !strings.Contains(got.Detail, "differs from /boot") {
 			t.Fatalf("got %+v", got)
 		}
 	})

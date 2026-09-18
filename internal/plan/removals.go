@@ -13,9 +13,17 @@ import (
 	"github.com/Furyfree/nimbus/internal/inspect"
 )
 
-// fdeMarkerPath is the marker approved FDE setup writes; it is world-readable
+// FDEMarkerPath is the marker approved FDE setup writes; it is world-readable
 // so planning stays unprivileged.
-const fdeMarkerPath = "/etc/nimbus/fde-uki.enabled"
+const FDEMarkerPath = "/etc/nimbus/fde-uki.enabled"
+
+// FDEMarkerText is the exact marker content approved FDE setup writes. A
+// foreign marker is not treated as active setup.
+const FDEMarkerText = `# Nimbus owns this marker. Its presence activates the kernel-install
+# hook /etc/kernel/install.d/90-nimbus-uki.install, which rebuilds
+# /boot/efi/EFI/Linux/nimbus.efi for new kernels through the installed
+# engine. Removing the file stops rebuilds and keeps the current image.
+`
 
 // fdeSetupActive reports whether automatic-unlock setup is armed. An
 // unreadable marker counts as active, so a read error cannot authorize
@@ -24,7 +32,7 @@ func (b *builder) fdeSetupActive() bool {
 	if b.in.Source == nil {
 		return false
 	}
-	_, err := b.in.Source.ReadFile(fdeMarkerPath)
+	_, err := b.in.Source.ReadFile(FDEMarkerPath)
 	return err == nil || !errors.Is(err, os.ErrNotExist)
 }
 
