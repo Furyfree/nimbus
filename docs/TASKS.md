@@ -1179,8 +1179,14 @@ follows; both tracks share the COPR key and repository ID.
   develop curl entry (`install-develop.sh`) that installs the develop track.
   The schema gate reads the target checkout's state constant against
   `/var/lib/nimbus/schema`; the same COPR key covers both channels.
-- [ ] Phase 3: the `furyfree/nimbus-develop` COPR project and its rolling
-  `0.6.0~dev` source from the `develop` branch.
+- [x] Phase 3a: the rolling develop source and packaging. The develop
+  workflow republishes `nimbus-<version>-vendor.tar.gz` (dotted asset name,
+  tilde RPM version) under the `develop` release on every push, and the copr
+  repository gained the `nimbus-develop` project entry, recipe, prepare
+  resolver and native scope with a locally built SRPM
+  (`0.6.0~dev.<date>git<sha>`).
+- [ ] Phase 3b: create the `furyfree/nimbus-develop` COPR project and run
+  its first build, then install from it in a VM.
 - [ ] Phase 4: clean-VM drills for both directions, drift refusal paths and a
   one-time notice on devices upgrading to a channel-aware engine.
 
