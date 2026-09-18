@@ -264,7 +264,7 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 		cmd.MarkFlagsMutuallyExclusive("plan", "reset")
 	}
 	if cmd.Flags().Lookup("remove") != nil {
-		cmd.MarkFlagsMutuallyExclusive("remove", "plan", "reset")
+		cmd.MarkFlagsMutuallyExclusive("remove", "reset")
 	}
 	return cmd
 }
@@ -458,7 +458,12 @@ func renderPostinstall(out io.Writer, view postinstallView) error {
 
 // Replacement deliberately defaults to No, unlike the normal apply prompt.
 func confirmDTUReplacement(in io.Reader, out io.Writer) bool {
-	if _, err := fmt.Fprint(out, "Delete and replace? [y/N] "); err != nil {
+	return confirmDefaultNo(in, out, "Delete and replace? [y/N] ")
+}
+
+// confirmDefaultNo accepts only an explicit yes; Enter keeps the safe default.
+func confirmDefaultNo(in io.Reader, out io.Writer, prompt string) bool {
+	if _, err := fmt.Fprint(out, prompt); err != nil {
 		return false
 	}
 	line, err := bufio.NewReader(in).ReadString('\n')

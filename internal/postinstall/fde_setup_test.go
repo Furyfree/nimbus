@@ -501,6 +501,7 @@ func fdeRemoveFixture(t *testing.T, tokenJSON string) *fdeEnrollSource {
 		t.Fatal(err)
 	}
 	src.Commands[nativetest.Key("sudo", "-n", "--", "/usr/bin/nimbus", "internal", "fde-uki", "state")] = data
+	src.Commands[nativetest.Key("sudo", "-n", "--", "test", "-d", fdeKeyDir)] = nil
 	if tokenJSON != "" {
 		src.tokenJSON = tokenJSON
 	}
@@ -552,6 +553,35 @@ func TestRunFDERemove(t *testing.T) {
 		src := fdeRemoveFixture(t, `{"tokens":{"0":{"type":"systemd-tpm2","keyslots":["1"]}},"keyslots":{"1":{"type":"luks2"}}}`)
 		if err := RunFDERemove(t.Context(), src, io.Discard, io.Discard, task); err == nil || !strings.Contains(err.Error(), "no other unlock method") {
 			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("only an unreferenced keyslot counts as another unlock", func(t *testing.T) {
+		src := fdeRemoveFixture(t, `{"tokens":{"0":{"type":"systemd-tpm2","keyslots":["1"]},"2":{"type":"systemd-fido2","keyslots":["2"]}},"keyslots":{"1":{"type":"luks2"},"2":{"type":"luks2"}}}`)
+		if err := RunFDERemove(t.Context(), src, io.Discard, io.Discard, task); err == nil || !strings.Contains(err.Error(), "no other unlock method") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("a different volume is refused", func(t *testing.T) {
+		src := fdeRemoveFixture(t, "")
+		src.Files[fdeCmdlineFile] = []byte(strings.Replace(fdeTestBase, "luks-1", "luks-2", 1) + "\n")
+		if err := RunFDERemove(t.Context(), src, io.Discard, io.Discard, task); err == nil || !strings.Contains(err.Error(), "refusing to wipe") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("setup without a token removes the boot path only", func(t *testing.T) {
+		src := fdeRemoveFixture(t, `{"tokens":{},"keyslots":{"0":{"type":"luks2"}}}`)
+		var out bytes.Buffer
+		if err := RunFDERemove(t.Context(), src, &out, &out, task); err != nil {
+			t.Fatal(err)
+		}
+		joined := strings.Join(src.streams, "\n")
+		if strings.Contains(joined, "--wipe-slot") {
+			t.Fatalf("a token was wiped without an enrollment: %v", src.streams)
+		}
+		for _, want := range []string{"efibootmgr -b 0009 -B", "rm -f " + FDEUKIMarker, "rm -f " + FDEUKIPath} {
+			if !strings.Contains(joined, want) {
+				t.Fatalf("cleanup lacks %q: %v", want, src.streams)
+			}
 		}
 	})
 }

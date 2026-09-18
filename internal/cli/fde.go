@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Furyfree/nimbus/internal/apply"
+	"github.com/Furyfree/nimbus/internal/inspect"
 	"github.com/Furyfree/nimbus/internal/native"
 	"github.com/Furyfree/nimbus/internal/postinstall"
 	"github.com/spf13/cobra"
@@ -78,14 +79,12 @@ func runFDERemoveAction(cmd *cobra.Command, src native.Source, before *postinsta
 	if err != nil {
 		return err
 	}
+	task.Verification = "The removal lists only what Nimbus owns: the recorded TPM keyslot, the Nimbus firmware entries, the image, the marker and the key material."
+	task.Recovery = "The disk passphrase and Fedora's GRUB entries remain a valid unlock and boot path. The MOK certificate stays enrolled; remove it with mokutil if desired."
 	if err := renderPostinstall(cmd.OutOrStdout(), postinstallView{Machine: before.view.Machine, Tasks: []postinstall.Task{task}}); err != nil {
 		return err
 	}
-	for _, argv := range commands {
-		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", strings.Join(argv, " ")); err != nil {
-			return err
-		}
-	}
+	_ = commands
 	if preview {
 		_, err := io.WriteString(cmd.OutOrStdout(), "No changes will be made.\n")
 		return err
@@ -99,7 +98,7 @@ func runFDERemoveAction(cmd *cobra.Command, src native.Source, before *postinsta
 	if _, err := io.WriteString(cmd.OutOrStdout(), "Remove the Nimbus TPM enrollment, firmware entry, image, marker and key material? The disk passphrase and Fedora's GRUB entries remain. Default: No.\n"); err != nil {
 		return err
 	}
-	if !approver(cmd.InOrStdin(), cmd.OutOrStdout(), before.digest) {
+	if !confirmDefaultNo(cmd.InOrStdin(), cmd.OutOrStdout(), "Remove Nimbus's FDE ownership? [y/N] ") {
 		return errors.New("FDE removal not approved; nothing was run")
 	}
 	path, err := apply.LockPath()
@@ -118,10 +117,16 @@ func runFDERemoveAction(cmd *cobra.Command, src native.Source, before *postinsta
 	if fresh.digest != before.digest {
 		return errors.New("native state changed after approval; inspect and retry the removal")
 	}
+	if err := inspect.CheckPlatform(src, fresh.selected.Checkout.Definitions().Compatibility.Fedora); err != nil {
+		return err
+	}
 	if err := postinstall.RunFDERemove(cmd.Context(), src, cmd.OutOrStdout(), cmd.ErrOrStderr(), task); err != nil {
 		return fmt.Errorf("postinstall fde removal failed: %w", err)
 	}
-	_, err = io.WriteString(cmd.OutOrStdout(), "Removal completed. The fde component can now be deselected and its packages removed.\n")
+	if err := resetTask(before.view.Machine, "fde"); err != nil {
+		return err
+	}
+	_, err = io.WriteString(cmd.OutOrStdout(), "Removal completed. The Nimbus MOK certificate stays enrolled; remove it with mokutil if desired. The fde component can now be deselected and its packages removed.\n")
 	return err
 }
 

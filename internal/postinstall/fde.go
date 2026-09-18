@@ -28,7 +28,7 @@ func fdeTask(src native.Source, in Inputs) Task {
 			"After the first reboot into the image, approved enrollment binds the TPM to the measured boot state; the disk passphrase always remains the fallback, and sync never changes policy.",
 		},
 		Verification: "Inspection reads the mounted root, the TPM2 device, the firmware mode, the hook payload, the marker, the firmware entry and the installed tools. The image content and its embedded command line need the approved read-only check.",
-		Recovery:     "The disk passphrase and Fedora's GRUB entries always remain a valid unlock and boot path. Scoped removal is implemented in the next step.",
+		Recovery:     "The disk passphrase and Fedora's GRUB entries always remain a valid unlock and boot path. Run nimbus postinstall fde --remove to clear the enrollment before deselecting the component.",
 	}
 	mounts, err := src.ReadFile("/proc/mounts")
 	if err != nil {

@@ -78,25 +78,32 @@ type fdeLUKSMetadata struct {
 		Type     string   `json:"type"`
 		Keyslots []string `json:"keyslots"`
 	} `json:"tokens"`
+	Keyslots map[string]struct {
+		Type string `json:"type"`
+	} `json:"keyslots"`
 }
 
-// fdeTokens lists every systemd-tpm2 token deterministically, so ownership
-// never depends on map iteration order.
-func fdeTokens(src native.Source) ([]fdeToken, error) {
+// fdeLUKSState reads the LUKS2 metadata once and returns the systemd-tpm2
+// tokens plus every keyslot type.
+func fdeLUKSState(src native.Source) ([]fdeToken, map[string]string, map[string]bool, error) {
 	device, _, err := fdeDevice(src)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	out, err := src.Run("sudo", "-n", "--", "cryptsetup", "luksDump", "--dump-json-metadata", device)
 	if err != nil {
-		return nil, fmt.Errorf("read the LUKS2 metadata: %w", err)
+		return nil, nil, nil, fmt.Errorf("read the LUKS2 metadata: %w", err)
 	}
 	var metadata fdeLUKSMetadata
 	if err := json.Unmarshal(out, &metadata); err != nil {
-		return nil, fmt.Errorf("parse the LUKS2 metadata: %w", err)
+		return nil, nil, nil, fmt.Errorf("parse the LUKS2 metadata: %w", err)
 	}
 	var tokens []fdeToken
+	referenced := map[string]bool{}
 	for tokenID, token := range metadata.Tokens {
+		for _, slot := range token.Keyslots {
+			referenced[slot] = true
+		}
 		if token.Type != "systemd-tpm2" {
 			continue
 		}
@@ -112,7 +119,18 @@ func fdeTokens(src native.Source) ([]fdeToken, error) {
 		}
 		return strings.Compare(a.ID, b.ID)
 	})
-	return tokens, nil
+	keyslots := make(map[string]string, len(metadata.Keyslots))
+	for id, keyslot := range metadata.Keyslots {
+		keyslots[id] = keyslot.Type
+	}
+	return tokens, keyslots, referenced, nil
+}
+
+// fdeTokens lists every systemd-tpm2 token deterministically, so ownership
+// never depends on map iteration order.
+func fdeTokens(src native.Source) ([]fdeToken, error) {
+	tokens, _, _, err := fdeLUKSState(src)
+	return tokens, err
 }
 
 // fdeEnrollment reads the ownership record through the root-only helper. A

@@ -1007,14 +1007,15 @@ the observed clean-boot PCR 12 and 13 values, with `--tpm2-pcrlock=` empty.
 The passphrase and unrelated slots are preserved. Nimbus records its LUKS
 UUID, slot, token, public-key fingerprint and PCR set under `/var/lib/nimbus`;
 status reports an unknown or foreign TPM token as an explicit problem.
-Renewal enrolls the new slot before wiping only the recorded old one; removal
-wipes only that slot, removes the Nimbus firmware entry, image, marker,
-drop-ins and key material, and never uses `--wipe-slot=tpm2` or `all`. Sync
-and upgrades never build images, enroll or change policy. Until scoped removal
-exists, deselecting `fde` while `/etc/nimbus/fde-uki.enabled` exists or cannot
-be read blocks the plan instead of removing the component's packages.
-Enrollment, booting, passphrase fallback, renewal and removal need
-real-hardware validation before claiming support.
+Explicit removal (`postinstall fde --remove`) wipes only the recorded slot,
+removes the Nimbus firmware entry, image, marker and key material, keeps the
+disk passphrase, and never uses `--wipe-slot=tpm2` or `all`; it requires
+interactive confirmation and `--yes` cannot accept it. Policy renewal is not
+implemented yet. Sync and upgrades never build images, enroll or change
+policy. While the marker exists, deselecting `fde` blocks the plan instead of
+removing the component's packages; run the removal first. Enrollment,
+booting, passphrase fallback, renewal and removal need real-hardware
+validation before claiming support.
 
 ## Preview, approval and results
 

@@ -458,13 +458,13 @@ refactor and TUI.
 - [ ] Add enrollment, policy renewal, status and scoped removal with explicit
   previews; reduced protection and removal default to No and a blanket `--yes`
   cannot accept them. Preserve the passphrase, unrelated keys and enrollment
-  slots. Until scoped removal exists, deselecting `fde` while
-  `/etc/nimbus/fde-uki.enabled` exists or cannot be read blocks the plan and
-  keeps the component's packages. This milestone also implements the signed,
-  shim-chained image and MOK
-  enrollment that Secure Boot needs, and reconciles Nimbus-initiated initramfs
-  refreshes (the NVIDIA signing flow and the Plymouth theme trigger) with the
-  image.
+  slots. In source: the signed shim-chained image and MOK enrollment, TPM
+  enrollment with its root-observed ownership record, boot-time status and
+  explicit scoped removal (`nimbus postinstall fde --remove`, which wipes only
+  the recorded keyslot and keeps the passphrase). Policy renewal and the
+  Nimbus-initiated initramfs reconcile (NVIDIA signing and Plymouth trigger)
+  remain. Deselecting `fde` while the marker exists still blocks the plan;
+  removal clears the marker first.
 - [ ] Test auto-unlock enrollment, booting, passphrase fallback, boot-change
   fallback and removal on real hardware. This scoped test precedes the TUI;
   it is separate from the later full desktop trial. No working claim yet.
