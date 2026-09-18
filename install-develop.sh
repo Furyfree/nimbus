@@ -14,4 +14,5 @@ fi
 
 export NIMBUS_CHANNEL=develop
 printf '%s\n' 'Nimbus develop channel: fetching install.sh from the develop branch.'
-curl -fsSL https://raw.githubusercontent.com/Furyfree/nimbus/develop/install.sh | bash
+# The query bypasses the raw CDN cache for a freshly pushed install.sh.
+curl -fsSL "https://raw.githubusercontent.com/Furyfree/nimbus/develop/install.sh?cache=$(date +%s)" | bash
