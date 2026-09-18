@@ -1018,8 +1018,12 @@ as the verified task's action when status runs on the Nimbus entry and the
 recorded literal PCR 7, 12, 13 and 14 values are missing or no longer match
 the observed ones; it enrolls the same policy into a new keyslot and wipes only
 the recorded slot, then rewrites the ownership record through root
-observation. The preview shows both commands, and the passphrase remains the
-fallback. Sync and upgrades never enroll or change unlock policy. While the
+observation. Because systemd-cryptenroll refuses an identical policy as
+already enrolled, a renewal offered only to record a missing TPM identity
+refreshes the ownership record without touching the token, and a renewal to
+rebind a different TPM removes the recorded slot before adding the new token;
+both still require the passphrase. The preview shows the enrollment and
+record commands, and the passphrase remains the fallback. Sync and upgrades never enroll or change unlock policy. While the
 marker exists, deselecting `fde` blocks the plan instead of removing the
 component's packages; run the removal first. Enrollment,
 booting, passphrase fallback, renewal and removal need real-hardware

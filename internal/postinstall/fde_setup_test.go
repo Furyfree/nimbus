@@ -676,6 +676,63 @@ func TestRunFDERenew(t *testing.T) {
 			t.Fatalf("got %v", err)
 		}
 	})
+	t.Run("a record without the TPM identity is refreshed without enrolling", func(t *testing.T) {
+		src := fdeRemoveFixture(t, "")
+		for _, pcr := range []string{"7", "12", "13", "14"} {
+			src.Files["/sys/class/tpm/tpm0/pcr-sha256/"+pcr] = []byte("aa" + pcr + "\n")
+		}
+		record := FDEEnrollment{Schema: 1, Device: "/dev/disk/by-uuid/1", UUID: "1", Keyslot: "1", Token: "0",
+			PCRs: "7+14+12+13+11", Fingerprint: "sha256:x",
+			PCRValues: map[string]string{"7": "aa7", "12": "aa12", "13": "aa13", "14": "aa14"}}
+		data, err := json.Marshal(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src.Commands[nativetest.Key("sudo", "-n", "--", "/usr/bin/nimbus", "internal", "fde-uki", "state")] = data
+		var out bytes.Buffer
+		if err := RunFDERenew(t.Context(), src, &out, &out, task); err != nil {
+			t.Fatal(err)
+		}
+		if slices.ContainsFunc(src.streams, func(stream string) bool {
+			return strings.Contains(stream, "systemd-cryptenroll")
+		}) {
+			t.Fatalf("record refresh ran cryptenroll: %v", src.streams)
+		}
+		if !slices.Contains(src.streams, "sudo -- /usr/bin/nimbus internal fde-uki record 1 0") {
+			t.Fatalf("record was not rewritten: %v", src.streams)
+		}
+		if !strings.Contains(out.String(), "already in place") {
+			t.Fatalf("missing guidance: %s", out.String())
+		}
+	})
+	t.Run("a different TPM wipes the recorded slot before enrolling", func(t *testing.T) {
+		src := fdeRemoveFixture(t, "")
+		for _, pcr := range []string{"7", "12", "13", "14"} {
+			src.Files["/sys/class/tpm/tpm0/pcr-sha256/"+pcr] = []byte("aa" + pcr + "\n")
+		}
+		record := FDEEnrollment{Schema: 1, Device: "/dev/disk/by-uuid/1", UUID: "1", Keyslot: "1", Token: "0",
+			PCRs: "7+14+12+13+11", Fingerprint: "sha256:x", TPMSRK: "sha256:other-tpm",
+			PCRValues: map[string]string{"7": "aa7", "12": "aa12", "13": "aa13", "14": "aa14"}}
+		data, err := json.Marshal(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src.Commands[nativetest.Key("sudo", "-n", "--", "/usr/bin/nimbus", "internal", "fde-uki", "state")] = data
+		var out bytes.Buffer
+		if err := RunFDERenew(t.Context(), src, &out, &out, task); err != nil {
+			t.Fatal(err)
+		}
+		crypt := slices.DeleteFunc(slices.Clone(src.streams), func(stream string) bool {
+			return !strings.Contains(stream, "systemd-cryptenroll")
+		})
+		if len(crypt) != 2 || !strings.Contains(crypt[0], "--wipe-slot=1") || strings.Contains(crypt[0], "--tpm2-device") ||
+			strings.Contains(crypt[1], "--wipe-slot") || !strings.Contains(crypt[1], "--tpm2-device=auto") {
+			t.Fatalf("wipe-first order wrong: %v", src.streams)
+		}
+		if !strings.Contains(out.String(), "renewed and recorded") {
+			t.Fatalf("missing renewed guidance: %s", out.String())
+		}
+	})
 	t.Run("a record write failure names the recovery command", func(t *testing.T) {
 		src := fdeRemoveFixture(t, "")
 		src.nextToken = `{"tokens":{"1":{"type":"systemd-tpm2","keyslots":["2"]}},"keyslots":{"0":{"type":"luks2"},"2":{"type":"luks2"}}}`

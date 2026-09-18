@@ -347,13 +347,37 @@ func runFDEEnrollment(ctx context.Context, src native.Source, out, errOut io.Wri
 		return err
 	}
 	wipe := ""
+	wipeFirst := false
 	switch {
 	case renew:
 		if len(before) != 1 || before[0].Slots != 1 || !owned ||
 			record.Keyslot != before[0].Keyslot || record.Token != before[0].ID || record.UUID != uuid {
 			return errors.New("the observed TPM token is not the single recorded token; inspect the LUKS2 tokens and the ownership record before renewing")
 		}
-		wipe = record.Keyslot
+		match, err := fdePCRsMatch(src, record)
+		if err != nil {
+			return fmt.Errorf("read the measured state before renewing: %w", err)
+		}
+		if match {
+			live, err := fdeSRKFingerprint(src)
+			if err != nil {
+				return fmt.Errorf("read the running TPM SRK before renewing: %w", err)
+			}
+			if record.TPMSRK == "" {
+				// The policy is already enrolled; only the ownership record
+				// lacked the TPM identity.
+				return refreshFDEEnrollment(src, out, errOut, record, before[0], true)
+			}
+			if record.TPMSRK == live {
+				return refreshFDEEnrollment(src, out, errOut, record, before[0], false)
+			}
+			// A different TPM with identical policy metadata would be
+			// refused as already enrolled, so the recorded slot is removed
+			// before the new token is added.
+			wipeFirst = true
+		} else {
+			wipe = record.Keyslot
+		}
 	case len(before) > 1:
 		return fmt.Errorf("more than one systemd-tpm2 token exists; inspect the LUKS2 tokens and %s", orphanHint(before[0]))
 	case len(before) == 1 && (!owned || record.Keyslot != before[0].Keyslot || record.Token != before[0].ID || record.UUID != uuid):
@@ -362,18 +386,35 @@ func runFDEEnrollment(ctx context.Context, src native.Source, out, errOut io.Wri
 		return errors.New("TPM automatic unlock is already enrolled and recorded; nothing to do")
 	}
 	keys := fdeKeys()
-	args := []string{"sudo", "--", "systemd-cryptenroll",
+	addArgs := []string{"sudo", "--", "systemd-cryptenroll",
 		"--tpm2-device=auto",
 		"--tpm2-pcrs=7+14+12+13",
 		"--tpm2-public-key=" + keys.pcrPublic,
 		"--tpm2-public-key-pcrs=11",
 		"--tpm2-pcrlock=",
 	}
-	if wipe != "" {
-		args = append(args, "--wipe-slot="+wipe)
+	if wipeFirst {
+		if err := stream("sudo", "--", "systemd-cryptenroll", "--wipe-slot="+record.Keyslot, device); err != nil {
+			return fmt.Errorf("remove the token bound to the other TPM: %w; automatic unlock stays off until enrollment succeeds; rerun this task", err)
+		}
+		left, err := fdeTokens(src)
+		if err != nil {
+			return err
+		}
+		if len(left) != 0 {
+			return errors.New("the old TPM token was not removed; inspect the LUKS2 tokens")
+		}
+	} else if wipe != "" {
+		addArgs = append(addArgs, "--wipe-slot="+wipe)
 	}
-	args = append(args, device)
-	if err := stream(args[0], args[1:]...); err != nil {
+	addArgs = append(addArgs, device)
+	if _, err := fmt.Fprintf(out, "$ %s %s\n", addArgs[0], strings.Join(addArgs[1:], " ")); err != nil {
+		return err
+	}
+	if err := stream(addArgs[0], addArgs[1:]...); err != nil {
+		if wipeFirst {
+			return fmt.Errorf("systemd-cryptenroll failed after the old TPM token was removed: %w; automatic unlock is off until enrollment succeeds; rerun this task", err)
+		}
 		return fmt.Errorf("systemd-cryptenroll failed: %w", err)
 	}
 	after, err := fdeTokens(src)
@@ -407,6 +448,27 @@ func runFDEEnrollment(ctx context.Context, src native.Source, out, errOut io.Wri
 		_, err = fmt.Fprintln(out, "TPM automatic unlock renewed and recorded. Reboot to verify that the disk unlocks without the passphrase; the disk passphrase remains the fallback.")
 	} else {
 		_, err = fmt.Fprintln(out, "TPM enrollment recorded. Reboot to verify that the disk unlocks without the passphrase; the disk passphrase remains the fallback.")
+	}
+	return err
+}
+
+// refreshFDEEnrollment rewrites the ownership record for the observed token
+// without touching enrollment. It is the repair when the token still matches
+// the measured state and only record metadata was missing. tpmChanged reports
+// whether the record is being bound to the running TPM for the first time.
+func refreshFDEEnrollment(src native.Source, out, errOut io.Writer, record FDEEnrollment, token fdeToken, tpmMissing bool) error {
+	exe, err := fdeExecutable()
+	if err != nil {
+		return err
+	}
+	args := []string{"sudo", "--", exe, "internal", "fde-uki", "record", token.Keyslot, token.ID}
+	if err := src.Stream(out, errOut, args[0], args[1:]...); err != nil {
+		return fmt.Errorf("the token is unchanged but its ownership record could not be rewritten (%w); finish with: sudo %s internal fde-uki record %s %s", err, exe, token.Keyslot, token.ID)
+	}
+	if tpmMissing {
+		_, err = fmt.Fprintln(out, "The enrollment policy was already in place; the ownership record now identifies this TPM. Reboot to verify automatic unlock; the disk passphrase remains the fallback.")
+	} else {
+		_, err = fmt.Fprintln(out, "The enrollment and ownership record already match this TPM; nothing to do. Reboot to verify automatic unlock; the disk passphrase remains the fallback.")
 	}
 	return err
 }
