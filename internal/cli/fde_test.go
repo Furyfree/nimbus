@@ -29,6 +29,7 @@ func TestInternalFDEUKIArgumentContract(t *testing.T) {
 		{"genkey", []string{"genkey"}, "reached"},
 		{"state", []string{"state"}, "reached"},
 		{"hook-shaped add", []string{"add", version, "/boot/efi/linux", "/boot/vmlinuz"}, "accepts between"},
+		{"stray flag on remove", []string{"remove", version, "--only-if-current"}, "applies only to"},
 		{"unknown flag", []string{"add", version, "--bogus"}, "unknown flag"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

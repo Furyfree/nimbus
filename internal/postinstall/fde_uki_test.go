@@ -196,6 +196,18 @@ func TestBuildFDEUKICurrent(t *testing.T) {
 			t.Fatalf("got %v", err)
 		}
 	})
+	t.Run("a stat failure is not treated as a missing image", func(t *testing.T) {
+		src := fdeBuildSource(t)
+		file := filepath.Join(t.TempDir(), "blocker")
+		if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		target := filepath.Join(file, "nimbus.efi")
+		if err := buildFDEUKI(src, fdeTestVersion, io.Discard, target, true); err == nil ||
+			!strings.Contains(err.Error(), "could not be examined") {
+			t.Fatalf("got %v", err)
+		}
+	})
 	t.Run("an image without a kernel release is not replaced", func(t *testing.T) {
 		src := fdeBuildSource(t)
 		target := filepath.Join(t.TempDir(), "EFI", "Linux", "nimbus.efi")

@@ -293,7 +293,7 @@ func TestFDEHookPayloadContract(t *testing.T) {
 			t.Fatalf("hook payload lacks %q", want)
 		}
 	}
-	if strings.Contains(script, `"$@"`) {
+	if strings.Contains(script, `"$@"`) || strings.Contains(script, `"$3"`) {
 		t.Fatal("hook forwards kernel-install's extra operands, which the engine rejects")
 	}
 	if !strings.HasSuffix(strings.TrimSpace(script), "exit 0") {
@@ -1060,7 +1060,7 @@ func TestVerifyFDE(t *testing.T) {
 		fdeStubEnrollment(t, src.FakeSource, "1")
 		src.Commands[nativetest.Key("sudo", "-n", "--", "sha256sum", "/boot/initramfs-"+fdeTestVersion+".img")] = []byte("")
 		got := VerifyFDE(src, fdeSetupTask())
-		if got.Status == Complete || !strings.Contains(got.Detail, "no digest") {
+		if got.Status != Unknown || got.VerificationNeedsRoot || !strings.Contains(got.Detail, "no digest") {
 			t.Fatalf("got %+v", got)
 		}
 	})

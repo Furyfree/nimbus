@@ -16,12 +16,17 @@ import (
 // no arbitrary file or command input.
 func newInternalFDEUKI() *cobra.Command {
 	var onlyIfCurrent bool
-	cmd := &cobra.Command{Use: "fde-uki", Hidden: true, Args: cobra.RangeArgs(1, 3), RunE: func(cmd *cobra.Command, args []string) error {
-		if os.Geteuid() != 0 {
-			return errors.New("internal fde-uki must run as root through kernel-install or approved setup")
+	cmd := &cobra.Command{Use: "fde-uki", Hidden: true, Args: func(_ *cobra.Command, args []string) error {
+		if err := cobra.RangeArgs(1, 3)(nil, args); err != nil {
+			return err
 		}
 		if onlyIfCurrent && args[0] != "add" {
 			return usageError{errors.New("--only-if-current applies only to fde-uki add")}
+		}
+		return nil
+	}, RunE: func(cmd *cobra.Command, args []string) error {
+		if os.Geteuid() != 0 {
+			return errors.New("internal fde-uki must run as root through kernel-install or approved setup")
 		}
 		switch args[0] {
 		case "genkey":

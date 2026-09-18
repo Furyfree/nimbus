@@ -282,6 +282,12 @@ func TestMOKPreviewDisclosesFDEImageRebuild(t *testing.T) {
 	if !disclosed(t, src) {
 		t.Fatal("the FDE rebuild was not disclosed with the marker")
 	}
+	delete(src.Files, FDEUKIMarker)
+	src.Dirs = map[string][]string{FDEUKIMarker: {}}
+	got := findTask(t, Inspect(src, in), "nvidia-mok")
+	if got.Status != Blocked || !strings.Contains(got.Detail, "could not be read") {
+		t.Fatalf("an unreadable marker was not blocked: %+v", got)
+	}
 }
 
 func TestFingerprintReadOnlyObservation(t *testing.T) {
