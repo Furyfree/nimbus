@@ -334,6 +334,9 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 						op.Notes = []string{"Selects the Paper Dark Plymouth theme and rebuilds the running kernel's initramfs."}
 					}
 				}
+				if op.Blocked == "" && b.fdeMarkerInstalled() {
+					op.Notes = append(op.Notes, "The signed Nimbus image is rebuilt for the running kernel unless it already targets another kernel, because FDE is enabled.")
+				}
 			}
 			if id == "grub-config" {
 				if removalTrigger[id] && !selectedTrigger[id] {
