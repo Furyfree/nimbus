@@ -428,17 +428,21 @@ func TestFDETokens(t *testing.T) {
 // observation can be exercised.
 type fdeEnrollSource struct {
 	*nativetest.FakeSource
-	t        *testing.T
-	enrolled bool
-	streams  []string
+	t         *testing.T
+	enrolled  bool
+	tokenJSON string
+	streams   []string
 }
 
 func (s *fdeEnrollSource) Run(name string, args ...string) ([]byte, error) {
 	if name == "sudo" && len(args) == 6 && args[2] == "cryptsetup" {
-		if s.enrolled {
-			return []byte(`{"tokens":{"0":{"type":"systemd-tpm2","keyslots":["1"]}}}`), nil
+		if s.tokenJSON != "" {
+			return []byte(s.tokenJSON), nil
 		}
-		return []byte(`{"tokens":{}}`), nil
+		if s.enrolled {
+			return []byte(`{"tokens":{"0":{"type":"systemd-tpm2","keyslots":["1"]}},"keyslots":{"0":{"type":"luks2"},"1":{"type":"luks2"}}}`), nil
+		}
+		return []byte(`{"tokens":{},"keyslots":{"0":{"type":"luks2"}}}`), nil
 	}
 	return s.FakeSource.Run(name, args...)
 }
@@ -449,7 +453,16 @@ func (s *fdeEnrollSource) Stream(_, _ io.Writer, name string, args ...string) er
 		return nil
 	}
 	if name == "sudo" && len(args) > 1 && args[1] == "systemd-cryptenroll" {
+		if strings.Contains(strings.Join(args, " "), "--wipe-slot") {
+			s.tokenJSON = `{"tokens":{},"keyslots":{"0":{"type":"luks2"}}}`
+			s.enrolled = false
+			return nil
+		}
 		s.enrolled = true
+		s.tokenJSON = ""
+		return nil
+	}
+	if name == "sudo" && len(args) > 1 && (args[1] == "efibootmgr" || args[1] == "rm" || args[1] == "rmdir") {
 		return nil
 	}
 	return s.FakeSource.Stream(nil, nil, name, args...)
@@ -473,6 +486,74 @@ func fdeEnrollFixture(t *testing.T) *fdeEnrollSource {
 	base.Commands[nativetest.Key("sudo", "-n", "--", "/usr/bin/nimbus", "internal", "fde-uki", "state")] = []byte("")
 	base.Commands[nativetest.Key("sudo", "--", "/usr/bin/nimbus", "internal", "fde-uki", "record", "1", "0")] = nil
 	return &fdeEnrollSource{FakeSource: base, t: t}
+}
+
+// fdeRemoveFixture starts from an enrolled state whose token matches the
+// record; the token metadata can be overridden per test.
+func fdeRemoveFixture(t *testing.T, tokenJSON string) *fdeEnrollSource {
+	t.Helper()
+	src := fdeEnrollFixture(t)
+	src.enrolled = true
+	record := FDEEnrollment{Schema: 1, Device: "/dev/disk/by-uuid/1", UUID: "1", Keyslot: "1", Token: "0",
+		PCRs: "7+14+12+13+11", Fingerprint: "sha256:x"}
+	data, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src.Commands[nativetest.Key("sudo", "-n", "--", "/usr/bin/nimbus", "internal", "fde-uki", "state")] = data
+	if tokenJSON != "" {
+		src.tokenJSON = tokenJSON
+	}
+	return src
+}
+
+func TestFDERemoveCommands(t *testing.T) {
+	task := Task{ID: "fde", Owner: "component:fde", Status: Pending, Action: &Action{Kind: RemoveFDE}}
+	commands, err := FDERemoveCommands(task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(slices.Concat(commands...), " ")
+	for _, want := range []string{"--wipe-slot=<recorded-keyslot>", "efibootmgr", FDEUKIPath, FDEUKIMarker, "enrollment.json"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("removal preview lacks %q: %v", want, commands)
+		}
+	}
+}
+
+func TestRunFDERemove(t *testing.T) {
+	task := Task{ID: "fde", Owner: "component:fde", Status: Pending, Action: &Action{Kind: RemoveFDE}}
+	t.Run("removes only the recorded ownership", func(t *testing.T) {
+		src := fdeRemoveFixture(t, "")
+		var out bytes.Buffer
+		if err := RunFDERemove(t.Context(), src, &out, &out, task); err != nil {
+			t.Fatal(err)
+		}
+		joined := strings.Join(src.streams, "\n")
+		if !strings.Contains(joined, "--wipe-slot=1") {
+			t.Fatalf("the recorded slot was not wiped: %v", src.streams)
+		}
+		for _, want := range []string{"efibootmgr -b 0009 -B", "rm -f " + FDEUKIPath, "rm -f " + FDEUKIMarker, "rmdir " + fdeKeyDir} {
+			if !strings.Contains(joined, want) {
+				t.Fatalf("removal lacks %q: %v", want, src.streams)
+			}
+		}
+		if !strings.Contains(out.String(), "passphrase") {
+			t.Fatalf("missing fallback guidance: %s", out.String())
+		}
+	})
+	t.Run("an unowned token is refused", func(t *testing.T) {
+		src := fdeRemoveFixture(t, `{"tokens":{"5":{"type":"systemd-tpm2","keyslots":["3"]}},"keyslots":{"0":{"type":"luks2"},"3":{"type":"luks2"}}}`)
+		if err := RunFDERemove(t.Context(), src, io.Discard, io.Discard, task); err == nil || !strings.Contains(err.Error(), "not the one Nimbus recorded") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("the last unlock method is preserved", func(t *testing.T) {
+		src := fdeRemoveFixture(t, `{"tokens":{"0":{"type":"systemd-tpm2","keyslots":["1"]}},"keyslots":{"1":{"type":"luks2"}}}`)
+		if err := RunFDERemove(t.Context(), src, io.Discard, io.Discard, task); err == nil || !strings.Contains(err.Error(), "no other unlock method") {
+			t.Fatalf("got %v", err)
+		}
+	})
 }
 
 func TestRunFDEEnroll(t *testing.T) {

@@ -86,12 +86,12 @@ func (b *builder) ownedRemovals() []Operation {
 		}
 		switch r.Provider {
 		case "dnf":
-			// Unknown ownership blocks deletion: the armed FDE marker owns
-			// the boot path, and scoped FDE removal does not exist yet.
+			// Unknown ownership blocks deletion: the armed FDE marker owns the
+			// boot path until the explicit removal command clears it.
 			if fdeArmed && slices.Contains(r.Paths, "component:fde") {
 				ops = append(ops, Operation{ID: id, Kind: KindPackage, Action: ActionRemove, Risk: RiskMedium,
 					Summary: "keep the FDE packages while automatic unlock is active",
-					Blocked: "FDE setup is active; keep the fde component selected until scoped FDE removal exists"})
+					Blocked: "FDE setup is active; run nimbus postinstall fde --remove before deselecting the fde component"})
 				continue
 			}
 			r.Resource = id

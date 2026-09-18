@@ -44,6 +44,7 @@ const (
 	SetupNVIDIA               ActionKind = "setup-nvidia"
 	SetupFDE                  ActionKind = "setup-fde"
 	EnrollFDE                 ActionKind = "enroll-fde"
+	RemoveFDE                 ActionKind = "remove-fde"
 )
 
 // Action describes native commands offered for explicit user selection.
