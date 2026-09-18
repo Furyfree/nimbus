@@ -302,15 +302,15 @@ if [ -e "${CHECKOUT}" ]; then
     [ -z "$(git -C "${real}" status --porcelain)" ] || fail "${CHECKOUT} has local changes; commit or stash them before installing"
     if [ "${current}" != "${branch}" ]; then
       say "switching ${CHECKOUT} from ${current} to ${branch}"
-      installer_run git -C "${real}" fetch origin "${branch}"
+      installer_run git -C "${real}" fetch origin "refs/heads/${branch}:refs/remotes/origin/${branch}"
       installer_run git -C "${real}" switch "${branch}"
-    else
-      # The installer always runs the channel's current code, not a stale
-      # checkout; sync continues to own ordinary updates.
-      installer_run git -C "${real}" fetch origin "${branch}"
-      installer_run git -C "${real}" merge --ff-only "origin/${branch}" ||
-        fail "${CHECKOUT} has local commits on ${current}; update or reset it before installing"
     fi
+    # The installer always runs the channel's current code, not a stale
+    # checkout; sync continues to own ordinary updates. The explicit refspec
+    # avoids the rolling release tag of the same name.
+    installer_run git -C "${real}" fetch origin "refs/heads/${branch}:refs/remotes/origin/${branch}"
+    installer_run git -C "${real}" merge --ff-only "refs/remotes/origin/${branch}" ||
+      fail "${CHECKOUT} has local commits on ${current}; update or reset it before installing"
   fi
   say "reusing the existing checkout at ${real}"
 else
