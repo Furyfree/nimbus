@@ -969,32 +969,51 @@ bootloader replacement needs a separate decision. Secure Boot with shim uses
 PCR 7 + PCR 14 + signed PCR 11; without shim, PCR 7 + signed PCR 11; with
 Secure Boot disabled, an explicit reduced-protection confirmation binds PCR 7
 to the disabled state. PCR 11 uses signed expected measurements, not today's
-fixed value.
+fixed value. The signed path is: firmware starts Fedora's installed shim with
+the UKI path `\EFI\Linux\nimbus.efi` as its load option; shim verifies the
+MOK-signed image and starts it; the Fedora GRUB and Windows entries stay
+untouched. A private shim copy, for firmware that ignores load options, is a
+documented recovery procedure, not the default. `systemd-pcrlock` stays
+complementary and is never selected implicitly.
 
 `postinstall fde` inspects read-only: the mounted LUKS2 root, the TPM2 device
 class, Secure Boot state, the selected tools and the installed hook payload.
 The engine package ships the inert
 `/etc/kernel/install.d/90-nimbus-uki.install` hook; it does nothing until
-approved setup writes `/etc/nimbus/fde-uki.enabled`. Approved setup then builds
-a Unified Kernel Image with ukify at `/boot/efi/EFI/Linux/nimbus.efi` and
-ensures exactly one `Nimbus UKI` firmware boot entry, which becomes the
-default boot target; a stale same-label duplicate is reported as a repair and
-replaced. Kernel updates rebuild the image through the native hook; Nimbus's own
-initramfs refreshes are reconciled in the enrollment milestone. Fedora's BLS
+approved setup writes `/etc/nimbus/fde-uki.enabled`. Approved setup then
+generates one key-pair set with `ukify genkey` under `/var/lib/nimbus/fde/`
+(directory `0700`, private keys `0400`), imports the MOK certificate through
+`mokutil` in a native prompt, and builds a signed Unified Kernel Image with
+ukify at `/boot/efi/EFI/Linux/nimbus.efi`; one `ukify` invocation signs the
+image and embeds the PCR 11 policy signature. The image is signed for
+`enter-initrd` only, and its embedded command line adds the per-volume
+`rd.luks.options=<uuid>=tpm2-device=auto` and the `rd.shell=0
+rd.emergency=reboot` hardening. A marker-gated dracut module adds `tpm2-tss`
+and `systemd-pcrphase` to the initramfs. Setup ensures exactly one
+`Nimbus UKI` firmware boot entry, which becomes the default boot target; a
+stale same-label duplicate is reported as a repair and replaced. Kernel
+updates rebuild and re-sign the image through the native hook; Nimbus's own
+initramfs refreshes rebuild the UKI in the same approved action. Fedora's BLS
 entries, shim and GRUB remain the fallback path. The embedded command line
 comes from `/etc/kernel/cmdline` when present, otherwise the running command
-line without `BOOT_IMAGE=` and `initrd=`. With Secure Boot enabled the task
-blocks: the signed, shim-chained image and MOK enrollment are the next
-milestone. With Secure Boot disabled the image is unsigned and the task
-discloses the reduced protection. If setup cannot build the image after
-writing the marker, it removes only that marker again so the hook stays inert.
-Enrollment, policy renewal and scoped removal are not implemented yet. Until
-scoped removal exists, deselecting `fde` while `/etc/nimbus/fde-uki.enabled`
-exists or cannot be read blocks the plan instead of removing the component's
-packages. Sync and upgrades never build images, enroll or change policy.
-Preserve the
-passphrase, unrelated keys and enrollment slots, and remove only Nimbus's
-enrollment. Enrollment, booting, passphrase fallback and removal need
+line without `BOOT_IMAGE=` and `initrd=`. With Secure Boot disabled the image
+is not signed, the task discloses the reduced protection, and the direct
+firmware entry is kept. If setup cannot build the image after writing the
+marker, it removes only that marker again so the hook stays inert.
+
+Enrollment writes one TPM keyslot with `systemd-cryptenroll` only while
+`BootCurrent` is the Nimbus entry, binding PCR 7 + PCR 14 + signed PCR 11 and
+the observed clean-boot PCR 12 and 13 values, with `--tpm2-pcrlock=` empty.
+The passphrase and unrelated slots are preserved. Nimbus records its LUKS
+UUID, slot, token, public-key fingerprint and PCR set under `/var/lib/nimbus`;
+status reports an unknown or foreign TPM token as an explicit problem.
+Renewal enrolls the new slot before wiping only the recorded old one; removal
+wipes only that slot, removes the Nimbus firmware entry, image, marker,
+drop-ins and key material, and never uses `--wipe-slot=tpm2` or `all`. Sync
+and upgrades never build images, enroll or change policy. Until scoped removal
+exists, deselecting `fde` while `/etc/nimbus/fde-uki.enabled` exists or cannot
+be read blocks the plan instead of removing the component's packages.
+Enrollment, booting, passphrase fallback, renewal and removal need
 real-hardware validation before claiming support.
 
 ## Preview, approval and results

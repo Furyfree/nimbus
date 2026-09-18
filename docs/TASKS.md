@@ -469,6 +469,37 @@ refactor and TUI.
   fallback and removal on real hardware. This scoped test precedes the TUI;
   it is separate from the later full desktop trial. No working claim yet.
 
+Milestone 3 design approved 2026-09-18 after research validated with external
+reviewers (issue #34): the signed path starts Fedora's installed shim with the
+UKI path as its load option; a private shim copy is only the documented
+recovery for firmware that ignores load options. One `ukify` invocation signs
+the PE and embeds the PCR 11 policy; one `ukify genkey` creates both key pairs
+under `/var/lib/nimbus/fde/`. The image is signed for `enter-initrd` only and
+its embedded command line carries the per-volume `rd.luks.options` unlock
+option plus `rd.shell=0 rd.emergency=reboot`. Enrollment binds PCR 7 + 14 +
+signed 11 and the observed clean-boot PCR 12/13 values, only while
+`BootCurrent` is the Nimbus entry, with `--tpm2-pcrlock=` empty. Phases:
+
+- [ ] 3.1 signed image through Fedora's shim, passphrase-only, Secure Boot on:
+  packages (`systemd-ukify`, `sbsigntools`, `systemd-boot-unsigned`,
+  `mokutil`), keys, signed build, `sbverify`, shim entry with the UKI path as
+  load option, MOK enrollment, passphrase boot, Fedora GRUB fallback, kernel
+  add/remove rebuild.
+- [ ] 3.2 VM enrollment: marker-gated dracut module (`tpm2-tss`,
+  `systemd-pcrphase`), embedded cmdline options, TPM keyslot, unattended boot,
+  passphrase fallback on the GRUB path, PCR 12/13 measurement, injected ESP
+  credential refuses to unseal.
+- [ ] 3.3 renewal, scoped removal, status and the failure matrix in the VM.
+- [ ] 3.4 rebuild the UKI after Plymouth and NVIDIA initramfs refreshes,
+  plan-visible.
+- [ ] 3.5 laptop, then desktop with both MOKs enrolled before TPM enrollment.
+
+VM-only gates still open: `--tpm2-signature` at enrollment time (omit if
+cryptenroll refuses from the running system), the elected
+`rd.luks.options` unlock path, and the observed PCR 12/13 values. Hardware-only
+gates: firmware OptionalData handling, fall-through to the Fedora entry,
+fwupd/dbx renewal, and the desktop's Windows/NVIDIA entries.
+
 ## NVIDIA MOK helper
 
 Implemented in source; the helper itself is not installation-tested yet. The
