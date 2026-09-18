@@ -528,10 +528,11 @@ signed 11 and the observed clean-boot PCR 12/13 values, only while
   In source: status offers renewal when the recorded literal PCR 7/12/13/14
   values are missing or no longer match, the offered task adds the new slot
   before wiping the recorded one, and the record is rewritten from
-  root-observed state; a record missing only the TPM identity is refreshed
-  without re-enrollment, and a different TPM removes the recorded slot before
-  adding the new token because an identical policy is refused as already
-  enrolled. VM 2026-09-18: enrolling a throwaway MOK changed PCR 14
+  root-observed state; a different or unidentified TPM removes the recorded
+  slot before adding the new token because an identical policy is refused as
+  already enrolled, and a no-op enrollment whose record proves the TPM
+  refreshes the record metadata alone. VM 2026-09-18: enrolling a throwaway
+  MOK changed PCR 14
   so the next boot refused TPM unseal and offered the passphrase; verification
   then offered renewal, which enrolled token 1 in keyslot 2, wiped slot 1 and
   rewrote the record, and the next boot unlocked unattended again. Removal

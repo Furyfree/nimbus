@@ -268,23 +268,28 @@ func validateFDEEnroll(task Task) error {
 	return nil
 }
 
-// FDERenewCommands describes the reviewed renewal operations.
+// FDERenewCommands describes the reviewed renewal operations. The mode is
+// decided by verification: an add-then-wipe for changed measured state, or a
+// recorded-slot wipe followed by a fresh enroll when the token is sealed to
+// another TPM and the identical policy would be refused as already enrolled.
 func FDERenewCommands(task Task) ([][]string, error) {
 	if err := validateFDERenew(task); err != nil {
 		return nil, err
 	}
 	keys := fdeKeys()
-	return [][]string{
-		{"sudo", "--", "systemd-cryptenroll",
-			"--tpm2-device=auto",
-			"--tpm2-pcrs=7+14+12+13",
-			"--tpm2-public-key=" + keys.pcrPublic,
-			"--tpm2-public-key-pcrs=11",
-			"--tpm2-pcrlock=",
-			"--wipe-slot=<recorded-keyslot>",
-			"<luks-device>"},
-		{"sudo", "--", "nimbus", "internal", "fde-uki", "record", "<new-keyslot>", "<new-token>"},
-	}, nil
+	add := []string{"sudo", "--", "systemd-cryptenroll",
+		"--tpm2-device=auto",
+		"--tpm2-pcrs=7+14+12+13",
+		"--tpm2-public-key=" + keys.pcrPublic,
+		"--tpm2-public-key-pcrs=11",
+		"--tpm2-pcrlock=",
+	}
+	record := []string{"sudo", "--", "nimbus", "internal", "fde-uki", "record", "<new-keyslot>", "<new-token>"}
+	if task.fdeRenewMode == "wipe-first" {
+		wipe := []string{"sudo", "--", "systemd-cryptenroll", "--wipe-slot=<recorded-keyslot>", "<luks-device>"}
+		return [][]string{wipe, append(slices.Clone(add), "<luks-device>"), record}, nil
+	}
+	return [][]string{append(slices.Clone(add), "--wipe-slot=<recorded-keyslot>", "<luks-device>"), record}, nil
 }
 
 func validateFDERenew(task Task) error {
@@ -358,22 +363,21 @@ func runFDEEnrollment(ctx context.Context, src native.Source, out, errOut io.Wri
 		if err != nil {
 			return fmt.Errorf("read the measured state before renewing: %w", err)
 		}
-		if match {
+		if match && record.TPMSRK != "" {
 			live, err := fdeSRKFingerprint(src)
 			if err != nil {
 				return fmt.Errorf("read the running TPM SRK before renewing: %w", err)
 			}
-			if record.TPMSRK == "" {
-				// The policy is already enrolled; only the ownership record
-				// lacked the TPM identity.
-				return refreshFDEEnrollment(src, out, errOut, record, before[0], true)
-			}
 			if record.TPMSRK == live {
-				return refreshFDEEnrollment(src, out, errOut, record, before[0], false)
+				return refreshFDEEnrollment(src, out, errOut, before[0])
 			}
 			// A different TPM with identical policy metadata would be
 			// refused as already enrolled, so the recorded slot is removed
 			// before the new token is added.
+			wipeFirst = true
+		} else if match {
+			// The record does not identify its TPM, so the token cannot be
+			// trusted to this machine; rebind it.
 			wipeFirst = true
 		} else {
 			wipe = record.Keyslot
@@ -393,7 +397,15 @@ func runFDEEnrollment(ctx context.Context, src native.Source, out, errOut io.Wri
 		"--tpm2-public-key-pcrs=11",
 		"--tpm2-pcrlock=",
 	}
-	if wipeFirst {
+	baseArgs := slices.Clone(addArgs)
+	addWith := func(wipeSlot string) []string {
+		args := slices.Clone(baseArgs)
+		if wipeSlot != "" {
+			args = append(args, "--wipe-slot="+wipeSlot)
+		}
+		return append(args, device)
+	}
+	wipeRecorded := func() error {
 		if err := stream("sudo", "--", "systemd-cryptenroll", "--wipe-slot="+record.Keyslot, device); err != nil {
 			return fmt.Errorf("remove the token bound to the other TPM: %w; automatic unlock stays off until enrollment succeeds; rerun this task", err)
 		}
@@ -404,18 +416,46 @@ func runFDEEnrollment(ctx context.Context, src native.Source, out, errOut io.Wri
 		if len(left) != 0 {
 			return errors.New("the old TPM token was not removed; inspect the LUKS2 tokens")
 		}
-	} else if wipe != "" {
-		addArgs = append(addArgs, "--wipe-slot="+wipe)
+		return nil
 	}
-	addArgs = append(addArgs, device)
-	if _, err := fmt.Fprintf(out, "$ %s %s\n", addArgs[0], strings.Join(addArgs[1:], " ")); err != nil {
-		return err
-	}
-	if err := stream(addArgs[0], addArgs[1:]...); err != nil {
-		if wipeFirst {
-			return fmt.Errorf("systemd-cryptenroll failed after the old TPM token was removed: %w; automatic unlock is off until enrollment succeeds; rerun this task", err)
+	if wipeFirst {
+		if err := wipeRecorded(); err != nil {
+			return err
 		}
-		return fmt.Errorf("systemd-cryptenroll failed: %w", err)
+		wipe = ""
+	}
+	addArgs = addWith(wipe)
+	var callErr error
+	for {
+		callErr = stream(addArgs[0], addArgs[1:]...)
+		if callErr == nil {
+			break
+		}
+		left, unchanged := fdeUnchangedToken(src, before)
+		if !unchanged || wipeFirst {
+			break
+		}
+		if record.TPMSRK != "" {
+			if live, serr := fdeSRKFingerprint(src); serr == nil && record.TPMSRK == live {
+				// The policy is already enrolled and the record proves this
+				// TPM; only record metadata was missing.
+				return refreshFDEEnrollment(src, out, errOut, left)
+			}
+		}
+		// The policy is already enrolled but the record cannot prove the
+		// TPM, so wipe the untrusted token and enroll again.
+		if err := wipeRecorded(); err != nil {
+			return err
+		}
+		wipeFirst = true
+		wipe = ""
+		addArgs = addWith("")
+	}
+	if callErr != nil {
+		if wipeFirst {
+			return fmt.Errorf("systemd-cryptenroll failed after the old TPM token was removed: %w; automatic unlock is off until enrollment succeeds; run the offered enrollment task (postinstall fde) to enroll again", callErr)
+		}
+		return fmt.Errorf("systemd-cryptenroll failed: %w", callErr)
 	}
 	after, err := fdeTokens(src)
 	if err != nil {
@@ -424,7 +464,12 @@ func runFDEEnrollment(ctx context.Context, src native.Source, out, errOut io.Wri
 	if len(after) != 1 || after[0].Keyslot == "" || after[0].Slots != 1 {
 		return errors.New("enrollment reported success but no single TPM token was observed; inspect the LUKS2 tokens")
 	}
-	if wipe != "" && after[0].Keyslot == wipe {
+	if wipe != "" && after[0].Keyslot == wipe && after[0].ID == before[0].ID {
+		if record.TPMSRK != "" {
+			if live, serr := fdeSRKFingerprint(src); serr == nil && record.TPMSRK == live {
+				return refreshFDEEnrollment(src, out, errOut, after[0])
+			}
+		}
 		return errors.New("renewal reported success but the recorded slot was reused; inspect the LUKS2 tokens")
 	}
 	exe, err := fdeExecutable()
@@ -452,11 +497,23 @@ func runFDEEnrollment(ctx context.Context, src native.Source, out, errOut io.Wri
 	return err
 }
 
+// fdeUnchangedToken reports whether the observed token set is still the
+// single recorded token, which means an enrollment attempt changed nothing.
+func fdeUnchangedToken(src native.Source, before []fdeToken) (fdeToken, bool) {
+	left, err := fdeTokens(src)
+	if err != nil || len(before) != 1 || len(left) != 1 {
+		return fdeToken{}, false
+	}
+	if left[0].Keyslot != before[0].Keyslot || left[0].ID != before[0].ID {
+		return fdeToken{}, false
+	}
+	return left[0], true
+}
+
 // refreshFDEEnrollment rewrites the ownership record for the observed token
-// without touching enrollment. It is the repair when the token still matches
-// the measured state and only record metadata was missing. tpmChanged reports
-// whether the record is being bound to the running TPM for the first time.
-func refreshFDEEnrollment(src native.Source, out, errOut io.Writer, record FDEEnrollment, token fdeToken, tpmMissing bool) error {
+// without touching enrollment. It is used when the policy was already
+// enrolled and the record proves the token belongs to this TPM.
+func refreshFDEEnrollment(src native.Source, out, errOut io.Writer, token fdeToken) error {
 	exe, err := fdeExecutable()
 	if err != nil {
 		return err
@@ -465,11 +522,7 @@ func refreshFDEEnrollment(src native.Source, out, errOut io.Writer, record FDEEn
 	if err := src.Stream(out, errOut, args[0], args[1:]...); err != nil {
 		return fmt.Errorf("the token is unchanged but its ownership record could not be rewritten (%w); finish with: sudo %s internal fde-uki record %s %s", err, exe, token.Keyslot, token.ID)
 	}
-	if tpmMissing {
-		_, err = fmt.Fprintln(out, "The enrollment policy was already in place; the ownership record now identifies this TPM. Reboot to verify automatic unlock; the disk passphrase remains the fallback.")
-	} else {
-		_, err = fmt.Fprintln(out, "The enrollment and ownership record already match this TPM; nothing to do. Reboot to verify automatic unlock; the disk passphrase remains the fallback.")
-	}
+	_, err = fmt.Fprintln(out, "The enrollment already matches this TPM; the ownership record was refreshed. Reboot to verify automatic unlock; the disk passphrase remains the fallback.")
 	return err
 }
 
@@ -587,35 +640,33 @@ func fdePCRsMatch(src native.Source, record FDEEnrollment) (bool, error) {
 // fdeTPMSRKFile is the live TPM's SRK public key as published by
 // systemd-tpm2-setup-early on tmpfs. A disk copy never carries it, and it is
 // world-readable, so it identifies the running TPM without a privileged read.
+// The persistent /var copy is never trusted: a moved disk carries it stale.
 const fdeTPMSRKFile = "/run/systemd/tpm2-srk-public-key.tpm2b_public"
 
-// fdeTPMSRKPersistentFile is the persistent copy systemd keeps on the root
-// filesystem for the next boot. It is only a fallback: a disk copy carries
-// the old value until a boot refreshes it.
-const fdeTPMSRKPersistentFile = "/var/lib/systemd/tpm2-srk-public-key.tpm2b_public"
-
-// fdeSRKFingerprint hashes the running TPM's SRK public key from the live
-// tmpfs copy, falling back to the persistent copy only when the live one is
-// absent. An empty record value means the record predates the fingerprint.
-func fdeSRKFingerprint(src native.Source) (string, error) {
-	var errs []error
-	for _, path := range []string{fdeTPMSRKFile, fdeTPMSRKPersistentFile} {
-		data, err := src.ReadFile(path)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("read %s: %w", path, err))
-			continue
-		}
-		if len(data) == 0 {
-			errs = append(errs, fmt.Errorf("%s is empty", path))
-			continue
-		}
-		sum := sha256.Sum256(data)
-		return fmt.Sprintf("sha256:%x", sum), nil
+// fdeSRKPublic reads the running TPM's SRK public key.
+func fdeSRKPublic(src native.Source) ([]byte, error) {
+	data, err := src.ReadFile(fdeTPMSRKFile)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", fdeTPMSRKFile, err)
 	}
-	return "", errors.Join(errs...)
+	if len(data) == 0 {
+		return nil, fmt.Errorf("%s is empty", fdeTPMSRKFile)
+	}
+	return data, nil
 }
 
-// fdeTPMSRKMatches reports whether the live TPM is the one the record bound.
+// fdeSRKFingerprint hashes the running TPM's SRK public key for the ownership
+// record.
+func fdeSRKFingerprint(src native.Source) (string, error) {
+	data, err := fdeSRKPublic(src)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("sha256:%x", sum), nil
+}
+
+// fdeTPMSRKMatches reports whether the live TPM's SRK matches the record.
 func fdeTPMSRKMatches(src native.Source, record FDEEnrollment) (bool, error) {
 	current, err := fdeSRKFingerprint(src)
 	if err != nil {

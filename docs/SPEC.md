@@ -1019,11 +1019,12 @@ recorded literal PCR 7, 12, 13 and 14 values are missing or no longer match
 the observed ones; it enrolls the same policy into a new keyslot and wipes only
 the recorded slot, then rewrites the ownership record through root
 observation. Because systemd-cryptenroll refuses an identical policy as
-already enrolled, a renewal offered only to record a missing TPM identity
-refreshes the ownership record without touching the token, and a renewal to
-rebind a different TPM removes the recorded slot before adding the new token;
-both still require the passphrase. The preview shows the enrollment and
-record commands, and the passphrase remains the fallback. Sync and upgrades
+already enrolled, a renewal for a different or unidentified TPM removes the
+recorded slot before adding the new token; a renewal for changed measured
+state keeps add-then-wipe, and a no-op enrollment whose record proves the TPM
+refreshes the record metadata alone. Renewals that touch the token require
+the passphrase. The preview shows the commands for the approved mode, and the
+passphrase remains the fallback. Sync and upgrades
 never enroll or change unlock policy. While the marker exists, deselecting
 `fde` blocks the plan instead of removing the component's packages; run the
 removal first. Enrollment,

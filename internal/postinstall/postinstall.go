@@ -81,6 +81,9 @@ type Task struct {
 	// fdeSecure remembers the inspected Secure Boot state for the FDE task's
 	// preview; RunFDESetup re-reads it before any mutation.
 	fdeSecure bool
+	// fdeRenewMode remembers which renewal commands verification approved:
+	// "wipe-first" or "add-wipe" (default).
+	fdeRenewMode string
 }
 
 // FDESecure reports the inspected Secure Boot state for the FDE task.

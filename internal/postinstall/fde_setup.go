@@ -760,19 +760,29 @@ func VerifyFDE(src native.Source, t Task) Task {
 			t.Detail = "The current firmware boot entry could not be determined; verify the Nimbus entry with root access."
 			return t
 		}
-		tpm, err := fdeTPMSRKMatches(src, record)
+		live, err := fdeSRKFingerprint(src)
 		if err != nil {
 			// No action can repair a missing live SRK, so do not offer one.
 			t.Action = nil
 			t.Detail = "The TPM identity could not be established; systemd did not publish the running TPM's SRK public key: " + err.Error()
 			return t
 		}
-		if !tpm {
+		if record.TPMSRK == "" || record.TPMSRK != live {
+			match, err := fdePCRsMatch(src, record)
+			if err != nil {
+				t.VerificationNeedsRoot = true
+				t.Detail = "The measured PCR values could not be read: " + err.Error()
+				return t
+			}
 			t.Status = Pending
 			t.Action = &Action{Kind: RenewFDE}
+			t.fdeRenewMode = "wipe-first"
+			if !match {
+				t.fdeRenewMode = "add-wipe"
+			}
 			t.Reboot = true
 			if record.TPMSRK == "" {
-				t.Detail = "The ownership record does not identify its TPM. Renew the enrollment to record the TPM identity; the disk passphrase remains the fallback."
+				t.Detail = "The ownership record does not identify its TPM, so the enrollment cannot be trusted to this system. Renew the enrollment to rebind it here; the disk passphrase is required and remains the fallback."
 			} else {
 				t.Detail = "The enrollment is bound to a different TPM, so automatic unlock cannot work on this system. Renew the enrollment to rebind it here; the disk passphrase is required and remains the fallback."
 			}
@@ -792,6 +802,7 @@ func VerifyFDE(src native.Source, t Task) Task {
 		if !match {
 			t.Status = Pending
 			t.Action = &Action{Kind: RenewFDE}
+			t.fdeRenewMode = "add-wipe"
 			t.Reboot = true
 			t.Detail = "The recorded measured state is missing or differs from this boot, so the TPM policy no longer matches. Renew the enrollment to record the current values; until then the disk passphrase unlocks."
 			return t

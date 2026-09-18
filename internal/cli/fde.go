@@ -69,8 +69,8 @@ func fdeVerify(cmd *cobra.Command, src native.Source, before *postinstallSnapsho
 	}, yes)
 }
 
-// runFDERenew replaces the recorded enrollment after the measured state
-// changed, then verifies the new record before reporting success.
+// runFDERenew rebinds or refreshes the recorded enrollment according to the
+// approved renewal mode, then verifies the new record before reporting.
 func runFDERenew(cmd *cobra.Command, src native.Source, before *postinstallSnapshot, task postinstall.Task) error {
 	if err := postinstall.RunFDERenew(cmd.Context(), src, cmd.OutOrStdout(), cmd.ErrOrStderr(), task); err != nil {
 		return fmt.Errorf("postinstall fde renewal failed: %w", err)

@@ -458,7 +458,7 @@ func (s *fdeEnrollSource) Run(name string, args ...string) ([]byte, error) {
 			return []byte(s.tokenJSON), nil
 		}
 		if s.enrolled {
-			return []byte(`{"tokens":{"0":{"type":"systemd-tpm2","keyslots":["1"]}},"keyslots":{"0":{"type":"luks2"},"1":{"type":"luks2"}}}`), nil
+			return []byte(`{"tokens":{"0":{"type":"systemd-tpm2","keyslots":["1"],"tpm2_srk":"c3JrLXB1YmxpYy1rZXk="}},"keyslots":{"0":{"type":"luks2"},"1":{"type":"luks2"}}}`), nil
 		}
 		return []byte(`{"tokens":{},"keyslots":{"0":{"type":"luks2"}}}`), nil
 	}
@@ -471,6 +471,9 @@ func (s *fdeEnrollSource) Stream(_, _ io.Writer, name string, args ...string) er
 		return nil
 	}
 	if name == "sudo" && len(args) > 1 && args[1] == "systemd-cryptenroll" {
+		if msg, ok := s.Failures[nativetest.Key(name, args...)]; ok {
+			return errors.New(msg)
+		}
 		if strings.Contains(strings.Join(args, " "), "--wipe-slot") {
 			if s.nextToken != "" {
 				s.tokenJSON = s.nextToken
@@ -640,6 +643,17 @@ func TestFDERenewCommands(t *testing.T) {
 			t.Fatalf("renewal preview lacks %q: %v", want, commands)
 		}
 	}
+	wipeFirst := task
+	wipeFirst.fdeRenewMode = "wipe-first"
+	commands, err = FDERenewCommands(wipeFirst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commands) != 3 || !slices.Contains(commands[0], "--wipe-slot=<recorded-keyslot>") ||
+		strings.Contains(strings.Join(commands[1], " "), "--wipe-slot") ||
+		!slices.Contains(commands[1], "--tpm2-device=auto") {
+		t.Fatalf("wipe-first preview wrong: %v", commands)
+	}
 }
 
 func TestRunFDERenew(t *testing.T) {
@@ -676,42 +690,13 @@ func TestRunFDERenew(t *testing.T) {
 			t.Fatalf("got %v", err)
 		}
 	})
-	t.Run("a record without the TPM identity is refreshed without enrolling", func(t *testing.T) {
+	t.Run("a record without the TPM identity is rebound by wipe-first", func(t *testing.T) {
 		src := fdeRemoveFixture(t, "")
 		for _, pcr := range []string{"7", "12", "13", "14"} {
 			src.Files["/sys/class/tpm/tpm0/pcr-sha256/"+pcr] = []byte("aa" + pcr + "\n")
 		}
 		record := FDEEnrollment{Schema: 1, Device: "/dev/disk/by-uuid/1", UUID: "1", Keyslot: "1", Token: "0",
 			PCRs: "7+14+12+13+11", Fingerprint: "sha256:x",
-			PCRValues: map[string]string{"7": "aa7", "12": "aa12", "13": "aa13", "14": "aa14"}}
-		data, err := json.Marshal(record)
-		if err != nil {
-			t.Fatal(err)
-		}
-		src.Commands[nativetest.Key("sudo", "-n", "--", "/usr/bin/nimbus", "internal", "fde-uki", "state")] = data
-		var out bytes.Buffer
-		if err := RunFDERenew(t.Context(), src, &out, &out, task); err != nil {
-			t.Fatal(err)
-		}
-		if slices.ContainsFunc(src.streams, func(stream string) bool {
-			return strings.Contains(stream, "systemd-cryptenroll")
-		}) {
-			t.Fatalf("record refresh ran cryptenroll: %v", src.streams)
-		}
-		if !slices.Contains(src.streams, "sudo -- /usr/bin/nimbus internal fde-uki record 1 0") {
-			t.Fatalf("record was not rewritten: %v", src.streams)
-		}
-		if !strings.Contains(out.String(), "already in place") {
-			t.Fatalf("missing guidance: %s", out.String())
-		}
-	})
-	t.Run("a different TPM wipes the recorded slot before enrolling", func(t *testing.T) {
-		src := fdeRemoveFixture(t, "")
-		for _, pcr := range []string{"7", "12", "13", "14"} {
-			src.Files["/sys/class/tpm/tpm0/pcr-sha256/"+pcr] = []byte("aa" + pcr + "\n")
-		}
-		record := FDEEnrollment{Schema: 1, Device: "/dev/disk/by-uuid/1", UUID: "1", Keyslot: "1", Token: "0",
-			PCRs: "7+14+12+13+11", Fingerprint: "sha256:x", TPMSRK: "sha256:other-tpm",
 			PCRValues: map[string]string{"7": "aa7", "12": "aa12", "13": "aa13", "14": "aa14"}}
 		data, err := json.Marshal(record)
 		if err != nil {
@@ -729,8 +714,59 @@ func TestRunFDERenew(t *testing.T) {
 			strings.Contains(crypt[1], "--wipe-slot") || !strings.Contains(crypt[1], "--tpm2-device=auto") {
 			t.Fatalf("wipe-first order wrong: %v", src.streams)
 		}
+		if !slices.Contains(src.streams, "sudo -- /usr/bin/nimbus internal fde-uki record 1 0") {
+			t.Fatalf("record was not rewritten: %v", src.streams)
+		}
+	})
+	t.Run("a different TPM wipes the recorded slot before enrolling", func(t *testing.T) {
+		src := fdeRemoveFixture(t, "")
+		for _, pcr := range []string{"7", "12", "13", "14"} {
+			src.Files["/sys/class/tpm/tpm0/pcr-sha256/"+pcr] = []byte("aa" + pcr + "\n")
+		}
+		record := FDEEnrollment{Schema: 1, Device: "/dev/disk/by-uuid/1", UUID: "1", Keyslot: "1", Token: "0",
+			PCRs: "7+14+12+13+11", Fingerprint: "sha256:x", TPMSRK: "sha256:other-tpm",
+			PCRValues: map[string]string{"7": "aa7", "12": "aa12", "13": "aa13", "14": "aa14"}}
+		data, err := json.Marshal(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src.Commands[nativetest.Key("sudo", "-n", "--", "/usr/bin/nimbus", "internal", "fde-uki", "state")] = data
+		src.tokenJSON = `{"tokens":{"0":{"type":"systemd-tpm2","keyslots":["1"],"tpm2_srk":"b3RoZXItdHBt"}},"keyslots":{"0":{"type":"luks2"},"1":{"type":"luks2"}}}`
+		var out bytes.Buffer
+		if err := RunFDERenew(t.Context(), src, &out, &out, task); err != nil {
+			t.Fatal(err)
+		}
+		crypt := slices.DeleteFunc(slices.Clone(src.streams), func(stream string) bool {
+			return !strings.Contains(stream, "systemd-cryptenroll")
+		})
+		if len(crypt) != 2 || !strings.Contains(crypt[0], "--wipe-slot=1") || strings.Contains(crypt[0], "--tpm2-device") ||
+			strings.Contains(crypt[1], "--wipe-slot") || !strings.Contains(crypt[1], "--tpm2-device=auto") {
+			t.Fatalf("wipe-first order wrong: %v", src.streams)
+		}
 		if !strings.Contains(out.String(), "renewed and recorded") {
 			t.Fatalf("missing renewed guidance: %s", out.String())
+		}
+	})
+	t.Run("an already-enrolled policy refreshes the record instead of failing", func(t *testing.T) {
+		src := fdeRemoveFixture(t, "")
+		record := FDEEnrollment{Schema: 1, Device: "/dev/disk/by-uuid/1", UUID: "1", Keyslot: "1", Token: "0",
+			PCRs: "7+14+12+13+11", Fingerprint: "sha256:x", TPMSRK: fdeSRKFixture(t, src.FakeSource)}
+		data, err := json.Marshal(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src.Commands[nativetest.Key("sudo", "-n", "--", "/usr/bin/nimbus", "internal", "fde-uki", "state")] = data
+		key := nativetest.Key("sudo", "--", "systemd-cryptenroll", "--tpm2-device=auto",
+			"--tpm2-pcrs=7+14+12+13", "--tpm2-public-key="+fdeKeys().pcrPublic,
+			"--tpm2-public-key-pcrs=11", "--tpm2-pcrlock=", "--wipe-slot=1",
+			"/dev/disk/by-uuid/1")
+		src.Failures[key] = "This PCR set is already enrolled, executing no operation."
+		var out bytes.Buffer
+		if err := RunFDERenew(t.Context(), src, &out, &out, task); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), "ownership record was refreshed") {
+			t.Fatalf("missing refresh guidance: %s", out.String())
 		}
 	})
 	t.Run("a record write failure names the recovery command", func(t *testing.T) {
@@ -1017,7 +1053,7 @@ func fdeStubEnrollment(t *testing.T, src *nativetest.FakeSource, slot string) {
 	fdeExecutable = func() (string, error) { return "/usr/bin/nimbus", nil }
 	t.Cleanup(func() { fdeExecutable = previous })
 	src.Commands[nativetest.Key("sudo", "-n", "--", "cryptsetup", "luksDump", "--dump-json-metadata", "/dev/disk/by-uuid/1")] =
-		[]byte(`{"tokens":{"0":{"type":"systemd-tpm2","keyslots":["` + slot + `"]}}}`)
+		[]byte(`{"tokens":{"0":{"type":"systemd-tpm2","keyslots":["` + slot + `"],"tpm2_srk":"c3JrLXB1YmxpYy1rZXk="}}}`)
 	values := map[string]string{}
 	for _, pcr := range []string{"7", "12", "13", "14"} {
 		values[pcr] = "aa" + pcr
@@ -1140,7 +1176,7 @@ func TestVerifyFDE(t *testing.T) {
 		src.Commands[nativetest.Key("sudo", "-n", "--", "/usr/bin/nimbus", "internal", "fde-uki", "state")] = data
 		got := VerifyFDE(src, fdeSetupTask())
 		if got.Status != Pending || got.Action == nil || got.Action.Kind != RenewFDE ||
-			!strings.Contains(got.Detail, "does not identify its TPM") {
+			got.fdeRenewMode != "wipe-first" || !strings.Contains(got.Detail, "does not identify its TPM") {
 			t.Fatalf("got %+v", got)
 		}
 	})
