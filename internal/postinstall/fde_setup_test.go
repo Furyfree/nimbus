@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -21,23 +22,47 @@ func TestFDEBootEntries(t *testing.T) {
 		"Boot0009* Nimbus UKI\tHD(1,GPT," + guid + ",0x800,0x200000)/\\EFI\\Linux\\nimbus.efi\n" +
 		"Boot000A  Nimbus UKI\tHD(1,GPT," + guid + ",0x800,0x200000)/EFI/Linux/old.efi\n"
 	entries := fdeBootEntries(output)
-	if len(entries) != 2 {
+	if len(entries) != 3 {
 		t.Fatalf("got %+v", entries)
 	}
-	if entries[0].ID != "0009" || entries[0].Loader != `EFI\Linux\nimbus.efi` {
-		t.Fatalf("got %+v", entries[0])
+	nimbus := fdeNimbusEntries(entries)
+	if len(nimbus) != 2 || nimbus[0].ID != "0009" || nimbus[0].Loader != `EFI\Linux\nimbus.efi` {
+		t.Fatalf("got %+v", nimbus)
 	}
-	if entries[1].ID != "000A" || entries[1].Loader != `EFI\Linux\old.efi` {
-		t.Fatalf("forward slashes were not normalized: %+v", entries[1])
+	if nimbus[1].ID != "000A" || nimbus[1].Loader != `EFI\Linux\old.efi` {
+		t.Fatalf("forward slashes were not normalized: %+v", nimbus[1])
 	}
-	if !fdeEntryCorrect(entries) {
+	if !fdeEntryCorrect(entries, false) {
 		t.Fatal("the current entry was not recognized")
 	}
-	if fdeEntryCorrect(entries[1:]) {
+	if fdeEntryCorrect([]fdeBootEntry{nimbus[1]}, false) {
 		t.Fatal("a stale entry was treated as correct")
 	}
 	if fdeLoaderPath("HD(1,GPT,g,0x800,0x200000)") != "" {
 		t.Fatal("a device path without a loader was not rejected")
+	}
+	// The signed chain resolves the Fedora shim and matches the load option
+	// data, which efibootmgr prints as UCS-2 hex when unterminated.
+	options := fdeUCS2Hex(FDEBootLoader + " ")
+	secure := "BootCurrent: 0008\nBootOrder: 0008,0009\n" +
+		"Boot0008* Fedora\tHD(1,GPT," + guid + ",0x800,0x200000)/\\EFI\\fedora\\shimx64.efi\n" +
+		"Boot0009* Nimbus UKI\tHD(1,GPT," + guid + ",0x800,0x200000)/\\EFI\\fedora\\shimx64.efi" + options + "\n"
+	secureEntries := fdeBootEntries(secure)
+	if !fdeEntryCorrect(secureEntries, true) {
+		t.Fatalf("the signed entry was not recognized: %+v", secureEntries)
+	}
+	if fdeEntryCorrect(secureEntries, false) {
+		t.Fatal("a load-option entry was accepted as a direct entry")
+	}
+	if _, ok := fdeShimLoader(fdeBootEntries(output)); !ok {
+		t.Fatal("the Fedora shim entry was not found")
+	}
+	// Some efibootmgr builds print the File(...) device-path form.
+	fileForm := "BootCurrent: 0008\nBootOrder: 0008,0009\n" +
+		"Boot0008* Fedora\tHD(1,GPT," + guid + ",0x800,0x200000)/File(\\EFI\\fedora\\shimx64.efi)\n" +
+		"Boot0009* Nimbus UKI\tHD(1,GPT," + guid + ",0x800,0x200000)/File(\\EFI\\fedora\\shimx64.efi) File(.\\EFI\\Linux\\nimbus.efi )\n"
+	if !fdeEntryCorrect(fdeBootEntries(fileForm), true) {
+		t.Fatalf("the File() form was not recognized: %+v", fdeBootEntries(fileForm))
 	}
 }
 
@@ -57,7 +82,7 @@ func TestFDEReplacesStaleSameLabelEntries(t *testing.T) {
 			},
 			Failures: map[string]string{},
 			Files:    map[string][]byte{"/proc/mounts": []byte("/dev/vda1 /boot/efi vfat rw 0 0\n")},
-			Dirs:     map[string][]string{},
+			Dirs:     map[string][]string{"/sys/firmware/efi/efivars": {}},
 			Paths:    map[string]string{},
 		}
 	}
@@ -82,6 +107,20 @@ func TestFDEReplacesStaleSameLabelEntries(t *testing.T) {
 		}
 		if strings.Contains(out.String(), "-B") {
 			t.Fatalf("a single correct entry was replaced:\n%s", out.String())
+		}
+	})
+	t.Run("the default boot order is promoted", func(t *testing.T) {
+		src := newSource()
+		src.Commands[nativetest.Key("efibootmgr")] = []byte("BootCurrent: 0008\nBootOrder: 0008,0009\n" +
+			"Boot0008* Fedora\tHD(1,GPT," + guid + ",0x800,0x200000)/\\EFI\\fedora\\shimx64.efi\n" +
+			"Boot0009* Nimbus UKI\tHD(1,GPT," + guid + ",0x800,0x200000)/\\EFI\\Linux\\nimbus.efi\n")
+		src.Commands[nativetest.Key("sudo", "--", "efibootmgr", "-o", "0009,0008")] = nil
+		var out bytes.Buffer
+		if err := fdeEnsureEntry(src, &out, &out); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), "-o 0009,0008") {
+			t.Fatalf("the boot order was not promoted:\n%s", out.String())
 		}
 	})
 }
@@ -119,15 +158,20 @@ type fdeSetupSource struct {
 	entryFails bool
 	entry      bool
 	stale      bool
+	secure     bool
 }
 
 func (s *fdeSetupSource) Run(name string, args ...string) ([]byte, error) {
 	if name == "efibootmgr" {
 		const guid = "78f7ab0d-3bb7-4c71-ba1b-d8f8db372fdc"
 		fedora := "Boot0008* Fedora\tHD(1,GPT," + guid + ",0x800,0x200000)/\\EFI\\fedora\\shimx64.efi\n"
+		nimbus := "Boot0009* Nimbus UKI\tHD(1,GPT," + guid + ",0x800,0x200000)/\\EFI\\Linux\\nimbus.efi\n"
+		if s.secure {
+			nimbus = "Boot0009* Nimbus UKI\tHD(1,GPT," + guid + ",0x800,0x200000)/\\EFI\\fedora\\shimx64.efi" + fdeUCS2Hex(FDEBootLoader+" ") + "\n"
+		}
 		switch {
 		case s.entry:
-			return []byte("BootCurrent: 0009\nBootOrder: 0009,0008\n" + fedora + "Boot0009* Nimbus UKI\tHD(1,GPT," + guid + ",0x800,0x200000)/\\EFI\\Linux\\nimbus.efi\n"), nil
+			return []byte("BootCurrent: 0009\nBootOrder: 0009,0008\n" + fedora + nimbus), nil
 		case s.stale:
 			return []byte("BootCurrent: 0008\nBootOrder: 0008,0009\n" + fedora + "Boot0009* Nimbus UKI\tHD(1,GPT," + guid + ",0x800,0x200000)/\\\\EFI\\\\Linux\\\\nimbus.efi\n"), nil
 		default:
@@ -185,17 +229,20 @@ func (s *fdeSetupSource) Stream(_, _ io.Writer, name string, args ...string) err
 		}
 		s.Files[FDEUKIMarker] = []byte(fdeMarkerText)
 		s.Dirs["/etc/nimbus"] = []string{"fde-uki.enabled"}
-	case strings.Contains(joined, "internal fde-uki"):
+	case strings.Contains(joined, "internal fde-uki add"):
 		if s.buildFails {
 			return errors.New("fixture build failure")
 		}
 		s.built = args[len(args)-1]
+	case strings.Contains(joined, "internal fde-uki genkey"):
+	case args[1] == "mokutil" && strings.Contains(joined, "--import"):
 	case args[1] == "efibootmgr" && strings.Contains(joined, " -c "):
 		if s.entryFails {
 			return errors.New("fixture entry failure")
 		}
 		s.entry = true
 	case args[1] == "efibootmgr" && strings.Contains(joined, " -B"):
+	case args[1] == "efibootmgr" && strings.Contains(joined, " -o "):
 	default:
 		s.t.Fatalf("unexpected native mutation: %s", joined)
 	}
@@ -219,7 +266,9 @@ func fdeSetupFixture(t *testing.T) *fdeSetupSource {
 	base.Commands[nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", "/etc/nimbus")] = []byte("directory|root|root|755|2\n")
 	base.Commands[nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", FDEUKIMarker)] = []byte("regular file|root|root|644|1\n")
 	src := &fdeSetupSource{FakeSource: base, t: t}
-	src.Files[fdeCmdlineFile] = []byte("root=UUID=test ro\n")
+	fdeTestKeys(t)
+	src.Files[fdeCmdlineFile] = []byte(fdeTestBase + "\n")
+	src.Files[fdeCrypttab] = []byte("luks-1 UUID=1 none discard,x-initrd.attach\n")
 	return src
 }
 
@@ -247,6 +296,68 @@ func TestFDEHookPayloadContract(t *testing.T) {
 	if !strings.HasSuffix(strings.TrimSpace(script), "exit 0") {
 		t.Fatal("hook payload does not end in a successful exit, which would fail kernel updates")
 	}
+}
+
+func TestFDESetupCommands(t *testing.T) {
+	direct, err := FDESetupCommands(fdeSetupTask())
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(slices.Concat(direct...), " ")
+	if !strings.Contains(joined, "fde-uki genkey") || strings.Contains(joined, "mokutil --import") {
+		t.Fatalf("direct preview wrong: %v", direct)
+	}
+	if !strings.Contains(joined, `-l \EFI\Linux\nimbus.efi`) || strings.Contains(joined, " -u ") {
+		t.Fatalf("direct entry preview wrong: %v", direct)
+	}
+	secure := fdeSetupTask()
+	secure.fdeSecure = true
+	commands, err := FDESetupCommands(secure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined = strings.Join(slices.Concat(commands...), " ")
+	if !strings.Contains(joined, "mokutil --import") || !strings.Contains(joined, " -u ") || !strings.Contains(joined, "<fedora-shim-loader>") {
+		t.Fatalf("secure preview wrong: %v", commands)
+	}
+}
+
+func TestVerifyFDESecureBoot(t *testing.T) {
+	secureEntries := func() []byte {
+		const guid = "78f7ab0d-3bb7-4c71-ba1b-d8f8db372fdc"
+		options := fdeUCS2Hex(FDEBootLoader + " ")
+		return []byte("BootCurrent: 0009\nBootOrder: 0009,0008\n" +
+			"Boot0008* Fedora\tHD(1,GPT," + guid + ",0x800,0x200000)/\\EFI\\fedora\\shimx64.efi\n" +
+			"Boot0009* Nimbus UKI\tHD(1,GPT," + guid + ",0x800,0x200000)/\\EFI\\fedora\\shimx64.efi" + options + "\n")
+	}
+	t.Run("enrolled MOK completes", func(t *testing.T) {
+		src := fdeVerifyFixture(t)
+		fdeEnableSecureBoot(src.FakeSource, true)
+		src.Commands[nativetest.Key("efibootmgr")] = secureEntries()
+		src.out = []byte(strings.Replace(fdeInspectOutput, "%s", fdeTestCmdline, 1))
+		der := fdeKeys().mokDER
+		key := nativetest.Key("sudo", "-n", "--", "mokutil", "--ignore-keyring", "--test-key", der)
+		src.Commands[key] = []byte(der + " is already enrolled\n")
+		src.ExitCodes[key] = 1
+		got := VerifyFDE(src, fdeSetupTask())
+		if got.Status != Complete || !got.FDESecure() {
+			t.Fatalf("got %+v", got)
+		}
+	})
+	t.Run("pending MOK stays pending", func(t *testing.T) {
+		src := fdeVerifyFixture(t)
+		fdeEnableSecureBoot(src.FakeSource, true)
+		src.Commands[nativetest.Key("efibootmgr")] = secureEntries()
+		src.out = []byte(strings.Replace(fdeInspectOutput, "%s", fdeTestCmdline, 1))
+		der := fdeKeys().mokDER
+		key := nativetest.Key("sudo", "-n", "--", "mokutil", "--ignore-keyring", "--test-key", der)
+		src.Commands[key] = []byte(der + " is already in the enrollment request\n")
+		src.ExitCodes[key] = 1
+		got := VerifyFDE(src, fdeSetupTask())
+		if got.Status != Pending || !strings.Contains(got.Detail, "pending") {
+			t.Fatalf("got %+v", got)
+		}
+	})
 }
 
 func TestRunFDESetup(t *testing.T) {
@@ -302,16 +413,26 @@ func TestRunFDESetup(t *testing.T) {
 			}
 		}
 	})
-	t.Run("secure boot blocks before changes", func(t *testing.T) {
+	t.Run("secure setup requests MOK and creates the shim entry", func(t *testing.T) {
 		src := fdeSetupFixture(t)
-		src.Dirs["/sys/firmware/efi/efivars"] = []string{"SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"}
-		src.Files["/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"] = []byte{6, 0, 0, 0, 1}
+		fdeEnableSecureBoot(src.FakeSource, true)
+		src.secure = true
+		src.Commands[nativetest.Key("sudo", "-n", "--", "mokutil", "--ignore-keyring", "--test-key", fdeKeys().mokDER)] = []byte(fdeKeys().mokDER + " is not enrolled\n")
+		src.Commands[nativetest.Key("mokutil", "--list-new")] = []byte("")
 		var out bytes.Buffer
-		if err := RunFDESetup(t.Context(), src, &out, &out, fdeSetupTask()); err == nil || !strings.Contains(err.Error(), "shim chain") {
-			t.Fatalf("got %v", err)
+		if err := RunFDESetup(t.Context(), src, &out, &out, fdeSetupTask()); err != nil {
+			t.Fatal(err)
 		}
-		if src.staged != "" || src.built != "" {
-			t.Fatalf("mutated under Secure Boot: %q", src.streams)
+		if !strings.Contains(out.String(), "Complete Enroll MOK") {
+			t.Fatalf("missing MOK guidance:\n%s", out.String())
+		}
+		if !slices.ContainsFunc(src.streams, func(stream string) bool {
+			return strings.Contains(stream, "mokutil --import")
+		}) {
+			t.Fatalf("no MOK import requested: %v", src.streams)
+		}
+		if src.built == "" || !src.entry {
+			t.Fatalf("secure setup did not build and create the entry: %v", src.streams)
 		}
 	})
 	t.Run("a failed build removes the new marker", func(t *testing.T) {
@@ -356,16 +477,25 @@ func (s fdeInspectSource) Run(name string, args ...string) ([]byte, error) {
 func fdeVerifyFixture(t *testing.T) fdeInspectSource {
 	t.Helper()
 	const guid = "78f7ab0d-3bb7-4c71-ba1b-d8f8db372fdc"
-	base := &nativetest.FakeSource{Commands: map[string][]byte{}, Failures: map[string]string{}, Files: map[string][]byte{}, Dirs: map[string][]string{}, Paths: map[string]string{}}
+	fdeTestKeys(t)
+	base := &nativetest.FakeSource{Commands: map[string][]byte{}, Failures: map[string]string{}, ExitCodes: map[string]int{}, Files: map[string][]byte{}, Dirs: map[string][]string{}, Paths: map[string]string{}}
 	base.Files[FDEUKIMarker] = []byte(fdeMarkerText)
-	base.Files[fdeCmdlineFile] = []byte("root=UUID=test ro\n")
+	base.Files[fdeCmdlineFile] = []byte(fdeTestBase + "\n")
+	base.Files[fdeCrypttab] = []byte("luks-1 UUID=1 none discard,x-initrd.attach\n")
+	base.Dirs["/sys/firmware/efi/efivars"] = []string{}
 	base.Commands[nativetest.Key("efibootmgr")] = []byte("BootCurrent: 0009\nBootOrder: 0009,0008\nBoot0009* Nimbus UKI\tHD(1,GPT," + guid + ",0x800,0x200000)/\\EFI\\Linux\\nimbus.efi\n")
-	base.Commands[nativetest.Key("stat", "--format=%s", "--", fdeKernelDir+"/6.19.10-300.fc44.x86_64/vmlinuz")] = []byte("18497536\n")
+	base.Commands[nativetest.Key("stat", "--format=%s", "--", fdeKernelDir+"/"+fdeTestVersion+"/vmlinuz")] = []byte("18497536\n")
 	return fdeInspectSource{FakeSource: base}
 }
 
 const fdeInspectOutput = `.sbat:
   size: 400 bytes
+  sha256: aa
+.pcrsig:
+  size: 1 bytes
+  sha256: aa
+.pcrpkey:
+  size: 1 bytes
   sha256: aa
 .linux:
   size: 18497536 bytes
@@ -391,7 +521,7 @@ const fdeInspectOutput = `.sbat:
 func TestVerifyFDE(t *testing.T) {
 	t.Run("verified", func(t *testing.T) {
 		src := fdeVerifyFixture(t)
-		src.out = []byte(strings.Replace(fdeInspectOutput, "%s", "root=UUID=test ro", 1))
+		src.out = []byte(strings.Replace(fdeInspectOutput, "%s", fdeTestCmdline, 1))
 		got := VerifyFDE(src, fdeSetupTask())
 		if got.Status != Complete || got.VerificationNeedsRoot {
 			t.Fatalf("got %+v", got)
@@ -407,7 +537,7 @@ func TestVerifyFDE(t *testing.T) {
 	})
 	t.Run("an extended command line is not a match", func(t *testing.T) {
 		src := fdeVerifyFixture(t)
-		src.out = []byte(strings.Replace(fdeInspectOutput, "%s", "root=UUID=test ro init=/bin/sh", 1))
+		src.out = []byte(strings.Replace(fdeInspectOutput, "%s", fdeTestCmdline+" init=/bin/sh", 1))
 		got := VerifyFDE(src, fdeSetupTask())
 		if got.Status == Complete || !strings.Contains(got.Detail, "does not embed") {
 			t.Fatalf("got %+v", got)
@@ -438,8 +568,8 @@ func TestVerifyFDE(t *testing.T) {
 	})
 	t.Run("an uninstalled embedded kernel offers repair", func(t *testing.T) {
 		src := fdeVerifyFixture(t)
-		src.out = []byte(strings.Replace(fdeInspectOutput, "%s", "root=UUID=test ro", 1))
-		delete(src.Commands, nativetest.Key("stat", "--format=%s", "--", fdeKernelDir+"/6.19.10-300.fc44.x86_64/vmlinuz"))
+		src.out = []byte(strings.Replace(fdeInspectOutput, "%s", fdeTestCmdline, 1))
+		delete(src.Commands, nativetest.Key("stat", "--format=%s", "--", fdeKernelDir+"/"+fdeTestVersion+"/vmlinuz"))
 		got := VerifyFDE(src, fdeSetupTask())
 		if got.Status != Pending || got.Action == nil || !strings.Contains(got.Detail, "no longer installed") {
 			t.Fatalf("got %+v", got)

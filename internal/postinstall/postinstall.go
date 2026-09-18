@@ -75,7 +75,13 @@ type Task struct {
 	Action                *Action  `json:"action,omitempty"`
 	Reboot                bool     `json:"reboot,omitzero"`
 	Logout                bool     `json:"logout,omitzero"`
+	// fdeSecure remembers the inspected Secure Boot state for the FDE task's
+	// preview; RunFDESetup re-reads it before any mutation.
+	fdeSecure bool
 }
+
+// FDESecure reports the inspected Secure Boot state for the FDE task.
+func (t Task) FDESecure() bool { return t.fdeSecure }
 
 type Inputs struct {
 	Task     string // Empty inspects the complete checklist; a task ID inspects only its prerequisites.

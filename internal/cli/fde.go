@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/Furyfree/nimbus/internal/native"
 	"github.com/Furyfree/nimbus/internal/postinstall"
@@ -57,7 +58,7 @@ func rootVerification(cmd *cobra.Command, src native.Source, before *postinstall
 // fdeVerify runs the approved read-only checks; a damaged or stale image
 // comes back Pending with the repair action so the caller can offer it.
 func fdeVerify(cmd *cobra.Command, src native.Source, before *postinstallSnapshot, task postinstall.Task, yes bool) (postinstall.Task, error) {
-	preview := fmt.Sprintf("Read-only administrator verification:\n  sudo -- ukify inspect %s (sections, kernel release and embedded command line)\nNo changes will be made.\n", postinstall.FDEUKIPath)
+	preview := fmt.Sprintf("Read-only administrator verification:\n  sudo -- ukify inspect %s (sections, kernel release and embedded command line)\n  sudo -- mokutil --ignore-keyring --test-key %s (enrollment state)\nNo changes will be made.\n", postinstall.FDEUKIPath, postinstall.FDEMOKCertificate())
 	return rootVerification(cmd, src, before, task, preview, func(s native.Source, t postinstall.Task) postinstall.Task {
 		return postinstall.VerifyFDE(fdeVerificationSource{s}, t)
 	}, yes)
@@ -72,6 +73,10 @@ func runFDESetup(cmd *cobra.Command, src native.Source, before *postinstallSnaps
 		return err
 	}
 	if verified.Status != postinstall.Complete {
+		if verified.FDESecure() && strings.Contains(verified.Detail, "MOK enrollment is pending") {
+			_, err := fmt.Fprintln(cmd.OutOrStdout(), "Setup finished. Complete Enroll MOK at the next reboot; completion is recorded after the certificate is enrolled.")
+			return err
+		}
 		return fmt.Errorf("setup finished but verification did not complete: %s", verified.Detail)
 	}
 	if err := recordTask(before.view.Machine, postinstall.FDEEvidence, "verified"); err != nil {

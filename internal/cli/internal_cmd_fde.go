@@ -15,14 +15,22 @@ import (
 // hook and approved setup call. It validates the marker gate itself; there is
 // no arbitrary file or command input.
 func newInternalFDEUKI() *cobra.Command {
-	cmd := &cobra.Command{Use: "fde-uki", Hidden: true, Args: cobra.MinimumNArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+	cmd := &cobra.Command{Use: "fde-uki", Hidden: true, Args: cobra.RangeArgs(1, 2), RunE: func(cmd *cobra.Command, args []string) error {
 		if os.Geteuid() != 0 {
 			return errors.New("internal fde-uki must run as root through kernel-install or approved setup")
 		}
 		switch args[0] {
+		case "genkey":
+			return postinstall.EnsureFDEKeys(native.ExecSource{}, cmd.OutOrStdout())
 		case "add":
+			if len(args) != 2 {
+				return usageError{errors.New("internal fde-uki add needs a kernel release")}
+			}
 			return postinstall.BuildFDEUKI(native.ExecSource{}, args[1], cmd.OutOrStdout())
 		case "remove":
+			if len(args) != 2 {
+				return usageError{errors.New("internal fde-uki remove needs a kernel release")}
+			}
 			return postinstall.RemoveFDEUKI(native.ExecSource{}, args[1], cmd.OutOrStdout())
 		default:
 			return usageError{fmt.Errorf("unsupported fde-uki command %q", args[0])}

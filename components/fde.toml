@@ -10,8 +10,10 @@ conflicts = []
 
 packages = [
   "systemd-ukify",
+  "systemd-boot-unsigned",
   "sbsigntools",
   "efibootmgr",
+  "mokutil",
 ]
 
 removes = []

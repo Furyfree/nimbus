@@ -23,8 +23,8 @@ func fdeTask(src native.Source, in Inputs) Task {
 			"The selected fde packages are applied and recorded by Nimbus.",
 		},
 		Instructions: []string{
-			"Approved setup writes /etc/nimbus/fde-uki.enabled, builds /boot/efi/EFI/Linux/nimbus.efi with ukify and ensures the Nimbus UKI firmware entry, which becomes the default boot target.",
-			"Kernel updates rebuild the image through the engine-provided kernel-install hook; Fedora's GRUB entries remain selectable as the fallback path.",
+			"Approved setup generates the key material under /var/lib/nimbus/fde, requests MOK enrollment when Secure Boot is enforced, builds the signed Nimbus image with ukify and ensures the Nimbus UKI firmware entry, which becomes the default boot target.",
+			"Kernel updates rebuild and re-sign the image through the engine-provided kernel-install hook; Fedora's GRUB entries remain selectable as the fallback path.",
 			"TPM enrollment is not implemented yet: after setup the disk passphrase still unlocks the disk and sync never changes policy.",
 		},
 		Verification: "Inspection reads the mounted root, the TPM2 device, the firmware mode, the hook payload, the marker, the firmware entry and the installed tools. The image content and its embedded command line need the approved read-only check.",
@@ -44,6 +44,7 @@ func fdeTask(src native.Source, in Inputs) Task {
 		t.Status, t.Detail = NotApplicable, "The root filesystem is not a LUKS2 mapper; automatic unlock keeps the passphrase only."
 		return t
 	}
+	secure := false
 	switch in.Facts.SecureBoot.Value {
 	case inspect.SecureBootEnabled:
 		setup, err := setupMode(src)
@@ -55,9 +56,7 @@ func fdeTask(src native.Source, in Inputs) Task {
 			t.Status, t.Detail = NotApplicable, "The firmware is in Setup Mode; enroll Secure Boot keys before automatic unlock."
 			return t
 		}
-		t.Status = Blocked
-		t.Detail = "Secure Boot is enabled. The signed shim-chained image and MOK enrollment are the next milestone; disable Secure Boot only if you accept the reduced protection, or wait for that work."
-		return t
+		secure = true
 	case inspect.SecureBootDisabled:
 	case inspect.SecureBootUnavailable:
 		t.Status, t.Detail = NotApplicable, "EFI Secure Boot state is unavailable; this setup keeps the passphrase only."
@@ -66,6 +65,7 @@ func fdeTask(src native.Source, in Inputs) Task {
 		t.Detail = "Secure Boot state could not be read; inspect bootctl status, then retry"
 		return t
 	}
+	t.fdeSecure = secure
 	names, err := src.ReadDir("/sys/class/tpm")
 	if errors.Is(err, os.ErrNotExist) {
 		t.Status, t.Detail = NotApplicable, "No TPM device was found; the disk passphrase remains the only unlock path."
@@ -88,7 +88,7 @@ func fdeTask(src native.Source, in Inputs) Task {
 		t.Status, t.Detail = NotApplicable, "The TPM is not version 2; automatic unlock keeps the passphrase only."
 		return t
 	}
-	for _, name := range []string{"systemd-ukify", "sbsigntools", "efibootmgr"} {
+	for _, name := range []string{"systemd-ukify", "systemd-boot-unsigned", "sbsigntools", "efibootmgr", "mokutil"} {
 		found := false
 		for _, pkg := range in.Resolved.Packages {
 			if pkg.Name != name {
@@ -106,7 +106,7 @@ func fdeTask(src native.Source, in Inputs) Task {
 		}
 	}
 	var missing []string
-	for _, tool := range []string{"systemd-cryptenroll", "ukify", "kernel-install", "dracut", "efibootmgr"} {
+	for _, tool := range []string{"systemd-cryptenroll", "ukify", "kernel-install", "dracut", "efibootmgr", "mokutil", "sbverify"} {
 		if _, err := src.LookPath(tool); err != nil {
 			missing = append(missing, tool)
 		}
@@ -141,12 +141,17 @@ func fdeTask(src native.Source, in Inputs) Task {
 	}
 	if !ready {
 		t.Status = Pending
-		t.Detail = "LUKS2 root, TPM2 and the setup tools are present. Approved setup writes the marker, builds the Nimbus image and ensures the firmware entry, which becomes the default boot target. Secure Boot is disabled, so the image is unsigned and the reduced protection is disclosed. TPM enrollment, policy renewal and scoped removal are not implemented yet."
+		t.fdeSecure = secure
+		if secure {
+			t.Detail = "LUKS2 root, TPM2, Secure Boot and the setup tools are present. Approved setup generates the key pair, requests MOK enrollment, builds and signs the Nimbus image and ensures the shim-chained firmware entry, which becomes the default boot target. TPM enrollment, policy renewal and scoped removal are not implemented yet."
+		} else {
+			t.Detail = "LUKS2 root, TPM2 and the setup tools are present. Approved setup writes the marker, builds the Nimbus image and ensures the firmware entry, which becomes the default boot target. Secure Boot is disabled, so the image is unsigned and the reduced protection is disclosed. TPM enrollment, policy renewal and scoped removal are not implemented yet."
+		}
 		t.Action = &Action{Kind: SetupFDE}
 		t.Reboot = true
 		return t
 	}
-	if !fdeEntryReady(entries) {
+	if !fdeEntryReady(entries, secure) {
 		t.Status = Pending
 		t.Detail = "FDE setup is active but the firmware entry is missing or different; rerun the approved setup to repair it."
 		t.Action = &Action{Kind: SetupFDE}
