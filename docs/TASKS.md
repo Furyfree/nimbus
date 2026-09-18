@@ -438,7 +438,10 @@ refactor and TUI.
   recorded, when it is Nimbus's own theme, or when it is no longer installed.
   Both payload triggers re-run once, shown in the plan, when their receipt was
   written by another engine version, so an engine update reaches the initramfs
-  and `grub.cfg`; a repeat run keeps the recorded previous theme. The trigger
+  and `grub.cfg`; a repeat run keeps the recorded previous theme. GRUB's
+  shim-lock verifier refuses `loadfont` under Secure Boot, so the drop-in
+  loads the custom faces only when `shim_lock` is unset; with it the theme
+  uses GRUB's built-in font without errors. The trigger
   operations carry plan notes for the mirror rewrite, initramfs rebuild and
   installed kernel-install hook, and a successful removal retires the
   `grub-config` receipt like the Plymouth one, only at the end of the run, so
@@ -480,10 +483,12 @@ refactor and TUI.
   slots. In source: the signed shim-chained image and MOK enrollment, TPM
   enrollment with its root-observed ownership record, boot-time status and
   explicit scoped removal (`nimbus postinstall fde --remove`, which wipes only
-  the recorded keyslot and keeps the passphrase). Renewal and the
-  Nimbus-initiated initramfs reconcile (NVIDIA signing and Plymouth trigger)
-  are implemented in source and await the VM pass. Deselecting `fde` while the
-  marker exists still blocks the plan; removal clears the marker first.
+  the recorded keyslot and keeps the passphrase). Renewal, scoped removal and
+  the ownership record were exercised end to end in the VM on 2026-09-18
+  (issue #34). The Plymouth and NVIDIA initramfs reconciles run the same
+  approved rebuild but are not yet exercised in the VM. Deselecting `fde`
+  while the marker exists still blocks the plan; removal clears the marker
+  first.
 - [ ] Test auto-unlock enrollment, booting, passphrase fallback, boot-change
   fallback and removal on real hardware. This scoped test precedes the TUI;
   it is separate from the later full desktop trial. No working claim yet.
@@ -499,25 +504,43 @@ option plus `rd.shell=0 rd.emergency=reboot`. Enrollment binds PCR 7 + 14 +
 signed 11 and the observed clean-boot PCR 12/13 values, only while
 `BootCurrent` is the Nimbus entry, with `--tpm2-pcrlock=` empty. Phases:
 
-- [ ] 3.1 signed image through Fedora's shim, passphrase-only, Secure Boot on:
+- [x] 3.1 signed image through Fedora's shim, passphrase-only, Secure Boot on:
   packages (`systemd-ukify`, `sbsigntools`, `systemd-boot-unsigned`,
   `mokutil`), keys, signed build, `sbverify`, shim entry with the UKI path as
   load option, MOK enrollment, passphrase boot, Fedora GRUB fallback, kernel
-  add/remove rebuild.
+  add/remove rebuild. VM 2026-09-18: the setup built and signed the image,
+  queued the MOK request, created `Boot0002 "Nimbus UKI"` from Fedora's shim
+  with the UKI path as its load option and promoted it first; after MOK
+  enrollment the image verified against `mok.crt` and booted through
+  systemd-stub; `kernel-install add <kver> <vmlinuz>` rebuilt and re-signed
+  the image through the hook, and Fedora's GRUB entry booted after removal.
 - [ ] 3.2 VM enrollment: marker-gated dracut module (`tpm2-tss`,
   `systemd-pcrphase`), embedded cmdline options, TPM keyslot, unattended boot,
   passphrase fallback on the GRUB path, PCR 12/13 measurement, injected ESP
-  credential refuses to unseal.
-- [ ] 3.3 renewal, scoped removal, status and the failure matrix in the VM.
+  credential refuses to unseal. VM 2026-09-18: enrollment recorded token 0 in
+  keyslot 1 with PCR 7/14/12/13 and signed 11, reboots unlocked unattended,
+  the LUKS passphrase remained the fallback on the GRUB path after removal,
+  and a changed PCR 14 refused to unseal. The injected ESP credential case is
+  still untested.
+- [x] 3.3 renewal, scoped removal, status and the failure matrix in the VM.
   In source: status offers renewal when the recorded literal PCR 7/12/13/14
   values are missing or no longer match, the offered task adds the new slot
   before wiping the recorded one, and the record is rewritten from
-  root-observed state.
+  root-observed state. VM 2026-09-18: enrolling a throwaway MOK changed PCR 14
+  so the next boot refused TPM unseal and offered the passphrase; verification
+  then offered renewal, which enrolled token 1 in keyslot 2, wiped slot 1 and
+  rewrote the record, and the next boot unlocked unattended again. Removal
+  wiped only the recorded slot, deleted the entry, image, marker and key
+  material, kept passphrase slot 0 and the MOK certificates, and Fedora's GRUB
+  booted with the passphrase. A root-only `/etc/crypttab` read broke
+  post-setup verification until fixed (`3dc574c`).
 - [ ] 3.4 rebuild the UKI after Plymouth and NVIDIA initramfs refreshes,
   plan-visible. In source: the Plymouth trigger and the NVIDIA dracut refresh
   invoke the approved internal rebuild for the running kernel when the marker
   exists, disclosed by a plan note or the postinstall preview, and skipped
-  when the image already targets another kernel.
+  when the image already targets another kernel. The kernel-install path was
+  verified in the VM 2026-09-18; the Plymouth and NVIDIA callers still need
+  the same run.
 - [ ] 3.5 laptop, then desktop with both MOKs enrolled before TPM enrollment.
 
 VM-only gates still open: `--tpm2-signature` at enrollment time (omit if

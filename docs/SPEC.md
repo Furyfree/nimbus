@@ -1101,7 +1101,10 @@ keeps `fc-match`, the fontconfig configuration and the monospace faces in the
 initramfs while the marker exists; it verifies the label plugin and `fc-match`
 before installing, so a missing dependency skips the module instead of failing
 a kernel transaction. The `plymouth-theme` trigger rebuilds the initramfs, and
-deselection rebuilds it without them. When the FDE marker holds the exact
+deselection rebuilds it without them. The GRUB drop-in loads the theme faces
+only when Secure Boot is off, because the shim-lock verifier refuses
+`loadfont`; with Secure Boot the theme uses GRUB's built-in font. When the FDE
+marker holds the exact
 approved content, the Plymouth trigger and the NVIDIA MOK dracut refresh also
 rebuild the running kernel's signed image in the same approved action, shown
 in the plan or the postinstall preview. The rebuild is skipped when the image
