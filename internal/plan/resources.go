@@ -42,6 +42,16 @@ type ResourceChange struct {
 
 var plymouthThemeName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
+// plymouthCurrentTheme reads the native selection without privilege, so the
+// removal plan can see a theme the user changed by hand.
+func plymouthCurrentTheme(src native.Source) (string, error) {
+	out, err := src.Run("plymouth-set-default-theme")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // plymouthThemeAvailable reports whether the native theme module file exists;
 // /usr/share is readable without privilege. The name comes from a recorded
 // receipt, so it is validated before it becomes a path.
@@ -281,21 +291,36 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 			if id == "plymouth-theme" {
 				switch {
 				case removalTrigger[id] && !selectedTrigger[id]:
-					// The selection returns to what was observed before the
-					// install; that value lives in the previous trigger
-					// receipt, and restoring it does not need the Nimbus
-					// payload that is being removed.
-					previous := receipt.Previous
-					if !ok || previous == "" {
-						op.Blocked = "no recorded previous Plymouth theme; select the boot-theme component to record it before removal"
-					} else if previous == "nimbus" {
+					// The selection returns to what the user has now; only a
+					// current nimbus theme needs the recorded previous value.
+					current, err := plymouthCurrentTheme(b.in.Source)
+					switch {
+					case err != nil:
+						op.Blocked = "could not read the current Plymouth theme: " + err.Error()
+					case current != "nimbus":
+						// The user already chose another theme; keep it and
+						// rebuild the initramfs without the Nimbus payload.
+						if current == "" {
+							op.Blocked = "the current Plymouth theme is unset; set one with plymouth-set-default-theme before removing boot-theme"
+						} else if !plymouthThemeAvailable(b.in.Source, current) {
+							op.Blocked = "the current Plymouth theme " + current + " is not an installed theme; set one with plymouth-set-default-theme before removing boot-theme"
+						} else {
+							op.Action = ActionRemove
+							op.Summary = "keep the current Plymouth theme"
+							op.Steps = []Step{{Description: "keep the current Plymouth theme", Argv: []string{"plymouth-set-default-theme", "-R", current}, Privileged: true}}
+							op.Notes = []string{"Rebuilds the running kernel's initramfs without the Nimbus payload."}
+						}
+					case !ok || receipt.Previous == "":
+						op.Blocked = "no recorded previous Plymouth theme; set a theme with plymouth-set-default-theme before removing boot-theme"
+					case receipt.Previous == "nimbus":
 						op.Blocked = "the recorded previous Plymouth theme is nimbus itself; set another theme with plymouth-set-default-theme before removing boot-theme"
-					} else if !plymouthThemeAvailable(b.in.Source, previous) {
-						op.Blocked = "the recorded previous Plymouth theme " + previous + " is no longer installed; set a theme manually with plymouth-set-default-theme before removing boot-theme"
-					} else {
+					case !plymouthThemeAvailable(b.in.Source, receipt.Previous):
+						op.Blocked = "the recorded previous Plymouth theme " + receipt.Previous + " is no longer installed; set a theme manually with plymouth-set-default-theme before removing boot-theme"
+					default:
 						op.Action = ActionRemove
 						op.Summary = "restore the previous Plymouth theme"
-						op.Steps = []Step{{Description: "restore the previous Plymouth theme", Argv: []string{"plymouth-set-default-theme", "-R", previous}, Privileged: true}}
+						op.Steps = []Step{{Description: "restore the previous Plymouth theme", Argv: []string{"plymouth-set-default-theme", "-R", receipt.Previous}, Privileged: true}}
+						op.Notes = []string{"Rebuilds the running kernel's initramfs with the restored theme."}
 					}
 				case !plymouthThemeAvailable(b.in.Source, "nimbus"):
 					op.Blocked = "the installed engine does not ship the boot-theme payload; upgrade nimbus or deselect boot-theme"
@@ -304,6 +329,24 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 						// Carry the theme observed before Nimbus took over, so
 						// a repeat apply cannot overwrite it with nimbus.
 						op.Resource = &ResourceChange{Name: "plymouth-theme", Previous: receipt.Previous}
+					}
+					if op.Blocked == "" && op.Action != ActionKeep {
+						op.Notes = []string{"Selects the Paper Dark Plymouth theme and rebuilds the running kernel's initramfs."}
+					}
+				}
+			}
+			if id == "grub-config" {
+				if removalTrigger[id] && !selectedTrigger[id] {
+					// Removing the marker restores Fedora's flat menu; the
+					// native mkconfig run is what makes it take effect.
+					op.Action = ActionRemove
+					op.Summary = "restore Fedora's flat kernel menu"
+				}
+				if op.Blocked == "" && op.Action != ActionKeep {
+					if op.Action == ActionRemove {
+						op.Notes = []string{"Removes the Nimbus BLS mirror and regenerates Fedora's flat grub.cfg."}
+					} else {
+						op.Notes = []string{"Rewrites /boot/loader/entries-nimbus and regenerates grub.cfg through grub2-mkconfig --no-grubenv-update; the installed kernel-install hook keeps it current on kernel updates."}
 					}
 				}
 			}

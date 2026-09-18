@@ -47,6 +47,9 @@ func TestMirror(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(mirrorDir, "notes.txt"), []byte("keep"), 0o644); err != nil {
 			t.Fatal(err)
 		}
+		if err := os.WriteFile(filepath.Join(mirrorDir, ".nimbus-old.tmp"), []byte("stale"), 0o644); err != nil {
+			t.Fatal(err)
+		}
 		id, err := Mirror(src, entriesDir, grubenv, mirrorDir)
 		if err != nil {
 			t.Fatal(err)
@@ -62,8 +65,42 @@ func TestMirror(t *testing.T) {
 		for _, entry := range got {
 			names = append(names, entry.Name())
 		}
-		if !slices.Contains(names, id+".conf") || slices.Contains(names, "m-6.19.10-300.fc44.x86_64.conf") || !slices.Contains(names, "notes.txt") {
+		if !slices.Contains(names, id+".conf") || slices.Contains(names, "m-6.19.10-300.fc44.x86_64.conf") || !slices.Contains(names, "notes.txt") || slices.Contains(names, ".nimbus-old.tmp") {
 			t.Fatalf("mirror contents: %v", names)
+		}
+		info, err := os.Stat(mirrorDir)
+		if err != nil || info.Mode().Perm() != 0o700 {
+			t.Fatalf("mirror mode = %v, err = %v", info.Mode().Perm(), err)
+		}
+	})
+	t.Run("a debug entry never wins the newest fallback", func(t *testing.T) {
+		src, entriesDir, grubenv, mirrorDir := mirrorFixture(t, []string{"m-7.2.5-200.fc44.x86_64", "m-7.2.6-200.fc44.x86_64-debug"}, "m-9.9.9-removed.fc44.x86_64")
+		id, err := Mirror(src, entriesDir, grubenv, mirrorDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if id != "m-7.2.5-200.fc44.x86_64" {
+			t.Fatalf("a debug entry led the fallback: got %q", id)
+		}
+	})
+	t.Run("a +debug suffix never wins the newest fallback", func(t *testing.T) {
+		src, entriesDir, grubenv, mirrorDir := mirrorFixture(t, []string{"m-7.2.5-200.fc44.x86_64", "m-7.2.6-200.fc44.x86_64+debug"}, "m-9.9.9-removed.fc44.x86_64")
+		id, err := Mirror(src, entriesDir, grubenv, mirrorDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if id != "m-7.2.5-200.fc44.x86_64" {
+			t.Fatalf("a +debug entry led the fallback: got %q", id)
+		}
+	})
+	t.Run("a rescue entry never leads beside a lone debug kernel", func(t *testing.T) {
+		src, entriesDir, grubenv, mirrorDir := mirrorFixture(t, []string{"m-0-rescue-abc", "m-7.2.6-200.fc44.x86_64-debug"}, "m-9.9.9-removed.fc44.x86_64")
+		id, err := Mirror(src, entriesDir, grubenv, mirrorDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if id != "m-7.2.6-200.fc44.x86_64-debug" {
+			t.Fatalf("a rescue entry led over the only real kernel: got %q", id)
 		}
 	})
 	t.Run("a stale saved entry falls back to the newest", func(t *testing.T) {
@@ -136,7 +173,7 @@ func TestCompareVersions(t *testing.T) {
 }
 
 // The engine payload is a contract: the marker gate, the internal call, the
-// blscfg filters and the submenu label are what the plan and SPEC promise.
+// guard and the submenu label are what the plan and SPEC promise.
 func TestPreviousKernelsPayloadContract(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "system", "root", "etc", "grub.d", "09_nimbus_previous_kernels"))
 	if err != nil {
@@ -148,12 +185,36 @@ func TestPreviousKernelsPayloadContract(t *testing.T) {
 		`rm -rf "$mirror"`,
 		"/usr/bin/nimbus internal boot-menu",
 		"blscfg $entry",
-		"blscfg non-default",
+		"if [ -f $entries_path/$entry.conf -a -f $mirror_path/$entry.conf ]",
+		"make_system_path_relative_to_its_root",
 		"submenu 'Previous kernels'",
+		"set blsdir=$entries_path",
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("payload lacks %q", want)
 		}
+	}
+	if strings.Count(script, "if [ -f $entries_path/$entry.conf -a -f $mirror_path/$entry.conf ]") != 2 {
+		t.Fatal("both Nimbus menu blocks must be guarded on the live entry and its mirror")
+	}
+	if !strings.Contains(script, "else\n    set blsdir=$entries_path\nfi") {
+		t.Fatal("the fallback path must point blsdir at the live entries directory")
+	}
+	if !strings.Contains(script, "set blsdir=$mirror_path") {
+		t.Fatal("the happy path must keep blsdir on the single-entry mirror")
+	}
+	if strings.Contains(script, "blscfg $entry\nfi\nset blsdir=$entries_path") {
+		t.Fatal("the live entries directory must not replace the mirror before Fedora's blscfg runs")
+	}
+	submenu := script[strings.Index(script, "submenu 'Previous kernels'"):]
+	if !strings.Contains(submenu, "set blsdir=$entries_path") {
+		t.Fatal("the submenu must point blsdir at the live entries directory")
+	}
+	// The submenu must stay unfiltered: GRUB's default comes from
+	// saved_entry, and the "non-default" filter would hide a rescue saved
+	// entry.
+	if strings.Contains(script, "blscfg non-default") {
+		t.Fatal("payload filters the submenu by GRUB's default, which can hide rescue")
 	}
 }
 
@@ -168,7 +229,7 @@ func TestMenuHookPayloadContract(t *testing.T) {
 	}
 	script := string(data)
 	for _, want := range []string{
-		"[ -e /etc/nimbus/boot-theme.enabled ] || exit 0",
+		"[ -f /etc/nimbus/boot-theme.enabled ] || exit 0",
 		"/usr/sbin/grub2-mkconfig --no-grubenv-update -o /boot/grub2/grub.cfg",
 		"warning: the Nimbus kernel menu was not regenerated; the previous grub.cfg is retained",
 	} {
