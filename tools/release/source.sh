@@ -1,21 +1,57 @@
 #!/usr/bin/env bash
-# Export a tagged source tree and its Go dependencies for the COPR recipe.
+# Export a tagged stable source tree or the develop branch's rolling source and
+# its Go dependencies for the COPR recipes.
+#
+#   source.sh vMAJOR.MINOR.PATCH /absolute/new-output-directory   (stable)
+#   source.sh --channel develop /absolute/new-output-directory    (develop)
+#
+# The develop version is <develop-version>~dev.<YYYYMMDD>git<shortsha>, which
+# RPM orders above the previous stable release and below the next one.
 set -euo pipefail
 
 fail() { printf 'release source: %s\n' "$*" >&2; exit 1; }
-[ "$#" -eq 2 ] || fail 'usage: source.sh vMAJOR.MINOR.PATCH /absolute/new-output-directory'
-tag="$1"
-output="$2"
-[[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || fail 'expected a stable version tag such as v0.1.0'
+channel=stable
+if [ "${1:-}" = "--channel" ]; then
+  channel="${2:-}"
+  shift 2
+fi
+case "$channel" in
+  stable)
+    [ "$#" -eq 2 ] || fail 'usage: source.sh vMAJOR.MINOR.PATCH /absolute/new-output-directory'
+    tag="$1"
+    output="$2"
+    [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || fail 'expected a stable version tag such as v0.1.0'
+    ;;
+  develop)
+    [ "$#" -eq 1 ] || fail 'usage: source.sh --channel develop /absolute/new-output-directory'
+    output="$1"
+    ;;
+  *)
+    fail "unsupported channel ${channel}"
+    ;;
+esac
 [[ "$output" = /* ]] || fail 'output directory must be absolute'
 if [ -e "$output" ] || [ -L "$output" ]; then
   fail 'output directory already exists'
 fi
-commit="$(git rev-parse --verify "refs/tags/${tag}^{commit}")" || fail 'tag does not exist'
-git merge-base --is-ancestor "$commit" refs/remotes/origin/main || fail 'tag must belong to origin/main'
 root="$(git rev-parse --show-toplevel)"
 case "$(realpath -m "$output")/" in "$root/"*) fail 'output must be outside the checkout' ;; esac
-version="${tag#v}"
+if [ "$channel" = stable ]; then
+  commit="$(git rev-parse --verify "refs/tags/${tag}^{commit}")" || fail 'tag does not exist'
+  git merge-base --is-ancestor "$commit" refs/remotes/origin/main || fail 'tag must belong to origin/main'
+  version="${tag#v}"
+  label="Tag: ${tag}"
+else
+  [ -f "${root}/develop-version" ] || fail 'develop-version is missing'
+  base="$(tr -d '[:space:]' < "${root}/develop-version")"
+  [[ "$base" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || fail 'develop-version must be MAJOR.MINOR.PATCH'
+  commit="$(git rev-parse --verify "HEAD^{commit}")" || fail 'HEAD does not resolve'
+  git merge-base --is-ancestor "$commit" refs/remotes/origin/develop || fail 'commit must belong to origin/develop'
+  date="$(git show -s --format=%cd --date=format:%Y%m%d "$commit")"
+  short="$(git rev-parse --short=12 "$commit")"
+  version="${base}~dev.${date}git${short}"
+  label="Channel: develop"
+fi
 epoch="$(git show -s --format=%ct "$commit")"
 work="$(mktemp -d)"
 trap 'rm -rf -- "$work"' EXIT
@@ -33,7 +69,7 @@ go mod verify
 go mod vendor
 sha256sum --check "$work/module-checksums"
 {
-  printf 'Tag: %s\nCommit: %s\nToolchain: %s\n\nModules:\n' "$tag" "$commit" "$(go env GOVERSION)"
+  printf '%s\nVersion: %s\nCommit: %s\nToolchain: %s\n\nModules:\n' "$label" "$version" "$commit" "$(go env GOVERSION)"
   go list -m -mod=readonly all
 } > "$work/RELEASE-SOURCE.txt"
 # Freeze the payload before tests or compilation can create local artifacts.

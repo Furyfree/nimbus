@@ -155,6 +155,107 @@ esac
 	}
 }
 
+func TestReleaseSourceDevelop(t *testing.T) {
+	script := filepath.Join(repoRoot(t), "tools/release/source.sh")
+	for _, scenario := range []string{"success", "missing version file", "invalid version", "unmerged commit"} {
+		t.Run(scenario, func(t *testing.T) {
+			root := t.TempDir()
+			repo := filepath.Join(root, "repo")
+			bin := filepath.Join(root, "bin")
+			for _, dir := range []string{repo, bin} {
+				if err := os.Mkdir(dir, 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			write := func(path, text string, mode os.FileMode) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(repo, path), []byte(text), mode); err != nil {
+					t.Fatal(err)
+				}
+			}
+			env := append(os.Environ(), "HOME="+root, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "PATH="+bin+":"+os.Getenv("PATH"))
+			git := func(args ...string) string {
+				t.Helper()
+				cmd := exec.Command("git", args...)
+				cmd.Dir, cmd.Env = repo, env
+				out, err := cmd.CombinedOutput()
+				if err != nil {
+					t.Fatalf("git %v: %v %s", args, err, out)
+				}
+				return strings.TrimSpace(string(out))
+			}
+			git("init", "-b", "develop")
+			write("LICENSE", "fixture license\n", 0644)
+			write("go.mod", "module example.invalid/fixture\n", 0644)
+			write("go.sum", "fixture checksums\n", 0644)
+			if scenario != "missing version file" {
+				version := "0.6.0"
+				if scenario == "invalid version" {
+					version = "0.6"
+				}
+				write("develop-version", version+"\n", 0644)
+			}
+			git("add", ".")
+			git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "fixture")
+			commit := git("rev-parse", "HEAD")
+			git("update-ref", "refs/remotes/origin/develop", commit)
+			if scenario == "unmerged commit" {
+				git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-m", "unmerged")
+			}
+			if err := os.WriteFile(filepath.Join(bin, "go"), []byte(`#!/usr/bin/env bash
+set -eu
+case "$*" in
+  'mod download'|'mod verify') ;;
+  'mod vendor')
+    mkdir -p vendor/example
+    printf notice > vendor/example/LICENSE ;;
+  'env GOVERSION') echo go1.26.7 ;;
+  'list -m -mod=readonly all') echo example.invalid/fixture ;;
+  'test -mod=vendor ./...') ;;
+  build*)
+    while [ "$1" != -o ]; do shift; done
+    printf '#!/bin/sh\nexit 0\n' > "$2"
+    chmod 700 "$2" ;;
+  *) exit 99 ;;
+esac
+`), 0700); err != nil {
+				t.Fatal(err)
+			}
+			output := filepath.Join(root, "release")
+			cmd := exec.Command("bash", script, "--channel", "develop", output)
+			cmd.Dir, cmd.Env = repo, env
+			out, err := cmd.CombinedOutput()
+			if scenario != "success" {
+				if err == nil {
+					t.Fatalf("accepted %s: %s", scenario, out)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("release: %v %s", err, out)
+			}
+			date := git("show", "-s", "--format=%cd", "--date=format:%Y%m%d", commit)
+			short := git("rev-parse", "--short=12", commit)
+			archive := "nimbus-0.6.0~dev." + date + "git" + short + "-vendor.tar.gz"
+			if _, err := os.Stat(filepath.Join(output, archive)); err != nil {
+				t.Fatal(err)
+			}
+			provenance, err := os.ReadFile(filepath.Join(output, "RELEASE-SOURCE.txt"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(provenance), "Channel: develop") || !strings.Contains(string(provenance), "Commit: "+commit) {
+				t.Fatalf("provenance lacks channel or commit: %s", provenance)
+			}
+			cmd = exec.Command("sha256sum", "--check", "SHA256SUMS")
+			cmd.Dir = output
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("checksums: %v %s", err, out)
+			}
+		})
+	}
+}
+
 func TestReleaseTagPushesOnlyRequestedTag(t *testing.T) {
 	root := t.TempDir()
 	repo := filepath.Join(root, "repo")

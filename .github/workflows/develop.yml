@@ -1,0 +1,42 @@
+name: Prepare develop source
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nimbus-develop
+  cancel-in-progress: true
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: extractions/setup-just@v4
+      - run: npm install --global markdownlint-cli
+      - run: sudo apt-get install -y shellcheck gnupg
+      - run: just check
+      - name: Prepare the develop vendored source
+        run: bash tools/release/source.sh --channel develop "$RUNNER_TEMP/release"
+      - name: Publish the rolling develop release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          (cd "$RUNNER_TEMP/release" && sha256sum --check SHA256SUMS)
+          gh release view develop --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
+            gh release create develop --repo "$GITHUB_REPOSITORY" --prerelease \
+              --title "Nimbus develop" \
+              --notes "Rolling source for the develop channel. Assets are replaced on every push."
+          gh release upload develop "$RUNNER_TEMP"/release/* --clobber --repo "$GITHUB_REPOSITORY"
