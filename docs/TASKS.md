@@ -1185,8 +1185,13 @@ follows; both tracks share the COPR key and repository ID.
   repository gained the `nimbus-develop` project entry, recipe, prepare
   resolver and native scope with a locally built SRPM
   (`0.6.0~dev.<date>git<sha>`).
-- [ ] Phase 3b: create the `furyfree/nimbus-develop` COPR project and run
-  its first build, then install from it in a VM.
+- [x] Phase 3b: the `furyfree/nimbus-develop` COPR project was created and
+  its first build succeeded (COPR build 11002548, `nimbus-0.6.0~dev...`).
+- [ ] Phase 4: VM drills for both directions, drift and schema refusals.
+  Switching to stable before a stable release carries the channel support is
+  deliberately forward-only: the 0.5.x engine rejects selector schema 2, so
+  the release from `main` that includes the channel code is the first stable
+  target that can be switched back to.
 - [ ] Phase 4: clean-VM drills for both directions, drift refusal paths and a
   one-time notice on devices upgrading to a channel-aware engine.
 

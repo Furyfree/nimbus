@@ -100,13 +100,16 @@ if [ -x "${ENGINE}" ] && [ "${switch_needed}" = true ]; then
   ')" || fail "COPR key must contain one valid primary key"
   [ "${fingerprint}" = "${PIN}" ] || fail "COPR signing-key fingerprint mismatch"
   say "Switching the Nimbus engine to ${CHANNEL} (${REPO_PROJECT})."
+  # An older installed engine may predate the internal command; record the
+  # channel when possible, swap the engine, then require it to be recorded.
+  installer_run "${ENGINE}" internal selector-channel "${CHANNEL}" || true
   installer_run sudo install -m 0644 -- "${work}/key.asc" "${KEY_TARGET}"
   repo_file "${REPO_PROJECT}" > "${work}/nimbus-engine.repo"
   installer_run sudo install -m 0644 -- "${work}/nimbus-engine.repo" "${REPO_TARGET}"
   installer_run sudo rpmkeys --import "${KEY_TARGET}"
   installer_run sudo dnf5 -y distro-sync nimbus
   [ -x "${ENGINE}" ] || fail "DNF completed without the Nimbus engine"
-  installer_run "${ENGINE}" internal selector-channel "${CHANNEL}"
+  installer_run "${ENGINE}" internal selector-channel "${CHANNEL}" || fail "the ${CHANNEL} engine could not record the channel; the selector does not match the installed engine"
   if ! report="$("${ENGINE}" validate --checkout "${CHECKOUT}" 2>&1)"; then
     installer_event "${report}"
     printf '%s\n' "${report}" >&2
@@ -187,13 +190,16 @@ if [ -x "${ENGINE}" ] && [ "${switch_needed}" = true ]; then
   ')" || fail "COPR key must contain one valid primary key"
   [ "${fingerprint}" = "${PIN}" ] || fail "COPR signing-key fingerprint mismatch"
   say "Switching the Nimbus engine to ${CHANNEL} (${REPO_PROJECT})."
+  # An older installed engine may predate the internal command; record the
+  # channel when possible, swap the engine, then require it to be recorded.
+  installer_run "${ENGINE}" internal selector-channel "${CHANNEL}" || true
   installer_run sudo install -m 0644 -- "${work}/key.asc" "${KEY_TARGET}"
   repo_file "${REPO_PROJECT}" > "${work}/nimbus-engine.repo"
   installer_run sudo install -m 0644 -- "${work}/nimbus-engine.repo" "${REPO_TARGET}"
   installer_run sudo rpmkeys --import "${KEY_TARGET}"
   installer_run sudo dnf5 -y distro-sync nimbus
   [ -x "${ENGINE}" ] || fail "DNF completed without the Nimbus engine"
-  installer_run "${ENGINE}" internal selector-channel "${CHANNEL}"
+  installer_run "${ENGINE}" internal selector-channel "${CHANNEL}" || fail "the ${CHANNEL} engine could not record the channel; the selector does not match the installed engine"
   if ! report="$("${ENGINE}" validate --checkout "${CHECKOUT}" 2>&1)"; then
     installer_event "${report}"
     printf '%s\n' "${report}" >&2
