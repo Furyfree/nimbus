@@ -50,6 +50,9 @@ else
   date="$(git show -s --format=%cd --date=format:%Y%m%d "$commit")"
   short="$(git rev-parse --short=12 "$commit")"
   version="${base}~dev.${date}git${short}"
+  # GitHub rewrites the tilde in asset names, so the archive file uses dots
+  # while the RPM version and archive root keep RPM's ordering tilde.
+  archive_version="${base}.dev.${date}git${short}"
   label="Channel: develop"
 fi
 epoch="$(git show -s --format=%ct "$commit")"
@@ -73,7 +76,7 @@ sha256sum --check "$work/module-checksums"
   go list -m -mod=readonly all
 } > "$work/RELEASE-SOURCE.txt"
 # Freeze the payload before tests or compilation can create local artifacts.
-archive="nimbus-$version-vendor.tar.gz"
+archive="nimbus-${archive_version:-$version}-vendor.tar.gz"
 (cd "$work" && tar --sort=name --mtime="@$epoch" --owner=0 --group=0 \
   --numeric-owner --format=gnu -cf - "nimbus-$version" | gzip -n > "$archive")
 # The same offline build and tests used by the RPM recipe. Build output and

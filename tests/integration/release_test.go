@@ -236,7 +236,7 @@ esac
 			}
 			date := git("show", "-s", "--format=%cd", "--date=format:%Y%m%d", commit)
 			short := git("rev-parse", "--short=12", commit)
-			archive := "nimbus-0.6.0~dev." + date + "git" + short + "-vendor.tar.gz"
+			archive := "nimbus-0.6.0.dev." + date + "git" + short + "-vendor.tar.gz"
 			if _, err := os.Stat(filepath.Join(output, archive)); err != nil {
 				t.Fatal(err)
 			}
