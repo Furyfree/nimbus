@@ -1023,9 +1023,10 @@ already enrolled, a renewal offered only to record a missing TPM identity
 refreshes the ownership record without touching the token, and a renewal to
 rebind a different TPM removes the recorded slot before adding the new token;
 both still require the passphrase. The preview shows the enrollment and
-record commands, and the passphrase remains the fallback. Sync and upgrades never enroll or change unlock policy. While the
-marker exists, deselecting `fde` blocks the plan instead of removing the
-component's packages; run the removal first. Enrollment,
+record commands, and the passphrase remains the fallback. Sync and upgrades
+never enroll or change unlock policy. While the marker exists, deselecting
+`fde` blocks the plan instead of removing the component's packages; run the
+removal first. Enrollment,
 booting, passphrase fallback, renewal and removal need real-hardware
 validation before claiming support.
 
