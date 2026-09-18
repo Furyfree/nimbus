@@ -407,7 +407,7 @@ func TestInitTrustChangeRefusesWithoutPrompt(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/yes=%t", field, yes), func(t *testing.T) {
 				root, src := installerFixture(t)
 				path, _ := selector.DefaultPath()
-				old := &selector.Selector{Schema: selector.CurrentSchema, Checkout: root, Machine: "vm", Origin: "github.com/Furyfree/nimbus"}
+				old := &selector.Selector{Schema: selector.CurrentSchema, Checkout: root, Machine: "vm", Origin: "github.com/Furyfree/nimbus", Channel: selector.ChannelStable}
 				if field == "origin" {
 					old.Origin = "github.com/previous/nimbus"
 				} else {

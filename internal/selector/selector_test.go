@@ -81,7 +81,7 @@ func TestWriteSelectorRoundTripsCheckoutPaths(t *testing.T) {
 			if err := os.Mkdir(checkout, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			want := &Selector{Schema: CurrentSchema, Checkout: checkout, Machine: "desktop", Origin: "github.com/Furyfree/nimbus"}
+			want := &Selector{Schema: CurrentSchema, Checkout: checkout, Machine: "desktop", Origin: "github.com/Furyfree/nimbus", Channel: ChannelStable}
 			path := filepath.Join(t.TempDir(), "nimbus", "config.toml")
 			if err := Write(path, want); err != nil {
 				t.Fatal(err)
@@ -100,7 +100,7 @@ func TestWriteSelectorRoundTripsCheckoutPaths(t *testing.T) {
 func TestWriteRejectsInvalidUTF8BeforeMutation(t *testing.T) {
 	for _, field := range []string{"checkout", "machine", "origin"} {
 		t.Run(field, func(t *testing.T) {
-			valid := Selector{Schema: CurrentSchema, Checkout: t.TempDir(), Machine: "desktop", Origin: "github.com/Furyfree/nimbus"}
+			valid := Selector{Schema: CurrentSchema, Checkout: t.TempDir(), Machine: "desktop", Origin: "github.com/Furyfree/nimbus", Channel: ChannelStable}
 			invalid := valid
 			switch field {
 			case "checkout":
@@ -135,6 +135,67 @@ func TestWriteRejectsInvalidUTF8BeforeMutation(t *testing.T) {
 	}
 }
 
+func TestChannelSchema(t *testing.T) {
+	dir := t.TempDir()
+	checkout := filepath.Join(dir, "checkout")
+	if err := os.Mkdir(checkout, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, content string) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	legacy := "schema = 1\ncheckout = '" + checkout + "'\nmachine = 'desktop'\norigin = 'github.com/Furyfree/nimbus'\n"
+	sel, err := Load(write("legacy.toml", legacy))
+	if err != nil || sel.Schema != 1 || sel.Channel != ChannelStable {
+		t.Fatalf("legacy selector = %+v, %v", sel, err)
+	}
+	legacyChannel := legacy + "channel = 'develop'\n"
+	if _, err := Load(write("legacy-channel.toml", legacyChannel)); err == nil || !strings.Contains(err.Error(), "must not set channel") {
+		t.Fatalf("legacy channel accepted: %v", err)
+	}
+	current := "schema = 2\ncheckout = '" + checkout + "'\nmachine = 'desktop'\norigin = 'github.com/Furyfree/nimbus'\nchannel = 'develop'\n"
+	if sel, err := Load(write("develop.toml", current)); err != nil || sel.Channel != ChannelDevelop {
+		t.Fatalf("develop selector = %+v, %v", sel, err)
+	}
+	if _, err := Load(write("missing.toml", strings.Replace(current, "channel = 'develop'\n", "", 1))); err == nil || !strings.Contains(err.Error(), "channel is required") {
+		t.Fatalf("missing channel accepted: %v", err)
+	}
+	if _, err := Load(write("bad.toml", strings.Replace(current, "'develop'", "'nightly'", 1))); err == nil || !strings.Contains(err.Error(), "unsupported channel") {
+		t.Fatalf("unknown channel accepted: %v", err)
+	}
+	if err := Write(filepath.Join(dir, "out.toml"), &Selector{Schema: CurrentSchema, Checkout: checkout, Machine: "desktop", Origin: "github.com/Furyfree/nimbus"}); err == nil {
+		t.Fatal("write accepted a selector without a channel")
+	}
+}
+
+func TestCheckoutBranch(t *testing.T) {
+	root := t.TempDir()
+	git := filepath.Join(root, ".git")
+	if err := os.Mkdir(git, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(git, "HEAD"), []byte("ref: refs/heads/develop\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	branch, err := CheckoutBranch(root)
+	if err != nil || branch != "develop" {
+		t.Fatalf("branch = %q, %v", branch, err)
+	}
+	if err := os.WriteFile(filepath.Join(git, "HEAD"), []byte("0123456789abcdef\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CheckoutBranch(root); err == nil || !strings.Contains(err.Error(), "attached local branch") {
+		t.Fatalf("detached HEAD accepted: %v", err)
+	}
+	if _, err := CheckoutBranch(t.TempDir()); err == nil {
+		t.Fatal("missing checkout accepted")
+	}
+}
+
 func TestWriteRemovesTemporaryFileOnRenameFailure(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
@@ -145,7 +206,7 @@ func TestWriteRemovesTemporaryFileOnRenameFailure(t *testing.T) {
 	if err := os.WriteFile(preserved, []byte("keep"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	err := Write(path, &Selector{Schema: CurrentSchema, Checkout: "checkout", Machine: "desktop", Origin: "github.com/Furyfree/nimbus"})
+	err := Write(path, &Selector{Schema: CurrentSchema, Checkout: "checkout", Machine: "desktop", Origin: "github.com/Furyfree/nimbus", Channel: ChannelStable})
 	if rename, ok := errors.AsType[*os.LinkError](err); !ok || rename.Op != "rename" {
 		t.Fatalf("expected rename failure, got %v", err)
 	}

@@ -860,6 +860,9 @@ the exact release and packaging results before calling the candidate ready.
 Run the full desktop trial after the dashboard and delivery are ready. The
 scoped FDE auto-unlock hardware test happens earlier, as described above.
 
+Engine channels: selector schema 2, read-only channel status, bootstrap
+switching and a develop COPR track (issue #72).
+
 ## Deferred beyond the desktop milestone
 
 | Work | Reason to keep it separate |

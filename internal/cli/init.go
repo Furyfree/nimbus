@@ -28,6 +28,7 @@ const DefaultCheckout = "~/.local/share/nimbus"
 type initFlags struct {
 	checkout, machine, newMachine, dotfiles string
 	noDotfiles, onePasswordSSH, plan, yes   bool
+	channel                                 string
 }
 
 func newInit(opts *options) *cobra.Command {
@@ -49,6 +50,7 @@ the new-machine dialogue. Existing checkout or origin trust cannot change in ini
   --new ID         describe a new machine and write its manifest
   --dotfiles URL   the dotfiles repository for a new machine
   --no-dotfiles    a new machine without a Chezmoi handoff
+  --channel NAME   the engine channel to record: stable (default) or develop
   -p, --plan       preview the setup without writing files or installing anything
   -y, --yes        apply the preview without asking for confirmation`,
 		Args: noArgs,
@@ -62,6 +64,7 @@ the new-machine dialogue. Existing checkout or origin trust cannot change in ini
 	cmd.Flags().StringVar(&f.dotfiles, "dotfiles", "", "the dotfiles repository for a new machine")
 	cmd.Flags().BoolVar(&f.noDotfiles, "no-dotfiles", false, "a new machine without a Chezmoi handoff")
 	cmd.Flags().BoolVar(&f.onePasswordSSH, "onepassword-ssh", false, "enable 1Password SSH integration during initial Chezmoi setup")
+	cmd.Flags().StringVar(&f.channel, "channel", selector.ChannelStable, "the engine channel to record: stable or develop")
 	cmd.Flags().BoolVarP(&f.plan, "plan", "p", false, "preview the setup and change nothing")
 	cmd.Flags().BoolVarP(&f.yes, "yes", "y", false, "apply the preview without asking")
 	return cmd
@@ -83,6 +86,9 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	}
 	if f.newMachine == "" && (f.dotfiles != "" || f.noDotfiles) {
 		return usageError{errors.New("--dotfiles and --no-dotfiles require --new; tracked machines use their manifest")}
+	}
+	if f.channel != selector.ChannelStable && f.channel != selector.ChannelDevelop {
+		return usageError{fmt.Errorf("--channel must be %s or %s", selector.ChannelStable, selector.ChannelDevelop)}
 	}
 	checkout := f.checkout
 	if checkout == "" {
@@ -365,7 +371,7 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 			return fmt.Errorf("report written manifest %s: %w", newManifestPath, err)
 		}
 	}
-	if err := selector.Write(selectorPath, &selector.Selector{Schema: selector.CurrentSchema, Checkout: root, Machine: machine, Origin: origin}); err != nil {
+	if err := selector.Write(selectorPath, &selector.Selector{Schema: selector.CurrentSchema, Checkout: root, Machine: machine, Origin: origin, Channel: f.channel}); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(out, "selected %s; selector written to %s\n\n", machine, selectorPath); err != nil {
