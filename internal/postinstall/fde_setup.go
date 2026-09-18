@@ -778,8 +778,25 @@ func VerifyFDE(src native.Source, t Task) Task {
 			t.Detail = "The recorded measured state is missing or differs from this boot, so the TPM policy no longer matches. Renew the enrollment to record the current values; until then the disk passphrase unlocks."
 			return t
 		}
+		tpm, err := fdeTPMSRKMatches(src, record)
+		if err != nil {
+			t.VerificationNeedsRoot = true
+			t.Detail = "The TPM identity could not be read: " + err.Error()
+			return t
+		}
+		if !tpm {
+			t.Status = Pending
+			t.Action = &Action{Kind: RenewFDE}
+			t.Reboot = true
+			if record.TPMSRK == "" {
+				t.Detail = "The ownership record does not identify its TPM. Renew the enrollment to record the TPM identity; the disk passphrase remains the fallback."
+			} else {
+				t.Detail = "The enrollment is bound to a different TPM, so automatic unlock cannot work on this system. Renew the enrollment to rebind it here; the disk passphrase is required and remains the fallback."
+			}
+			return t
+		}
 		t.Status = Complete
-		t.Detail = "The signed Nimbus image is booting and the recorded TPM keyslot matches the recorded measured state. Reboots unlock automatically; the disk passphrase remains the fallback."
+		t.Detail = "The signed Nimbus image is booting and the recorded TPM keyslot matches the recorded measured state and this TPM. Reboots unlock automatically; the disk passphrase remains the fallback."
 	case len(tokens) == 1 && (!owned || tokens[0].Slots != 1):
 		t.Status = Blocked
 		t.Detail = "A systemd-tpm2 token exists that Nimbus does not own as a single-key slot; " + orphanHint(tokens[0])

@@ -514,14 +514,16 @@ signed 11 and the observed clean-boot PCR 12/13 values, only while
   enrollment the image verified against `mok.crt` and booted through
   systemd-stub; `kernel-install add <kver> <vmlinuz>` rebuilt and re-signed
   the image through the hook, and Fedora's GRUB entry booted after removal.
-- [ ] 3.2 VM enrollment: marker-gated dracut module (`tpm2-tss`,
+- [x] 3.2 VM enrollment: marker-gated dracut module (`tpm2-tss`,
   `systemd-pcrphase`), embedded cmdline options, TPM keyslot, unattended boot,
   passphrase fallback on the GRUB path, PCR 12/13 measurement, injected ESP
   credential refuses to unseal. VM 2026-09-18: enrollment recorded token 0 in
   keyslot 1 with PCR 7/14/12/13 and signed 11, reboots unlocked unattended,
   the LUKS passphrase remained the fallback on the GRUB path after removal,
-  and a changed PCR 14 refused to unseal. The injected ESP credential case is
-  still untested.
+  and a changed PCR 14 refused to unseal. A full disk copy booted with a
+  fresh TPM also refused to unseal; that drill showed status claimed
+  automatic unlock on a different TPM, so the record now captures the TPM SRK
+  fingerprint and verification offers renewal instead.
 - [x] 3.3 renewal, scoped removal, status and the failure matrix in the VM.
   In source: status offers renewal when the recorded literal PCR 7/12/13/14
   values are missing or no longer match, the offered task adds the new slot

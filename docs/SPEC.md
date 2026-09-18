@@ -1005,8 +1005,11 @@ Enrollment writes one TPM keyslot with `systemd-cryptenroll` only while
 `BootCurrent` is the Nimbus entry, binding PCR 7 + PCR 14 + signed PCR 11 and
 the observed clean-boot PCR 12 and 13 values, with `--tpm2-pcrlock=` empty.
 The passphrase and unrelated slots are preserved. Nimbus records its LUKS
-UUID, slot, token, public-key fingerprint and PCR set under `/var/lib/nimbus`;
-status reports an unknown or foreign TPM token as an explicit problem.
+UUID, slot, token, public-key fingerprint, PCR set and the observed TPM SRK
+fingerprint under `/var/lib/nimbus`; status reports an unknown or foreign TPM
+token as an explicit problem, tells a different TPM from the enrolled one,
+and offers renewal to rebind automatic unlock there (the passphrase is still
+required).
 Explicit removal (`postinstall fde --remove`) wipes only the recorded slot,
 removes the Nimbus firmware entry, image, marker and key material, keeps the
 disk passphrase, and never uses `--wipe-slot=tpm2` or `all`; it requires

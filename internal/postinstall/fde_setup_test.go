@@ -2,8 +2,10 @@ package postinstall
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -372,6 +374,7 @@ func fdeEnrollRootSource(t *testing.T, slot, token string) *nativetest.FakeSourc
 	src := &nativetest.FakeSource{Commands: map[string][]byte{}, Failures: map[string]string{}, Files: map[string][]byte{}, Dirs: map[string][]string{}, Paths: map[string]string{}}
 	src.Files[fdeCmdlineFile] = []byte(fdeTestBase + "\n")
 	src.Files[fdeCrypttab] = []byte("luks-1 UUID=1 none discard,x-initrd.attach\n")
+	src.Files[fdeTPMSRKFile] = []byte("srk-public-key")
 	for _, pcr := range []string{"7", "12", "13", "14"} {
 		src.Files["/sys/class/tpm/tpm0/pcr-sha256/"+pcr] = []byte("aa" + pcr + "\n")
 	}
@@ -394,7 +397,7 @@ func TestFDEEnrollmentRecord(t *testing.T) {
 		t.Fatalf("record mode=%v err=%v", info.Mode().Perm(), err)
 	}
 	data, err := ReadFDEEnrollment()
-	if err != nil || !strings.Contains(string(data), `"enrolled_at"`) || !strings.Contains(string(data), `"keyslot":"1"`) {
+	if err != nil || !strings.Contains(string(data), `"enrolled_at"`) || !strings.Contains(string(data), `"keyslot":"1"`) || !strings.Contains(string(data), `"tpm_srk":"sha256:`) {
 		t.Fatalf("record roundtrip: %q, %v", data, err)
 	}
 	if err := WriteFDEEnrollment("1", "9"); err == nil {
@@ -927,6 +930,16 @@ func fdeStubEnrollmentState(t *testing.T, src fdeInspectSource) {
 	src.Commands[nativetest.Key("sudo", "-n", "--", "/usr/bin/nimbus", "internal", "fde-uki", "state")] = []byte("")
 }
 
+// fdeSRKFixture writes the TPM SRK public key fixture and returns its
+// ownership-record fingerprint.
+func fdeSRKFixture(t *testing.T, src *nativetest.FakeSource) string {
+	t.Helper()
+	content := []byte("srk-public-key")
+	src.Files[fdeTPMSRKFile] = content
+	sum := sha256.Sum256(content)
+	return fmt.Sprintf("sha256:%x", sum)
+}
+
 // fdeStubEnrollment registers the native token metadata and the ownership
 // record that a completed enrollment leaves behind.
 func fdeStubEnrollment(t *testing.T, src *nativetest.FakeSource, slot string) {
@@ -942,7 +955,7 @@ func fdeStubEnrollment(t *testing.T, src *nativetest.FakeSource, slot string) {
 		src.Files["/sys/class/tpm/tpm0/pcr-sha256/"+pcr] = []byte("aa" + pcr + "\n")
 	}
 	record := FDEEnrollment{Schema: 1, Device: "/dev/disk/by-uuid/1", UUID: "1", Keyslot: slot, Token: "0",
-		PCRs: "7+14+12+13+11", Fingerprint: "sha256:x", PCRValues: values}
+		PCRs: "7+14+12+13+11", Fingerprint: "sha256:x", PCRValues: values, TPMSRK: fdeSRKFixture(t, src)}
 	data, err := json.Marshal(record)
 	if err != nil {
 		t.Fatal(err)
@@ -968,7 +981,7 @@ func TestVerifyFDE(t *testing.T) {
 			src.Files["/sys/class/tpm/tpm0/pcr-sha256/"+pcr] = []byte("changed-" + pcr + "\n")
 		}
 		record := FDEEnrollment{Schema: 1, Device: "/dev/disk/by-uuid/1", UUID: "1", Keyslot: "1", Token: "0",
-			PCRs: "7+14+12+13+11", Fingerprint: "sha256:x",
+			PCRs: "7+14+12+13+11", Fingerprint: "sha256:x", TPMSRK: fdeSRKFixture(t, src.FakeSource),
 			PCRValues: map[string]string{"7": "recorded", "12": "recorded", "13": "recorded", "14": "recorded"}}
 		data, err := json.Marshal(record)
 		if err != nil {
@@ -990,7 +1003,7 @@ func TestVerifyFDE(t *testing.T) {
 			src.Files["/sys/class/tpm/tpm0/pcr-sha256/"+pcr] = []byte("same-" + pcr + "\n")
 		}
 		record := FDEEnrollment{Schema: 1, Device: "/dev/disk/by-uuid/1", UUID: "1", Keyslot: "1", Token: "0",
-			PCRs: "7+14+12+13+11", Fingerprint: "sha256:x", PCRValues: values}
+			PCRs: "7+14+12+13+11", Fingerprint: "sha256:x", PCRValues: values, TPMSRK: fdeSRKFixture(t, src.FakeSource)}
 		data, err := json.Marshal(record)
 		if err != nil {
 			t.Fatal(err)
@@ -1030,6 +1043,45 @@ func TestVerifyFDE(t *testing.T) {
 		src.Commands[nativetest.Key("sudo", "-n", "--", "/usr/bin/nimbus", "internal", "fde-uki", "state")] = data
 		got := VerifyFDE(src, fdeSetupTask())
 		if got.Status != Pending || got.Action == nil || got.Action.Kind != RenewFDE {
+			t.Fatalf("got %+v", got)
+		}
+	})
+	t.Run("a different TPM offers renewal", func(t *testing.T) {
+		src := fdeVerifyFixture(t)
+		src.out = []byte(strings.Replace(fdeInspectOutput, "%s", fdeTestCmdline, 1))
+		fdeStubEnrollment(t, src.FakeSource, "1")
+		src.Files[fdeTPMSRKFile] = []byte("another-tpm")
+		got := VerifyFDE(src, fdeSetupTask())
+		if got.Status != Pending || got.Action == nil || got.Action.Kind != RenewFDE ||
+			!strings.Contains(got.Detail, "different TPM") {
+			t.Fatalf("got %+v", got)
+		}
+	})
+	t.Run("a record without a TPM fingerprint offers renewal", func(t *testing.T) {
+		src := fdeVerifyFixture(t)
+		src.out = []byte(strings.Replace(fdeInspectOutput, "%s", fdeTestCmdline, 1))
+		fdeStubEnrollment(t, src.FakeSource, "1")
+		record := FDEEnrollment{Schema: 1, Device: "/dev/disk/by-uuid/1", UUID: "1", Keyslot: "1", Token: "0",
+			PCRs: "7+14+12+13+11", Fingerprint: "sha256:x",
+			PCRValues: map[string]string{"7": "aa7", "12": "aa12", "13": "aa13", "14": "aa14"}}
+		data, err := json.Marshal(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src.Commands[nativetest.Key("sudo", "-n", "--", "/usr/bin/nimbus", "internal", "fde-uki", "state")] = data
+		got := VerifyFDE(src, fdeSetupTask())
+		if got.Status != Pending || got.Action == nil || got.Action.Kind != RenewFDE ||
+			!strings.Contains(got.Detail, "does not identify its TPM") {
+			t.Fatalf("got %+v", got)
+		}
+	})
+	t.Run("an unreadable SRK needs root verification", func(t *testing.T) {
+		src := fdeVerifyFixture(t)
+		src.out = []byte(strings.Replace(fdeInspectOutput, "%s", fdeTestCmdline, 1))
+		fdeStubEnrollment(t, src.FakeSource, "1")
+		delete(src.Files, fdeTPMSRKFile)
+		got := VerifyFDE(src, fdeSetupTask())
+		if got.Status != Unknown || !got.VerificationNeedsRoot {
 			t.Fatalf("got %+v", got)
 		}
 	})

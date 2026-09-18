@@ -32,16 +32,19 @@ var fdeUUIDRE = regexp.MustCompile(`^[0-9a-fA-F-]+$`)
 
 // FDEEnrollment is the ownership record written after a successful enrollment.
 type FDEEnrollment struct {
-	Schema      int               `json:"schema"`
-	Device      string            `json:"device"`
-	UUID        string            `json:"uuid"`
-	Keyslot     string            `json:"keyslot"`
-	Token       string            `json:"token"`
-	PCRs        string            `json:"pcrs"`
-	PCRValues   map[string]string `json:"pcr_values,omitempty"`
-	SecureBoot  bool              `json:"secure_boot"`
-	Fingerprint string            `json:"fingerprint"`
-	EnrolledAt  string            `json:"enrolled_at"`
+	Schema    int               `json:"schema"`
+	Device    string            `json:"device"`
+	UUID      string            `json:"uuid"`
+	Keyslot   string            `json:"keyslot"`
+	Token     string            `json:"token"`
+	PCRs      string            `json:"pcrs"`
+	PCRValues map[string]string `json:"pcr_values,omitempty"`
+	// TPMSRK fingerprints the TPM's SRK public key, so verification can tell
+	// a different TPM from the enrolled one.
+	TPMSRK      string `json:"tpm_srk,omitempty"`
+	SecureBoot  bool   `json:"secure_boot"`
+	Fingerprint string `json:"fingerprint"`
+	EnrolledAt  string `json:"enrolled_at"`
 }
 
 // fdeDevice derives the LUKS2 backing device from the reviewed command line.
@@ -428,6 +431,10 @@ func WriteFDEEnrollment(keyslot, token string) error {
 	if err != nil {
 		return err
 	}
+	srk, err := fdeSRKFingerprint(fdeRootSource)
+	if err != nil {
+		return err
+	}
 	secure, err := fdeSecureBoot(fdeRootSource)
 	if err != nil {
 		return err
@@ -438,8 +445,8 @@ func WriteFDEEnrollment(keyslot, token string) error {
 	}
 	entry := FDEEnrollment{
 		Schema: 1, Device: device, UUID: uuid, Keyslot: keyslot, Token: token,
-		PCRs: "7+14+12+13+11", PCRValues: values, SecureBoot: secure, Fingerprint: fingerprint,
-		EnrolledAt: time.Now().UTC().Format(time.RFC3339),
+		PCRs: "7+14+12+13+11", PCRValues: values, TPMSRK: srk, SecureBoot: secure,
+		Fingerprint: fingerprint, EnrolledAt: time.Now().UTC().Format(time.RFC3339),
 	}
 	data, err := json.Marshal(entry)
 	if err != nil {
@@ -510,6 +517,34 @@ func fdePCRsMatch(src native.Source, record FDEEnrollment) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+// fdeTPMSRKFile is systemd's SRK public key for the running TPM. It is
+// world-readable and changes with the TPM, so it identifies the enrolled TPM
+// without another privileged read.
+const fdeTPMSRKFile = "/var/lib/systemd/tpm2-srk-public-key.tpm2b_public"
+
+// fdeSRKFingerprint hashes the live TPM's SRK public key. An empty record
+// value means the record predates the fingerprint and does not match.
+func fdeSRKFingerprint(src native.Source) (string, error) {
+	data, err := src.ReadFile(fdeTPMSRKFile)
+	if err != nil {
+		return "", fmt.Errorf("read the TPM SRK public key: %w", err)
+	}
+	if len(data) == 0 {
+		return "", errors.New("the TPM SRK public key is empty")
+	}
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("sha256:%x", sum), nil
+}
+
+// fdeTPMSRKMatches reports whether the live TPM is the one the record bound.
+func fdeTPMSRKMatches(src native.Source, record FDEEnrollment) (bool, error) {
+	current, err := fdeSRKFingerprint(src)
+	if err != nil {
+		return false, err
+	}
+	return record.TPMSRK != "" && record.TPMSRK == current, nil
 }
 
 // fdePublicKeyDigest fingerprints the PCR public key for the ownership record.
