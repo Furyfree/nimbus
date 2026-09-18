@@ -22,17 +22,17 @@ installer_session
 [ -f "${CHECKOUT}/nimbus.toml" ] || fail "${CHECKOUT} holds no nimbus.toml"
 
 ENGINE=/usr/bin/nimbus
-KEY_SOURCE="${CHECKOUT}/system/keys/nimbus.asc"
-PIN_SOURCE="${CHECKOUT}/system/keys/nimbus.fingerprint"
 KEY_TARGET=/etc/pki/rpm-gpg/RPM-GPG-KEY-nimbus
 REPO_TARGET=/etc/yum.repos.d/nimbus-engine.repo
 
 CHANNEL="${NIMBUS_CHANNEL:-stable}"
 case "${CHANNEL}" in
-  stable) BRANCH=main; REPO_PROJECT=furyfree/nimbus ;;
-  develop) BRANCH=develop; REPO_PROJECT=furyfree/nimbus-develop ;;
+  stable) BRANCH=main; REPO_PROJECT=furyfree/nimbus; KEY_FILE=nimbus.asc; PIN_FILE=nimbus.fingerprint ;;
+  develop) BRANCH=develop; REPO_PROJECT=furyfree/nimbus-develop; KEY_FILE=nimbus-develop.asc; PIN_FILE=nimbus-develop.fingerprint ;;
   *) fail "unsupported channel ${CHANNEL}" ;;
 esac
+KEY_SOURCE="${CHECKOUT}/system/keys/${KEY_FILE}"
+PIN_SOURCE="${CHECKOUT}/system/keys/${PIN_FILE}"
 # repo_file writes the reviewed nimbus-engine repository for one channel.
 repo_file() {
   local project="$1"

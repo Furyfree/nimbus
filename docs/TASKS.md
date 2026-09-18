@@ -1178,7 +1178,8 @@ follows; both tracks share the COPR key and repository ID.
   repository rewrite, distro-sync, schema and compatibility gates), and the
   develop curl entry (`install-develop.sh`) that installs the develop track.
   The schema gate reads the target checkout's state constant against
-  `/var/lib/nimbus/schema`; the same COPR key covers both channels.
+  `/var/lib/nimbus/schema`; each channel pins its own reviewed COPR project
+  key under `system/keys/`.
 - [x] Phase 3a: the rolling develop source and packaging. The develop
   workflow republishes `nimbus-<version>-vendor.tar.gz` (dotted asset name,
   tilde RPM version) under the `develop` release on every push, and the copr

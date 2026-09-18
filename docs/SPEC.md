@@ -172,7 +172,8 @@ existing machine later.
 
 Switching channels is an installer action, not a sync action:
 `install.sh --channel stable|develop` (or the develop curl entry point)
-verifies the same COPR key, switches the checkout branch, rewrites the
+verifies the target channel's reviewed COPR key, switches the checkout
+branch, rewrites the
 `nimbus-engine` repository, runs the native `distro-sync`, records the
 channel in the selector and validates the checkout before reporting. It
 refuses a dirty checkout, an unrecognized repository file and a target engine
@@ -184,8 +185,9 @@ A schema 1 selector predates the channel, is read as stable, and is recorded
 as schema 2 by the next selector-writing action (init or a channel switch).
 The channel names the engine track: `stable` follows `main` and the
 `furyfree/nimbus` repository, `develop` follows the `develop` branch and the
-`furyfree/nimbus-develop` repository. Both tracks use the same COPR signing
-key and the `nimbus-engine` repository ID, and develop builds use a
+`furyfree/nimbus-develop` repository. Each track pins its own reviewed COPR
+project key under `system/keys/`, and both use the `nimbus-engine` repository
+ID, and develop builds use a
 `0.6.0~dev` version so RPM ordering prefers a released stable version.
 
 The optional machine field `shell = "bash"` or `shell = "zsh"` selects the
