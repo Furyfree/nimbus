@@ -1010,8 +1010,13 @@ status reports an unknown or foreign TPM token as an explicit problem.
 Explicit removal (`postinstall fde --remove`) wipes only the recorded slot,
 removes the Nimbus firmware entry, image, marker and key material, keeps the
 disk passphrase, and never uses `--wipe-slot=tpm2` or `all`; it requires
-interactive confirmation and `--yes` cannot accept it. Policy renewal is not
-implemented yet. Sync and upgrades never build images, enroll or change
+interactive confirmation and `--yes` cannot accept it. Renewal
+(`postinstall fde --renew`) is offered when status runs on the Nimbus entry
+and the recorded literal PCR 7, 12, 13 and 14 values no longer match the
+observed ones; it enrolls the same policy into a new keyslot and wipes only
+the recorded slot, then rewrites the ownership record through root
+observation. The preview shows both commands, and the passphrase remains the
+fallback. Sync and upgrades never build images, enroll or change
 policy. While the marker exists, deselecting `fde` blocks the plan instead of
 removing the component's packages; run the removal first. Enrollment,
 booting, passphrase fallback, renewal and removal need real-hardware
@@ -1087,7 +1092,10 @@ engine also ships a
 marker-gated dracut module (`/usr/lib/dracut/modules.d/40nimbus-plymouth`) that
 adds the label plugin, `fc-match`, fontconfig configuration and the monospace
 font to the initramfs while the marker exists; the `plymouth-theme` trigger
-rebuilds the initramfs, and deselection rebuilds it without them.
+rebuilds the initramfs, and deselection rebuilds it without them. When the
+FDE marker exists, the Plymouth trigger and the NVIDIA MOK dracut refresh
+also rebuild the running kernel's signed image in the same approved action,
+shown as a plan note.
 The matching Plymouth theme styles native disk-unlock prompts without changing
 encryption or automatic-unlock policy. The engine package ships the payload
 under `/boot/grub2/themes/nimbus` and `/usr/share/plymouth/themes/nimbus` plus

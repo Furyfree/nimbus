@@ -327,6 +327,21 @@ func fdeSyncFile(path string) error {
 	return file.Sync()
 }
 
+// FDEUKIRebuildArgv returns the approved command that rebuilds the signed
+// image for one kernel after an initramfs change, or nil when the marker shows
+// no approved FDE setup. Callers run it through their own privileged runner.
+func FDEUKIRebuildArgv(src native.Source, version string) ([]string, error) {
+	ready, err := fdeMarkerReady(src)
+	if err != nil || !ready {
+		return nil, err
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	return []string{"sudo", "--", exe, "internal", "fde-uki", "add", version}, nil
+}
+
 // BuildFDEUKI rebuilds the firmware image for one kernel through native
 // ukify. It runs as root from the kernel-install hook and from approved
 // setup, and never changes firmware entries or enrollment.

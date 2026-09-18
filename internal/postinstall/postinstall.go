@@ -45,6 +45,7 @@ const (
 	SetupFDE                  ActionKind = "setup-fde"
 	EnrollFDE                 ActionKind = "enroll-fde"
 	RemoveFDE                 ActionKind = "remove-fde"
+	RenewFDE                  ActionKind = "renew-fde"
 )
 
 // Action describes native commands offered for explicit user selection.

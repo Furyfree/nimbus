@@ -461,10 +461,10 @@ refactor and TUI.
   slots. In source: the signed shim-chained image and MOK enrollment, TPM
   enrollment with its root-observed ownership record, boot-time status and
   explicit scoped removal (`nimbus postinstall fde --remove`, which wipes only
-  the recorded keyslot and keeps the passphrase). Policy renewal and the
+  the recorded keyslot and keeps the passphrase). Renewal and the
   Nimbus-initiated initramfs reconcile (NVIDIA signing and Plymouth trigger)
-  remain. Deselecting `fde` while the marker exists still blocks the plan;
-  removal clears the marker first.
+  are implemented in source and await the VM pass. Deselecting `fde` while the
+  marker exists still blocks the plan; removal clears the marker first.
 - [ ] Test auto-unlock enrollment, booting, passphrase fallback, boot-change
   fallback and removal on real hardware. This scoped test precedes the TUI;
   it is separate from the later full desktop trial. No working claim yet.
@@ -490,8 +490,14 @@ signed 11 and the observed clean-boot PCR 12/13 values, only while
   passphrase fallback on the GRUB path, PCR 12/13 measurement, injected ESP
   credential refuses to unseal.
 - [ ] 3.3 renewal, scoped removal, status and the failure matrix in the VM.
+  In source: status offers renewal when the recorded literal PCR 7/12/13/14
+  values no longer match, `postinstall fde --renew` adds the new slot before
+  wiping the recorded one, and the record is rewritten from root-observed
+  state.
 - [ ] 3.4 rebuild the UKI after Plymouth and NVIDIA initramfs refreshes,
-  plan-visible.
+  plan-visible. In source: the Plymouth trigger and the NVIDIA dracut refresh
+  invoke the approved internal rebuild for the running kernel when the marker
+  exists, and the plan carries the note.
 - [ ] 3.5 laptop, then desktop with both MOKs enrolled before TPM enrollment.
 
 VM-only gates still open: `--tpm2-signature` at enrollment time (omit if

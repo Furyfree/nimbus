@@ -72,6 +72,24 @@ func fdeVerify(cmd *cobra.Command, src native.Source, before *postinstallSnapsho
 // runFDERemoveAction removes only Nimbus's FDE ownership. Removal is
 // destructive, so it requires interactive confirmation and --yes cannot
 // accept it.
+func runFDERenew(cmd *cobra.Command, src native.Source, before *postinstallSnapshot, task postinstall.Task) error {
+	if err := postinstall.RunFDERenew(cmd.Context(), src, cmd.OutOrStdout(), cmd.ErrOrStderr(), task); err != nil {
+		return fmt.Errorf("postinstall fde renewal failed: %w", err)
+	}
+	verified := postinstall.VerifyFDE(fdeVerificationSource{src}, task)
+	if err := renderPostinstallStatus(cmd.OutOrStdout(), postinstallView{Machine: before.view.Machine, Tasks: []postinstall.Task{verified}}); err != nil {
+		return err
+	}
+	if verified.Status != postinstall.Complete {
+		return fmt.Errorf("renewal finished but verification did not complete: %s", verified.Detail)
+	}
+	if err := recordTask(before.view.Machine, postinstall.FDEEvidence, "verified"); err != nil {
+		return err
+	}
+	_, err := io.WriteString(cmd.OutOrStdout(), "Renewal recorded. Reboot to confirm automatic unlock; the disk passphrase remains the fallback.\n")
+	return err
+}
+
 func runFDERemoveAction(cmd *cobra.Command, src native.Source, before *postinstallSnapshot, flags machineFlags, yes, preview bool) error {
 	task := postinstall.Task{ID: "fde", Owner: "component:fde", Title: "Remove TPM automatic disk unlock",
 		Status: postinstall.Pending, Action: &postinstall.Action{Kind: postinstall.RemoveFDE}}

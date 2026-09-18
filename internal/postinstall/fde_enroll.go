@@ -32,15 +32,16 @@ var fdeUUIDRE = regexp.MustCompile(`^[0-9a-fA-F-]+$`)
 
 // FDEEnrollment is the ownership record written after a successful enrollment.
 type FDEEnrollment struct {
-	Schema      int    `json:"schema"`
-	Device      string `json:"device"`
-	UUID        string `json:"uuid"`
-	Keyslot     string `json:"keyslot"`
-	Token       string `json:"token"`
-	PCRs        string `json:"pcrs"`
-	SecureBoot  bool   `json:"secure_boot"`
-	Fingerprint string `json:"fingerprint"`
-	EnrolledAt  string `json:"enrolled_at"`
+	Schema      int               `json:"schema"`
+	Device      string            `json:"device"`
+	UUID        string            `json:"uuid"`
+	Keyslot     string            `json:"keyslot"`
+	Token       string            `json:"token"`
+	PCRs        string            `json:"pcrs"`
+	PCRValues   map[string]string `json:"pcr_values,omitempty"`
+	SecureBoot  bool              `json:"secure_boot"`
+	Fingerprint string            `json:"fingerprint"`
+	EnrolledAt  string            `json:"enrolled_at"`
 }
 
 // fdeDevice derives the LUKS2 backing device from the reviewed command line.
@@ -261,6 +262,32 @@ func validateFDEEnroll(task Task) error {
 	return nil
 }
 
+// FDERenewCommands describes the reviewed renewal operations.
+func FDERenewCommands(task Task) ([][]string, error) {
+	if err := validateFDERenew(task); err != nil {
+		return nil, err
+	}
+	keys := fdeKeys()
+	return [][]string{
+		{"sudo", "--", "systemd-cryptenroll",
+			"--tpm2-device=auto",
+			"--tpm2-pcrs=7+14+12+13",
+			"--tpm2-public-key=" + keys.pcrPublic,
+			"--tpm2-public-key-pcrs=11",
+			"--tpm2-pcrlock=",
+			"--wipe-slot=<recorded-keyslot>",
+			"<luks-device>"},
+		{"sudo", "--", "nimbus", "internal", "fde-uki", "record", "<new-keyslot>", "<new-token>"},
+	}, nil
+}
+
+func validateFDERenew(task Task) error {
+	if task.ID != "fde" || task.Status != Pending || task.Action == nil || task.Action.Kind != RenewFDE {
+		return errors.New("invalid FDE renewal action")
+	}
+	return nil
+}
+
 // orphanHint names the exact native command that removes a token Nimbus does
 // not own, so a stranded enrollment is recoverable.
 func orphanHint(token fdeToken) string {
@@ -273,6 +300,19 @@ func RunFDEEnroll(ctx context.Context, src native.Source, out, errOut io.Writer,
 	if err := validateFDEEnroll(task); err != nil {
 		return err
 	}
+	return runFDEEnrollment(ctx, src, out, errOut, false)
+}
+
+// RunFDERenew replaces the recorded enrollment after the measured state
+// changed, adding the new slot before wiping only the recorded one.
+func RunFDERenew(ctx context.Context, src native.Source, out, errOut io.Writer, task Task) error {
+	if err := validateFDERenew(task); err != nil {
+		return err
+	}
+	return runFDEEnrollment(ctx, src, out, errOut, true)
+}
+
+func runFDEEnrollment(ctx context.Context, src native.Source, out, errOut io.Writer, renew bool) error {
 	stream := func(name string, args ...string) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -288,7 +328,7 @@ func RunFDEEnroll(ctx context.Context, src native.Source, out, errOut io.Writer,
 	if err := fdeEnrollEligible(src); err != nil {
 		return err
 	}
-	device, _, err := fdeDevice(src)
+	device, uuid, err := fdeDevice(src)
 	if err != nil {
 		return err
 	}
@@ -300,10 +340,17 @@ func RunFDEEnroll(ctx context.Context, src native.Source, out, errOut io.Writer,
 	if err != nil {
 		return err
 	}
+	wipe := ""
 	switch {
+	case renew:
+		if len(before) != 1 || before[0].Slots != 1 || !owned ||
+			record.Keyslot != before[0].Keyslot || record.Token != before[0].ID || record.UUID != uuid {
+			return errors.New("the observed TPM token is not the one Nimbus recorded; rerun without renewal to re-inspect")
+		}
+		wipe = record.Keyslot
 	case len(before) > 1:
 		return fmt.Errorf("more than one systemd-tpm2 token exists; inspect the LUKS2 tokens and %s", orphanHint(before[0]))
-	case len(before) == 1 && (!owned || record.Keyslot != before[0].Keyslot || record.Token != before[0].ID):
+	case len(before) == 1 && (!owned || record.Keyslot != before[0].Keyslot || record.Token != before[0].ID || record.UUID != uuid):
 		return fmt.Errorf("a TPM token exists that Nimbus does not own; %s", orphanHint(before[0]))
 	case len(before) == 1:
 		return errors.New("TPM automatic unlock is already enrolled and recorded; nothing to do")
@@ -315,8 +362,11 @@ func RunFDEEnroll(ctx context.Context, src native.Source, out, errOut io.Writer,
 		"--tpm2-public-key=" + keys.pcrPublic,
 		"--tpm2-public-key-pcrs=11",
 		"--tpm2-pcrlock=",
-		device,
 	}
+	if wipe != "" {
+		args = append(args, "--wipe-slot="+wipe)
+	}
+	args = append(args, device)
 	if err := stream(args[0], args[1:]...); err != nil {
 		return fmt.Errorf("systemd-cryptenroll failed: %w", err)
 	}
@@ -324,8 +374,11 @@ func RunFDEEnroll(ctx context.Context, src native.Source, out, errOut io.Writer,
 	if err != nil {
 		return err
 	}
-	if len(after) != 1 || after[0].Keyslot == "" {
+	if len(after) != 1 || after[0].Keyslot == "" || after[0].Slots != 1 {
 		return errors.New("enrollment reported success but no single TPM token was observed; inspect the LUKS2 tokens")
+	}
+	if wipe != "" && after[0].Keyslot == wipe {
+		return errors.New("renewal reported success but the recorded slot was reused; inspect the LUKS2 tokens")
 	}
 	exe, err := fdeExecutable()
 	if err != nil {
@@ -341,7 +394,11 @@ func RunFDEEnroll(ctx context.Context, src native.Source, out, errOut io.Writer,
 	if recordErr != nil {
 		return fmt.Errorf("the token is enrolled but its ownership record could not be written (%w); rerun this task to record it", recordErr)
 	}
-	_, err = fmt.Fprintln(out, "TPM enrollment recorded. Reboot to verify that the disk unlocks without the passphrase; the disk passphrase remains the fallback.")
+	if renew {
+		_, err = fmt.Fprintln(out, "TPM automatic unlock renewed and recorded. Reboot to verify that the disk unlocks without the passphrase; the disk passphrase remains the fallback.")
+	} else {
+		_, err = fmt.Fprintln(out, "TPM enrollment recorded. Reboot to verify that the disk unlocks without the passphrase; the disk passphrase remains the fallback.")
+	}
 	return err
 }
 
@@ -362,13 +419,17 @@ func WriteFDEEnrollment(keyslot, token string) error {
 	}
 	found := false
 	for _, observed := range tokens {
-		if observed.ID == token && observed.Keyslot == keyslot {
+		if observed.ID == token && observed.Keyslot == keyslot && observed.Slots == 1 {
 			found = true
 			break
 		}
 	}
 	if !found {
-		return fmt.Errorf("no systemd-tpm2 token %s in keyslot %s was observed; the record was not written", token, keyslot)
+		return fmt.Errorf("no single systemd-tpm2 token %s in keyslot %s was observed; the record was not written", token, keyslot)
+	}
+	values, err := fdePCRValues(fdeRootSource)
+	if err != nil {
+		return err
 	}
 	secure, err := fdeSecureBoot(fdeRootSource)
 	if err != nil {
@@ -380,7 +441,7 @@ func WriteFDEEnrollment(keyslot, token string) error {
 	}
 	entry := FDEEnrollment{
 		Schema: 1, Device: device, UUID: uuid, Keyslot: keyslot, Token: token,
-		PCRs: "7+14+12+13+11", SecureBoot: secure, Fingerprint: fingerprint,
+		PCRs: "7+14+12+13+11", PCRValues: values, SecureBoot: secure, Fingerprint: fingerprint,
 		EnrolledAt: time.Now().UTC().Format(time.RFC3339),
 	}
 	data, err := json.Marshal(entry)
@@ -417,6 +478,38 @@ func ReadFDEEnrollment() ([]byte, error) {
 		return nil, nil
 	}
 	return data, err
+}
+
+// fdePCRValues captures the literal PCR values the enrollment bound, so a
+// later boot can detect a changed measured state without guessing.
+func fdePCRValues(src native.Source) (map[string]string, error) {
+	values := map[string]string{}
+	for _, pcr := range []string{"7", "12", "13", "14"} {
+		data, err := src.ReadFile("/sys/class/tpm/tpm0/pcr-sha256/" + pcr)
+		if err != nil {
+			return nil, fmt.Errorf("read PCR %s: %w", pcr, err)
+		}
+		values[pcr] = strings.TrimSpace(string(data))
+	}
+	return values, nil
+}
+
+// fdePCRsMatch reports whether the current literal PCR values match the
+// enrollment record. A record without values (older schema) always matches.
+func fdePCRsMatch(src native.Source, record FDEEnrollment) (bool, error) {
+	if len(record.PCRValues) == 0 {
+		return true, nil
+	}
+	current, err := fdePCRValues(src)
+	if err != nil {
+		return false, err
+	}
+	for pcr, value := range record.PCRValues {
+		if current[pcr] != value {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // fdePublicKeyDigest fingerprints the PCR public key for the ownership record.

@@ -46,6 +46,9 @@ func (ex *executor) plymouthThemeTrigger(op plan.Operation) ([]state.Receipt, []
 	if observed := strings.TrimSpace(string(after)); observed != intended {
 		return nil, nil, fmt.Errorf("Plymouth theme verification failed: expected %s, observed %s", intended, observed)
 	}
+	if err := ex.rebuildFDEUKI(); err != nil {
+		return nil, nil, err
+	}
 	if op.Action == plan.ActionRemove {
 		// The install receipt carries the previous theme needed to replan a
 		// failed removal; a successful removal retires it with the other
@@ -53,6 +56,31 @@ func (ex *executor) plymouthThemeTrigger(op plan.Operation) ([]state.Receipt, []
 		return nil, []string{op.ID}, nil
 	}
 	return []state.Receipt{ex.receipt(op, plan.KindTrigger, previous, intended, "native Plymouth theme selection verified after the command")}, nil, nil
+}
+
+// rebuildFDEUKI refreshes the signed image after Plymouth regenerated the
+// initramfs, when approved setup marked the machine FDE-enabled. The Plymouth
+// trigger's plan note discloses the rebuild before approval.
+func (ex *executor) rebuildFDEUKI() error {
+	if _, err := os.Stat("/etc/nimbus/fde-uki.enabled"); err != nil {
+		return nil
+	}
+	kernelOut, err := ex.opts.Source.Run("uname", "-r")
+	if err != nil {
+		return fmt.Errorf("read the running kernel to rebuild the Nimbus image: %w", err)
+	}
+	kernel := strings.TrimSpace(string(kernelOut))
+	if kernel == "" || strings.ContainsAny(kernel, "/\\ \t\r\n") {
+		return errors.New("cannot determine a safe running kernel release")
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if err := ex.sudo(exe, "internal", "fde-uki", "add", kernel); err != nil {
+		return fmt.Errorf("Plymouth regenerated the initramfs but the signed Nimbus image could not be rebuilt; the disk passphrase still unlocks: %w", err)
+	}
+	return nil
 }
 
 // FilePayload binds the narrow file helper input to the reviewed plan.

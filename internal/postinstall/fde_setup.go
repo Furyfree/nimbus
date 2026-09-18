@@ -655,11 +655,12 @@ func VerifyFDE(src native.Source, t Task) Task {
 		t.Status, t.Detail = Pending, "Setup is not active; run the approved FDE setup first."
 		return t
 	}
-	entries, err := fdeBootEntriesOutput(src)
+	bootOutput, err := src.Run("efibootmgr")
 	if err != nil {
 		t.Detail = "The firmware entries could not be inspected: " + err.Error()
 		return t
 	}
+	entries := fdeBootEntries(string(bootOutput))
 	secure, err := fdeSecureBoot(src)
 	if err != nil {
 		t.Detail = "The Secure Boot state could not be read: " + err.Error()
@@ -725,6 +726,13 @@ func VerifyFDE(src native.Source, t Task) Task {
 	if _, err := src.Run("stat", "--format=%s", "--", fdeKernelDir+"/"+inspected.uname+"/vmlinuz"); err != nil {
 		return damaged("The Nimbus image embeds kernel " + inspected.uname + ", whose kernel package is no longer installed; rebuild it for an installed kernel with the approved setup.")
 	}
+	if inspected.initrd != "" {
+		if sum, err := src.Run("sudo", "-n", "--", "sha256sum", "/boot/initramfs-"+inspected.uname+".img"); err == nil {
+			if fields := strings.Fields(string(sum)); len(fields) > 0 && !strings.EqualFold(fields[0], inspected.initrd) {
+				return damaged("The Nimbus image embeds an initramfs older than /boot; rebuild it with the approved setup.")
+			}
+		}
+	}
 	tokens, err := fdeTokens(src)
 	if err != nil {
 		t.VerificationNeedsRoot = true
@@ -737,10 +745,29 @@ func VerifyFDE(src native.Source, t Task) Task {
 		t.Detail = "The FDE enrollment record could not be read: " + err.Error()
 		return t
 	}
+	entryID, _ := fdeCorrectEntryID(entries, secure)
 	switch {
 	case len(tokens) == 1 && owned && record.Keyslot == tokens[0].Keyslot && record.Token == tokens[0].ID:
+		if !strings.EqualFold(fdeBootCurrentID(string(bootOutput)), entryID) {
+			t.Status = Complete
+			t.Detail = "The recorded TPM keyslot is present. This boot used the Fedora entry, where the policy does not apply; reboot through the Nimbus image to unlock automatically."
+			return t
+		}
+		match, err := fdePCRsMatch(src, record)
+		if err != nil {
+			t.VerificationNeedsRoot = true
+			t.Detail = "The measured PCR values could not be read: " + err.Error()
+			return t
+		}
+		if !match {
+			t.Status = Pending
+			t.Action = &Action{Kind: RenewFDE}
+			t.Reboot = true
+			t.Detail = "The measured boot state changed, so the TPM policy no longer matches. Renew the enrollment; until then the disk passphrase unlocks."
+			return t
+		}
 		t.Status = Complete
-		t.Detail = "The signed Nimbus image is booting and the recorded TPM keyslot is present. Reboots unlock automatically; the disk passphrase remains the fallback."
+		t.Detail = "The signed Nimbus image is booting and the recorded TPM keyslot matches the measured state. Reboots unlock automatically; the disk passphrase remains the fallback."
 	case len(tokens) > 1:
 		t.Status = Blocked
 		t.Detail = "More than one systemd-tpm2 token exists; inspect the LUKS2 tokens before changing enrollment."
@@ -762,6 +789,7 @@ type fdeInspectResult struct {
 	sections []string
 	cmdline  string
 	uname    string
+	initrd   string
 }
 
 // fdeInspect extracts section names and the text payloads Nimbus verifies.
@@ -787,6 +815,11 @@ func fdeInspect(output string) fdeInspectResult {
 			continue
 		}
 		if !inText {
+			if section == ".initrd:" {
+				if rest, ok := strings.CutPrefix(trimmed, "sha256:"); ok {
+					result.initrd = strings.TrimSpace(rest)
+				}
+			}
 			inText = trimmed == "text:"
 			continue
 		}

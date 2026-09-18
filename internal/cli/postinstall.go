@@ -203,6 +203,8 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 				return runFDESetup(cmd, src, before, task)
 			} else if task.Action.Kind == postinstall.EnrollFDE {
 				return runFDEEnroll(cmd, src, before, task)
+			} else if task.Action.Kind == postinstall.RenewFDE {
+				return runFDERenew(cmd, src, before, task)
 			} else {
 				argv := commands[0]
 				runErr = src.Stream(cmd.OutOrStdout(), cmd.ErrOrStderr(), argv[0], argv[1:]...)
@@ -346,6 +348,9 @@ func postinstallCommands(task postinstall.Task) ([][]string, error) {
 	}
 	if task.Action != nil && task.Action.Kind == postinstall.RemoveFDE {
 		return postinstall.FDERemoveCommands(task)
+	}
+	if task.Action != nil && task.Action.Kind == postinstall.RenewFDE {
+		return postinstall.FDERenewCommands(task)
 	}
 	if task.Action != nil && len(task.Action.Commands) != 0 {
 		return nil, errors.New("unexpected native command list")

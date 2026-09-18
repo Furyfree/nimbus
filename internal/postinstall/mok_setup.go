@@ -82,6 +82,15 @@ func RunNVIDIAMOK(ctx context.Context, src native.Source, out, stderr io.Writer)
 	if err := stream("sudo", "--", "dracut", "--force", "--kver", kernel); err != nil {
 		return fmt.Errorf("refresh boot image: %w; enrollment was not changed; correct the error and retry", err)
 	}
+	rebuild, err := FDEUKIRebuildArgv(src, kernel)
+	if err != nil {
+		return fmt.Errorf("inspect the FDE marker: %w; enrollment was not changed", err)
+	}
+	if rebuild != nil {
+		if err := stream(rebuild[0], rebuild[1:]...); err != nil {
+			return fmt.Errorf("rebuild the signed Nimbus image after the initramfs refresh: %w; enrollment was not changed", err)
+		}
+	}
 	if state == mokAbsent {
 		if _, err := fmt.Fprintln(out, "Choose a temporary MOK password in the native prompt. The reboot enrollment screen uses US/QWERTY. Nimbus does not record the password."); err != nil {
 			return err
