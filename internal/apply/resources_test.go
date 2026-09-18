@@ -457,6 +457,33 @@ func TestDaemonReloadVerificationPreservesInspectionFailure(t *testing.T) {
 	}
 }
 
+func TestTriggerReceiptClaimsVerificationOnlyWhenChecked(t *testing.T) {
+	src := &nativetest.FakeSource{Commands: map[string][]byte{
+		nativetest.Key("sudo", "systemctl", "daemon-reload"):                                                nil,
+		nativetest.Key("systemctl", "show", "--property=NeedDaemonReload", "--value", "--", "demo.service"): []byte("no\n"),
+	}}
+	ex := resourceExecutor(src)
+	ex.p.Operations = []plan.Operation{{Kind: plan.KindService, Resource: &plan.ResourceChange{Name: "demo.service"}}}
+	receipts, _, err := ex.systemResource(plan.Operation{ID: "trigger:systemd-daemon-reload", Kind: plan.KindTrigger, Action: plan.ActionRepair})
+	if err != nil || len(receipts) != 1 || !strings.Contains(receipts[0].Verification, "declared verification") {
+		t.Fatalf("verified trigger receipt: receipts=%v err=%v", receipts, err)
+	}
+	src = &nativetest.FakeSource{Commands: map[string][]byte{
+		nativetest.Key("sudo", "grub2-mkconfig", "--no-grubenv-update", "-o", "/boot/grub2/grub.cfg"): nil,
+	}}
+	receipts, _, err = resourceExecutor(src).systemResource(plan.Operation{ID: "trigger:grub-config", Kind: plan.KindTrigger, Action: plan.ActionRepair})
+	if err != nil || len(receipts) != 1 || receipts[0].Verification != "fixed native trigger completed" {
+		t.Fatalf("unverified trigger received a verification claim: receipts=%v err=%v", receipts, err)
+	}
+	src = &nativetest.FakeSource{Commands: map[string][]byte{
+		nativetest.Key("sudo", "systemctl", "daemon-reload"): nil,
+	}}
+	receipts, _, err = resourceExecutor(src).systemResource(plan.Operation{ID: "trigger:systemd-daemon-reload", Kind: plan.KindTrigger, Action: plan.ActionRepair})
+	if err != nil || len(receipts) != 1 || receipts[0].Verification != "fixed native trigger completed" {
+		t.Fatalf("unchecked daemon-reload claimed verification: receipts=%v err=%v", receipts, err)
+	}
+}
+
 type fileCommandSource struct {
 	*nativetest.FakeSource
 	after          inspect.SystemFile
@@ -842,6 +869,7 @@ func TestPlymouthThemeTriggerRecordsAndRestores(t *testing.T) {
 	}{
 		{"select", plan.ActionRepair, "text", "nimbus", "text"},
 		{"restore", plan.ActionRemove, "nimbus", "text", "nimbus"},
+		{"keep current", plan.ActionRemove, "spinner", "spinner", "spinner"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			src := &plymouthTestSource{theme: test.theme}
@@ -873,6 +901,16 @@ func TestPlymouthThemeTriggerRecordsAndRestores(t *testing.T) {
 		receipts, _, err := resourceExecutor(src).systemResource(op)
 		if err != nil || len(receipts) != 1 || receipts[0].Previous != "text" {
 			t.Fatalf("receipts=%v err=%v", receipts, err)
+		}
+	})
+	t.Run("removal retires the trigger after the native command", func(t *testing.T) {
+		src := &nativetest.FakeSource{Commands: map[string][]byte{
+			nativetest.Key("sudo", "grub2-mkconfig", "--no-grubenv-update", "-o", "/boot/grub2/grub.cfg"): nil,
+		}}
+		op := plan.Operation{ID: "trigger:grub-config", Kind: plan.KindTrigger, Action: plan.ActionRemove}
+		receipts, removed, err := resourceExecutor(src).systemResource(op)
+		if err != nil || len(receipts) != 0 || !slices.Equal(removed, []string{op.ID}) {
+			t.Fatalf("receipts=%v removed=%v err=%v", receipts, removed, err)
 		}
 	})
 	t.Run("verification failure", func(t *testing.T) {

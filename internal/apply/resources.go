@@ -104,9 +104,11 @@ func (ex *executor) systemResource(op plan.Operation) ([]state.Receipt, []string
 			}
 		}
 
+		checked := false
 		if op.ID == "trigger:systemd-daemon-reload" {
 			for _, resource := range ex.p.Operations {
 				if resource.Kind == plan.KindService && resource.Resource != nil {
+					checked = true
 					out, err := ex.opts.Source.Run("systemctl", "show", "--property=NeedDaemonReload", "--value", "--", resource.Resource.Name)
 					if err != nil {
 						return nil, nil, fmt.Errorf("daemon reload verification failed for %s: %w", resource.Resource.Name, err)
@@ -117,7 +119,16 @@ func (ex *executor) systemResource(op plan.Operation) ([]state.Receipt, []string
 				}
 			}
 		}
-		return []state.Receipt{ex.receipt(op, plan.KindTrigger, "pending", "completed", "fixed native trigger completed and its declared verification passed")}, nil, nil
+		if op.Action == plan.ActionRemove {
+			// The native command ran to restore the default; the install
+			// receipt is retired with the other removal receipts.
+			return nil, []string{op.ID}, nil
+		}
+		detail := "fixed native trigger completed"
+		if checked {
+			detail = "fixed native trigger completed and its declared verification passed"
+		}
+		return []state.Receipt{ex.receipt(op, plan.KindTrigger, "pending", "completed", detail)}, nil, nil
 	}
 	change := op.Resource
 	if change == nil {

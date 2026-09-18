@@ -654,6 +654,7 @@ func TestGreeterAppearanceChangeExplainsDeferredActivation(t *testing.T) {
 
 func TestPlymouthRemovalRestoresRecordedTheme(t *testing.T) {
 	b, src := resourceBuilder()
+	src.Commands[nativetest.Key("plymouth-set-default-theme")] = []byte("nimbus\n")
 	src.Files["/usr/share/plymouth/themes/nimbus/nimbus.plymouth"] = []byte("theme")
 	src.Files["/usr/share/plymouth/themes/text/text.plymouth"] = []byte("theme")
 	target := "/etc/grub.d/36_paper_dark"
@@ -677,6 +678,19 @@ func TestPlymouthRemovalRestoresRecordedTheme(t *testing.T) {
 		len(op.Steps) != 1 || !slices.Equal(op.Steps[0].Argv, []string{"plymouth-set-default-theme", "-R", "text"}) {
 		t.Fatalf("deselected theme did not restore the recorded selection: %+v", op)
 	}
+	grub := func(ops []Operation) *Operation {
+		for i := range ops {
+			if ops[i].ID == "trigger:grub-config" {
+				return &ops[i]
+			}
+		}
+		return nil
+	}
+	if gop := grub(b.systemResources(nil)); gop == nil || gop.Action != ActionRemove || len(gop.Notes) == 0 || !strings.Contains(gop.Summary, "flat") ||
+		!strings.Contains(strings.Join(gop.Notes, " "), "mirror") ||
+		len(gop.Steps) != 1 || !slices.Equal(gop.Steps[0].Argv, []string{"grub2-mkconfig", "--no-grubenv-update", "-o", "/boot/grub2/grub.cfg"}) {
+		t.Fatalf("grub removal plan: %+v", gop)
+	}
 	delete(b.in.Applied.Receipts, "trigger:plymouth-theme")
 	if op = trigger(b.systemResources(nil)); op == nil || op.Blocked == "" {
 		t.Fatalf("unrecorded removal was not blocked: %+v", op)
@@ -692,11 +706,25 @@ func TestPlymouthRemovalRestoresRecordedTheme(t *testing.T) {
 		len(op.Steps) != 1 || !slices.Equal(op.Steps[0].Argv, []string{"plymouth-set-default-theme", "-R", "text"}) {
 		t.Fatalf("removal with a missing payload did not restore the recorded theme: %+v", op)
 	}
+	src.Files["/usr/share/plymouth/themes/nimbus/nimbus.plymouth"] = []byte("theme")
+	src.Commands[nativetest.Key("plymouth-set-default-theme")] = []byte("spinner\n")
+	src.Files["/usr/share/plymouth/themes/spinner/spinner.plymouth"] = []byte("theme")
+	if op = trigger(b.systemResources(nil)); op == nil || op.Action != ActionRemove || op.Blocked != "" ||
+		len(op.Steps) != 1 || !slices.Equal(op.Steps[0].Argv, []string{"plymouth-set-default-theme", "-R", "spinner"}) {
+		t.Fatalf("a manually selected theme was not kept and rebuilt: %+v", op)
+	}
+	delete(src.Files, "/usr/share/plymouth/themes/spinner/spinner.plymouth")
+	if op = trigger(b.systemResources(nil)); op == nil || !strings.Contains(op.Blocked, "not an installed theme") {
+		t.Fatalf("an uninstalled current theme was not blocked: %+v", op)
+	}
+	src.Files["/usr/share/plymouth/themes/spinner/spinner.plymouth"] = []byte("theme")
+	delete(src.Files, "/usr/share/plymouth/themes/nimbus/nimbus.plymouth")
 	b.in.Resolved.Files = []definitions.ResolvedFile{{Target: target, Content: have.Content, Owner: have.Owner, Group: have.Group, Mode: have.Mode, Triggers: []string{"grub-config", "plymouth-theme"}}}
 	if op = trigger(b.systemResources(nil)); op == nil || !strings.Contains(op.Blocked, "does not ship") {
 		t.Fatalf("install with a missing payload was not blocked: %+v", op)
 	}
 	b.in.Resolved.Files = nil
+	src.Commands[nativetest.Key("plymouth-set-default-theme")] = []byte("nimbus\n")
 	legacy := receipt
 	legacy.Previous = "nimbus"
 	b.in.Applied.Receipts["trigger:plymouth-theme"] = legacy

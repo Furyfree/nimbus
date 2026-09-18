@@ -1,7 +1,7 @@
 // Package bootmenu maintains the Nimbus BLS mirror that lets GRUB show one
 // default kernel plus a "Previous kernels" submenu. The mirror holds a copy
 // of exactly the current Fedora default entry; the grub.d payload lists it
-// with `blscfg` and the rest through `blscfg non-default`.
+// with `blscfg <entry>` and the rest with an unfiltered `blscfg`.
 package bootmenu
 
 import (
@@ -56,12 +56,37 @@ func Mirror(src native.Source, entriesDir, grubenv, mirrorDir string) (string, e
 	case saved != "" && !strings.Contains(saved, "-0-rescue") && slices.Contains(ids, saved):
 		chosen = saved
 	default:
-		chosen = slices.MaxFunc(ids, compareVersions)
+		chosen = newestKernel(ids)
 	}
 	if err := rebuild(entriesDir, mirrorDir, chosen); err != nil {
 		return "", err
 	}
 	return chosen, nil
+}
+
+// newestKernel picks the newest non-rescue, non-debug entry, matching
+// Fedora's default selection. Rescue never leads the grouped menu, and debug
+// entries only lead when they are the only kernels installed.
+func newestKernel(ids []string) string {
+	kernels := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if !strings.Contains(id, "-0-rescue") {
+			kernels = append(kernels, id)
+		}
+	}
+	if len(kernels) == 0 {
+		return slices.MaxFunc(ids, compareVersions)
+	}
+	usable := make([]string, 0, len(kernels))
+	for _, id := range kernels {
+		if !strings.Contains(id, "debug") {
+			usable = append(usable, id)
+		}
+	}
+	if len(usable) == 0 {
+		usable = kernels
+	}
+	return slices.MaxFunc(usable, compareVersions)
 }
 
 // grubenvValue reads one key from the GRUB environment block. A missing file
@@ -83,16 +108,19 @@ func grubenvValue(src native.Source, path, key string) (string, error) {
 }
 
 // rebuild replaces the mirror contents with a copy of one BLS entry. The
-// entry is written through a temporary file and renamed into place before any
-// stale copy is removed, so a failure never leaves grub.cfg pointing at a
-// missing or truncated mirror. Only *.conf files created by Nimbus are
-// removed.
+// entry is written through a temporary file, synced and renamed into place
+// before any stale copy is removed, so a failure never leaves grub.cfg
+// pointing at a missing or truncated mirror. Only *.conf files created by
+// Nimbus and its own temporary files are removed.
 func rebuild(entriesDir, mirrorDir, chosen string) error {
 	data, err := os.ReadFile(filepath.Join(entriesDir, chosen+".conf"))
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(mirrorDir, 0o755); err != nil {
+	if err := os.MkdirAll(mirrorDir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(mirrorDir, 0o700); err != nil {
 		return err
 	}
 	target := filepath.Join(mirrorDir, chosen+".conf")
@@ -102,6 +130,11 @@ func rebuild(entriesDir, mirrorDir, chosen string) error {
 	}
 	tmpName := tmp.Name()
 	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
 		_ = tmp.Close()
 		_ = os.Remove(tmpName)
 		return err
@@ -124,6 +157,12 @@ func rebuild(entriesDir, mirrorDir, chosen string) error {
 	}
 	for _, entry := range names {
 		name := entry.Name()
+		if strings.HasPrefix(name, ".nimbus-") && strings.HasSuffix(name, ".tmp") {
+			if err := os.Remove(filepath.Join(mirrorDir, name)); err != nil {
+				return err
+			}
+			continue
+		}
 		if !strings.HasSuffix(name, ".conf") || name == chosen+".conf" {
 			continue
 		}

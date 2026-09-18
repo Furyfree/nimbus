@@ -1054,9 +1054,16 @@ older kernels, including rescue entries, under a `Previous kernels` submenu.
 The engine ships an inert `/etc/grub.d/09_nimbus_previous_kernels` drop-in that
 runs before Fedora's `10_linux`: it maintains a Nimbus-owned mirror of the one
 default BLS entry under `/boot/loader/entries-nimbus` through
-`nimbus internal boot-menu`, then uses the blscfg module's own filters. Fedora's
-flat menu returns whenever the engine, the marker or the mirror is unavailable,
-and removing the marker removes the mirror with any temporary files. Fedora's
+`nimbus internal boot-menu`, lists it with `blscfg <entry>`, and lists the rest
+with an unfiltered `blscfg` in the submenu. The submenu is never filtered by
+GRUB's `default`, because Fedora sets it from `saved_entry` and a rescue
+`saved_entry` would otherwise be hidden. Both blocks are guarded inside
+`grub.cfg` by a check for the live BLS entry and its mirror copy, resolved
+relative to the boot filesystem, so a kernel removal
+followed by a failed `grub2-mkconfig` falls through to Fedora's flat menu
+instead of naming a missing entry. Fedora's flat menu also returns whenever
+the engine, the marker or the mirror is unavailable, and removing the marker
+removes the mirror with any temporary files. Fedora's
 grub hook regenerates
 grub.cfg only when BLS is disabled, so the engine also ships an inert
 `/etc/kernel/install.d/96-nimbus-menu.install` hook that runs after the
@@ -1065,9 +1072,11 @@ boot-entry hook on kernel installs and removals and runs
 during that run. It warns instead of failing the kernel transaction. The
 engine also ships a
 marker-gated dracut module (`/usr/lib/dracut/modules.d/40nimbus-plymouth`) that
-adds the label plugin, `fc-match`, fontconfig configuration and the monospace
-font to the initramfs while the marker exists; the `plymouth-theme` trigger
-rebuilds the initramfs, and deselection rebuilds it without them.
+keeps `fc-match`, the fontconfig configuration and the monospace faces in the
+initramfs while the marker exists; it verifies the label plugin and `fc-match`
+before installing, so a missing dependency skips the module instead of failing
+a kernel transaction. The `plymouth-theme` trigger rebuilds the initramfs, and
+deselection rebuilds it without them.
 The matching Plymouth theme styles native disk-unlock prompts without changing
 encryption or automatic-unlock policy. The engine package ships the payload
 under `/boot/grub2/themes/nimbus` and `/usr/share/plymouth/themes/nimbus` plus
@@ -1077,12 +1086,22 @@ triggers regenerate `grub.cfg` and reselect the Plymouth theme after approval.
 Both triggers re-run once, shown in the plan, when their receipt was written by
 another engine version, so an engine update reaches `grub.cfg` and the
 initramfs; a repeat run keeps the theme recorded before Nimbus took over.
-Removing the marker restores Fedora's default configuration and the theme
-selected before installation. That restore does not need the Nimbus payload,
-and the plan blocks when no usable previous theme was recorded, when it is
-Nimbus's own theme, or when it is no longer installed. The trigger receipt is
+Removing the marker restores Fedora's default configuration. The removal plan
+reads the current Plymouth theme: a theme already chosen by the user is kept
+and its initramfs rebuilt without the Nimbus payload, while a current
+Nimbus theme is restored from the record without needing the Nimbus payload.
+The plan blocks when no usable previous theme was recorded, when it is Nimbus's
+own theme, or when it is no longer installed. The trigger receipt is
 retired only after a successful run, so a failed removal replans from the
-install receipt. Fedora boot verification remains open; see the
+install receipt. Accepted limitations: `grubby` and `grub2-set-default`
+changes take effect only after a later `grub2-mkconfig`, because the grouped
+menu names entries explicitly; a failed boot keeps the forced five-second
+timeout instead of Fedora's longer recordfail timeout; a submenu opened
+once shows no entries on a second open, because the blscfg module never
+clears its loaded entries; and a kernel installed while only one entry
+existed appears after the next successful `grub2-mkconfig` when that
+generation failed. Fedora boot
+verification remains open; see the
 [theme sources and previews](../tools/boot-theme/README.md).
 
 TTY repair is the supported direction; no extra Hyprland recovery desktop is

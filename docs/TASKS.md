@@ -379,8 +379,15 @@ refactor and TUI.
   so `saved_entry` still named the removed kernel; the grouped menu boots the
   explicit mirror entry and does not depend on `saved_entry`, but a boot after
   a removal and the Fedora flat-menu fallback are still part of the bare-metal
-  validation in #40. The image and drop-ins still need the 0.6.0 `nimbus.spec`
-  packaging step below.
+  validation in #40. The 2026-09-18 boot audit replaced the submenu's
+  `blscfg non-default` filter with an unfiltered `blscfg` (a rescue
+  `saved_entry` hid the rescue entry), added a GRUB-side check for the live
+  BLS entry and its mirror copy so a failed mkconfig after a kernel removal
+  falls back to Fedora's flat menu, and made the mirror write sync and remove
+  its temporary files. Fedora's `grub2-script-check` rejects `if ... && ...`
+  and accepts the `-a` form, which the guard uses. The submenu and guard still
+  need the same VM rerun. The image and
+  drop-ins still need the 0.6.0 `nimbus.spec` packaging step below.
 - [ ] Ship the payload and drop-in in the 0.6.0 engine package (`nimbus.spec`),
   including `/etc/grub.d/09_nimbus_previous_kernels`,
   `/etc/kernel/install.d/96-nimbus-menu.install` and
@@ -410,20 +417,32 @@ refactor and TUI.
   and fontconfig inside the initramfs; the engine's marker-gated dracut module
   `40nimbus-plymouth` adds `label-freetype.so`, `fc-match`, fontconfig and the
   monospace font, and creates the writable xdg fontconfig cache on the initrd
-  root (`/usr` is read-only there). Verified 2026-09-17 in the VM: the
+  root (`/usr` is read-only there). Since the 2026-09-18 audit the module
+  verifies the label plugin and `fc-match` before installing, so a broken
+  dependency skips it instead of failing a kernel transaction, and the
+  removal plan keeps a theme the user selected after installation and rebuilds
+  its initramfs without the Nimbus payload. Verified 2026-09-17 in the VM: the
   previously intermittent text-mode unlock prompt rendered the themed screen,
   and the boot journal showed zero `fc-match` and `Fontconfig` errors. BIOS-only
   systems are untested (EFI verified). The
   explicit `set timeout=5` intentionally overrides `GRUB_TIMEOUT`,
-  `menu_auto_hide` and `systemctl reboot --boot-loader-menu`. A missing engine
+  `menu_auto_hide` and `systemctl reboot --boot-loader-menu`, including
+  Fedora's longer recordfail timeout after a failed boot; `grubby` and
+  `grub2-set-default` changes take effect only after a later
+  `grub2-mkconfig`; and a submenu opened once shows no entries on a second
+  open, because the blscfg module never clears its loaded entries; a kernel
+  installed while only one entry existed appears after the next successful
+  `grub2-mkconfig` when that generation failed. A missing engine
   payload blocks installation; a removal restores the recorded previous theme
   without the Nimbus payload and blocks only when no usable theme was
   recorded, when it is Nimbus's own theme, or when it is no longer installed.
   Both payload triggers re-run once, shown in the plan, when their receipt was
   written by another engine version, so an engine update reaches the initramfs
-  and `grub.cfg`; a repeat run keeps the recorded previous theme. A successful
-  removal retires the trigger receipt only at the end of the run, so a failed
-  removal replans from the install receipt.
+  and `grub.cfg`; a repeat run keeps the recorded previous theme. The trigger
+  operations carry plan notes for the mirror rewrite, initramfs rebuild and
+  installed kernel-install hook, and a successful removal retires the
+  `grub-config` receipt like the Plymouth one, only at the end of the run, so
+  a failed removal replans from the install receipt.
 - [x] Inspect the Fedora/LUKS2 boot path, TPM and Secure Boot support; choose
   the native auto-unlock method and boot-change policy before implementation.
   Read-only inspection covered the laptop and the disposable VM: LUKS2 with a

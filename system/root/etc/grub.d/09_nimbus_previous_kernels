@@ -7,12 +7,21 @@
 # /etc/nimbus/boot-theme.enabled. It runs before Fedora's 10_linux during
 # grub2-mkconfig, rebuilds the Nimbus-owned mirror of the single Fedora
 # default BLS entry through the installed engine, and lists it with the
-# blscfg module's own filters: `blscfg <entry>` for the top level and
-# `blscfg non-default` inside the submenu. Fedora's plain blscfg call then
-# finds every entry already loaded and adds nothing. If the engine is
-# missing, the marker is absent or the mirror is unavailable, the script
-# emits nothing and Fedora's flat menu returns. Removing the marker removes
-# the mirror and regenerates the flat menu.
+# blscfg module: `blscfg <entry>` for the top level and an unfiltered
+# `blscfg` inside the submenu. The submenu must stay unfiltered: Fedora sets
+# GRUB's `default` from saved_entry, so filtering against it would hide a
+# rescue saved_entry everywhere. Entries made visible by the top level are
+# skipped, so the unfiltered call cannot duplicate it. The mirror keeps
+# `blsdir` pointed at the single-entry directory while Fedora's `10_linux`
+# runs its own parse-time `blscfg`, so that call sees only the already
+# visible entry; the submenu sets `blsdir` to the live directory when it
+# opens.
+#
+# Both blocks are wrapped in a GRUB-side check that the live Fedora BLS entry
+# and its Nimbus mirror copy exist. If a kernel removal is followed by a
+# failed grub2-mkconfig, the retained grub.cfg names a missing entry; the
+# check adds no entries instead and Fedora's flat menu handles the remaining
+# kernels. A missing engine, marker or mirror also leaves the flat menu.
 
 mirror=/boot/loader/entries-nimbus
 
@@ -28,8 +37,14 @@ if [ -z "${GRUB_ENABLE_BLSCFG}" ] && ! command -v new-kernel-pkg >/dev/null 2>&1
 fi
 [ "${GRUB_ENABLE_BLSCFG}" = "true" ] || exit 0
 
-[ -x /usr/bin/nimbus ] || exit 0
-entry="$(/usr/bin/nimbus internal boot-menu 2>/dev/null)" || exit 0
+[ -x /usr/bin/nimbus ] || {
+    echo "warning: /usr/bin/nimbus is missing; Fedora's flat kernel menu is kept" >&2
+    exit 0
+}
+if ! entry="$(/usr/bin/nimbus internal boot-menu)"; then
+    echo "warning: the Nimbus kernel menu mirror was not rebuilt; Fedora's flat kernel menu is kept" >&2
+    exit 0
+fi
 [ -n "$entry" ] || exit 0
 
 # Emit the same device preparation as 10_linux's BLS branch, because this
@@ -53,11 +68,26 @@ else
     prepare_grub_to_access_device_with_variable boot "$boot_device"
 fi
 
+# GRUB resolves `[ -f ]` and `blsdir` relative to the boot filesystem root,
+# so ask Fedora's own helper for the layout-relative paths. A separate /boot
+# keeps /loader/entries; /boot on the root filesystem becomes
+# /boot/loader/entries.
+entries_path="$(make_system_path_relative_to_its_root /boot/loader/entries)"
+mirror_path="$(make_system_path_relative_to_its_root "$mirror")"
+if [ -z "$entries_path" ] || [ -z "$mirror_path" ]; then
+    echo "warning: the Nimbus kernel menu paths could not be resolved; Fedora's flat kernel menu is kept" >&2
+    exit 0
+fi
+
 cat << EOF
 
 insmod blscfg
-set blsdir=/loader/entries-nimbus
-blscfg $entry
+if [ -f $entries_path/$entry.conf -a -f $mirror_path/$entry.conf ]; then
+    set blsdir=$mirror_path
+    blscfg $entry
+else
+    set blsdir=$entries_path
+fi
 EOF
 
 # With a single entry the mirror already is the whole menu.
@@ -68,11 +98,13 @@ for conf in /boot/loader/entries/*.conf; do
 done
 [ "$entries" -gt 1 ] || exit 0
 
-cat << 'EOF'
+cat << EOF
 
-submenu 'Previous kernels' {
-    set blsdir=/loader/entries
-    insmod blscfg
-    blscfg non-default
-}
+if [ -f $entries_path/$entry.conf -a -f $mirror_path/$entry.conf ]; then
+    submenu 'Previous kernels' {
+        insmod blscfg
+        set blsdir=$entries_path
+        blscfg
+    }
+fi
 EOF
