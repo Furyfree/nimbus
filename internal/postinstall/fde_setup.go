@@ -725,11 +725,31 @@ func VerifyFDE(src native.Source, t Task) Task {
 	if _, err := src.Run("stat", "--format=%s", "--", fdeKernelDir+"/"+inspected.uname+"/vmlinuz"); err != nil {
 		return damaged("The Nimbus image embeds kernel " + inspected.uname + ", whose kernel package is no longer installed; rebuild it for an installed kernel with the approved setup.")
 	}
-	if secure {
-		t.Status, t.Detail = Complete, "The signed Nimbus image parses, embeds the expected command line for an installed kernel, its firmware entry is correct and its MOK certificate is enrolled. TPM automatic unlock is not configured yet."
+	info, err := fdeTokenState(src)
+	if err != nil {
+		t.VerificationNeedsRoot = true
+		t.Detail = "The LUKS2 TPM token state could not be read: " + err.Error()
 		return t
 	}
-	t.Status, t.Detail = Complete, "The Nimbus image parses, embeds the expected command line for an installed kernel and its firmware entry is correct. TPM enrollment and automatic unlock are still not configured."
+	record, owned, err := fdeEnrollment(src)
+	if err != nil {
+		t.VerificationNeedsRoot = true
+		t.Detail = "The FDE enrollment record could not be read: " + err.Error()
+		return t
+	}
+	switch {
+	case info.Present && owned && record.Keyslot == info.Keyslot:
+		t.Status = Complete
+		t.Detail = "The signed Nimbus image is booting and the recorded TPM keyslot is present. Reboots unlock automatically; the disk passphrase remains the fallback."
+	case info.Present:
+		t.Status = Blocked
+		t.Detail = "A systemd-tpm2 token exists that Nimbus does not own; inspect the LUKS2 tokens before changing enrollment."
+	default:
+		t.Status = Pending
+		t.Action = &Action{Kind: EnrollFDE}
+		t.Reboot = true
+		t.Detail = "The signed Nimbus image is booting. Enroll TPM automatic unlock now; keep the disk passphrase available."
+	}
 	return t
 }
 

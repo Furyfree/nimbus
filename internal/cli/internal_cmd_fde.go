@@ -22,6 +22,18 @@ func newInternalFDEUKI() *cobra.Command {
 		switch args[0] {
 		case "genkey":
 			return postinstall.EnsureFDEKeys(native.ExecSource{}, cmd.OutOrStdout())
+		case "state":
+			data, err := postinstall.ReadFDEEnrollment()
+			if err != nil || len(data) == 0 {
+				return err
+			}
+			_, err = cmd.OutOrStdout().Write(data)
+			return err
+		case "record":
+			if len(args) != 2 {
+				return usageError{errors.New("internal fde-uki record needs a staged file")}
+			}
+			return postinstall.WriteFDEEnrollment(args[1])
 		case "add":
 			if len(args) != 2 {
 				return usageError{errors.New("internal fde-uki add needs a kernel release")}

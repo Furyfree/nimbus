@@ -64,6 +64,24 @@ func fdeVerify(cmd *cobra.Command, src native.Source, before *postinstallSnapsho
 	}, yes)
 }
 
+func runFDEEnroll(cmd *cobra.Command, src native.Source, before *postinstallSnapshot, task postinstall.Task) error {
+	if err := postinstall.RunFDEEnroll(cmd.Context(), src, cmd.OutOrStdout(), cmd.ErrOrStderr(), task); err != nil {
+		return fmt.Errorf("postinstall fde enrollment failed: %w", err)
+	}
+	verified := postinstall.VerifyFDE(fdeVerificationSource{src}, task)
+	if err := renderPostinstallStatus(cmd.OutOrStdout(), postinstallView{Machine: before.view.Machine, Tasks: []postinstall.Task{verified}}); err != nil {
+		return err
+	}
+	if verified.Status != postinstall.Complete {
+		return fmt.Errorf("enrollment finished but verification did not complete: %s", verified.Detail)
+	}
+	if err := recordTask(before.view.Machine, postinstall.FDEEvidence, "verified"); err != nil {
+		return err
+	}
+	_, err := io.WriteString(cmd.OutOrStdout(), "Enrollment recorded. Reboot to confirm automatic unlock; the disk passphrase remains the fallback.\n")
+	return err
+}
+
 func runFDESetup(cmd *cobra.Command, src native.Source, before *postinstallSnapshot, task postinstall.Task) error {
 	if err := postinstall.RunFDESetup(cmd.Context(), src, cmd.OutOrStdout(), cmd.ErrOrStderr(), task); err != nil {
 		return fmt.Errorf("postinstall fde action failed: %w", err)
