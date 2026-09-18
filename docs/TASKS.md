@@ -485,8 +485,8 @@ refactor and TUI.
   explicit scoped removal (`nimbus postinstall fde --remove`, which wipes only
   the recorded keyslot and keeps the passphrase). Renewal, scoped removal and
   the ownership record were exercised end to end in the VM on 2026-09-18
-  (issue #34). The Plymouth and NVIDIA initramfs reconciles run the same
-  approved rebuild but are not yet exercised in the VM. Deselecting `fde`
+  (issue #34). The Plymouth reconcile is VM-verified; the NVIDIA caller uses
+  the same approved rebuild and waits for hardware. Deselecting `fde`
   while the marker exists still blocks the plan; removal clears the marker
   first.
 - [ ] Test auto-unlock enrollment, booting, passphrase fallback, boot-change
@@ -534,13 +534,16 @@ signed 11 and the observed clean-boot PCR 12/13 values, only while
   material, kept passphrase slot 0 and the MOK certificates, and Fedora's GRUB
   booted with the passphrase. A root-only `/etc/crypttab` read broke
   post-setup verification until fixed (`3dc574c`).
-- [ ] 3.4 rebuild the UKI after Plymouth and NVIDIA initramfs refreshes,
+- [x] 3.4 rebuild the UKI after Plymouth and NVIDIA initramfs refreshes,
   plan-visible. In source: the Plymouth trigger and the NVIDIA dracut refresh
   invoke the approved internal rebuild for the running kernel when the marker
   exists, disclosed by a plan note or the postinstall preview, and skipped
-  when the image already targets another kernel. The kernel-install path was
-  verified in the VM 2026-09-18; the Plymouth and NVIDIA callers still need
-  the same run.
+  when the image already targets another kernel. VM 2026-09-18: sync re-ran
+  the Plymouth trigger with the marker present, carried the plan note, ran
+  `internal fde-uki add <kver> --only-if-current`, rebuilt and re-signed the
+  image; the rebuilt image still verified and the next boot unlocked
+  unattended. The NVIDIA caller shares that helper and its preview/test rows;
+  it waits for NVIDIA hardware.
 - [ ] 3.5 laptop, then desktop with both MOKs enrolled before TPM enrollment.
 
 VM-only gates still open: `--tpm2-signature` at enrollment time (omit if
