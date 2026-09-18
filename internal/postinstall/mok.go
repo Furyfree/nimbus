@@ -39,6 +39,13 @@ func mok(src native.Source, in Inputs) Task {
 	default:
 		return t
 	}
+	switch ready, err := fdeMarkerReady(src); {
+	case err != nil:
+		t.Status, t.Detail = Blocked, "The FDE marker could not be read: "+err.Error()
+		return t
+	case ready:
+		t.Instructions = append(t.Instructions, "FDE is enabled: after the boot-image refresh, the signed Nimbus image for the running kernel is rebuilt too (sudo nimbus internal fde-uki add <running-kernel> --only-if-current).")
+	}
 	for _, name := range []string{"akmod-nvidia", "akmods", "mokutil"} {
 		found := false
 		for _, pkg := range in.Resolved.Packages {

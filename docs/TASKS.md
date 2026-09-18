@@ -477,16 +477,54 @@ refactor and TUI.
 - [ ] Add enrollment, policy renewal, status and scoped removal with explicit
   previews; reduced protection and removal default to No and a blanket `--yes`
   cannot accept them. Preserve the passphrase, unrelated keys and enrollment
-  slots. Until scoped removal exists, deselecting `fde` while
-  `/etc/nimbus/fde-uki.enabled` exists or cannot be read blocks the plan and
-  keeps the component's packages. This milestone also implements the signed,
-  shim-chained image and MOK
-  enrollment that Secure Boot needs, and reconciles Nimbus-initiated initramfs
-  refreshes (the NVIDIA signing flow and the Plymouth theme trigger) with the
-  image.
+  slots. In source: the signed shim-chained image and MOK enrollment, TPM
+  enrollment with its root-observed ownership record, boot-time status and
+  explicit scoped removal (`nimbus postinstall fde --remove`, which wipes only
+  the recorded keyslot and keeps the passphrase). Renewal and the
+  Nimbus-initiated initramfs reconcile (NVIDIA signing and Plymouth trigger)
+  are implemented in source and await the VM pass. Deselecting `fde` while the
+  marker exists still blocks the plan; removal clears the marker first.
 - [ ] Test auto-unlock enrollment, booting, passphrase fallback, boot-change
   fallback and removal on real hardware. This scoped test precedes the TUI;
   it is separate from the later full desktop trial. No working claim yet.
+
+Milestone 3 design approved 2026-09-18 after research validated with external
+reviewers (issue #34): the signed path starts Fedora's installed shim with the
+UKI path as its load option; a private shim copy is only the documented
+recovery for firmware that ignores load options. One `ukify` invocation signs
+the PE and embeds the PCR 11 policy; one `ukify genkey` creates both key pairs
+under `/var/lib/nimbus/fde/`. The image is signed for `enter-initrd` only and
+its embedded command line carries the per-volume `rd.luks.options` unlock
+option plus `rd.shell=0 rd.emergency=reboot`. Enrollment binds PCR 7 + 14 +
+signed 11 and the observed clean-boot PCR 12/13 values, only while
+`BootCurrent` is the Nimbus entry, with `--tpm2-pcrlock=` empty. Phases:
+
+- [ ] 3.1 signed image through Fedora's shim, passphrase-only, Secure Boot on:
+  packages (`systemd-ukify`, `sbsigntools`, `systemd-boot-unsigned`,
+  `mokutil`), keys, signed build, `sbverify`, shim entry with the UKI path as
+  load option, MOK enrollment, passphrase boot, Fedora GRUB fallback, kernel
+  add/remove rebuild.
+- [ ] 3.2 VM enrollment: marker-gated dracut module (`tpm2-tss`,
+  `systemd-pcrphase`), embedded cmdline options, TPM keyslot, unattended boot,
+  passphrase fallback on the GRUB path, PCR 12/13 measurement, injected ESP
+  credential refuses to unseal.
+- [ ] 3.3 renewal, scoped removal, status and the failure matrix in the VM.
+  In source: status offers renewal when the recorded literal PCR 7/12/13/14
+  values are missing or no longer match, the offered task adds the new slot
+  before wiping the recorded one, and the record is rewritten from
+  root-observed state.
+- [ ] 3.4 rebuild the UKI after Plymouth and NVIDIA initramfs refreshes,
+  plan-visible. In source: the Plymouth trigger and the NVIDIA dracut refresh
+  invoke the approved internal rebuild for the running kernel when the marker
+  exists, disclosed by a plan note or the postinstall preview, and skipped
+  when the image already targets another kernel.
+- [ ] 3.5 laptop, then desktop with both MOKs enrolled before TPM enrollment.
+
+VM-only gates still open: `--tpm2-signature` at enrollment time (omit if
+cryptenroll refuses from the running system), the elected
+`rd.luks.options` unlock path, and the observed PCR 12/13 values. Hardware-only
+gates: firmware OptionalData handling, fall-through to the Fedora entry,
+fwupd/dbx renewal, and the desktop's Windows/NVIDIA entries.
 
 ## NVIDIA MOK helper
 

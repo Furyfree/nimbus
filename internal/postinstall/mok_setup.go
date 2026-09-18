@@ -42,6 +42,12 @@ func RunNVIDIAMOK(ctx context.Context, src native.Source, out, stderr io.Writer)
 	if err := stream("sudo", "--validate"); err != nil {
 		return err
 	}
+	// Read the marker before any change so a foreign or unreadable marker
+	// stops the task before akmods and dracut run.
+	rebuild, err := FDEUKIRebuildArgv(src, kernel)
+	if err != nil {
+		return fmt.Errorf("read the FDE marker: %w; no changes were made", err)
+	}
 	files, err := src.Run("sudo", "-n", "--", "find", "/etc/pki/akmods", "-maxdepth", "2", "(", "-path", MOKCertificate, "-o", "-path", mokPrivateKey, ")", "-print")
 	if err != nil {
 		return fmt.Errorf("inspect akmods key files: %w; no key generation was attempted", err)
@@ -64,7 +70,7 @@ func RunNVIDIAMOK(ctx context.Context, src native.Source, out, stderr io.Writer)
 	if err != nil || cert.SerialNumber.Sign() <= 0 {
 		return errors.New("akmods public certificate is invalid or has no positive serial number; existing keys were preserved")
 	}
-	state, err := mokEnrollment(src)
+	state, err := mokEnrollment(src, MOKCertificate)
 	if err != nil {
 		return err
 	}
@@ -82,6 +88,11 @@ func RunNVIDIAMOK(ctx context.Context, src native.Source, out, stderr io.Writer)
 	if err := stream("sudo", "--", "dracut", "--force", "--kver", kernel); err != nil {
 		return fmt.Errorf("refresh boot image: %w; enrollment was not changed; correct the error and retry", err)
 	}
+	if rebuild != nil {
+		if err := stream(rebuild[0], rebuild[1:]...); err != nil {
+			return fmt.Errorf("the initramfs was regenerated but the signed Nimbus image could not be rebuilt: %w; the previous image and the disk passphrase remain; enrollment was not changed", err)
+		}
+	}
 	if state == mokAbsent {
 		if _, err := fmt.Fprintln(out, "Choose a temporary MOK password in the native prompt. The reboot enrollment screen uses US/QWERTY. Nimbus does not record the password."); err != nil {
 			return err
@@ -89,7 +100,7 @@ func RunNVIDIAMOK(ctx context.Context, src native.Source, out, stderr io.Writer)
 		if err := stream("sudo", "--", "mokutil", "--import", MOKCertificate); err != nil {
 			return fmt.Errorf("request MOK enrollment: %w; signed modules and boot image remain; retry after correcting the error", err)
 		}
-		state, err = mokEnrollment(src)
+		state, err = mokEnrollment(src, MOKCertificate)
 		if err != nil {
 			return err
 		}
@@ -117,8 +128,8 @@ const (
 	mokTrusted
 )
 
-func mokEnrollment(src native.Source) (mokState, error) {
-	data, err := src.Run("sudo", "-n", "--", "mokutil", "--ignore-keyring", "--test-key", MOKCertificate)
+func mokEnrollment(src native.Source, certificate string) (mokState, error) {
+	data, err := src.Run("sudo", "-n", "--", "mokutil", "--ignore-keyring", "--test-key", certificate)
 	code := 0
 	if err != nil {
 		code = -1
@@ -134,15 +145,15 @@ func mokEnrollment(src native.Source) (mokState, error) {
 	// --ignore-keyring flag keeps the kernel-keyring shortcut from reporting a
 	// key that is not enrolled in the firmware.
 	switch strings.TrimSpace(string(data)) {
-	case MOKCertificate + " is already enrolled", MOKCertificate + " is already in db":
+	case certificate + " is already enrolled", certificate + " is already in db":
 		if code == 1 {
 			return mokTrusted, nil
 		}
-	case MOKCertificate + " is already in the enrollment request":
+	case certificate + " is already in the enrollment request":
 		if code == 1 {
 			return mokRequested, nil
 		}
-	case MOKCertificate + " is not enrolled":
+	case certificate + " is not enrolled":
 		if code == 0 {
 			return mokAbsent, nil
 		}

@@ -20,11 +20,7 @@ import (
 	"github.com/Furyfree/nimbus/internal/plan"
 )
 
-const fdeMarkerText = `# Nimbus owns this marker. Its presence activates the kernel-install
-# hook /etc/kernel/install.d/90-nimbus-uki.install, which rebuilds
-# /boot/efi/EFI/Linux/nimbus.efi for new kernels through the installed
-# engine. Removing the file stops rebuilds and keeps the current image.
-`
+const fdeMarkerText = plan.FDEMarkerText
 
 const fdeSizeSlack = 64 << 20
 
@@ -70,12 +66,15 @@ func fdeMarkerChange(src native.Source) (plan.FileChange, string, error) {
 }
 
 type fdeBootEntry struct {
-	ID     string
-	Loader string
+	ID      string
+	Label   string
+	Loader  string
+	Options string
+	Active  bool
 }
 
-// fdeBootEntries returns entries whose description is the Nimbus label from
-// plain efibootmgr output.
+// fdeBootEntries returns every firmware boot entry with its loader and load
+// option data, so the Fedora shim entry can be resolved as well as Nimbus's.
 func fdeBootEntries(output string) []fdeBootEntry {
 	var entries []fdeBootEntry
 	for line := range strings.SplitSeq(output, "\n") {
@@ -86,41 +85,172 @@ func fdeBootEntries(output string) []fdeBootEntry {
 		if !ok {
 			continue
 		}
+		active := strings.HasSuffix(rawID, "*")
 		id := strings.TrimSuffix(rawID, "*")
 		if _, err := strconv.ParseUint(id, 16, 16); err != nil {
 			continue
 		}
 		label, device, ok := strings.Cut(rest, "\t")
-		if !ok || strings.TrimSpace(label) != FDEBootLabel {
+		if !ok {
 			continue
 		}
-		entries = append(entries, fdeBootEntry{ID: id, Loader: fdeLoaderPath(device)})
+		loader, options := fdeSplitDevice(device)
+		if loader == "" {
+			continue
+		}
+		entries = append(entries, fdeBootEntry{ID: id, Label: strings.TrimSpace(label), Loader: loader, Options: options, Active: active})
 	}
 	return entries
 }
 
-// fdeLoaderPath normalizes the loader file path in an efibootmgr device path.
-// Long device-path forms may contain earlier ")/" pairs, so only the last one
-// separates the ESP from the loader file.
-func fdeLoaderPath(device string) string {
+// fdeBootOrder returns the BootOrder ids, or nil when the line is absent.
+func fdeBootOrder(output string) []string {
+	for line := range strings.SplitSeq(output, "\n") {
+		rest, ok := strings.CutPrefix(line, "BootOrder:")
+		if !ok {
+			continue
+		}
+		var ids []string
+		for _, id := range strings.Split(strings.TrimSpace(rest), ",") {
+			if id != "" {
+				ids = append(ids, strings.ToUpper(id))
+			}
+		}
+		return ids
+	}
+	return nil
+}
+
+// fdeCorrectEntryID returns the id of one active, matching Nimbus entry.
+func fdeCorrectEntryID(entries []fdeBootEntry, secure bool) (string, bool) {
+	for _, entry := range fdeNimbusEntries(entries) {
+		if fdeEntryMatches(entry, entries, secure) {
+			return entry.ID, true
+		}
+	}
+	return "", false
+}
+
+// fdeSplitDevice separates the loader file path from the trailing optional
+// data in an efibootmgr device path. It accepts both the raw form
+// (`...)/\EFI\fedora\shimx64.efi<options>`) and the `File(...)` form some
+// builds print.
+func fdeSplitDevice(device string) (string, string) {
 	index := strings.LastIndex(device, ")/")
 	if index < 0 {
-		return ""
+		return "", ""
 	}
-	return strings.TrimPrefix(strings.ReplaceAll(device[index+2:], "/", `\`), `\`)
+	rest := strings.TrimPrefix(strings.ReplaceAll(device[index+2:], "/", `\`), `\`)
+	if file := strings.Index(rest, "File("); file >= 0 {
+		loader, options := "", ""
+		if end := strings.Index(rest[file+len("File("):], ")"); end >= 0 {
+			loader = strings.TrimPrefix(rest[file+len("File("):file+len("File(")+end], ".")
+			tail := rest[file+len("File(")+end+1:]
+			if next := strings.Index(tail, "File("); next >= 0 {
+				if end2 := strings.Index(tail[next+len("File("):], ")"); end2 >= 0 {
+					options = strings.TrimPrefix(tail[next+len("File("):next+len("File(")+end2], ".")
+				}
+			}
+		}
+		return loader, options
+	}
+	end := strings.Index(strings.ToLower(rest), ".efi")
+	if end < 0 {
+		return rest, ""
+	}
+	end += len(".efi")
+	return rest[:end], rest[end:]
 }
 
-func fdeEntryCorrect(entries []fdeBootEntry) bool {
+func fdeLoaderPath(device string) string {
+	loader, _ := fdeSplitDevice(device)
+	return loader
+}
+
+// fdeNimbusEntries filters the firmware entries Nimbus owns by label.
+func fdeNimbusEntries(entries []fdeBootEntry) []fdeBootEntry {
+	var nimbus []fdeBootEntry
+	for _, entry := range entries {
+		if entry.Label == FDEBootLabel {
+			nimbus = append(nimbus, entry)
+		}
+	}
+	return nimbus
+}
+
+// fdeShimLoader resolves the installed Fedora shim from its own firmware
+// entry, so the signed chain follows the distribution instead of a hardcoded
+// path.
+func fdeShimLoader(entries []fdeBootEntry) (string, bool) {
+	for _, entry := range entries {
+		if entry.Label == "Fedora" && strings.Contains(strings.ToLower(entry.Loader), "shim") {
+			return entry.Loader, true
+		}
+	}
+	return "", false
+}
+
+// fdeOptionsEqual matches the load option data as efibootmgr prints it: raw
+// UCS-2 hex when unterminated, or text when the firmware kept a terminator.
+func fdeOptionsEqual(options, want string) bool {
+	if options == "" {
+		return want == ""
+	}
+	if strings.HasPrefix(options, "0x") || strings.HasPrefix(options, "0X") {
+		options = options[2:]
+	}
+	hex := len(options) > 0 && len(options)%4 == 0
+	for _, r := range options {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", r) {
+			hex = false
+			break
+		}
+	}
+	if hex {
+		// efibootmgr prints the raw UTF-16LE bytes in order, so each
+		// four-digit group is low byte first.
+		var decoded strings.Builder
+		for i := 0; i+4 <= len(options); i += 4 {
+			low, errLow := strconv.ParseUint(options[i:i+2], 16, 8)
+			high, errHigh := strconv.ParseUint(options[i+2:i+4], 16, 8)
+			if errLow != nil || errHigh != nil {
+				return false
+			}
+			decoded.WriteRune(rune(low | high<<8))
+		}
+		return decoded.String() == want
+	}
+	return options == want
+}
+
+// fdeEntryCorrect reports whether one active Nimbus entry matches the
+// reviewed loader, with the shim plus load option when Secure Boot is
+// enforced.
+func fdeEntryCorrect(entries []fdeBootEntry, secure bool) bool {
+	_, ok := fdeCorrectEntryID(entries, secure)
+	return ok
+}
+
+// fdeEntryMatches reports whether one entry matches the reviewed form.
+func fdeEntryMatches(entry fdeBootEntry, entries []fdeBootEntry, secure bool) bool {
+	if !entry.Active {
+		return false
+	}
+	if secure {
+		shim, ok := fdeShimLoader(entries)
+		if !ok {
+			return false
+		}
+		return strings.EqualFold(entry.Loader, shim) && fdeOptionsEqual(entry.Options, FDEBootLoader+" ")
+	}
 	want := strings.TrimPrefix(FDEBootLoader, `\`)
-	return slices.ContainsFunc(entries, func(entry fdeBootEntry) bool {
-		return strings.EqualFold(entry.Loader, want)
-	})
+	return strings.EqualFold(entry.Loader, want) && entry.Options == ""
 }
 
-// fdeEntryReady reports exactly one firmware entry pointing at the current
+// fdeEntryReady reports exactly one Nimbus entry pointing at the current
 // image; a same-label duplicate still needs cleanup.
-func fdeEntryReady(entries []fdeBootEntry) bool {
-	return len(entries) == 1 && fdeEntryCorrect(entries)
+func fdeEntryReady(entries []fdeBootEntry, secure bool) bool {
+	return len(fdeNimbusEntries(entries)) == 1 && fdeEntryCorrect(entries, secure)
 }
 
 func fdeBootEntriesOutput(src native.Source) ([]fdeBootEntry, error) {
@@ -168,11 +298,21 @@ func fdeESPDevice(src native.Source) (string, string, error) {
 // same-label entry is removed even when another same-label entry is correct,
 // so no shadowed duplicate keeps an earlier position in BootOrder.
 func fdeEnsureEntry(src native.Source, out, errOut io.Writer) error {
-	entries, err := fdeBootEntriesOutput(src)
+	raw, err := src.Run("efibootmgr")
 	if err != nil {
-		return err
+		return fmt.Errorf("inspect firmware boot entries: %w", err)
 	}
-	if fdeEntryReady(entries) {
+	entries := fdeBootEntries(string(raw))
+	secure, err := fdeSecureBoot(src)
+	if err != nil {
+		return fmt.Errorf("read the Secure Boot state: %w", err)
+	}
+	if fdeEntryReady(entries, secure) {
+		if id, ok := fdeCorrectEntryID(entries, secure); ok {
+			if err := fdePromoteEntry(src, out, errOut, fdeBootOrder(string(raw)), id); err != nil {
+				return err
+			}
+		}
 		_, err := fmt.Fprintln(out, "Firmware entry already points at the Nimbus image.")
 		return err
 	}
@@ -180,7 +320,14 @@ func fdeEnsureEntry(src native.Source, out, errOut io.Writer) error {
 	if err != nil {
 		return err
 	}
-	for _, entry := range entries {
+	shim := ""
+	if secure {
+		var ok bool
+		if shim, ok = fdeShimLoader(entries); !ok {
+			return errors.New("no Fedora shim boot entry was found; the signed chain cannot be created")
+		}
+	}
+	for _, entry := range fdeNimbusEntries(entries) {
 		if _, err := fmt.Fprintf(out, "$ sudo -- efibootmgr -b %s -B\n", entry.ID); err != nil {
 			return err
 		}
@@ -188,19 +335,52 @@ func fdeEnsureEntry(src native.Source, out, errOut io.Writer) error {
 			return fmt.Errorf("remove stale firmware entry %s: %w", entry.ID, err)
 		}
 	}
-	args := []string{"sudo", "--", "efibootmgr", "-c", "-d", disk, "-p", part, "-L", FDEBootLabel, "-l", FDEBootLoader}
+	args := []string{"sudo", "--", "efibootmgr", "-c", "-d", disk, "-p", part, "-L", FDEBootLabel, "-l"}
+	if secure {
+		args = append(args, `\`+shim, "-u", FDEBootLoader+" ")
+	} else {
+		args = append(args, FDEBootLoader)
+	}
 	if _, err := fmt.Fprintf(out, "$ %s\n", strings.Join(args, " ")); err != nil {
 		return err
 	}
 	if err := src.Stream(out, errOut, args[0], args[1:]...); err != nil {
 		return fmt.Errorf("create firmware entry: %w", err)
 	}
-	after, err := fdeBootEntriesOutput(src)
+	raw, err = src.Run("efibootmgr")
 	if err != nil {
 		return err
 	}
-	if !fdeEntryCorrect(after) {
+	entries = fdeBootEntries(string(raw))
+	if !fdeEntryCorrect(entries, secure) {
 		return errors.New("the firmware entry was created but does not reference the Nimbus image")
+	}
+	id, ok := fdeCorrectEntryID(entries, secure)
+	if !ok {
+		return errors.New("the Nimbus firmware entry disappeared after creation")
+	}
+	return fdePromoteEntry(src, out, errOut, fdeBootOrder(string(raw)), id)
+}
+
+// fdePromoteEntry puts the Nimbus entry first in BootOrder, so the firmware
+// boots the signed image by default while Fedora's entry stays next.
+func fdePromoteEntry(src native.Source, out, errOut io.Writer, order []string, id string) error {
+	if len(order) > 0 && strings.EqualFold(order[0], id) {
+		_, err := fmt.Fprintln(out, "The Nimbus image is already the default boot target.")
+		return err
+	}
+	next := []string{id}
+	for _, existing := range order {
+		if !strings.EqualFold(existing, id) {
+			next = append(next, existing)
+		}
+	}
+	args := append([]string{"sudo", "--", "efibootmgr", "-o"}, strings.Join(next, ","))
+	if _, err := fmt.Fprintf(out, "$ %s\n", strings.Join(args, " ")); err != nil {
+		return err
+	}
+	if err := src.Stream(out, errOut, args[0], args[1:]...); err != nil {
+		return fmt.Errorf("set the default boot target: %w", err)
 	}
 	return nil
 }
@@ -258,12 +438,67 @@ func FDESetupCommands(task Task) ([][]string, error) {
 	if err := validateFDESetup(task); err != nil {
 		return nil, err
 	}
-	return [][]string{
-		{"sudo", "--", "nimbus", "internal", "system-file", "--plan", "<approved-digest>", "--payload", "<verified-marker-change>"},
-		{"sudo", "--", "nimbus", "internal", "fde-uki", "add", "<running-kernel>"},
-		{"sudo", "--", "efibootmgr", "-b", "<stale-nimbus-entry>", "-B"},
-		{"sudo", "--", "efibootmgr", "-c", "-d", "<esp-disk>", "-p", "<esp-partition>", "-L", FDEBootLabel, "-l", FDEBootLoader},
-	}, nil
+	commands := [][]string{
+		{"sudo", "--", "nimbus", "internal", "fde-uki", "genkey"},
+	}
+	if task.fdeSecure {
+		commands = append(commands, []string{"sudo", "--", "mokutil", "--import", FDEMOKCertificate()})
+	}
+	commands = append(commands,
+		[]string{"sudo", "--", "nimbus", "internal", "system-file", "--plan", "<approved-digest>", "--payload", "<verified-marker-change>"},
+		[]string{"sudo", "--", "nimbus", "internal", "fde-uki", "add", "<running-kernel>"},
+		[]string{"sudo", "--", "efibootmgr", "-b", "<stale-nimbus-entry>", "-B"},
+		[]string{"sudo", "--", "efibootmgr", "-o", "<nimbus-entry>,<remaining-boot-order>"},
+	)
+	entry := []string{"sudo", "--", "efibootmgr", "-c", "-d", "<esp-disk>", "-p", "<esp-partition>", "-L", FDEBootLabel, "-l"}
+	if task.fdeSecure {
+		entry = append(entry, "<fedora-shim-loader>", "-u", FDEBootLoader+" ")
+	} else {
+		entry = append(entry, FDEBootLoader)
+	}
+	return append(commands, entry), nil
+}
+
+// fdeMOKState maps the repository's MOK parser onto the FDE certificate.
+func fdeMOKState(src native.Source, der string) (bool, bool, error) {
+	state, err := mokEnrollment(src, der)
+	if err != nil {
+		return false, false, err
+	}
+	switch state {
+	case mokTrusted:
+		return true, false, nil
+	case mokRequested:
+		return false, true, nil
+	default:
+		return false, false, nil
+	}
+}
+
+// fdeEnsureMOK requests the native MOK enrollment once. Nimbus never sees the
+// temporary password; mokutil and MokManager prompt for it directly.
+func fdeEnsureMOK(src native.Source, out, errOut io.Writer, keys fdeKeyPaths) error {
+	enrolled, pending, err := fdeMOKState(src, keys.mokDER)
+	if err != nil {
+		return err
+	}
+	if enrolled {
+		_, err := fmt.Fprintln(out, "The Nimbus MOK certificate is already enrolled.")
+		return err
+	}
+	if pending {
+		_, err := fmt.Fprintln(out, "A MOK enrollment for this certificate is already pending; complete Enroll MOK at the next boot.")
+		return err
+	}
+	args := []string{"sudo", "--", "mokutil", "--import", keys.mokDER}
+	if _, err := fmt.Fprintf(out, "$ %s\n", strings.Join(args, " ")); err != nil {
+		return err
+	}
+	if err := src.Stream(out, errOut, args[0], args[1:]...); err != nil {
+		return fmt.Errorf("request MOK enrollment: %w", err)
+	}
+	_, err = fmt.Fprintln(out, "Complete Enroll MOK in MokManager at the next boot with the temporary password you entered.")
+	return err
 }
 
 // RunFDESetup runs only after the caller previews, approves, locks and
@@ -297,9 +532,6 @@ func RunFDESetup(ctx context.Context, src native.Source, out, errOut io.Writer, 
 	if err != nil {
 		return fmt.Errorf("read the Secure Boot state: %w", err)
 	}
-	if secure {
-		return errors.New("Secure Boot is enabled; the signed shim chain is not implemented yet, and no changes were made")
-	}
 	kernelOut, err := src.Run("uname", "-r")
 	if err != nil {
 		return err
@@ -311,11 +543,20 @@ func RunFDESetup(ctx context.Context, src native.Source, out, errOut io.Writer, 
 	if err := fdeSpaceCheck(src, kernel, out); err != nil {
 		return err
 	}
-	ready, err := fdeMarkerReady(src)
+	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	exe, err := os.Executable()
+	if err := stream("sudo", "--", exe, "internal", "fde-uki", "genkey"); err != nil {
+		return fmt.Errorf("generate the FDE key material: %w", err)
+	}
+	keys := fdeKeys()
+	if secure {
+		if err := fdeEnsureMOK(src, out, errOut, keys); err != nil {
+			return err
+		}
+	}
+	ready, err := fdeMarkerReady(src)
 	if err != nil {
 		return err
 	}
@@ -355,7 +596,11 @@ func RunFDESetup(ctx context.Context, src native.Source, out, errOut io.Writer, 
 	if err := fdeEnsureEntry(src, out, errOut); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintln(out, "Reboot when ready to boot the Nimbus image. Fedora's GRUB entries and the disk passphrase remain the fallback path.")
+	if secure {
+		_, err = fmt.Fprintln(out, "Reboot when ready. Complete Enroll MOK in MokManager with the temporary password, then boot the Nimbus image; Fedora's GRUB entries and the disk passphrase remain the fallback path.")
+	} else {
+		_, err = fmt.Fprintln(out, "Reboot when ready to boot the Nimbus image. Fedora's GRUB entries and the disk passphrase remain the fallback path.")
+	}
 	return err
 }
 
@@ -406,16 +651,23 @@ func VerifyFDE(src native.Source, t Task) Task {
 		t.Status, t.Detail = Pending, "Setup is not active; run the approved FDE setup first."
 		return t
 	}
-	entries, err := fdeBootEntriesOutput(src)
+	bootOutput, err := src.Run("efibootmgr")
 	if err != nil {
 		t.Detail = "The firmware entries could not be inspected: " + err.Error()
 		return t
 	}
-	if !fdeEntryReady(entries) {
+	entries := fdeBootEntries(string(bootOutput))
+	secure, err := fdeSecureBoot(src)
+	if err != nil {
+		t.Detail = "The Secure Boot state could not be read: " + err.Error()
+		return t
+	}
+	t.fdeSecure = secure
+	if !fdeEntryReady(entries, secure) {
 		t.Status, t.Detail = Pending, "No correct Nimbus firmware entry was observed; rerun the approved setup to repair it."
 		return t
 	}
-	expected, err := fdeCmdline(src)
+	expected, err := fdeBuildCmdline(src)
 	if err != nil {
 		t.Detail = "The expected command line could not be observed: " + err.Error()
 		return t
@@ -433,9 +685,32 @@ func VerifyFDE(src native.Source, t Task) Task {
 		t.Reboot = true
 		return t
 	}
-	for _, want := range []string{".linux:", ".initrd:", ".cmdline:", ".osrel:", ".uname:"} {
+	for _, want := range []string{".linux:", ".initrd:", ".cmdline:", ".osrel:", ".uname:", ".pcrsig:", ".pcrpkey:"} {
 		if !slices.Contains(inspected.sections, want) {
 			return damaged("The Nimbus image lacks the " + strings.TrimSuffix(want, ":") + " section; rebuild it with the approved setup.")
+		}
+	}
+	if secure {
+		if !slices.Contains(inspected.sections, ".sbat:") {
+			return damaged("The Nimbus image lacks its SBAT metadata; rebuild it with the approved setup.")
+		}
+		keys := fdeKeys()
+		enrolled, pending, err := fdeMOKState(src, keys.mokDER)
+		if err != nil {
+			t.VerificationNeedsRoot = true
+			t.Detail = "The MOK enrollment state could not be read; retry when sudo is available."
+			return t
+		}
+		if !enrolled {
+			t.Status = Pending
+			t.Action = &Action{Kind: SetupFDE}
+			t.Reboot = true
+			if pending {
+				t.Detail = "MOK enrollment is pending; complete Enroll MOK at the next boot."
+			} else {
+				t.Detail = "The Nimbus MOK certificate is not enrolled; rerun the approved setup."
+			}
+			return t
 		}
 	}
 	if inspected.cmdline != expected {
@@ -447,7 +722,79 @@ func VerifyFDE(src native.Source, t Task) Task {
 	if _, err := src.Run("stat", "--format=%s", "--", fdeKernelDir+"/"+inspected.uname+"/vmlinuz"); err != nil {
 		return damaged("The Nimbus image embeds kernel " + inspected.uname + ", whose kernel package is no longer installed; rebuild it for an installed kernel with the approved setup.")
 	}
-	t.Status, t.Detail = Complete, "The Nimbus image parses, embeds the expected command line for an installed kernel and its firmware entry is correct. TPM enrollment and automatic unlock are still not configured."
+	if inspected.initrd == "" {
+		return damaged("The Nimbus image does not identify its initramfs; rebuild it with the approved setup.")
+	}
+	sum, err := src.Run("sudo", "-n", "--", "sha256sum", "/boot/initramfs-"+inspected.uname+".img")
+	if err != nil {
+		t.VerificationNeedsRoot = true
+		t.Detail = "The embedded initramfs could not be compared with /boot: " + err.Error()
+		return t
+	}
+	fields := strings.Fields(string(sum))
+	if len(fields) == 0 {
+		t.Detail = "The embedded initramfs freshness could not be established: sha256sum returned no digest."
+		return t
+	}
+	if !strings.EqualFold(fields[0], inspected.initrd) {
+		return damaged("The Nimbus image embeds an initramfs that differs from /boot; rebuild it with the approved setup.")
+	}
+	tokens, err := fdeTokens(src)
+	if err != nil {
+		t.VerificationNeedsRoot = true
+		t.Detail = "The LUKS2 TPM token state could not be read: " + err.Error()
+		return t
+	}
+	record, owned, err := fdeEnrollment(src)
+	if err != nil {
+		t.VerificationNeedsRoot = true
+		t.Detail = "The FDE enrollment record could not be read: " + err.Error()
+		return t
+	}
+	entryID, _ := fdeCorrectEntryID(entries, secure)
+	switch {
+	case len(tokens) == 1 && owned && tokens[0].Slots == 1 && record.Keyslot == tokens[0].Keyslot && record.Token == tokens[0].ID:
+		current := fdeBootCurrentID(string(bootOutput))
+		if current == "" {
+			t.VerificationNeedsRoot = true
+			t.Detail = "The current firmware boot entry could not be determined; verify the Nimbus entry with root access."
+			return t
+		}
+		if !strings.EqualFold(current, entryID) {
+			t.Status = Complete
+			t.Detail = "The recorded TPM keyslot is present. This boot used another firmware entry, where the policy does not apply; reboot through the Nimbus image to unlock automatically."
+			return t
+		}
+		match, err := fdePCRsMatch(src, record)
+		if err != nil {
+			t.VerificationNeedsRoot = true
+			t.Detail = "The measured PCR values could not be read: " + err.Error()
+			return t
+		}
+		if !match {
+			t.Status = Pending
+			t.Action = &Action{Kind: RenewFDE}
+			t.Reboot = true
+			t.Detail = "The recorded measured state is missing or differs from this boot, so the TPM policy no longer matches. Renew the enrollment to record the current values; until then the disk passphrase unlocks."
+			return t
+		}
+		t.Status = Complete
+		t.Detail = "The signed Nimbus image is booting and the recorded TPM keyslot matches the recorded measured state. Reboots unlock automatically; the disk passphrase remains the fallback."
+	case len(tokens) == 1 && (!owned || tokens[0].Slots != 1):
+		t.Status = Blocked
+		t.Detail = "A systemd-tpm2 token exists that Nimbus does not own as a single-key slot; " + orphanHint(tokens[0])
+	case len(tokens) > 1:
+		t.Status = Blocked
+		t.Detail = "More than one systemd-tpm2 token exists; inspect the LUKS2 tokens before changing enrollment."
+	case len(tokens) == 1:
+		t.Status = Blocked
+		t.Detail = "A systemd-tpm2 token exists that Nimbus does not own; " + orphanHint(tokens[0])
+	default:
+		t.Status = Pending
+		t.Action = &Action{Kind: EnrollFDE}
+		t.Reboot = true
+		t.Detail = "The signed Nimbus image is booting. Reboot into it if this boot did not, then enroll TPM automatic unlock; the disk passphrase remains available."
+	}
 	return t
 }
 
@@ -457,6 +804,7 @@ type fdeInspectResult struct {
 	sections []string
 	cmdline  string
 	uname    string
+	initrd   string
 }
 
 // fdeInspect extracts section names and the text payloads Nimbus verifies.
@@ -482,6 +830,11 @@ func fdeInspect(output string) fdeInspectResult {
 			continue
 		}
 		if !inText {
+			if section == ".initrd:" {
+				if rest, ok := strings.CutPrefix(trimmed, "sha256:"); ok {
+					result.initrd = strings.TrimSpace(rest)
+				}
+			}
 			inText = trimmed == "text:"
 			continue
 		}

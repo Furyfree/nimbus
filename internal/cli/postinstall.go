@@ -41,13 +41,13 @@ type postinstallSnapshot struct {
 }
 
 func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cobra.Command {
-	var yes, preview, markDone, reset, showDiff bool
+	var yes, preview, markDone, reset, showDiff, remove bool
 	var onepasswordItem string
 	cmd := &cobra.Command{
 		Use: taskID, Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			replaceDTU := false
-			if opts.json && (yes || markDone || reset || !preview) {
+			if opts.json && (yes || markDone || reset || remove || !preview) {
 				return usageError{errors.New("postinstall --json lists tasks only; it cannot select or approve an action")}
 			}
 			if onepasswordItem != "" && !postinstall.ValidDTUItem(onepasswordItem) {
@@ -74,6 +74,9 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 			}
 			if markDone {
 				return markExistingTask(cmd, src, before, task, yes)
+			}
+			if remove {
+				return runFDERemoveAction(cmd, src, before, *flags, yes, preview)
 			}
 			if task.ID == "onepassword" && !preview {
 				return runOnePassword(cmd, src, before, task, yes, false, showDiff)
@@ -198,6 +201,10 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 				return postinstall.RunNVIDIAMOK(cmd.Context(), src, cmd.OutOrStdout(), cmd.ErrOrStderr())
 			} else if task.Action.Kind == postinstall.SetupFDE {
 				return runFDESetup(cmd, src, before, task)
+			} else if task.Action.Kind == postinstall.EnrollFDE {
+				return runFDEEnroll(cmd, src, before, task)
+			} else if task.Action.Kind == postinstall.RenewFDE {
+				return runFDERenew(cmd, src, before, task)
 			} else {
 				argv := commands[0]
 				runErr = src.Stream(cmd.OutOrStdout(), cmd.ErrOrStderr(), argv[0], argv[1:]...)
@@ -250,10 +257,16 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 		cmd.Flags().BoolVar(&showDiff, "diff", false, "show the full private file diff during guided setup, without a pager")
 		cmd.MarkFlagsMutuallyExclusive("diff", "plan", "mark-done", "reset")
 	}
+	if taskID == "fde" {
+		cmd.Flags().BoolVar(&remove, "remove", false, "remove the Nimbus TPM enrollment, firmware entry, image and key material; the disk passphrase remains")
+	}
 	if cmd.Flags().Lookup("mark-done") != nil {
 		cmd.MarkFlagsMutuallyExclusive("plan", "mark-done", "reset")
 	} else {
 		cmd.MarkFlagsMutuallyExclusive("plan", "reset")
+	}
+	if cmd.Flags().Lookup("remove") != nil {
+		cmd.MarkFlagsMutuallyExclusive("remove", "reset")
 	}
 	return cmd
 }
@@ -329,6 +342,15 @@ func postinstallCommands(task postinstall.Task) ([][]string, error) {
 	}
 	if task.Action != nil && task.Action.Kind == postinstall.SetupFDE {
 		return postinstall.FDESetupCommands(task)
+	}
+	if task.Action != nil && task.Action.Kind == postinstall.EnrollFDE {
+		return postinstall.FDEEnrollCommands(task)
+	}
+	if task.Action != nil && task.Action.Kind == postinstall.RemoveFDE {
+		return postinstall.FDERemoveCommands(task)
+	}
+	if task.Action != nil && task.Action.Kind == postinstall.RenewFDE {
+		return postinstall.FDERenewCommands(task)
 	}
 	if task.Action != nil && len(task.Action.Commands) != 0 {
 		return nil, errors.New("unexpected native command list")
@@ -441,7 +463,12 @@ func renderPostinstall(out io.Writer, view postinstallView) error {
 
 // Replacement deliberately defaults to No, unlike the normal apply prompt.
 func confirmDTUReplacement(in io.Reader, out io.Writer) bool {
-	if _, err := fmt.Fprint(out, "Delete and replace? [y/N] "); err != nil {
+	return confirmDefaultNo(in, out, "Delete and replace? [y/N] ")
+}
+
+// confirmDefaultNo accepts only an explicit yes; Enter keeps the safe default.
+func confirmDefaultNo(in io.Reader, out io.Writer, prompt string) bool {
+	if _, err := fmt.Fprint(out, prompt); err != nil {
 		return false
 	}
 	line, err := bufio.NewReader(in).ReadString('\n')

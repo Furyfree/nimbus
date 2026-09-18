@@ -13,7 +13,7 @@ const setupModeVar = "/sys/firmware/efi/efivars/SetupMode-8be4df61-93ca-11d2-aa0
 
 func fdeFixture(t *testing.T) (Inputs, *nativetest.FakeSource) {
 	t.Helper()
-	in, src := fixture("systemd-ukify", "sbsigntools", "efibootmgr")
+	in, src := fixture("systemd-ukify", "systemd-boot-unsigned", "sbsigntools", "efibootmgr", "mokutil")
 	if src.Dirs == nil {
 		src.Dirs = map[string][]string{}
 	}
@@ -28,7 +28,7 @@ func fdeFixture(t *testing.T) (Inputs, *nativetest.FakeSource) {
 	src.Dirs["/sys/firmware/efi/efivars"] = []string{"SetupMode-8be4df61-93ca-11d2-aa0d-00e098032b8c"}
 	src.Files[setupModeVar] = []byte{6, 0, 0, 0, 0}
 	src.Files[FDEHookPath] = []byte("#!/bin/sh\n")
-	for _, tool := range []string{"systemd-cryptenroll", "ukify", "sbsign", "kernel-install", "dracut", "efibootmgr"} {
+	for _, tool := range []string{"systemd-cryptenroll", "ukify", "sbsign", "kernel-install", "dracut", "efibootmgr", "mokutil", "sbverify"} {
 		src.Paths[tool] = "/usr/bin/" + tool
 	}
 	src.Commands[nativetest.Key("efibootmgr")] = []byte("BootCurrent: 0008\nTimeout: 0 seconds\nBootOrder: 0008,0000\nBoot0008* Fedora\tHD(1,GPT,78f7ab0d-3bb7-4c71-ba1b-d8f8db372fdc,0x800,0x200000)/\\EFI\\fedora\\shimx64.efi\n")
@@ -125,11 +125,11 @@ func TestFDEInspectionStates(t *testing.T) {
 			t.Fatalf("got %+v", got)
 		}
 	})
-	t.Run("secure boot enabled blocks", func(t *testing.T) {
+	t.Run("secure boot enabled offers signed setup", func(t *testing.T) {
 		in, src := fdeFixture(t)
 		in.Facts.SecureBoot.Value = inspect.SecureBootEnabled
 		got := findTask(t, Inspect(src, in), "fde")
-		if got.Status != Blocked || got.Action != nil || !strings.Contains(got.Detail, "next milestone") {
+		if got.Status != Pending || got.Action == nil || got.Action.Kind != SetupFDE || !got.fdeSecure || !strings.Contains(got.Detail, "MOK enrollment") {
 			t.Fatalf("got %+v", got)
 		}
 	})

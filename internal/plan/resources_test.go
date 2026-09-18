@@ -652,6 +652,39 @@ func TestGreeterAppearanceChangeExplainsDeferredActivation(t *testing.T) {
 	}
 }
 
+func TestPlymouthTriggerDisclosesFDEImageRebuild(t *testing.T) {
+	b, src := resourceBuilder()
+	src.Files["/usr/share/plymouth/themes/nimbus/nimbus.plymouth"] = []byte("theme")
+	target := "/etc/grub.d/36_paper_dark"
+	have := inspect.SystemFile{Exists: true, Content: []byte("snippet"), Owner: "root", Group: "root", Mode: "0644"}
+	answerFile(src, target, have)
+	b.in.Resolved.Files = []definitions.ResolvedFile{{Target: target, Content: have.Content, Owner: have.Owner, Group: have.Group, Mode: have.Mode, Triggers: []string{"plymouth-theme"}}}
+	trigger := func(ops []Operation) *Operation {
+		for i := range ops {
+			if ops[i].ID == "trigger:plymouth-theme" {
+				return &ops[i]
+			}
+		}
+		return nil
+	}
+	disclosed := func(op *Operation) bool {
+		return op != nil && slices.ContainsFunc(op.Notes, func(note string) bool {
+			return strings.Contains(note, "signed Nimbus image")
+		})
+	}
+	if disclosed(trigger(b.systemResources(nil))) {
+		t.Fatal("the FDE rebuild was disclosed without the marker")
+	}
+	src.Files[FDEMarkerPath] = []byte(FDEMarkerText)
+	if !disclosed(trigger(b.systemResources(nil))) {
+		t.Fatal("the FDE rebuild was not disclosed with the marker")
+	}
+	src.Files[FDEMarkerPath] = []byte("foreign\n")
+	if disclosed(trigger(b.systemResources(nil))) {
+		t.Fatal("the FDE rebuild was disclosed for a foreign marker")
+	}
+}
+
 func TestPlymouthRemovalRestoresRecordedTheme(t *testing.T) {
 	b, src := resourceBuilder()
 	src.Commands[nativetest.Key("plymouth-set-default-theme")] = []byte("nimbus\n")

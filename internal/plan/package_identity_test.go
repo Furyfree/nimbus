@@ -59,12 +59,12 @@ func TestFDEActiveBlocksPackageRemoval(t *testing.T) {
 	id := "package:dnf:systemd-ukify"
 	b, src := identityBuilder([]inspect.Package{{Name: "systemd-ukify", Arch: "x86_64", Version: "1", Release: "1"}}, nil,
 		map[string]state.Receipt{id: {Resource: id, Provider: "dnf", Package: "systemd-ukify.x86_64", Paths: []string{"component:fde"}}})
-	src.Files = map[string][]byte{fdeMarkerPath: []byte("enabled\n")}
+	src.Files = map[string][]byte{FDEMarkerPath: []byte("enabled\n")}
 	ops := b.ownedRemovals()
 	if len(ops) != 1 || !strings.Contains(ops[0].Blocked, "FDE setup is active") {
 		t.Fatalf("armed FDE did not block removal: %+v", ops)
 	}
-	delete(src.Files, fdeMarkerPath)
+	delete(src.Files, FDEMarkerPath)
 	src.Commands[nativetest.Key("dnf5", "--assumeno", "--cacheonly", "remove", "--no-autoremove", "systemd-ukify.x86_64")] = previewText([]TxPackage{{Name: "systemd-ukify", Arch: "x86_64", EVR: "1-1", Section: "removing", Repository: "@System"}})
 	if ops = b.ownedRemovals(); len(ops) != 1 || ops[0].Blocked != "" {
 		t.Fatalf("cleared marker must allow cleanup: %+v", ops)

@@ -257,6 +257,39 @@ func TestMOKNativeEnrollmentStates(t *testing.T) {
 	}
 }
 
+func TestMOKPreviewDisclosesFDEImageRebuild(t *testing.T) {
+	in, src := fixture("akmod-nvidia", "akmods", "mokutil")
+	in.Resolved.Components = []definitions.ResolvedComponent{{ID: "nvidia"}}
+	in.Facts.SecureBoot.Value = inspect.SecureBootEnabled
+	for _, tool := range []string{"sudo", "dracut", "modinfo", "nvidia-smi"} {
+		src.Paths[tool] = "/usr/bin/" + tool
+	}
+	src.Files[MOKCertificate] = []byte("certificate supplied to native validator")
+	key := nativetest.Key("mokutil", "--ignore-keyring", "--test-key", MOKCertificate)
+	src.Commands[key] = []byte(MOKCertificate + " is already enrolled")
+	src.ExitCodes = map[string]int{key: 1}
+	disclosed := func(t *testing.T, src *nativetest.FakeSource) bool {
+		t.Helper()
+		got := findTask(t, Inspect(src, in), "nvidia-mok")
+		return slices.ContainsFunc(got.Instructions, func(line string) bool {
+			return strings.Contains(line, "fde-uki add")
+		})
+	}
+	if disclosed(t, src) {
+		t.Fatal("the FDE rebuild was disclosed without the marker")
+	}
+	src.Files[FDEUKIMarker] = []byte(fdeMarkerText)
+	if !disclosed(t, src) {
+		t.Fatal("the FDE rebuild was not disclosed with the marker")
+	}
+	delete(src.Files, FDEUKIMarker)
+	src.Dirs = map[string][]string{FDEUKIMarker: {}}
+	got := findTask(t, Inspect(src, in), "nvidia-mok")
+	if got.Status != Blocked || !strings.Contains(got.Detail, "could not be read") {
+		t.Fatalf("an unreadable marker was not blocked: %+v", got)
+	}
+}
+
 func TestFingerprintReadOnlyObservation(t *testing.T) {
 	for _, test := range []struct {
 		name, devices, fingers string
