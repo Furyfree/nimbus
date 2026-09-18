@@ -224,6 +224,9 @@ func fdeEnrollEligible(src native.Source) error {
 	if current := fdeBootCurrentID(string(out)); !strings.EqualFold(current, id) {
 		return fmt.Errorf("this boot used firmware entry %s, not the Nimbus image entry %s; reboot into the Nimbus image before enrolling", current, id)
 	}
+	if _, err := fdeSRKFingerprint(src); err != nil {
+		return fmt.Errorf("the running TPM SRK public key is unavailable (%w); enrollment was not changed; retry after systemd-tpm2-setup completes", err)
+	}
 	if secure {
 		keys := fdeKeys()
 		enrolled, pending, err := fdeMOKState(src, keys.mokDER)
@@ -519,23 +522,35 @@ func fdePCRsMatch(src native.Source, record FDEEnrollment) (bool, error) {
 	return true, nil
 }
 
-// fdeTPMSRKFile is systemd's SRK public key for the running TPM. It is
-// world-readable and changes with the TPM, so it identifies the enrolled TPM
-// without another privileged read.
-const fdeTPMSRKFile = "/var/lib/systemd/tpm2-srk-public-key.tpm2b_public"
+// fdeTPMSRKFile is the live TPM's SRK public key as published by
+// systemd-tpm2-setup-early on tmpfs. A disk copy never carries it, and it is
+// world-readable, so it identifies the running TPM without a privileged read.
+const fdeTPMSRKFile = "/run/systemd/tpm2-srk-public-key.tpm2b_public"
 
-// fdeSRKFingerprint hashes the live TPM's SRK public key. An empty record
-// value means the record predates the fingerprint and does not match.
+// fdeTPMSRKPersistentFile is the persistent copy systemd keeps on the root
+// filesystem for the next boot. It is only a fallback: a disk copy carries
+// the old value until a boot refreshes it.
+const fdeTPMSRKPersistentFile = "/var/lib/systemd/tpm2-srk-public-key.tpm2b_public"
+
+// fdeSRKFingerprint hashes the running TPM's SRK public key from the live
+// tmpfs copy, falling back to the persistent copy only when the live one is
+// absent. An empty record value means the record predates the fingerprint.
 func fdeSRKFingerprint(src native.Source) (string, error) {
-	data, err := src.ReadFile(fdeTPMSRKFile)
-	if err != nil {
-		return "", fmt.Errorf("read the TPM SRK public key: %w", err)
+	var errs []error
+	for _, path := range []string{fdeTPMSRKFile, fdeTPMSRKPersistentFile} {
+		data, err := src.ReadFile(path)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("read %s: %w", path, err))
+			continue
+		}
+		if len(data) == 0 {
+			errs = append(errs, fmt.Errorf("%s is empty", path))
+			continue
+		}
+		sum := sha256.Sum256(data)
+		return fmt.Sprintf("sha256:%x", sum), nil
 	}
-	if len(data) == 0 {
-		return "", errors.New("the TPM SRK public key is empty")
-	}
-	sum := sha256.Sum256(data)
-	return fmt.Sprintf("sha256:%x", sum), nil
+	return "", errors.Join(errs...)
 }
 
 // fdeTPMSRKMatches reports whether the live TPM is the one the record bound.

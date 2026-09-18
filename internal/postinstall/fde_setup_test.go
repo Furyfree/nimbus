@@ -2,10 +2,8 @@ package postinstall
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -397,11 +395,19 @@ func TestFDEEnrollmentRecord(t *testing.T) {
 		t.Fatalf("record mode=%v err=%v", info.Mode().Perm(), err)
 	}
 	data, err := ReadFDEEnrollment()
-	if err != nil || !strings.Contains(string(data), `"enrolled_at"`) || !strings.Contains(string(data), `"keyslot":"1"`) || !strings.Contains(string(data), `"tpm_srk":"sha256:`) {
+	if err != nil || !strings.Contains(string(data), `"enrolled_at"`) || !strings.Contains(string(data), `"keyslot":"1"`) ||
+		!strings.Contains(string(data), `"tpm_srk":"sha256:85e48b76b12bf2f9a87001bb216d0744fb9a6eaf8ad8c10e850332b90aef1ab8"`) {
 		t.Fatalf("record roundtrip: %q, %v", data, err)
 	}
 	if err := WriteFDEEnrollment("1", "9"); err == nil {
 		t.Fatal("an unobserved token was accepted")
+	}
+	if fake, ok := fdeRootSource.(*nativetest.FakeSource); ok {
+		delete(fake.Files, fdeTPMSRKFile)
+		if err := WriteFDEEnrollment("1", "0"); err == nil || !strings.Contains(err.Error(), "srk-public-key") {
+			t.Fatalf("a missing TPM SRK was accepted: %v", err)
+		}
+		fake.Files[fdeTPMSRKFile] = []byte("srk-public-key")
 	}
 	if err := WriteFDEEnrollment("all", "0"); err == nil {
 		t.Fatal("a non-numeric keyslot was accepted")
@@ -496,6 +502,7 @@ func fdeEnrollFixture(t *testing.T) *fdeEnrollSource {
 	base.Files[FDEUKIMarker] = []byte(fdeMarkerText)
 	base.Files[fdeCmdlineFile] = []byte(fdeTestBase + "\n")
 	base.Files[fdeCrypttab] = []byte("luks-1 UUID=1 none discard,x-initrd.attach\n")
+	base.Files[fdeTPMSRKFile] = []byte("srk-public-key")
 	base.Dirs["/sys/firmware/efi/efivars"] = []string{}
 	base.Commands[nativetest.Key("efibootmgr")] = []byte("BootCurrent: 0009\nBootOrder: 0009,0008\n" +
 		"Boot0008* Fedora\tHD(1,GPT," + guid + ",0x800,0x200000)/\\EFI\\fedora\\shimx64.efi\n" +
@@ -736,6 +743,7 @@ func TestFDEEnrollEligibility(t *testing.T) {
 		src := &nativetest.FakeSource{Commands: map[string][]byte{}, Failures: map[string]string{}, Files: map[string][]byte{}, Dirs: map[string][]string{}, Paths: map[string]string{}}
 		src.Files[FDEUKIMarker] = []byte(fdeMarkerText)
 		src.Files[fdeCmdlineFile] = []byte(fdeTestBase + "\n")
+		src.Files[fdeTPMSRKFile] = []byte("srk-public-key")
 		src.Dirs["/sys/firmware/efi/efivars"] = []string{}
 		src.Commands[nativetest.Key("efibootmgr")] = []byte("BootCurrent: 0009\nBootOrder: 0009,0008\n" +
 			"Boot0008* Fedora\tHD(1,GPT," + guid + ",0x800,0x200000)/\\EFI\\fedora\\shimx64.efi\n" +
@@ -756,6 +764,11 @@ func TestFDEEnrollEligibility(t *testing.T) {
 	delete(src.Files, FDEUKIMarker)
 	if err := fdeEnrollEligible(src); err == nil || !strings.Contains(err.Error(), "not active") {
 		t.Fatalf("inactive setup was accepted: %v", err)
+	}
+	src = base()
+	delete(src.Files, fdeTPMSRKFile)
+	if err := fdeEnrollEligible(src); err == nil || !strings.Contains(err.Error(), "SRK public key is unavailable") {
+		t.Fatalf("a missing TPM SRK was accepted: %v", err)
 	}
 }
 
@@ -930,14 +943,13 @@ func fdeStubEnrollmentState(t *testing.T, src fdeInspectSource) {
 	src.Commands[nativetest.Key("sudo", "-n", "--", "/usr/bin/nimbus", "internal", "fde-uki", "state")] = []byte("")
 }
 
-// fdeSRKFixture writes the TPM SRK public key fixture and returns its
-// ownership-record fingerprint.
+// fdeSRKFixture writes the live TPM SRK public key fixture and returns the
+// ownership-record fingerprint. The digest is pinned so a format change in
+// the implementation cannot pass unnoticed.
 func fdeSRKFixture(t *testing.T, src *nativetest.FakeSource) string {
 	t.Helper()
-	content := []byte("srk-public-key")
-	src.Files[fdeTPMSRKFile] = content
-	sum := sha256.Sum256(content)
-	return fmt.Sprintf("sha256:%x", sum)
+	src.Files[fdeTPMSRKFile] = []byte("srk-public-key")
+	return "sha256:85e48b76b12bf2f9a87001bb216d0744fb9a6eaf8ad8c10e850332b90aef1ab8"
 }
 
 // fdeStubEnrollment registers the native token metadata and the ownership
@@ -1075,13 +1087,23 @@ func TestVerifyFDE(t *testing.T) {
 			t.Fatalf("got %+v", got)
 		}
 	})
-	t.Run("an unreadable SRK needs root verification", func(t *testing.T) {
+	t.Run("an unreadable SRK stays unknown", func(t *testing.T) {
 		src := fdeVerifyFixture(t)
 		src.out = []byte(strings.Replace(fdeInspectOutput, "%s", fdeTestCmdline, 1))
 		fdeStubEnrollment(t, src.FakeSource, "1")
 		delete(src.Files, fdeTPMSRKFile)
 		got := VerifyFDE(src, fdeSetupTask())
-		if got.Status != Unknown || !got.VerificationNeedsRoot {
+		if got.Status != Unknown || got.VerificationNeedsRoot || got.Action != nil || !strings.Contains(got.Detail, "could not be established") {
+			t.Fatalf("got %+v", got)
+		}
+	})
+	t.Run("an empty SRK stays unknown", func(t *testing.T) {
+		src := fdeVerifyFixture(t)
+		src.out = []byte(strings.Replace(fdeInspectOutput, "%s", fdeTestCmdline, 1))
+		fdeStubEnrollment(t, src.FakeSource, "1")
+		src.Files[fdeTPMSRKFile] = []byte("")
+		got := VerifyFDE(src, fdeSetupTask())
+		if got.Status != Unknown || got.Action != nil || !strings.Contains(got.Detail, "empty") {
 			t.Fatalf("got %+v", got)
 		}
 	})
