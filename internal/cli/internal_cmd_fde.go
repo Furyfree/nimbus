@@ -15,7 +15,7 @@ import (
 // hook and approved setup call. It validates the marker gate itself; there is
 // no arbitrary file or command input.
 func newInternalFDEUKI() *cobra.Command {
-	cmd := &cobra.Command{Use: "fde-uki", Hidden: true, Args: cobra.RangeArgs(1, 2), RunE: func(cmd *cobra.Command, args []string) error {
+	cmd := &cobra.Command{Use: "fde-uki", Hidden: true, Args: cobra.RangeArgs(1, 3), RunE: func(cmd *cobra.Command, args []string) error {
 		if os.Geteuid() != 0 {
 			return errors.New("internal fde-uki must run as root through kernel-install or approved setup")
 		}
@@ -30,10 +30,10 @@ func newInternalFDEUKI() *cobra.Command {
 			_, err = cmd.OutOrStdout().Write(data)
 			return err
 		case "record":
-			if len(args) != 2 {
-				return usageError{errors.New("internal fde-uki record needs a staged file")}
+			if len(args) != 3 {
+				return usageError{errors.New("internal fde-uki record needs a keyslot and token")}
 			}
-			return postinstall.WriteFDEEnrollment(args[1])
+			return postinstall.WriteFDEEnrollment(args[1], args[2])
 		case "add":
 			if len(args) != 2 {
 				return usageError{errors.New("internal fde-uki add needs a kernel release")}

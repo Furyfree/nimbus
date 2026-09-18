@@ -9,7 +9,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/Furyfree/nimbus/internal/native"
 )
@@ -21,6 +24,11 @@ var fdeEnrollmentPath = "/var/lib/nimbus/fde/enrollment.json"
 // fdeExecutable resolves the installed engine for root-only internal calls;
 // tests override it.
 var fdeExecutable = os.Executable
+
+// fdeRootSource runs the root-observed record write; tests override it.
+var fdeRootSource native.Source = native.ExecSource{}
+
+var fdeUUIDRE = regexp.MustCompile(`^[0-9a-fA-F-]+$`)
 
 // FDEEnrollment is the ownership record written after a successful enrollment.
 type FDEEnrollment struct {
@@ -36,6 +44,8 @@ type FDEEnrollment struct {
 }
 
 // fdeDevice derives the LUKS2 backing device from the reviewed command line.
+// The UUID must be one path component, so a forged command line cannot escape
+// the by-uuid directory.
 func fdeDevice(src native.Source) (string, string, error) {
 	cmdline, err := fdeCmdline(src)
 	if err != nil {
@@ -51,15 +61,16 @@ func fdeDevice(src native.Source) (string, string, error) {
 	if uuid == "" {
 		return "", "", errors.New("the command line names no LUKS root; enrollment cannot identify the device")
 	}
+	if !fdeUUIDRE.MatchString(uuid) {
+		return "", "", fmt.Errorf("the LUKS UUID %q is not a plain identifier", uuid)
+	}
 	return "/dev/disk/by-uuid/" + uuid, uuid, nil
 }
 
-// fdeTokenInfo describes the native TPM token state of the root volume.
-type fdeTokenInfo struct {
-	Present    bool
-	Keyslot    string
-	Token      string
-	Unreadable bool
+// fdeToken is one systemd-tpm2 token observed in the LUKS2 metadata.
+type fdeToken struct {
+	ID      string
+	Keyslot string
 }
 
 type fdeLUKSMetadata struct {
@@ -69,36 +80,43 @@ type fdeLUKSMetadata struct {
 	} `json:"tokens"`
 }
 
-// fdeTokenState reads the LUKS2 token metadata read-only and reports the
-// systemd-tpm2 token. Native metadata is authoritative; an unreadable device
-// stays explicit instead of guessing.
-func fdeTokenState(src native.Source) (fdeTokenInfo, error) {
+// fdeTokens lists every systemd-tpm2 token deterministically, so ownership
+// never depends on map iteration order.
+func fdeTokens(src native.Source) ([]fdeToken, error) {
 	device, _, err := fdeDevice(src)
 	if err != nil {
-		return fdeTokenInfo{}, err
+		return nil, err
 	}
 	out, err := src.Run("sudo", "-n", "--", "cryptsetup", "luksDump", "--dump-json-metadata", device)
 	if err != nil {
-		return fdeTokenInfo{Unreadable: true}, fmt.Errorf("read the LUKS2 metadata: %w", err)
+		return nil, fmt.Errorf("read the LUKS2 metadata: %w", err)
 	}
 	var metadata fdeLUKSMetadata
 	if err := json.Unmarshal(out, &metadata); err != nil {
-		return fdeTokenInfo{Unreadable: true}, fmt.Errorf("parse the LUKS2 metadata: %w", err)
+		return nil, fmt.Errorf("parse the LUKS2 metadata: %w", err)
 	}
+	var tokens []fdeToken
 	for tokenID, token := range metadata.Tokens {
 		if token.Type != "systemd-tpm2" {
 			continue
 		}
-		info := fdeTokenInfo{Present: true, Token: tokenID}
+		observed := fdeToken{ID: tokenID}
 		if len(token.Keyslots) > 0 {
-			info.Keyslot = token.Keyslots[0]
+			observed.Keyslot = token.Keyslots[0]
 		}
-		return info, nil
+		tokens = append(tokens, observed)
 	}
-	return fdeTokenInfo{}, nil
+	slices.SortFunc(tokens, func(a, b fdeToken) int {
+		if a.Keyslot != b.Keyslot {
+			return strings.Compare(a.Keyslot, b.Keyslot)
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	return tokens, nil
 }
 
-// fdeEnrollment reads the ownership record through the root-only helper.
+// fdeEnrollment reads the ownership record through the root-only helper. A
+// missing record is not an error.
 func fdeEnrollment(src native.Source) (FDEEnrollment, bool, error) {
 	exe, err := fdeExecutable()
 	if err != nil {
@@ -115,10 +133,23 @@ func fdeEnrollment(src native.Source) (FDEEnrollment, bool, error) {
 	if err := json.Unmarshal(out, &record); err != nil {
 		return FDEEnrollment{}, false, fmt.Errorf("parse the FDE enrollment record: %w", err)
 	}
-	if record.Schema != 1 || record.Device == "" || record.UUID == "" || record.Keyslot == "" {
+	if record.Schema != 1 || record.Device == "" || record.UUID == "" ||
+		!numericID(record.Keyslot) || !numericID(record.Token) {
 		return FDEEnrollment{}, false, errors.New("the FDE enrollment record is incomplete")
 	}
 	return record, true, nil
+}
+
+func numericID(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // fdeBootCurrentID returns the firmware's current boot entry id.
@@ -157,7 +188,7 @@ func fdeEnrollEligible(src native.Source) error {
 	if !ok {
 		return errors.New("the Nimbus firmware entry could not be identified")
 	}
-	if current := fdeBootCurrentID(string(out)); current != id {
+	if current := fdeBootCurrentID(string(out)); !strings.EqualFold(current, id) {
 		return fmt.Errorf("this boot used firmware entry %s, not the Nimbus image entry %s; reboot into the Nimbus image before enrolling", current, id)
 	}
 	if secure {
@@ -182,18 +213,16 @@ func FDEEnrollCommands(task Task) ([][]string, error) {
 		return nil, err
 	}
 	keys := fdeKeys()
-	args := []string{"sudo", "--", "systemd-cryptenroll",
-		"--tpm2-device=auto",
-		"--tpm2-pcrs=7+14+12+13",
-		"--tpm2-public-key=" + keys.pcrPublic,
-		"--tpm2-public-key-pcrs=11",
-		"--tpm2-pcrlock=",
-	}
-	if task.fdeRenewSlot != "" {
-		args = append(args, "--wipe-slot="+task.fdeRenewSlot)
-	}
-	args = append(args, "<luks-device>")
-	return [][]string{args, {"sudo", "--", "nimbus", "internal", "fde-uki", "record", "<staged-enrollment>"}}, nil
+	return [][]string{
+		{"sudo", "--", "systemd-cryptenroll",
+			"--tpm2-device=auto",
+			"--tpm2-pcrs=7+14+12+13",
+			"--tpm2-public-key=" + keys.pcrPublic,
+			"--tpm2-public-key-pcrs=11",
+			"--tpm2-pcrlock=",
+			"<luks-device>"},
+		{"sudo", "--", "nimbus", "internal", "fde-uki", "record", "<keyslot>", "<token>"},
+	}, nil
 }
 
 func validateFDEEnroll(task Task) error {
@@ -203,8 +232,14 @@ func validateFDEEnroll(task Task) error {
 	return nil
 }
 
-// RunFDEEnroll performs the approved enrollment or renewal. The passphrase is
-// entered in systemd-cryptenroll's own native prompt and never read here.
+// orphanHint names the exact native command that removes a token Nimbus does
+// not own, so a stranded enrollment is recoverable.
+func orphanHint(token fdeToken) string {
+	return fmt.Sprintf("remove it with: sudo systemd-cryptenroll --wipe-slot=%s /dev/disk/by-uuid/<uuid>", token.Keyslot)
+}
+
+// RunFDEEnroll performs the approved first enrollment. The passphrase is
+// entered in systemd-cryptenroll's own native prompt and is never read here.
 func RunFDEEnroll(ctx context.Context, src native.Source, out, errOut io.Writer, task Task) error {
 	if err := validateFDEEnroll(task); err != nil {
 		return err
@@ -224,119 +259,104 @@ func RunFDEEnroll(ctx context.Context, src native.Source, out, errOut io.Writer,
 	if err := fdeEnrollEligible(src); err != nil {
 		return err
 	}
-	device, uuid, err := fdeDevice(src)
+	device, _, err := fdeDevice(src)
 	if err != nil {
 		return err
 	}
-	info, err := fdeTokenState(src)
+	before, err := fdeTokens(src)
 	if err != nil {
 		return err
 	}
-	keys := fdeKeys()
 	record, owned, err := fdeEnrollment(src)
 	if err != nil {
 		return err
 	}
-	if info.Present && (!owned || record.Keyslot != info.Keyslot) {
-		return errors.New("a TPM token exists that Nimbus does not own; inspect it before enrolling")
+	switch {
+	case len(before) > 1:
+		return fmt.Errorf("more than one systemd-tpm2 token exists; inspect the LUKS2 tokens and %s", orphanHint(before[0]))
+	case len(before) == 1 && (!owned || record.Keyslot != before[0].Keyslot || record.Token != before[0].ID):
+		return fmt.Errorf("a TPM token exists that Nimbus does not own; %s", orphanHint(before[0]))
+	case len(before) == 1:
+		return errors.New("TPM automatic unlock is already enrolled and recorded; nothing to do")
 	}
-	if !info.Present && owned {
-		// The token was removed outside Nimbus; renew to a fresh slot.
-		owned = false
-	}
+	keys := fdeKeys()
 	args := []string{"sudo", "--", "systemd-cryptenroll",
 		"--tpm2-device=auto",
 		"--tpm2-pcrs=7+14+12+13",
 		"--tpm2-public-key=" + keys.pcrPublic,
 		"--tpm2-public-key-pcrs=11",
 		"--tpm2-pcrlock=",
+		device,
 	}
-	if owned {
-		args = append(args, "--wipe-slot="+record.Keyslot)
-	}
-	args = append(args, device)
 	if err := stream(args[0], args[1:]...); err != nil {
 		return fmt.Errorf("systemd-cryptenroll failed: %w", err)
 	}
-	after, err := fdeTokenState(src)
+	after, err := fdeTokens(src)
 	if err != nil {
 		return err
 	}
-	if !after.Present || after.Keyslot == "" {
-		return errors.New("enrollment reported success but no TPM token was observed")
-	}
-	if owned && after.Keyslot == record.Keyslot {
-		return errors.New("the renewed enrollment reused the wiped slot; inspect the LUKS2 tokens")
-	}
-	secure, err := fdeSecureBoot(src)
-	if err != nil {
-		return err
-	}
-	fingerprint, err := fdePublicKeyDigest(keys.pcrPublic)
-	if err != nil {
-		return err
-	}
-	entry := FDEEnrollment{
-		Schema: 1, Device: device, UUID: uuid, Keyslot: after.Keyslot, Token: after.Token,
-		PCRs: "7+14+12+13+11", SecureBoot: secure, Fingerprint: fingerprint,
+	if len(after) != 1 || after[0].Keyslot == "" {
+		return errors.New("enrollment reported success but no single TPM token was observed; inspect the LUKS2 tokens")
 	}
 	exe, err := fdeExecutable()
 	if err != nil {
 		return err
 	}
-	staged, cleanup, err := stageFDEEnrollment(entry)
-	if err != nil {
-		return err
+	recordArgs := []string{"sudo", "--", exe, "internal", "fde-uki", "record", after[0].Keyslot, after[0].ID}
+	recordErr := src.Stream(out, errOut, recordArgs[0], recordArgs[1:]...)
+	if recordErr != nil {
+		// The token exists but is unrecorded; retry the root-observed write
+		// once before reporting, because nothing else changed.
+		recordErr = src.Stream(out, errOut, recordArgs[0], recordArgs[1:]...)
 	}
-	defer cleanup()
-	if err := stream("sudo", "--", exe, "internal", "fde-uki", "record", staged); err != nil {
-		return fmt.Errorf("record the FDE enrollment: %w", err)
+	if recordErr != nil {
+		return fmt.Errorf("the token is enrolled but its ownership record could not be written (%w); rerun this task to record it", recordErr)
 	}
-	if owned {
-		_, err = fmt.Fprintln(out, "Automatic unlock renewed. Reboot to verify that the disk unlocks without the passphrase; the passphrase remains the fallback.")
-	} else {
-		_, err = fmt.Fprintln(out, "TPM enrollment recorded. Reboot to verify that the disk unlocks without the passphrase; the passphrase remains the fallback.")
-	}
+	_, err = fmt.Fprintln(out, "TPM enrollment recorded. Reboot to verify that the disk unlocks without the passphrase; the disk passphrase remains the fallback.")
 	return err
 }
 
-// stageFDEEnrollment writes the ownership record to a private staged file the
-// root-only recorder validates before installing it.
-func stageFDEEnrollment(entry FDEEnrollment) (string, func(), error) {
-	dir, err := os.MkdirTemp("", "nimbus-fde-enroll-")
-	if err != nil {
-		return "", func() {}, err
+// WriteFDEEnrollment observes the native token state as root and writes the
+// ownership record. Identifiers come from the observed metadata, never from
+// the invoking user.
+func WriteFDEEnrollment(keyslot, token string) error {
+	if !numericID(keyslot) || !numericID(token) {
+		return errors.New("the keyslot and token must be numeric")
 	}
-	cleanup := func() { _ = os.RemoveAll(dir) }
-	staged := filepath.Join(dir, "enrollment.json")
-	data, err := json.Marshal(entry)
-	if err != nil {
-		cleanup()
-		return "", func() {}, err
-	}
-	if err := os.WriteFile(staged, data, 0600); err != nil {
-		cleanup()
-		return "", func() {}, err
-	}
-	return staged, cleanup, nil
-}
-
-// WriteFDEEnrollment validates and installs the staged ownership record. It
-// runs as root through the internal command; Nimbus never trusts the caller's
-// content beyond these native identifiers.
-func WriteFDEEnrollment(staged string) error {
-	data, err := os.ReadFile(staged)
+	device, uuid, err := fdeDevice(fdeRootSource)
 	if err != nil {
 		return err
 	}
-	var entry FDEEnrollment
-	if err := json.Unmarshal(data, &entry); err != nil {
-		return fmt.Errorf("parse the staged enrollment record: %w", err)
+	tokens, err := fdeTokens(fdeRootSource)
+	if err != nil {
+		return err
 	}
-	if entry.Schema != 1 || !strings.HasPrefix(entry.Device, "/dev/disk/by-uuid/") || entry.UUID == "" ||
-		entry.Keyslot == "" || entry.Token == "" || entry.Fingerprint == "" || entry.PCRs == "" ||
-		strings.ContainsAny(entry.Keyslot+entry.Token, "/\\ \t\n") {
-		return errors.New("the staged enrollment record is invalid")
+	found := false
+	for _, observed := range tokens {
+		if observed.ID == token && observed.Keyslot == keyslot {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("no systemd-tpm2 token %s in keyslot %s was observed; the record was not written", token, keyslot)
+	}
+	secure, err := fdeSecureBoot(fdeRootSource)
+	if err != nil {
+		return err
+	}
+	fingerprint, err := fdePublicKeyDigest(fdeKeys().pcrPublic)
+	if err != nil {
+		return err
+	}
+	entry := FDEEnrollment{
+		Schema: 1, Device: device, UUID: uuid, Keyslot: keyslot, Token: token,
+		PCRs: "7+14+12+13+11", SecureBoot: secure, Fingerprint: fingerprint,
+		EnrolledAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return err
 	}
 	dir := filepath.Dir(fdeEnrollmentPath)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -349,14 +369,15 @@ func WriteFDEEnrollment(staged string) error {
 	if err := os.WriteFile(temp, data, 0o600); err != nil {
 		return err
 	}
+	if err := fdeSyncFile(temp); err != nil {
+		_ = os.Remove(temp)
+		return err
+	}
 	if err := os.Rename(temp, fdeEnrollmentPath); err != nil {
 		_ = os.Remove(temp)
 		return err
 	}
-	if err := os.Chmod(fdeEnrollmentPath, 0o600); err != nil {
-		return err
-	}
-	return nil
+	return os.Chmod(fdeEnrollmentPath, 0o600)
 }
 
 // ReadFDEEnrollment prints the ownership record for root-only inspection. A

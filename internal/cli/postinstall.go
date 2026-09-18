@@ -332,6 +332,9 @@ func postinstallCommands(task postinstall.Task) ([][]string, error) {
 	if task.Action != nil && task.Action.Kind == postinstall.SetupFDE {
 		return postinstall.FDESetupCommands(task)
 	}
+	if task.Action != nil && task.Action.Kind == postinstall.EnrollFDE {
+		return postinstall.FDEEnrollCommands(task)
+	}
 	if task.Action != nil && len(task.Action.Commands) != 0 {
 		return nil, errors.New("unexpected native command list")
 	}

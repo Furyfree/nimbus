@@ -79,9 +79,6 @@ type Task struct {
 	// fdeSecure remembers the inspected Secure Boot state for the FDE task's
 	// preview; RunFDESetup re-reads it before any mutation.
 	fdeSecure bool
-	// fdeRenewSlot carries the recorded Nimbus keyslot when an enrollment
-	// replaces an existing token.
-	fdeRenewSlot string
 }
 
 // FDESecure reports the inspected Secure Boot state for the FDE task.

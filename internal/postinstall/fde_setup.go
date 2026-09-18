@@ -725,7 +725,7 @@ func VerifyFDE(src native.Source, t Task) Task {
 	if _, err := src.Run("stat", "--format=%s", "--", fdeKernelDir+"/"+inspected.uname+"/vmlinuz"); err != nil {
 		return damaged("The Nimbus image embeds kernel " + inspected.uname + ", whose kernel package is no longer installed; rebuild it for an installed kernel with the approved setup.")
 	}
-	info, err := fdeTokenState(src)
+	tokens, err := fdeTokens(src)
 	if err != nil {
 		t.VerificationNeedsRoot = true
 		t.Detail = "The LUKS2 TPM token state could not be read: " + err.Error()
@@ -738,17 +738,20 @@ func VerifyFDE(src native.Source, t Task) Task {
 		return t
 	}
 	switch {
-	case info.Present && owned && record.Keyslot == info.Keyslot:
+	case len(tokens) == 1 && owned && record.Keyslot == tokens[0].Keyslot && record.Token == tokens[0].ID:
 		t.Status = Complete
 		t.Detail = "The signed Nimbus image is booting and the recorded TPM keyslot is present. Reboots unlock automatically; the disk passphrase remains the fallback."
-	case info.Present:
+	case len(tokens) > 1:
 		t.Status = Blocked
-		t.Detail = "A systemd-tpm2 token exists that Nimbus does not own; inspect the LUKS2 tokens before changing enrollment."
+		t.Detail = "More than one systemd-tpm2 token exists; inspect the LUKS2 tokens before changing enrollment."
+	case len(tokens) == 1:
+		t.Status = Blocked
+		t.Detail = "A systemd-tpm2 token exists that Nimbus does not own; " + orphanHint(tokens[0])
 	default:
 		t.Status = Pending
 		t.Action = &Action{Kind: EnrollFDE}
 		t.Reboot = true
-		t.Detail = "The signed Nimbus image is booting. Enroll TPM automatic unlock now; keep the disk passphrase available."
+		t.Detail = "The signed Nimbus image is booting. Reboot into it if this boot did not, then enroll TPM automatic unlock; the disk passphrase remains available."
 	}
 	return t
 }

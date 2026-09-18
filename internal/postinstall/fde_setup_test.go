@@ -361,18 +361,26 @@ func TestVerifyFDESecureBoot(t *testing.T) {
 	})
 }
 
+// fdeEnrollRootSource builds the root-observed state used by the enrollment
+// record writer.
+func fdeEnrollRootSource(t *testing.T, slot, token string) *nativetest.FakeSource {
+	t.Helper()
+	fdeTestKeys(t)
+	src := &nativetest.FakeSource{Commands: map[string][]byte{}, Failures: map[string]string{}, Files: map[string][]byte{}, Dirs: map[string][]string{}, Paths: map[string]string{}}
+	src.Files[fdeCmdlineFile] = []byte(fdeTestBase + "\n")
+	src.Files[fdeCrypttab] = []byte("luks-1 UUID=1 none discard,x-initrd.attach\n")
+	src.Dirs["/sys/firmware/efi/efivars"] = []string{}
+	src.Commands[nativetest.Key("sudo", "-n", "--", "cryptsetup", "luksDump", "--dump-json-metadata", "/dev/disk/by-uuid/1")] =
+		[]byte(`{"tokens":{"` + token + `":{"type":"systemd-tpm2","keyslots":["` + slot + `"]}}}`)
+	return src
+}
+
 func TestFDEEnrollmentRecord(t *testing.T) {
-	previous := fdeEnrollmentPath
+	previousPath, previousSource := fdeEnrollmentPath, fdeRootSource
 	fdeEnrollmentPath = filepath.Join(t.TempDir(), "enrollment.json")
-	t.Cleanup(func() { fdeEnrollmentPath = previous })
-	entry := FDEEnrollment{Schema: 1, Device: "/dev/disk/by-uuid/1", UUID: "1", Keyslot: "1", Token: "0",
-		PCRs: "7+14+12+13+11", Fingerprint: "sha256:x"}
-	staged, cleanup, err := stageFDEEnrollment(entry)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer cleanup()
-	if err := WriteFDEEnrollment(staged); err != nil {
+	fdeRootSource = fdeEnrollRootSource(t, "1", "0")
+	t.Cleanup(func() { fdeEnrollmentPath = previousPath; fdeRootSource = previousSource })
+	if err := WriteFDEEnrollment("1", "0"); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(fdeEnrollmentPath)
@@ -380,18 +388,14 @@ func TestFDEEnrollmentRecord(t *testing.T) {
 		t.Fatalf("record mode=%v err=%v", info.Mode().Perm(), err)
 	}
 	data, err := ReadFDEEnrollment()
-	if err != nil || !strings.Contains(string(data), `"keyslot":"1"`) {
+	if err != nil || !strings.Contains(string(data), `"enrolled_at"`) || !strings.Contains(string(data), `"keyslot":"1"`) {
 		t.Fatalf("record roundtrip: %q, %v", data, err)
 	}
-	bad := entry
-	bad.Device = "/etc/passwd"
-	badStaged, badCleanup, err := stageFDEEnrollment(bad)
-	if err != nil {
-		t.Fatal(err)
+	if err := WriteFDEEnrollment("1", "9"); err == nil {
+		t.Fatal("an unobserved token was accepted")
 	}
-	defer badCleanup()
-	if err := WriteFDEEnrollment(badStaged); err == nil {
-		t.Fatal("an invalid record was accepted")
+	if err := WriteFDEEnrollment("all", "0"); err == nil {
+		t.Fatal("a non-numeric keyslot was accepted")
 	}
 	if err := os.Remove(fdeEnrollmentPath); err != nil {
 		t.Fatal(err)
@@ -401,19 +405,112 @@ func TestFDEEnrollmentRecord(t *testing.T) {
 	}
 }
 
-func TestFDETokenState(t *testing.T) {
+func TestFDETokens(t *testing.T) {
 	src := &nativetest.FakeSource{Commands: map[string][]byte{}, Failures: map[string]string{}, Files: map[string][]byte{}, Dirs: map[string][]string{}, Paths: map[string]string{}}
 	src.Files[fdeCmdlineFile] = []byte(fdeTestBase + "\n")
-	src.Commands[nativetest.Key("sudo", "-n", "--", "cryptsetup", "luksDump", "--dump-json-metadata", "/dev/disk/by-uuid/1")] =
-		[]byte(`{"tokens":{"0":{"type":"systemd-tpm2","keyslots":["1"]}}}`)
-	info, err := fdeTokenState(src)
-	if err != nil || !info.Present || info.Keyslot != "1" || info.Token != "0" {
-		t.Fatalf("got %+v, %v", info, err)
+	key := nativetest.Key("sudo", "-n", "--", "cryptsetup", "luksDump", "--dump-json-metadata", "/dev/disk/by-uuid/1")
+	src.Commands[key] = []byte(`{"tokens":{"1":{"type":"systemd-tpm2","keyslots":["2"]},"0":{"type":"systemd-tpm2","keyslots":["1"]},"9":{"type":"luks2-keyring"}}}`)
+	tokens, err := fdeTokens(src)
+	if err != nil || len(tokens) != 2 || tokens[0].Keyslot != "1" || tokens[0].ID != "0" || tokens[1].Keyslot != "2" {
+		t.Fatalf("got %+v, %v", tokens, err)
 	}
-	src.Commands[nativetest.Key("sudo", "-n", "--", "cryptsetup", "luksDump", "--dump-json-metadata", "/dev/disk/by-uuid/1")] = []byte(`{"tokens":{}}`)
-	if info, err := fdeTokenState(src); err != nil || info.Present {
-		t.Fatalf("empty tokens: %+v, %v", info, err)
+	src.Commands[key] = []byte(`{"tokens":{}}`)
+	if tokens, err := fdeTokens(src); err != nil || len(tokens) != 0 {
+		t.Fatalf("empty tokens: %+v, %v", tokens, err)
 	}
+	src.Commands[key] = []byte(`not json`)
+	if _, err := fdeTokens(src); err == nil {
+		t.Fatal("unparsable metadata was accepted")
+	}
+}
+
+// fdeEnrollSource flips the token metadata on enrollment so the before/after
+// observation can be exercised.
+type fdeEnrollSource struct {
+	*nativetest.FakeSource
+	t        *testing.T
+	enrolled bool
+	streams  []string
+}
+
+func (s *fdeEnrollSource) Run(name string, args ...string) ([]byte, error) {
+	if name == "sudo" && len(args) == 6 && args[2] == "cryptsetup" {
+		if s.enrolled {
+			return []byte(`{"tokens":{"0":{"type":"systemd-tpm2","keyslots":["1"]}}}`), nil
+		}
+		return []byte(`{"tokens":{}}`), nil
+	}
+	return s.FakeSource.Run(name, args...)
+}
+
+func (s *fdeEnrollSource) Stream(_, _ io.Writer, name string, args ...string) error {
+	s.streams = append(s.streams, nativetest.Key(name, args...))
+	if name == "sudo" && len(args) == 1 && args[0] == "--validate" {
+		return nil
+	}
+	if name == "sudo" && len(args) > 1 && args[1] == "systemd-cryptenroll" {
+		s.enrolled = true
+		return nil
+	}
+	return s.FakeSource.Stream(nil, nil, name, args...)
+}
+
+func fdeEnrollFixture(t *testing.T) *fdeEnrollSource {
+	t.Helper()
+	const guid = "78f7ab0d-3bb7-4c71-ba1b-d8f8db372fdc"
+	fdeTestKeys(t)
+	previous := fdeExecutable
+	fdeExecutable = func() (string, error) { return "/usr/bin/nimbus", nil }
+	t.Cleanup(func() { fdeExecutable = previous })
+	base := &nativetest.FakeSource{Commands: map[string][]byte{}, Failures: map[string]string{}, Files: map[string][]byte{}, Dirs: map[string][]string{}, Paths: map[string]string{}}
+	base.Files[FDEUKIMarker] = []byte(fdeMarkerText)
+	base.Files[fdeCmdlineFile] = []byte(fdeTestBase + "\n")
+	base.Files[fdeCrypttab] = []byte("luks-1 UUID=1 none discard,x-initrd.attach\n")
+	base.Dirs["/sys/firmware/efi/efivars"] = []string{}
+	base.Commands[nativetest.Key("efibootmgr")] = []byte("BootCurrent: 0009\nBootOrder: 0009,0008\n" +
+		"Boot0008* Fedora\tHD(1,GPT," + guid + ",0x800,0x200000)/\\EFI\\fedora\\shimx64.efi\n" +
+		"Boot0009* Nimbus UKI\tHD(1,GPT," + guid + ",0x800,0x200000)/\\EFI\\Linux\\nimbus.efi\n")
+	base.Commands[nativetest.Key("sudo", "-n", "--", "/usr/bin/nimbus", "internal", "fde-uki", "state")] = []byte("")
+	base.Commands[nativetest.Key("sudo", "--", "/usr/bin/nimbus", "internal", "fde-uki", "record", "1", "0")] = nil
+	return &fdeEnrollSource{FakeSource: base, t: t}
+}
+
+func TestRunFDEEnroll(t *testing.T) {
+	task := Task{ID: "fde", Owner: "component:fde", Title: "Set up TPM automatic disk unlock", Status: Pending, Action: &Action{Kind: EnrollFDE}}
+	t.Run("fresh enrollment records the observed token", func(t *testing.T) {
+		src := fdeEnrollFixture(t)
+		var out bytes.Buffer
+		if err := RunFDEEnroll(t.Context(), src, &out, &out, task); err != nil {
+			t.Fatal(err)
+		}
+		crypt := slices.IndexFunc(src.streams, func(stream string) bool {
+			return strings.Contains(stream, "systemd-cryptenroll")
+		})
+		if crypt < 0 || strings.Contains(src.streams[crypt], "--wipe-slot") {
+			t.Fatalf("enrollment argv wrong: %v", src.streams)
+		}
+		if !strings.Contains(out.String(), "TPM enrollment recorded") {
+			t.Fatalf("missing guidance: %s", out.String())
+		}
+	})
+	t.Run("an unowned token is refused with a hint", func(t *testing.T) {
+		src := fdeEnrollFixture(t)
+		src.enrolled = true
+		err := RunFDEEnroll(t.Context(), src, io.Discard, io.Discard, task)
+		if err == nil || !strings.Contains(err.Error(), "does not own") || !strings.Contains(err.Error(), "--wipe-slot=1") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("a non-active boot entry is refused", func(t *testing.T) {
+		src := fdeEnrollFixture(t)
+		src.Commands[nativetest.Key("efibootmgr")] = []byte("BootCurrent: 0008\nBootOrder: 0008,0009\n" +
+			"Boot0008* Fedora\tHD(1,GPT,78f7ab0d-3bb7-4c71-ba1b-d8f8db372fdc,0x800,0x200000)/\\EFI\\fedora\\shimx64.efi\n" +
+			"Boot0009* Nimbus UKI\tHD(1,GPT,78f7ab0d-3bb7-4c71-ba1b-d8f8db372fdc,0x800,0x200000)/\\EFI\\Linux\\nimbus.efi\n")
+		err := RunFDEEnroll(t.Context(), src, io.Discard, io.Discard, task)
+		if err == nil || !strings.Contains(err.Error(), "reboot into the Nimbus image") {
+			t.Fatalf("got %v", err)
+		}
+	})
 }
 
 func TestFDEEnrollEligibility(t *testing.T) {

@@ -25,10 +25,10 @@ func fdeTask(src native.Source, in Inputs) Task {
 		Instructions: []string{
 			"Approved setup generates the key material under /var/lib/nimbus/fde, requests MOK enrollment when Secure Boot is enforced, builds the signed Nimbus image with ukify and ensures the Nimbus UKI firmware entry, which becomes the default boot target.",
 			"Kernel updates rebuild and re-sign the image through the engine-provided kernel-install hook; Fedora's GRUB entries remain selectable as the fallback path.",
-			"TPM enrollment is not implemented yet: after setup the disk passphrase still unlocks the disk and sync never changes policy.",
+			"After the first reboot into the image, approved enrollment binds the TPM to the measured boot state; the disk passphrase always remains the fallback, and sync never changes policy.",
 		},
 		Verification: "Inspection reads the mounted root, the TPM2 device, the firmware mode, the hook payload, the marker, the firmware entry and the installed tools. The image content and its embedded command line need the approved read-only check.",
-		Recovery:     "The disk passphrase and Fedora's GRUB entries always remain a valid unlock and boot path. Enrollment, policy renewal and scoped removal are not implemented yet.",
+		Recovery:     "The disk passphrase and Fedora's GRUB entries always remain a valid unlock and boot path. Scoped removal is implemented in the next step.",
 	}
 	mounts, err := src.ReadFile("/proc/mounts")
 	if err != nil {
@@ -143,9 +143,9 @@ func fdeTask(src native.Source, in Inputs) Task {
 		t.Status = Pending
 		t.fdeSecure = secure
 		if secure {
-			t.Detail = "LUKS2 root, TPM2, Secure Boot and the setup tools are present. Approved setup generates the key pair, requests MOK enrollment, builds and signs the Nimbus image and ensures the shim-chained firmware entry, which becomes the default boot target. TPM enrollment, policy renewal and scoped removal are not implemented yet."
+			t.Detail = "LUKS2 root, TPM2, Secure Boot and the setup tools are present. Approved setup generates the key pair, requests MOK enrollment, builds and signs the Nimbus image and ensures the shim-chained firmware entry, which becomes the default boot target. TPM enrollment follows after the first reboot into the image; policy renewal and scoped removal are not implemented yet."
 		} else {
-			t.Detail = "LUKS2 root, TPM2 and the setup tools are present. Approved setup writes the marker, builds the Nimbus image and ensures the firmware entry, which becomes the default boot target. Secure Boot is disabled, so the image is unsigned and the reduced protection is disclosed. TPM enrollment, policy renewal and scoped removal are not implemented yet."
+			t.Detail = "LUKS2 root, TPM2 and the setup tools are present. Approved setup writes the marker, builds the Nimbus image and ensures the firmware entry, which becomes the default boot target. Secure Boot is disabled, so the image is unsigned and the reduced protection is disclosed. TPM enrollment follows after the first reboot into the image; policy renewal and scoped removal are not implemented yet."
 		}
 		t.Action = &Action{Kind: SetupFDE}
 		t.Reboot = true
