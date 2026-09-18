@@ -1165,6 +1165,25 @@ managed/status/diff pass; verify reports expected drift against an empty home.
 No apply was run. The startup guard is exercised with zero, one and multiple
 Bluetooth adapters; the next real login remains untested.
 
+## Engine channels, 2026-09-18
+
+Tracked by issue #72. The selector records which engine track an installation
+follows; both tracks share the COPR key and repository ID.
+
+- [x] Phase 1: selector schema 2 with a required `channel`, schema 1 read as
+  stable, read-only `nimbus channel` with branch and repository drift, and
+  `init --channel` recording the field. No silent selector writes on read or
+  update paths.
+- [x] Phase 2: bootstrap `--channel stable|develop` switching (branch fetch,
+  repository rewrite, distro-sync, schema and compatibility gates), and the
+  develop curl entry (`install-develop.sh`) that installs the develop track.
+  The schema gate reads the target checkout's state constant against
+  `/var/lib/nimbus/schema`; the same COPR key covers both channels.
+- [ ] Phase 3: the `furyfree/nimbus-develop` COPR project and its rolling
+  `0.6.0~dev` source from the `develop` branch.
+- [ ] Phase 4: clean-VM drills for both directions, drift refusal paths and a
+  one-time notice on devices upgrading to a channel-aware engine.
+
 ## Maintenance and setup candidate, 2026-09-13
 
 - [x] Engine check/update precedes definitions and Git fetches. Fresh root DNF

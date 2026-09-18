@@ -20,8 +20,16 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
-// CurrentSchema is the selector schema this engine reads.
-const CurrentSchema = 1
+// CurrentSchema is the selector schema this engine reads. Schema 2 adds the
+// required channel; schema 1 selectors are read as stable and are recorded as
+// schema 2 by the next selector-writing action.
+const CurrentSchema = 2
+
+// Channel names the engine track a selector follows.
+const (
+	ChannelStable  = "stable"
+	ChannelDevelop = "develop"
+)
 
 // Selector is ~/.config/nimbus/config.toml.
 type Selector struct {
@@ -29,6 +37,7 @@ type Selector struct {
 	Checkout string `toml:"checkout"`
 	Machine  string `toml:"machine"`
 	Origin   string `toml:"origin"`
+	Channel  string `toml:"channel"`
 }
 
 // DefaultPath is the selector location for the current user.
@@ -78,9 +87,26 @@ func Load(path string) (*Selector, error) {
 		}
 		return nil, fmt.Errorf("selector %s: %w", path, err)
 	}
-	switch {
-	case s.Schema != CurrentSchema:
+	switch s.Schema {
+	case 1:
+		// The legacy schema predates the channel; it means stable and is
+		// recorded as schema 2 by the next selector-writing action.
+		if s.Channel != "" {
+			return nil, fmt.Errorf("selector %s: schema 1 must not set channel; run init to record schema 2", path)
+		}
+		s.Channel = ChannelStable
+	case CurrentSchema:
+		switch s.Channel {
+		case ChannelStable, ChannelDevelop:
+		case "":
+			return nil, fmt.Errorf("selector %s: channel is required", path)
+		default:
+			return nil, fmt.Errorf("selector %s: unsupported channel %q", path, s.Channel)
+		}
+	default:
 		return nil, fmt.Errorf("selector %s: schema %d is not supported", path, s.Schema)
+	}
+	switch {
 	case s.Checkout == "":
 		return nil, fmt.Errorf("selector %s: checkout is required", path)
 	case s.Machine == "":
@@ -98,15 +124,33 @@ func Load(path string) (*Selector, error) {
 	return &s, nil
 }
 
+// SetChannel rewrites the selector's channel, migrating schema 1 to schema 2
+// while preserving checkout, machine and origin. It is the narrow action the
+// checkout bootstrap uses after a channel switch.
+func SetChannel(path, channel string) error {
+	if channel != ChannelStable && channel != ChannelDevelop {
+		return fmt.Errorf("unsupported channel %q", channel)
+	}
+	sel, err := Load(path)
+	if err != nil {
+		return err
+	}
+	sel.Schema = CurrentSchema
+	sel.Channel = channel
+	return Write(path, sel)
+}
+
 // Write stores the selector: the directory with mode 0700 when it is
 // missing, the file written beside its target and renamed into place, so a
 // reader never sees a partial file. The origin must already be normalized.
 func Write(path string, s *Selector) error {
-	if s.Schema != CurrentSchema || s.Checkout == "" || s.Machine == "" || s.Origin == "" {
-		return errors.New("selector: schema, checkout, machine, and origin are required")
+	if s.Schema != CurrentSchema || s.Checkout == "" || s.Machine == "" || s.Origin == "" ||
+		(s.Channel != ChannelStable && s.Channel != ChannelDevelop) {
+		return errors.New("selector: schema, checkout, machine, origin, and a valid channel are required")
 	}
-	if !utf8.ValidString(s.Checkout) || !utf8.ValidString(s.Machine) || !utf8.ValidString(s.Origin) {
-		return errors.New("selector: checkout, machine, and origin must be valid UTF-8")
+	if !utf8.ValidString(s.Checkout) || !utf8.ValidString(s.Machine) || !utf8.ValidString(s.Origin) ||
+		!utf8.ValidString(s.Channel) {
+		return errors.New("selector: checkout, machine, origin, and channel must be valid UTF-8")
 	}
 	if normalized, err := NormalizeOrigin(s.Origin); err != nil || normalized != s.Origin {
 		return fmt.Errorf("selector: origin %q is not a normalized identity", s.Origin)
@@ -183,16 +227,15 @@ func NormalizeOrigin(locator string) (string, error) {
 	return host + "/" + p, nil
 }
 
-// CheckoutOrigin reads remote.origin.url from the checkout's local Git
-// configuration without running Git. It follows a worktree .git file and
-// rejects configuration that uses include directives.
-func CheckoutOrigin(root string) (string, error) {
+// gitDir resolves the directory holding a checkout's Git metadata without
+// running Git. It follows a worktree .git file and its commondir.
+func gitDir(root string) (string, error) {
 	gitPath := filepath.Join(root, ".git")
 	info, err := os.Lstat(gitPath)
 	if err != nil {
 		return "", fmt.Errorf("%s is not a Git checkout", root)
 	}
-	gitDir := gitPath
+	dir := gitPath
 	if info.Mode()&fs.ModeSymlink != 0 {
 		return "", fmt.Errorf("%s must not be a symlink", gitPath)
 	}
@@ -202,32 +245,42 @@ func CheckoutOrigin(root string) (string, error) {
 			return "", err
 		}
 		line := strings.TrimSpace(string(data))
-		dir, ok := strings.CutPrefix(line, "gitdir: ")
+		target, ok := strings.CutPrefix(line, "gitdir: ")
 		if !ok {
 			return "", fmt.Errorf("%s is not a worktree pointer", gitPath)
 		}
-		gitDir = dir
-		if !filepath.IsAbs(gitDir) {
-			gitDir = filepath.Join(root, gitDir)
+		dir = target
+		if !filepath.IsAbs(dir) {
+			dir = filepath.Join(root, dir)
 		}
 	}
-	configPath := filepath.Join(gitDir, "config")
-	common, err := os.ReadFile(filepath.Join(gitDir, "commondir"))
+	common, err := os.ReadFile(filepath.Join(dir, "commondir"))
 	switch {
 	case err == nil:
-		dir := strings.TrimSpace(string(common))
-		if dir == "" {
-			return "", fmt.Errorf("%s: commondir is empty", gitDir)
+		value := strings.TrimSpace(string(common))
+		if value == "" {
+			return "", fmt.Errorf("%s: commondir is empty", dir)
 		}
-		if !filepath.IsAbs(dir) {
-			dir = filepath.Join(gitDir, dir)
+		if !filepath.IsAbs(value) {
+			value = filepath.Join(dir, value)
 		}
-		configPath = filepath.Join(dir, "config")
+		return value, nil
 	case errors.Is(err, fs.ErrNotExist):
-		// Not a linked worktree; the configuration lives beside it.
+		return dir, nil
 	default:
-		return "", fmt.Errorf("read %s: %w", filepath.Join(gitDir, "commondir"), err)
+		return "", fmt.Errorf("read %s: %w", filepath.Join(dir, "commondir"), err)
 	}
+}
+
+// CheckoutOrigin reads remote.origin.url from the checkout's local Git
+// configuration without running Git. It follows a worktree .git file and
+// rejects configuration that uses include directives.
+func CheckoutOrigin(root string) (string, error) {
+	dir, err := gitDir(root)
+	if err != nil {
+		return "", err
+	}
+	configPath := filepath.Join(dir, "config")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", configPath, err)
@@ -237,6 +290,24 @@ func CheckoutOrigin(root string) (string, error) {
 		return "", fmt.Errorf("%s: %w", configPath, err)
 	}
 	return origin, nil
+}
+
+// CheckoutBranch reads the checkout's attached local branch without running
+// Git. A detached HEAD or a foreign HEAD line is an error.
+func CheckoutBranch(root string) (string, error) {
+	dir, err := gitDir(root)
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "HEAD"))
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", filepath.Join(dir, "HEAD"), err)
+	}
+	line := strings.TrimSpace(string(data))
+	if branch, ok := strings.CutPrefix(line, "ref: refs/heads/"); ok && branch != "" {
+		return branch, nil
+	}
+	return "", fmt.Errorf("%s is not an attached local branch", root)
 }
 
 // ParseOriginURL extracts remote.origin.url from Git configuration text.

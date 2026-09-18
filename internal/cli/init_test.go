@@ -49,7 +49,7 @@ func TestInitStopsBeforeSelectionWhenStartupOutputFails(t *testing.T) {
 			args := []string{"init", "-y", "--checkout", root, "--machine", "vm"}
 			var before []byte
 			if tc.reuse {
-				if err := selector.Write(path, &selector.Selector{Schema: selector.CurrentSchema, Checkout: root, Machine: "vm", Origin: "github.com/Furyfree/nimbus"}); err != nil {
+				if err := selector.Write(path, &selector.Selector{Schema: selector.CurrentSchema, Checkout: root, Machine: "vm", Origin: "github.com/Furyfree/nimbus", Channel: selector.ChannelStable}); err != nil {
 					t.Fatal(err)
 				}
 				before, err = os.ReadFile(path)
@@ -779,7 +779,7 @@ func TestInitRechecksApprovalBeforeWritingSelector(t *testing.T) {
 					key := nativetest.Key("dnf5", inspect.PackageQueryArgs...)
 					src.Commands[key] = []byte(strings.ReplaceAll(string(src.Commands[key]), "bash|0|", "bash|1|"))
 				case "selector":
-					if err := selector.Write(path, &selector.Selector{Schema: selector.CurrentSchema, Checkout: root, Machine: "other", Origin: "github.com/Furyfree/nimbus"}); err != nil {
+					if err := selector.Write(path, &selector.Selector{Schema: selector.CurrentSchema, Checkout: root, Machine: "other", Origin: "github.com/Furyfree/nimbus", Channel: selector.ChannelStable}); err != nil {
 						t.Fatal(err)
 					}
 					selectorBefore, err = os.ReadFile(path)

@@ -14,29 +14,36 @@ say() { printf '%s\n' "$*"; installer_event "$*"; }
 fail() { printf 'installer: %s\n' "$*" >&2; installer_event "error: $*"; exit 1; }
 
 installer_arguments() {
-  local machine='' new='' dotfiles='' no_dotfiles=false onepassword=false arg
+  local machine='' new='' dotfiles='' no_dotfiles=false onepassword=false channel='' arg
   while [ "$#" -gt 0 ]; do
     arg="$1"; shift
     case "$arg" in
-      --machine|--new|--dotfiles)
+      --machine|--new|--dotfiles|--channel)
         if [ "$#" -eq 0 ] || [[ "$1" == -* ]] || [ -z "$1" ]; then
           fail "${arg} requires a value"
         fi
-        case "$arg" in --machine) machine="$1";; --new) new="$1";; --dotfiles) dotfiles="$1";; esac
+        case "$arg" in --machine) machine="$1";; --new) new="$1";; --dotfiles) dotfiles="$1";; --channel) channel="$1";; esac
         shift ;;
       --machine=*) machine="${arg#*=}"; [ -n "$machine" ] || fail '--machine requires a value';;
       --new=*) new="${arg#*=}"; [ -n "$new" ] || fail '--new requires a value';;
       --dotfiles=*) dotfiles="${arg#*=}"; [ -n "$dotfiles" ] || fail '--dotfiles requires a value';;
+      --channel=*) channel="${arg#*=}"; [ -n "$channel" ] || fail '--channel requires a value';;
       --no-dotfiles) no_dotfiles=true;;
       --onepassword-ssh) onepassword=true;;
       -y|--yes) ;;
       -h|--help)
-        printf '%s\n' 'Usage: install.sh [--machine ID | --new ID] [--dotfiles URL | --no-dotfiles] [--onepassword-ssh] [-y]'
-        printf '%s\n' 'First installation asks which machine to use; --machine ID skips that choice.' 'Reruns reuse the trusted selector. --new ID opens a new-machine dialogue.' 'Init shows its plan and asks before applying. --yes requires a selection and skips approval.' 'Sudo and Chezmoi may still ask for input.'
+        printf '%s\n' 'Usage: install.sh [--machine ID | --new ID] [--dotfiles URL | --no-dotfiles] [--onepassword-ssh] [--channel stable|develop] [-y]'
+        printf '%s\n' 'First installation asks which machine to use; --machine ID skips that choice.' 'Reruns reuse the trusted selector. --new ID opens a new-machine dialogue.' 'The channel defaults to stable; develop follows the develop branch.' 'Init shows its plan and asks before applying. --yes requires a selection and skips approval.' 'Sudo and Chezmoi may still ask for input.'
         exit 0;;
       *) fail "unsupported installer argument: ${arg}";;
     esac
   done
+  if [ -n "${channel}" ] && [ "${channel}" != stable ] && [ "${channel}" != develop ]; then
+    fail "unsupported channel ${channel}"
+  fi
+  if [ -n "${channel}" ]; then
+    export NIMBUS_CHANNEL="${channel}"
+  fi
   [ -z "$machine" ] || [ -z "$new" ] || fail '--machine and --new exclude each other'
   [ -z "$dotfiles" ] || [ "$no_dotfiles" = false ] || fail '--dotfiles and --no-dotfiles exclude each other'
   [ "$onepassword" = false ] || [ "$no_dotfiles" = false ] || fail '--onepassword-ssh and --no-dotfiles exclude each other'
@@ -233,6 +240,15 @@ SUPPORTED_FEDORA="44"
 
 installer_arguments "$@"
 
+# The channel comes from --channel, the environment, or defaults to stable.
+CHANNEL="${NIMBUS_CHANNEL:-stable}"
+case "${CHANNEL}" in
+  stable) BRANCH=main ;;
+  develop) BRANCH=develop ;;
+  *) fail "unsupported channel ${CHANNEL}" ;;
+esac
+export NIMBUS_CHANNEL="${CHANNEL}"
+
 if ! ( : <> /dev/tty ) 2>/dev/null; then
   fail "a controlling terminal is required; run this from an interactive shell"
 fi
@@ -249,6 +265,7 @@ installer_sudo
 
 say "Nimbus origin: ${ORIGIN}"
 say "checkout:      ${CHECKOUT}"
+say "channel:       ${CHANNEL} (branch ${BRANCH})"
 
 prerequisites=()
 command -v git >/dev/null 2>&1 || prerequisites+=(git-core)
@@ -269,6 +286,9 @@ normalize() {
   printf '%s' "$(printf '%s' "${url%%/*}" | tr '[:upper:]' '[:lower:]')/${url#*/}"
 }
 
+branch=main
+[ "${CHANNEL:-stable}" = develop ] && branch=develop
+
 if [ -e "${CHECKOUT}" ]; then
   real="$(realpath -e "${CHECKOUT}")" || fail "${CHECKOUT} exists but cannot be resolved"
   top="$(git -C "${real}" rev-parse --show-toplevel 2>/dev/null)" || fail "${CHECKOUT} exists and is not a Git worktree"
@@ -277,11 +297,18 @@ if [ -e "${CHECKOUT}" ]; then
   [ -n "${remote}" ] || fail "${CHECKOUT} has no origin remote"
   got="$(normalize "${remote}")"
   [ "$(printf '%s' "${got}" | tr '[:upper:]' '[:lower:]')" = "${ORIGIN_ID}" ] || fail "${CHECKOUT} does not match the Nimbus origin; it is left untouched"
+  current="$(git -C "${real}" branch --show-current 2>/dev/null || true)"
+  if [ -n "${current}" ] && [ "${current}" != "${branch}" ]; then
+    [ -z "$(git -C "${real}" status --porcelain)" ] || fail "${CHECKOUT} has local changes; commit or stash them before switching channel"
+    say "switching ${CHECKOUT} from ${current} to ${branch}"
+    installer_run git -C "${real}" fetch origin "${branch}"
+    installer_run git -C "${real}" switch "${branch}"
+  fi
   say "reusing the existing checkout at ${real}"
 else
-  say "cloning ${ORIGIN}"
+  say "cloning ${ORIGIN} (${branch})"
   mkdir -p "$(dirname "${CHECKOUT}")"
-  installer_run git clone "${ORIGIN}" "${CHECKOUT}"
+  installer_run git clone --branch "${branch}" "${ORIGIN}" "${CHECKOUT}"
 fi
 
 BOOTSTRAP="${CHECKOUT}/bootstrap"

@@ -64,6 +64,18 @@ On Fedora 44 x86_64, run as your normal user:
 curl -fsSL https://raw.githubusercontent.com/Furyfree/nimbus/main/install.sh | bash
 ~~~
 
+The default channel is stable, which follows `main`. To install or switch a
+machine to the develop channel, use its entry point; the URL selects the
+channel:
+
+~~~sh
+curl -fsSL https://raw.githubusercontent.com/Furyfree/nimbus/develop/install-develop.sh | bash
+~~~
+
+An installed machine can change channels with
+`./install.sh --channel develop` (or `--channel stable`) run from the checkout;
+the installer switches the branch, engine and repository together.
+
 On first installation, enter the machine name when asked:
 
 - `desktop`: the MSI Z690 desktop with NVIDIA RTX 3080.

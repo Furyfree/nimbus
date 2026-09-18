@@ -159,14 +159,34 @@ does not audit application source or test every installed application's UI.
 | `profiles/` | User-facing bundles of packages and components |
 | `components/` | Capabilities, dependencies and owned system resources |
 | `system/root/etc/` | Sources for generic managed files below `/etc` |
-| `~/.config/nimbus/config.toml` | Checkout, machine ID and approved origin |
+| `~/.config/nimbus/config.toml` | Checkout, machine, origin and channel |
 | `/var/lib/nimbus` | Applied-state records and package baseline |
 | `$XDG_STATE_HOME/nimbus/` | Private note history and setup evidence |
 
-The selector holds no desired package or configuration state. Definitions are
-strict, versioned TOML. Invalid references, conflicts and dependency cycles
-fail validation. Hardware detection proposes selections during init; it does
-not silently change an existing machine later.
+The selector holds no desired package or configuration state. It records only
+identity and provenance: which checkout, machine, origin and engine channel
+this installation follows. Definitions are strict, versioned TOML. Invalid
+references, conflicts and dependency cycles fail validation. Hardware
+detection proposes selections during init; it does not silently change an
+existing machine later.
+
+Switching channels is an installer action, not a sync action:
+`install.sh --channel stable|develop` (or the develop curl entry point)
+verifies the same COPR key, switches the checkout branch, rewrites the
+`nimbus-engine` repository, runs the native `distro-sync`, records the
+channel in the selector and validates the checkout before reporting. It
+refuses a dirty checkout, an unrecognized repository file and a target engine
+that cannot read the current applied-state schema. Installers fetched from
+the `develop` branch carry the develop channel; `main` installs stable.
+
+The selector schema is 2, with a required `channel` of `stable` or `develop`.
+A schema 1 selector predates the channel, is read as stable, and is recorded
+as schema 2 by the next selector-writing action (init or a channel switch).
+The channel names the engine track: `stable` follows `main` and the
+`furyfree/nimbus` repository, `develop` follows the `develop` branch and the
+`furyfree/nimbus-develop` repository. Both tracks use the same COPR signing
+key and the `nimbus-engine` repository ID, and develop builds use a
+`0.6.0~dev` version so RPM ordering prefers a released stable version.
 
 The optional machine field `shell = "bash"` or `shell = "zsh"` selects the
 invoking user's default login shell, with `machine:shell` provenance. Common
@@ -307,6 +327,7 @@ refreshes metadata.
 | `nimbus sync` | Update repositories, reconcile the system, apply Chezmoi |
 | `nimbus upgrade` | Update installed software through Topgrade |
 | `nimbus sync --upgrade` | Update Nimbus, sync once, then run Topgrade |
+| `nimbus channel` | Show the engine channel and checkout or repository drift |
 | `nimbus postinstall` | Show task commands and help |
 | `nimbus postinstall status` | Compact machine-specific setup checklist |
 | `nimbus setup-notes` | Display all applicable guidance, read-only |

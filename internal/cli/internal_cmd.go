@@ -14,6 +14,7 @@ import (
 	"github.com/Furyfree/nimbus/internal/inspect"
 	"github.com/Furyfree/nimbus/internal/native"
 	"github.com/Furyfree/nimbus/internal/plan"
+	"github.com/Furyfree/nimbus/internal/selector"
 	"github.com/Furyfree/nimbus/internal/snapper"
 	"github.com/Furyfree/nimbus/internal/state"
 )
@@ -55,6 +56,17 @@ func newInternal() *cobra.Command {
 	record.Flags().StringVar(&planDigest, "plan", "", "plan digest the stage must be bound to")
 	record.Flags().StringVar(&stagePath, "stage", "", "staged receipts file written by the normal user")
 	group.AddCommand(record)
+	selectorChannel := &cobra.Command{Use: "selector-channel CHANNEL", Hidden: true, Short: "Record the engine channel in the selector", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		if os.Geteuid() == 0 {
+			return fmt.Errorf("internal selector-channel must run as the invoking user, not root")
+		}
+		path, err := selector.DefaultPath()
+		if err != nil {
+			return err
+		}
+		return selector.SetChannel(path, args[0])
+	}}
+	group.AddCommand(selectorChannel)
 	group.AddCommand(newInternalSystemFile())
 	group.AddCommand(newInternalFDEUKI())
 	group.AddCommand(newInternalBootMenu())
