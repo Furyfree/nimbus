@@ -196,6 +196,32 @@ func TestBuildFDEUKICurrent(t *testing.T) {
 			t.Fatalf("got %v", err)
 		}
 	})
+	t.Run("an image without a kernel release is not replaced", func(t *testing.T) {
+		src := fdeBuildSource(t)
+		target := filepath.Join(t.TempDir(), "EFI", "Linux", "nimbus.efi")
+		existing(t, target)
+		src.Commands[nativetest.Key(FDEUKITool, "inspect", target)] = []byte(".uname:\n  size: 1 bytes\n")
+		if err := buildFDEUKI(src, fdeTestVersion, io.Discard, target, true); err == nil ||
+			!strings.Contains(err.Error(), "does not identify its kernel") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("an image for the same kernel is rebuilt", func(t *testing.T) {
+		src := fdeBuildSource(t)
+		target := filepath.Join(t.TempDir(), "EFI", "Linux", "nimbus.efi")
+		existing(t, target)
+		src.Commands[nativetest.Key(FDEUKITool, "inspect", target)] =
+			[]byte(strings.Replace(fdeInspectOutput, "%s", fdeTestCmdline, 1))
+		fdeStagedTarget(t, target, fdeMinimumSize+1)
+		src.Commands[nativetest.Key(FDEUKITool, fdeBuildArgv(target, false)...)] = []byte{}
+		src.Commands[nativetest.Key(FDEUKITool, "inspect", target+".new")] = []byte(fdeStagedText)
+		if err := buildFDEUKI(src, fdeTestVersion, io.Discard, target, true); err != nil {
+			t.Fatal(err)
+		}
+		if data, err := os.ReadFile(target); err != nil || string(data) == "existing" {
+			t.Fatalf("image was not replaced: %q %v", data, err)
+		}
+	})
 	t.Run("a missing image is built", func(t *testing.T) {
 		src := fdeBuildSource(t)
 		target := filepath.Join(t.TempDir(), "EFI", "Linux", "nimbus.efi")

@@ -286,12 +286,15 @@ func TestFDEHookPayloadContract(t *testing.T) {
 	script := string(data)
 	for _, want := range []string{
 		"[ -e /etc/nimbus/fde-uki.enabled ] || exit 0",
-		"/usr/bin/nimbus internal fde-uki",
+		`/usr/bin/nimbus internal fde-uki "$1" "$2"`,
 		"warning: the Nimbus kernel image was not rebuilt",
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("hook payload lacks %q", want)
 		}
+	}
+	if strings.Contains(script, `"$@"`) {
+		t.Fatal("hook forwards kernel-install's extra operands, which the engine rejects")
 	}
 	if !strings.HasSuffix(strings.TrimSpace(script), "exit 0") {
 		t.Fatal("hook payload does not end in a successful exit, which would fail kernel updates")
@@ -1048,6 +1051,16 @@ func TestVerifyFDE(t *testing.T) {
 			[]byte(`{"tokens":{"0":{"type":"systemd-tpm2","keyslots":["1","2"]}},"keyslots":{"0":{"type":"luks2"},"1":{"type":"luks2"},"2":{"type":"luks2"}}}`)
 		got := VerifyFDE(src, fdeSetupTask())
 		if got.Status != Blocked || !strings.Contains(got.Detail, "single-key slot") {
+			t.Fatalf("got %+v", got)
+		}
+	})
+	t.Run("an empty digest result cannot complete", func(t *testing.T) {
+		src := fdeVerifyFixture(t)
+		src.out = []byte(strings.Replace(fdeInspectOutput, "%s", fdeTestCmdline, 1))
+		fdeStubEnrollment(t, src.FakeSource, "1")
+		src.Commands[nativetest.Key("sudo", "-n", "--", "sha256sum", "/boot/initramfs-"+fdeTestVersion+".img")] = []byte("")
+		got := VerifyFDE(src, fdeSetupTask())
+		if got.Status == Complete || !strings.Contains(got.Detail, "no digest") {
 			t.Fatalf("got %+v", got)
 		}
 	})

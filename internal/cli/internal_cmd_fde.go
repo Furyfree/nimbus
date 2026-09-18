@@ -20,6 +20,9 @@ func newInternalFDEUKI() *cobra.Command {
 		if os.Geteuid() != 0 {
 			return errors.New("internal fde-uki must run as root through kernel-install or approved setup")
 		}
+		if onlyIfCurrent && args[0] != "add" {
+			return usageError{errors.New("--only-if-current applies only to fde-uki add")}
+		}
 		switch args[0] {
 		case "genkey":
 			return postinstall.EnsureFDEKeys(native.ExecSource{}, cmd.OutOrStdout())

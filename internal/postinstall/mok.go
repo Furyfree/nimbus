@@ -28,7 +28,11 @@ func mok(src native.Source, in Inputs) Task {
 		Recovery:     "Cancel enrollment before confirming it, or boot a working kernel and inspect the akmods Secure Boot instructions before changing keys.",
 		Reboot:       true,
 	}
-	if ready, err := fdeMarkerReady(src); err == nil && ready {
+	switch ready, err := fdeMarkerReady(src); {
+	case err != nil:
+		t.Status, t.Detail = Blocked, "The FDE marker could not be read: "+err.Error()
+		return t
+	case ready:
 		t.Instructions = append(t.Instructions, "FDE is enabled: after the boot-image refresh, the signed Nimbus image for the running kernel is rebuilt too (sudo nimbus internal fde-uki add <running-kernel> --only-if-current).")
 	}
 	if !in.Facts.SecureBoot.Known() {

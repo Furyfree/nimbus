@@ -382,6 +382,8 @@ func buildFDEUKI(src native.Source, version string, out io.Writer, target string
 				_, err := fmt.Fprintf(out, "the image already targets kernel %s; it was not rebuilt for %s\n", embedded, version)
 				return err
 			}
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			return fmt.Errorf("the existing image could not be examined; it was not replaced: %w", statErr)
 		}
 	}
 	secure, err := fdeSecureBoot(src)

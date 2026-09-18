@@ -733,8 +733,7 @@ func VerifyFDE(src native.Source, t Task) Task {
 	}
 	fields := strings.Fields(string(sum))
 	if len(fields) == 0 {
-		t.VerificationNeedsRoot = true
-		t.Detail = "The embedded initramfs could not be compared with /boot: sha256sum returned no digest."
+		t.Detail = "The embedded initramfs freshness could not be established: sha256sum returned no digest."
 		return t
 	}
 	if !strings.EqualFold(fields[0], inspected.initrd) {
