@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -169,6 +170,17 @@ func fdeSigningArgs(keys fdeKeyPaths, secure bool) []string {
 	return args
 }
 
+// fdeCrypttabData reads /etc/crypttab, which Fedora ships root-only. The
+// approved read-only verification runs as the invoking user, so a permission
+// error falls back to the same sudo -n read used for the LUKS metadata.
+func fdeCrypttabData(src native.Source) ([]byte, error) {
+	data, err := src.ReadFile(fdeCrypttab)
+	if err == nil || !errors.Is(err, fs.ErrPermission) {
+		return data, err
+	}
+	return src.Run("sudo", "-n", "--", "cat", fdeCrypttab)
+}
+
 // fdeUnlockOption derives the per-volume unlock option from the native
 // crypttab line, so its existing options (discard, x-initrd.attach) survive.
 func fdeUnlockOption(src native.Source, cmdline string) (string, error) {
@@ -182,7 +194,7 @@ func fdeUnlockOption(src native.Source, cmdline string) (string, error) {
 	if uuid == "" {
 		return "", errors.New("the command line names no LUKS root (rd.luks.uuid); the automatic-unlock option cannot be added")
 	}
-	data, err := src.ReadFile(fdeCrypttab)
+	data, err := fdeCrypttabData(src)
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", fdeCrypttab, err)
 	}

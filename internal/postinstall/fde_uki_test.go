@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"io/fs"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -137,6 +138,19 @@ func TestFDECmdline(t *testing.T) {
 	}
 }
 
+// permissionSource simulates a root-only file on an unprivileged source.
+type permissionSource struct {
+	*nativetest.FakeSource
+	deny string
+}
+
+func (s permissionSource) ReadFile(path string) ([]byte, error) {
+	if path == s.deny {
+		return nil, fmt.Errorf("%s: %w", path, fs.ErrPermission)
+	}
+	return s.FakeSource.ReadFile(path)
+}
+
 func TestFDEUnlockOption(t *testing.T) {
 	fixture := func() *nativetest.FakeSource {
 		src := &nativetest.FakeSource{Commands: map[string][]byte{}, Files: map[string][]byte{}, Dirs: map[string][]string{}, Paths: map[string]string{}}
@@ -161,6 +175,16 @@ func TestFDEUnlockOption(t *testing.T) {
 	if _, err := fdeUnlockOption(src, fdeTestBase); err == nil {
 		t.Fatal("a missing crypttab entry was accepted")
 	}
+	t.Run("a root-only crypttab falls back to sudo -n", func(t *testing.T) {
+		src := fixture()
+		delete(src.Files, fdeCrypttab)
+		src.Commands[nativetest.Key("sudo", "-n", "--", "cat", fdeCrypttab)] =
+			[]byte("luks-1 UUID=1 none discard,x-initrd.attach\n")
+		option, err := fdeUnlockOption(permissionSource{FakeSource: src, deny: fdeCrypttab}, fdeTestBase)
+		if err != nil || option != "rd.luks.options=1=discard,x-initrd.attach,tpm2-device=auto" {
+			t.Fatalf("got %q, %v", option, err)
+		}
+	})
 }
 
 func TestBuildFDEUKICurrent(t *testing.T) {
