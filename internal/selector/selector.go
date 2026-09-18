@@ -124,6 +124,22 @@ func Load(path string) (*Selector, error) {
 	return &s, nil
 }
 
+// SetChannel rewrites the selector's channel, migrating schema 1 to schema 2
+// while preserving checkout, machine and origin. It is the narrow action the
+// checkout bootstrap uses after a channel switch.
+func SetChannel(path, channel string) error {
+	if channel != ChannelStable && channel != ChannelDevelop {
+		return fmt.Errorf("unsupported channel %q", channel)
+	}
+	sel, err := Load(path)
+	if err != nil {
+		return err
+	}
+	sel.Schema = CurrentSchema
+	sel.Channel = channel
+	return Write(path, sel)
+}
+
 // Write stores the selector: the directory with mode 0700 when it is
 // missing, the file written beside its target and renamed into place, so a
 // reader never sees a partial file. The origin must already be normalized.

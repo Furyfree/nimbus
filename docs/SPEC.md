@@ -170,6 +170,15 @@ references, conflicts and dependency cycles fail validation. Hardware
 detection proposes selections during init; it does not silently change an
 existing machine later.
 
+Switching channels is an installer action, not a sync action:
+`install.sh --channel stable|develop` (or the develop curl entry point)
+verifies the same COPR key, switches the checkout branch, rewrites the
+`nimbus-engine` repository, runs the native `distro-sync`, records the
+channel in the selector and validates the checkout before reporting. It
+refuses a dirty checkout, an unrecognized repository file and a target engine
+that cannot read the current applied-state schema. Installers fetched from
+the `develop` branch carry the develop channel; `main` installs stable.
+
 The selector schema is 2, with a required `channel` of `stable` or `develop`.
 A schema 1 selector predates the channel, is read as stable, and is recorded
 as schema 2 by the next selector-writing action (init or a channel switch).

@@ -26,10 +26,97 @@ KEY_SOURCE="${CHECKOUT}/system/keys/nimbus.asc"
 PIN_SOURCE="${CHECKOUT}/system/keys/nimbus.fingerprint"
 KEY_TARGET=/etc/pki/rpm-gpg/RPM-GPG-KEY-nimbus
 REPO_TARGET=/etc/yum.repos.d/nimbus-engine.repo
-REPO_URL=https://download.copr.fedorainfracloud.org/results/furyfree/nimbus/fedora-44-x86_64/
+
+CHANNEL="${NIMBUS_CHANNEL:-stable}"
+case "${CHANNEL}" in
+  stable) BRANCH=main; REPO_PROJECT=furyfree/nimbus ;;
+  develop) BRANCH=develop; REPO_PROJECT=furyfree/nimbus-develop ;;
+  *) fail "unsupported channel ${CHANNEL}" ;;
+esac
+# repo_file writes the reviewed nimbus-engine repository for one channel.
+repo_file() {
+  local project="$1"
+  cat <<EOF
+[nimbus-engine]
+name=Nimbus engine (${project} COPR)
+baseurl=https://download.copr.fedorainfracloud.org/results/${project}/fedora-44-x86_64/
+enabled=1
+gpgcheck=1
+repo_gpgcheck=0
+gpgkey=file://${KEY_TARGET}
+sslverify=1
+skip_if_unavailable=0
+includepkgs=nimbus
+EOF
+}
 
 if command -v nimbus >/dev/null 2>&1 && [ "$(command -v nimbus)" != "${ENGINE}" ]; then
   fail "another nimbus shadows ${ENGINE} on PATH; move it aside before retrying"
+fi
+
+# An installed engine switches channel when its repository no longer matches.
+# The branch switch belongs to install.sh, which runs before this script and
+# replaces it on disk.
+if [ -e "${CHECKOUT}/.git" ]; then
+  branch_current="$(git -C "${CHECKOUT}" branch --show-current 2>/dev/null || true)"
+  if [ -n "${branch_current}" ] && [ "${branch_current}" != "${BRANCH}" ]; then
+    fail "the checkout is on ${branch_current}; run ./install.sh --channel ${CHANNEL} to switch the checkout branch first"
+  fi
+fi
+switch_needed=false
+repo_current=""
+if [ -f "${REPO_TARGET}" ] && [ ! -L "${REPO_TARGET}" ]; then
+  for project in furyfree/nimbus furyfree/nimbus-develop; do
+    if repo_file "${project}" | cmp -s - "${REPO_TARGET}"; then
+      [ "${project}" = "${REPO_PROJECT}" ] || switch_needed=true
+      repo_current="${project}"
+      break
+    fi
+  done
+  [ -n "${repo_current}" ] || fail "existing ${REPO_TARGET} is not a recognized channel; inspect it before retrying"
+fi
+
+if [ -x "${ENGINE}" ] && [ "${switch_needed}" = true ]; then
+  if [ ! -f "${KEY_SOURCE}" ] || [ -L "${KEY_SOURCE}" ] || [ ! -f "${PIN_SOURCE}" ] || [ -L "${PIN_SOURCE}" ]; then
+    fail "the reviewed COPR key material is not available in this checkout"
+  fi
+  PIN="$(cat "${PIN_SOURCE}")"
+  [[ "${PIN}" =~ ^[0-9A-F]{40}$ ]] || fail "invalid COPR signing-key fingerprint"
+  # Refuse a target whose engine cannot read the current applied-state schema.
+  marker="$(cat /var/lib/nimbus/schema 2>/dev/null || true)"
+  target_schema="$(sed -n 's/^const Schema = \([0-9][0-9]*\)$/\1/p' "${CHECKOUT}/internal/state/state.go")"
+  if [ -n "${marker}" ] && [ -n "${target_schema}" ] && [ "${marker}" -gt "${target_schema}" ]; then
+    fail "the ${CHANNEL} engine reads state schema ${target_schema} but this machine already wrote schema ${marker}; stay on the current channel until a matching release ships"
+  fi
+  work="$(mktemp -d)"
+  mkdir -m 700 "${work}/gnupg" "${work}/rpmdb" "${work}/repos"
+  cp -- "${KEY_SOURCE}" "${work}/key.asc"
+  key_info="$(gpg --batch --no-options --homedir "${work}/gnupg" --with-colons --show-keys "${work}/key.asc")" || fail "cannot inspect the COPR signing key"
+  fingerprint="$(printf '%s\n' "${key_info}" | awk -F: '
+    $1 == "pub" { count++; primary=1; if ($2 == "r" || $2 == "e") bad=1; next }
+    $1 == "sub" { primary=0 }
+    $1 == "fpr" && primary { fingerprint=$10; primary=0 }
+    END { if (count != 1 || bad) exit 1; print fingerprint }
+  ')" || fail "COPR key must contain one valid primary key"
+  [ "${fingerprint}" = "${PIN}" ] || fail "COPR signing-key fingerprint mismatch"
+  say "Switching the Nimbus engine to ${CHANNEL} (${REPO_PROJECT})."
+  installer_run sudo install -m 0644 -- "${work}/key.asc" "${KEY_TARGET}"
+  repo_file "${REPO_PROJECT}" > "${work}/nimbus-engine.repo"
+  installer_run sudo install -m 0644 -- "${work}/nimbus-engine.repo" "${REPO_TARGET}"
+  installer_run sudo rpmkeys --import "${KEY_TARGET}"
+  installer_run sudo dnf5 -y distro-sync nimbus
+  [ -x "${ENGINE}" ] || fail "DNF completed without the Nimbus engine"
+  installer_run "${ENGINE}" internal selector-channel "${CHANNEL}"
+  if ! report="$("${ENGINE}" validate --checkout "${CHECKOUT}" 2>&1)"; then
+    installer_event "${report}"
+    printf '%s\n' "${report}" >&2
+    fail "the checkout does not validate with the ${CHANNEL} engine"
+  fi
+  installer_event "${report}"
+  rm -rf -- "${work}"
+  work=""
+  say "Channel switched to ${CHANNEL}. Run nimbus sync to reconcile the workstation."
+  exit 0
 fi
 
 if [ ! -x "${ENGINE}" ]; then
@@ -54,6 +141,71 @@ if [ "${#prerequisites[@]}" -gt 0 ]; then
   installer_run sudo dnf5 -y install "${prerequisites[@]}"
 fi
 
+# An installed engine switches channel when its repository no longer matches.
+# The branch switch belongs to install.sh, which runs before this script and
+# replaces it on disk.
+if [ -e "${CHECKOUT}/.git" ]; then
+  branch_current="$(git -C "${CHECKOUT}" branch --show-current 2>/dev/null || true)"
+  if [ -n "${branch_current}" ] && [ "${branch_current}" != "${BRANCH}" ]; then
+    fail "the checkout is on ${branch_current}; run ./install.sh --channel ${CHANNEL} to switch the checkout branch first"
+  fi
+fi
+switch_needed=false
+repo_current=""
+if [ -f "${REPO_TARGET}" ] && [ ! -L "${REPO_TARGET}" ]; then
+  for project in furyfree/nimbus furyfree/nimbus-develop; do
+    if repo_file "${project}" | cmp -s - "${REPO_TARGET}"; then
+      [ "${project}" = "${REPO_PROJECT}" ] || switch_needed=true
+      repo_current="${project}"
+      break
+    fi
+  done
+  [ -n "${repo_current}" ] || fail "existing ${REPO_TARGET} is not a recognized channel; inspect it before retrying"
+fi
+
+if [ -x "${ENGINE}" ] && [ "${switch_needed}" = true ]; then
+  if [ ! -f "${KEY_SOURCE}" ] || [ -L "${KEY_SOURCE}" ] || [ ! -f "${PIN_SOURCE}" ] || [ -L "${PIN_SOURCE}" ]; then
+    fail "the reviewed COPR key material is not available in this checkout"
+  fi
+  PIN="$(cat "${PIN_SOURCE}")"
+  [[ "${PIN}" =~ ^[0-9A-F]{40}$ ]] || fail "invalid COPR signing-key fingerprint"
+  # Refuse a target whose engine cannot read the current applied-state schema.
+  marker="$(cat /var/lib/nimbus/schema 2>/dev/null || true)"
+  target_schema="$(sed -n 's/^const Schema = \([0-9][0-9]*\)$/\1/p' "${CHECKOUT}/internal/state/state.go")"
+  if [ -n "${marker}" ] && [ -n "${target_schema}" ] && [ "${marker}" -gt "${target_schema}" ]; then
+    fail "the ${CHANNEL} engine reads state schema ${target_schema} but this machine already wrote schema ${marker}; stay on the current channel until a matching release ships"
+  fi
+  work="$(mktemp -d)"
+  mkdir -m 700 "${work}/gnupg" "${work}/rpmdb" "${work}/repos"
+  cp -- "${KEY_SOURCE}" "${work}/key.asc"
+  key_info="$(gpg --batch --no-options --homedir "${work}/gnupg" --with-colons --show-keys "${work}/key.asc")" || fail "cannot inspect the COPR signing key"
+  fingerprint="$(printf '%s\n' "${key_info}" | awk -F: '
+    $1 == "pub" { count++; primary=1; if ($2 == "r" || $2 == "e") bad=1; next }
+    $1 == "sub" { primary=0 }
+    $1 == "fpr" && primary { fingerprint=$10; primary=0 }
+    END { if (count != 1 || bad) exit 1; print fingerprint }
+  ')" || fail "COPR key must contain one valid primary key"
+  [ "${fingerprint}" = "${PIN}" ] || fail "COPR signing-key fingerprint mismatch"
+  say "Switching the Nimbus engine to ${CHANNEL} (${REPO_PROJECT})."
+  installer_run sudo install -m 0644 -- "${work}/key.asc" "${KEY_TARGET}"
+  repo_file "${REPO_PROJECT}" > "${work}/nimbus-engine.repo"
+  installer_run sudo install -m 0644 -- "${work}/nimbus-engine.repo" "${REPO_TARGET}"
+  installer_run sudo rpmkeys --import "${KEY_TARGET}"
+  installer_run sudo dnf5 -y distro-sync nimbus
+  [ -x "${ENGINE}" ] || fail "DNF completed without the Nimbus engine"
+  installer_run "${ENGINE}" internal selector-channel "${CHANNEL}"
+  if ! report="$("${ENGINE}" validate --checkout "${CHECKOUT}" 2>&1)"; then
+    installer_event "${report}"
+    printf '%s\n' "${report}" >&2
+    fail "the checkout does not validate with the ${CHANNEL} engine"
+  fi
+  installer_event "${report}"
+  rm -rf -- "${work}"
+  work=""
+  say "Channel switched to ${CHANNEL}. Run nimbus sync to reconcile the workstation."
+  exit 0
+fi
+
 if [ ! -x "${ENGINE}" ]; then
   work="$(mktemp -d)"
   mkdir -m 700 "${work}/gnupg" "${work}/rpmdb" "${work}/repos" "${work}/packages"
@@ -66,31 +218,27 @@ if [ ! -x "${ENGINE}" ]; then
     END { if (count != 1 || bad) exit 1; print fingerprint }
   ')" || fail "COPR key must contain one valid primary key"
   [ "${fingerprint}" = "${PIN}" ] || fail "COPR signing-key fingerprint mismatch"
-  cat > "${work}/repos/nimbus-engine.repo" <<EOF
-[nimbus-engine]
-name=Nimbus engine (furyfree/nimbus COPR)
-baseurl=${REPO_URL}
-enabled=1
-gpgcheck=1
-repo_gpgcheck=0
-gpgkey=file://${KEY_TARGET}
-sslverify=1
-skip_if_unavailable=0
-includepkgs=nimbus
-EOF
-  # Preserve an existing configuration unless it is exactly the expected one.
+  repo_file "${REPO_PROJECT}" > "${work}/repos/nimbus-engine.repo"
+  # Preserve an existing configuration unless it is exactly one of the two
+  # recognized channel variants.
   for target in "${KEY_TARGET}" "${REPO_TARGET}"; do
     [ ! -L "${target}" ] || fail "refusing symlink ${target}"
     if [ -e "${target}" ]; then
       if [ ! -f "${target}" ] || [ "$(stat -c %u "${target}")" != 0 ]; then
         fail "unowned bootstrap file: ${target}"
       fi
-      expected="${work}/key.asc"
-      [ "${target}" != "${REPO_TARGET}" ] || expected="${work}/repos/nimbus-engine.repo"
-      cmp -s "${expected}" "${target}" || fail "existing ${target} differs; inspect it before retrying"
+      if [ "${target}" = "${REPO_TARGET}" ]; then
+        recognized=false
+        for project in furyfree/nimbus furyfree/nimbus-develop; do
+          repo_file "${project}" | cmp -s - "${target}" && recognized=true
+        done
+        [ "${recognized}" = true ] || fail "existing ${target} is not a recognized channel; inspect it before retrying"
+      else
+        cmp -s "${work}/key.asc" "${target}" || fail "existing ${target} differs; inspect it before retrying"
+      fi
     fi
   done
-  say "Downloading the Nimbus engine from furyfree/nimbus for Fedora 44 x86_64."
+  say "Downloading the Nimbus engine from ${REPO_PROJECT} for Fedora 44 x86_64."
   # Download only the engine from an isolated source configuration. Dependencies
   # are resolved by the final native DNF transaction against the host's sources.
   installer_run dnf5 -y --setopt="reposdir=${work}/repos" --setopt="cachedir=${work}/cache" \
@@ -133,4 +281,8 @@ if [ -n "${work:-}" ]; then
 fi
 say "Refreshing the user package cache for the installation preview."
 installer_run dnf5 makecache
+case " $* " in
+  *" --channel "*) ;;
+  *) set -- "$@" --channel "${CHANNEL}" ;;
+esac
 installer_handoff "${ENGINE}" init --checkout "${CHECKOUT}" "$@"

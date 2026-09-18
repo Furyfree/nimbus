@@ -574,6 +574,7 @@ func TestInstallerAcceptsOnlyCheckoutRoots(t *testing.T) {
 		}
 	}
 	git("init", repo)
+	git("-C", repo, "branch", "-m", "main")
 	git("-C", repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-m", "fixture")
 	git("-C", repo, "remote", "add", "origin", "https://github.com/Furyfree/nimbus.git")
 	git("-C", repo, "worktree", "add", "--detach", worktree)
@@ -585,7 +586,7 @@ func TestInstallerAcceptsOnlyCheckoutRoots(t *testing.T) {
 		path     string
 		accepted bool
 	}{{repo, true}, {worktree, true}, {nested, false}} {
-		cmd := exec.Command("bash", "-c", "set -eu\nsay() { :; }\nfail() { echo \"$*\"; exit 1; }\n"+body)
+		cmd := exec.Command("bash", "-c", "set -eu\nsay() { :; }\ninstaller_run() { \"$@\"; }\nfail() { echo \"$*\"; exit 1; }\n"+body)
 		cmd.Env = append(os.Environ(), "HOME="+home, "CHECKOUT="+tc.path, "ORIGIN_ID=github.com/furyfree/nimbus")
 		out, err := cmd.CombinedOutput()
 		if (err == nil) != tc.accepted {

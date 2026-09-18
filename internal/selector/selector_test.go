@@ -172,6 +172,33 @@ func TestChannelSchema(t *testing.T) {
 	}
 }
 
+func TestSetChannel(t *testing.T) {
+	dir := t.TempDir()
+	checkout := filepath.Join(dir, "checkout")
+	if err := os.Mkdir(checkout, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "config.toml")
+	legacy := "schema = 1\ncheckout = '" + checkout + "'\nmachine = 'vm'\norigin = 'github.com/Furyfree/nimbus'\n"
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetChannel(path, ChannelDevelop); err != nil {
+		t.Fatal(err)
+	}
+	sel, err := Load(path)
+	if err != nil || sel.Schema != CurrentSchema || sel.Channel != ChannelDevelop ||
+		sel.Machine != "vm" || sel.Checkout != checkout {
+		t.Fatalf("selector = %+v, %v", sel, err)
+	}
+	if err := SetChannel(path, "nightly"); err == nil || !strings.Contains(err.Error(), "unsupported channel") {
+		t.Fatalf("unknown channel accepted: %v", err)
+	}
+	if err := SetChannel(filepath.Join(dir, "missing.toml"), ChannelStable); err == nil {
+		t.Fatal("missing selector accepted")
+	}
+}
+
 func TestCheckoutBranch(t *testing.T) {
 	root := t.TempDir()
 	git := filepath.Join(root, ".git")
