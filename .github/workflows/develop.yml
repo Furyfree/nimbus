@@ -39,4 +39,15 @@ jobs:
             gh release create develop --repo "$GITHUB_REPOSITORY" --prerelease \
               --title "Nimbus develop" \
               --notes "Rolling source for the develop channel. Assets are replaced on every push."
+          # Remove superseded vendored archives; --clobber only replaces
+          # assets with the same name.
+          gh release view develop --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' |
+            while IFS= read -r name; do
+              case "$name" in
+                *-vendor.tar.gz)
+                  current="$(basename "$RUNNER_TEMP"/release/*-vendor.tar.gz)"
+                  [ "$name" = "$current" ] || gh release delete-asset develop "$name" --yes --repo "$GITHUB_REPOSITORY"
+                  ;;
+              esac
+            done
           gh release upload develop "$RUNNER_TEMP"/release/* --clobber --repo "$GITHUB_REPOSITORY"
