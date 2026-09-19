@@ -1,0 +1,9 @@
+# Fedora install media tooling for the fedora-iso repository: pykickstart
+# provides ksvalidator, lorax provides mkksiso.
+schema = 1
+id = "fedora-iso"
+
+requires = []
+conflicts = []
+packages = ["pykickstart", "lorax"]
+removes = []

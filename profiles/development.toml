@@ -8,7 +8,6 @@ packages = [
   "terra:t3code",
   "chatgpt:chatgpt",
   "woeusb:woeusb",
-  "pykickstart",
 ]
 
 components = [
@@ -16,4 +15,5 @@ components = [
   "zeron",
   "docker",
   "nix",
+  "fedora-iso",
 ]
