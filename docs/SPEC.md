@@ -152,8 +152,9 @@ curl -fsSL https://raw.githubusercontent.com/Furyfree/nimbus/main/install.sh | b
 The first run asks for `desktop`, `laptop` or `vm`; reruns reuse the saved
 machine, and `bash -s -- --machine vm` chooses explicitly. Bootstrap obtains
 prerequisites, verifies the Nimbus RPM, obtains the checkout, refreshes the
-package cache and runs init. It includes no uncommitted local work and
-validates but does not upgrade an installed engine. The minimum compatible
+package cache and runs init. It includes no uncommitted local work and, when
+rerun, upgrades an installed engine from its configured channel before
+validating. The minimum compatible
 engine is declared in `nimbus.toml`. Init shows its plan before approval; a
 direct init that reports missing package metadata suggests `dnf5 makecache`.
 `init --plan` never refreshes metadata. Reboot when requested and select

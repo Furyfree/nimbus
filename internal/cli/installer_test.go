@@ -598,3 +598,47 @@ func TestInstallerAcceptsOnlyCheckoutRoots(t *testing.T) {
 		}
 	}
 }
+
+func TestInstallerRerunConvergesTheEngine(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "bootstrap"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	start := strings.Index(text, "engine_update() {")
+	if start < 0 {
+		t.Fatal("missing engine update helper")
+	}
+	end := strings.Index(text[start:], "\nfi\n")
+	if end < 0 {
+		t.Fatal("missing engine update guard")
+	}
+	block := text[start : start+end+len("\nfi\n")]
+
+	engine := filepath.Join(t.TempDir(), "nimbus")
+	if err := os.WriteFile(engine, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name         string
+		engine       string
+		repoCurrent  string
+		switchNeeded string
+		want         string
+	}{
+		{"rerun", engine, "furyfree/nimbus-develop", "false", "sudo dnf5 -y --setopt=nimbus-engine.metadata_expire=0 --setopt=nimbus-engine.gpgcheck=1 --setopt=nimbus-engine.skip_if_unavailable=0 upgrade --from-repo=nimbus-engine nimbus"},
+		{"engine absent", filepath.Join(t.TempDir(), "missing"), "furyfree/nimbus-develop", "false", ""},
+		{"channel switch already synced", engine, "furyfree/nimbus", "true", ""},
+		{"unrecognized repository", engine, "", "false", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			script := "set -eu\nsay() { :; }\nfail() { echo \"installer: $*\" >&2; exit 1; }\n" +
+				"installer_run() { printf '%s\\n' \"$*\"; }\nREPO_PROJECT=furyfree/nimbus-develop\n" +
+				"ENGINE=" + tc.engine + "\nrepo_current=" + tc.repoCurrent + "\nswitch_needed=" + tc.switchNeeded + "\n" + block
+			out, err := exec.Command("bash", "-c", script).CombinedOutput()
+			if err != nil || strings.TrimSpace(string(out)) != tc.want {
+				t.Fatalf("rerun guard behavior changed: %v\n%s", err, out)
+			}
+		})
+	}
+}

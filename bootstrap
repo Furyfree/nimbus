@@ -212,6 +212,22 @@ if [ ! -x "${ENGINE}" ]; then
   [ -x "${ENGINE}" ] || fail "DNF completed without installing ${ENGINE}"
 fi
 
+# engine_update converges an installed engine on its configured channel.
+engine_update() {
+  installer_run sudo dnf5 -y \
+    --setopt=nimbus-engine.metadata_expire=0 \
+    --setopt=nimbus-engine.gpgcheck=1 \
+    --setopt=nimbus-engine.skip_if_unavailable=0 \
+    upgrade --from-repo=nimbus-engine nimbus
+}
+
+# A rerun keeps the checkout and its engine on the same channel.
+if [ -x "${ENGINE}" ] && [ "${switch_needed}" = false ] && [ -n "${repo_current}" ]; then
+  say "Updating the Nimbus engine from ${REPO_PROJECT}."
+  engine_update
+  [ -x "${ENGINE}" ] || fail "DNF completed without the Nimbus engine"
+fi
+
 [ "$(rpm -qf --qf '%{NAME}' "${ENGINE}")" = nimbus ] || fail "${ENGINE} is not owned by the Nimbus RPM"
 [ "$(command -v nimbus)" = "${ENGINE}" ] || fail "another nimbus shadows ${ENGINE} on PATH; move it aside before retrying"
 say "nimbus is installed: $("${ENGINE}" version)"
