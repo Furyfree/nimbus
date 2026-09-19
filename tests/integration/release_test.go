@@ -15,7 +15,7 @@ import (
 
 func TestReleaseSource(t *testing.T) {
 	script := filepath.Join(repoRoot(t), "tools/release/source.sh")
-	for _, scenario := range []string{"success", "invalid tag", "missing tag", "unmerged tag", "existing output", "inside checkout", "vendor failure", "test failure", "module drift"} {
+	for _, scenario := range []string{"success", "invalid tag", "missing tag", "unmerged tag", "existing output", "inside checkout", "vendor failure", "test failure", "module drift", "below develop version"} {
 		t.Run(scenario, func(t *testing.T) {
 			root := t.TempDir()
 			repo := filepath.Join(root, "repo")
@@ -46,6 +46,11 @@ func TestReleaseSource(t *testing.T) {
 			write(filepath.Join(repo, "LICENSE"), "fixture license\n", 0644)
 			write(filepath.Join(repo, "go.mod"), "module example.invalid/fixture\n", 0644)
 			write(filepath.Join(repo, "go.sum"), "fixture checksums\n", 0644)
+			developBase := "0.1.0"
+			if scenario == "below develop version" {
+				developBase = "0.2.0"
+			}
+			write(filepath.Join(repo, "develop-version"), developBase+"\n", 0644)
 			git("add", ".")
 			git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "fixture")
 			commit := git("rev-parse", "HEAD")

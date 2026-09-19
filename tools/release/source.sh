@@ -41,6 +41,14 @@ if [ "$channel" = stable ]; then
   commit="$(git rev-parse --verify "refs/tags/${tag}^{commit}")" || fail 'tag does not exist'
   git merge-base --is-ancestor "$commit" refs/remotes/origin/main || fail 'tag must belong to origin/main'
   version="${tag#v}"
+  # A stable release must never sort below the develop builds it follows;
+  # develop bumps its base to the next planned release on the develop branch.
+  if git cat-file -e "${commit}:develop-version" 2>/dev/null; then
+    base="$(git show "${commit}:develop-version" | tr -d '[:space:]')"
+    [[ "$base" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || fail 'develop-version must be MAJOR.MINOR.PATCH'
+    newest="$(printf '%s\n%s\n' "$base" "$version" | sort -V | tail -n 1)"
+    [ "$newest" = "$version" ] || fail "stable ${version} is below the develop base ${base}; tag at least v${base}"
+  fi
   label="Tag: ${tag}"
 else
   [ -f "${root}/develop-version" ] || fail 'develop-version is missing'
