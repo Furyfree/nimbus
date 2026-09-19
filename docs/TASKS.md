@@ -1165,6 +1165,13 @@ managed/status/diff pass; verify reports expected drift against an empty home.
 No apply was run. The startup guard is exercised with zero, one and multiple
 Bluetooth adapters; the next real login remains untested.
 
+## WoeUSB package, 2026-09-19
+
+- [x] Package WoeUSB for Fedora 44 in the copr repository and publish it from
+  COPR (project `furyfree/woeusb`, build 11002712).
+- [x] Select it in the development profile with its own pinned repository key
+  (`54DB A577 ... 0AD8 E157`); all three machine manifests validate.
+
 ## Engine channels, 2026-09-18
 
 Tracked by issue #72. The selector records which engine track an installation
