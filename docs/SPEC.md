@@ -302,14 +302,14 @@ managed by Chezmoi, committed, or mixed with `/var/lib/nimbus` receipts.
 Init retains installation logging and prerequisite ordering; selected
 1Password access is checked before secret-backed rendering, and failure
 preserves selection and completed work for retry. Public native output is
-streamed through a pseudo-terminal when logging requires it, retaining
-resizing, cancellation and restoration; privileged commands keep the invoking
-terminal, so the sudo credential cache covers the whole run. Authentication
-input and secret-capable output stay outside transcripts. No progress
-percentage is invented. One closing report distinguishes completed
-changes, failed and skipped phases, remaining guided tasks, new guidance
-and session notices. An unavailable check is reported, never treated as
-proof of matching state.
+streamed through a pseudo-terminal in the invoking session when logging
+requires it, retaining progress, resizing and cancellation while the sudo
+credential cache covers the whole run. Authentication input and
+secret-capable output stay outside transcripts. No progress percentage is
+invented. One closing report distinguishes completed changes, failed and
+skipped phases, prerequisites for the requested reboot, verification
+problems and a pointer to remaining setup and guidance. An unavailable
+check is reported, never treated as proof of matching state.
 
 Nimbus output uses shared bright terminal colors (green success, yellow
 pending, red failure, cyan actions and historical verification), bold

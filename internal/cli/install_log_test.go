@@ -405,23 +405,24 @@ func TestSystemResourceLoggingExcludesSecretCapableProperties(t *testing.T) {
 	}
 }
 
-func TestSudoKeepsTheInvokingTerminal(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		args []string
-		want bool
-	}{
-		{"sudo", []string{"dnf5", "-y", "install", "demo"}, false},
-		{"sudo", []string{"--", "/usr/bin/noctalia-greeter", "passwordless-sync", "enable"}, false},
-		{"sudo", []string{"-v"}, false},
-		{"dnf5", []string{"-y", "install", "demo"}, true},
-		{"rpm", []string{"--import", "/etc/pki/rpm-gpg/RPM-GPG-KEY-nimbus"}, true},
-		{"systemctl", []string{"enable", "--", "greetd.service"}, true},
-		{"install", []string{"-m", "0644", "a", "b"}, false},
-		{"restorecon", []string{"-v", "/etc/x"}, false},
-	} {
-		if got := useLoggingTTY(tc.name, tc.args); got != tc.want {
-			t.Fatalf("useLoggingTTY(%s %v) = %t, want %t", tc.name, tc.args, got, tc.want)
-		}
+func TestInstallLogSanitizesTerminalFrames(t *testing.T) {
+	l := testInstallLog(t)
+	payload := "\x1b[2Jplain \x1b[31mred\x1b[0m\r\n50%\r75%\r100%\r\n"
+	if _, err := l.Write([]byte(payload)); err != nil {
+		t.Fatal(err)
+	}
+	// A read can split the pty's CRLF pair; the line must survive.
+	if _, err := l.Write([]byte("split\r")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Write([]byte("\nnext\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(l.dir, "engine.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(data); !strings.Contains(got, "plain red\n100%\nsplit\nnext\n") || strings.ContainsAny(got, "\x1b\r") {
+		t.Fatalf("log not sanitized: %q", got)
 	}
 }

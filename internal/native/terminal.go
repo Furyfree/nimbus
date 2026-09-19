@@ -17,8 +17,11 @@ import (
 	"golang.org/x/term"
 )
 
-// StreamLogged attaches a native pseudo-terminal when interactive output must
-// also be logged. Only output is copied; terminal input is never recorded.
+// StreamLogged attaches a logging pseudo-terminal when interactive output must
+// also be logged. The child keeps the invoking session, process group and
+// controlling terminal, so terminal signals and sudo's credential cache keep
+// working; only stdout and stderr are redirected through the pty. Terminal
+// input is never recorded because stdin stays on the real terminal.
 func (ExecSource) StreamLogged(stdout, stderr io.Writer, log io.Writer, name string, args ...string) error {
 	stdout, stderr = output.Native(stdout), output.Native(stderr)
 	outFile, outOK := stdout.(*os.File)
@@ -31,12 +34,30 @@ func (ExecSource) StreamLogged(stdout, stderr io.Writer, log io.Writer, name str
 		return err
 	}
 	defer master.Close()
-	if err := unix.IoctlSetPointerInt(int(master.Fd()), unix.TIOCSPTLCK, 0); err != nil {
-		return err
-	}
-	number, err := unix.IoctlGetInt(int(master.Fd()), unix.TIOCGPTN)
+	// File.Fd disables deadlines, so every ioctl goes through SyscallConn.
+	// That keeps the descriptor pollable: a lingering slave holder can then be
+	// drained with SetReadDeadline instead of hanging the copy.
+	control, err := master.SyscallConn()
 	if err != nil {
 		return err
+	}
+	var ioctlErr error
+	if err := control.Control(func(fd uintptr) {
+		ioctlErr = unix.IoctlSetPointerInt(int(fd), unix.TIOCSPTLCK, 0)
+	}); err != nil {
+		return err
+	}
+	if ioctlErr != nil {
+		return ioctlErr
+	}
+	var number int
+	if err := control.Control(func(fd uintptr) {
+		number, ioctlErr = unix.IoctlGetInt(int(fd), unix.TIOCGPTN)
+	}); err != nil {
+		return err
+	}
+	if ioctlErr != nil {
+		return ioctlErr
 	}
 	slave, err := os.OpenFile(fmt.Sprintf("/dev/pts/%d", number), os.O_RDWR|syscall.O_NOCTTY, 0)
 	if err != nil {
@@ -45,23 +66,19 @@ func (ExecSource) StreamLogged(stdout, stderr io.Writer, log io.Writer, name str
 	defer slave.Close()
 	resize := func() {
 		if size, err := unix.IoctlGetWinsize(int(os.Stdin.Fd()), unix.TIOCGWINSZ); err == nil {
-			_ = unix.IoctlSetWinsize(int(master.Fd()), unix.TIOCSWINSZ, size)
+			_ = control.Control(func(fd uintptr) {
+				_ = unix.IoctlSetWinsize(int(fd), unix.TIOCSWINSZ, size)
+			})
 		}
 	}
 	resize()
-	state, err := term.MakeRaw(int(os.Stdin.Fd()))
-	if err != nil {
-		return err
-	}
-	defer term.Restore(int(os.Stdin.Fd()), state)
 	// Subscribe before the child starts: a window resize arriving right after
 	// start must not be lost to a scheduling gap between Start and Notify.
 	resizes := make(chan os.Signal, 1)
 	signal.Notify(resizes, syscall.SIGWINCH)
 	defer signal.Stop(resizes)
 	cmd := exec.Command(name, args...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = slave, slave, slave
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, slave, slave
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -78,42 +95,13 @@ func (ExecSource) StreamLogged(stdout, stderr io.Writer, log io.Writer, name str
 			}
 		}
 	})
-	workers.Go(func() {
-		buffer := make([]byte, 4096)
-		for {
-			select {
-			case <-done:
-				return
-			default:
-			}
-			fds := []unix.PollFd{{Fd: int32(os.Stdin.Fd()), Events: unix.POLLIN}}
-			n, err := unix.Poll(fds, 50)
-			if errors.Is(err, syscall.EINTR) {
-				continue
-			}
-			if err != nil {
-				return
-			}
-			if n == 0 {
-				continue
-			}
-			if fds[0].Revents&unix.POLLIN == 0 {
-				return
-			}
-			n, err = unix.Read(int(os.Stdin.Fd()), buffer)
-			if err != nil || n == 0 {
-				return
-			}
-			if _, err = master.Write(buffer[:n]); err != nil {
-				return
-			}
-		}
-	})
 	outputDone := make(chan error, 1)
 	go func() {
 		_, err := io.Copy(io.MultiWriter(stdout, log), master)
-		if err != nil && !errors.Is(err, syscall.EIO) && !errors.Is(err, os.ErrClosed) {
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+		if err != nil && !errors.Is(err, syscall.EIO) && !errors.Is(err, os.ErrClosed) && !errors.Is(err, os.ErrDeadlineExceeded) {
+			// The terminal or log writer failed. Keep draining so the child
+			// never blocks on a full pty buffer; the log keeps the first error.
+			_, _ = io.Copy(io.Discard, master)
 		}
 		outputDone <- err
 	}()
@@ -124,10 +112,15 @@ func (ExecSource) StreamLogged(stdout, stderr io.Writer, log io.Writer, name str
 	select {
 	case outputErr = <-outputDone:
 	case <-time.After(250 * time.Millisecond):
-		_ = master.Close()
+		// A lingering grandchild can hold the slave open after the direct
+		// child exits. Force the pending read to return; close is the
+		// fallback when this descriptor has no deadlines.
+		if err := master.SetReadDeadline(time.Now()); err != nil {
+			_ = master.Close()
+		}
 		outputErr = <-outputDone
 	}
-	if errors.Is(outputErr, syscall.EIO) || errors.Is(outputErr, os.ErrClosed) {
+	if errors.Is(outputErr, syscall.EIO) || errors.Is(outputErr, os.ErrClosed) || errors.Is(outputErr, os.ErrDeadlineExceeded) {
 		outputErr = nil
 	}
 	if err := errors.Join(runErr, outputErr); err != nil {

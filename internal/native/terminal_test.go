@@ -6,8 +6,10 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -65,16 +67,19 @@ func TestLoggedTTYChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer log.Close()
-	// The process that receives Ctrl+C must announce its own readiness. A shell
-	// printing WAITING before spawning sleep races with delivery of the interrupt.
-	// Both Python writes bypass buffered stdout: Ctrl+C can arrive while the
-	// readiness write is still returning, and buffered writers are not reentrant.
+	// The harness interrupts the whole process group. Drain this process's own
+	// copy so the test reports the child's exit code instead of dying first.
+	signals := make(chan os.Signal, 4)
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(signals)
+	// The child must see a terminal on stdout while stdin stays on the outer
+	// terminal, so typed input never crosses the logged pty.
 	body := `test -t 0 && test -t 1 || exit 91
-stty -echo
+test "$(readlink /proc/self/fd/0)" != "$(readlink /proc/self/fd/1)" || exit 93
 printf 'READY\n'
 read answer
 test "$answer" = 'synthetic-private-answer' || exit 92
-stty size
+stty -F /dev/fd/1 size
 exec python3 -c 'import os,signal,sys,time
 def interrupted(*args):
     os.write(1, b"INTERRUPTED\n")
@@ -105,7 +110,7 @@ time.sleep(20)'
 	}
 }
 func TestLoggedTTYProgressPrivacyResizeAndCancellation(t *testing.T) {
-	for _, tool := range []string{"python3", "stty"} {
+	for _, tool := range []string{"python3", "stty", "readlink"} {
 		if _, err := exec.LookPath(tool); err != nil {
 			t.Skip(tool + " unavailable")
 		}
@@ -130,15 +135,13 @@ def until(marker):
         if select.select([master],[],[],0.1)[0]: output+=os.read(master,65536)
 try:
     until(b'READY')
-    raw=termios.tcgetattr(master)
-    assert not raw[3]&termios.ICANON and not raw[3]&termios.ECHO,repr(raw)
     fcntl.ioctl(master,termios.TIOCSWINSZ,struct.pack('HHHH',37,111,0,0))
     os.kill(pid,signal.SIGWINCH)
-    time.sleep(0.1)
+    time.sleep(0.2)
     os.write(master,b'synthetic-private-answer\n')
     until(b'WAITING')
     assert b'37 111' in output,repr(output)
-    os.write(master,b'\x03')
+    os.killpg(pid,signal.SIGINT)
     deadline=time.monotonic()+8
     while True:
         ended,status=os.waitpid(pid,os.WNOHANG)
@@ -149,10 +152,9 @@ try:
         if select.select([master],[],[],0.1)[0]:
             try: output+=os.read(master,65536)
             except OSError: pass
-    # The parent terminal must come back restored (canonical input, echo) so
-    # the invoking shell keeps its foreground behavior after the child exits.
-    restored=termios.tcgetattr(master)
-    assert restored[3]&termios.ICANON and restored[3]&termios.ECHO,repr(restored)
+    # The logging pty must not touch the invoking terminal's input modes.
+    attrs=termios.tcgetattr(master)
+    assert attrs[3]&termios.ICANON and attrs[3]&termios.ECHO,repr(attrs)
     log=open(sys.argv[2],'rb').read()
     assert b'READY' in log and b'WAITING' in log,log
     assert b'INTERRUPTED' in log,log

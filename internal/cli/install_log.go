@@ -17,6 +17,7 @@ import (
 	"github.com/Furyfree/nimbus/internal/inspect"
 	"github.com/Furyfree/nimbus/internal/native"
 	"github.com/Furyfree/nimbus/internal/version"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Installation logs are opt-in at the command boundary: inspection never
@@ -154,17 +155,46 @@ func logParents(path string, create bool) error {
 func makeLogParents(path string) error     { return logParents(path, true) }
 func validateLogParents(path string) error { return logParents(path, false) }
 
+// Write retains the first error for commandError and finish to report. Native
+// terminal frames are reduced to plain text so the transcript stays readable;
+// the terminal itself receives the original bytes.
 func (l *installLog) Write(p []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.err != nil {
 		return 0, l.err
 	}
-	n, err := l.file.Write(p)
-	if err != nil {
+	if _, err := l.file.Write(sanitizeTerminal(p)); err != nil {
 		l.err = err
+		return 0, err
 	}
-	return n, err
+	return len(p), nil
+}
+
+// sanitizeTerminal removes ANSI escape sequences and collapses carriage-return
+// overdraws to their final segment, the way the terminal would show them. The
+// pty line discipline turns each newline into CRLF, so that pair is normalized
+// before lone carriage returns are treated as overdraws.
+func sanitizeTerminal(p []byte) []byte {
+	text := strings.ReplaceAll(ansi.Strip(string(p)), "\r\n", "\n")
+	if !strings.ContainsRune(text, '\r') {
+		return []byte(text)
+	}
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		j := strings.LastIndexByte(line, '\r')
+		if j < 0 {
+			continue
+		}
+		if j == len(line)-1 {
+			// A read can split the pty's CRLF pair; keep the text before it
+			// instead of collapsing the line to nothing.
+			lines[i] = line[:j]
+			continue
+		}
+		lines[i] = line[j+1:]
+	}
+	return []byte(strings.Join(lines, "\n"))
 }
 
 func (l *installLog) event(format string, args ...any) {
@@ -356,17 +386,6 @@ func (s installSource) Run(name string, args ...string) ([]byte, error) {
 	return output, s.commandError(name, args, err, !probe)
 }
 
-// useLoggingTTY reports whether a command runs under the logging pty. sudo
-// commands keep the invoking terminal instead: sudo keys its credential cache
-// to the terminal session, and a pty child is a new session, which asked for
-// the password again for every privileged command during init.
-func useLoggingTTY(name string, args []string) bool {
-	if name == "sudo" {
-		return false
-	}
-	return publicInstallCommand(name, args)
-}
-
 func (s installSource) Stream(out, errOut io.Writer, name string, args ...string) error {
 	start := time.Now()
 	label := filepath.Base(name)
@@ -376,7 +395,7 @@ func (s installSource) Stream(out, errOut io.Writer, name string, args ...string
 	s.log.event("command start %s", label)
 	out, errOut = unlogged(out), unlogged(errOut)
 	var err error
-	if executor, ok := s.Source.(native.ExecSource); ok && useLoggingTTY(name, args) {
+	if executor, ok := s.Source.(native.ExecSource); ok && publicInstallCommand(name, args) {
 		err = executor.StreamLogged(out, errOut, s.log, name, args...)
 	} else {
 		if publicInstallCommand(name, args) {
