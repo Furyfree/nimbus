@@ -62,6 +62,7 @@ func hyprlandPlugins(src native.Source, in Inputs, pkg definitions.ResolvedPacka
 	t := Task{
 		ID: "hyprland-plugins", Owner: "package:" + pkg.Canonical,
 		Title: "Install and load selected Hyprland plugins", Status: Unknown,
+		Session: true,
 		Instructions: []string{
 			"Apply Chezmoi first, then run inside your Hyprland session. HyprPM downloads and builds third-party plugin code and may ask for administrator authentication.",
 			"Updates can rebuild all registered HyprPM repositories and reload their enabled plugins. The final config reload applies your Lua settings. Nimbus does not change plugin selection or create a completion receipt.",

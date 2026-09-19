@@ -49,6 +49,10 @@ Decisions:
 - [x] `engine.log` drops ANSI sequences and carriage-return overdraws at the
   log boundary; the terminal keeps the original bytes
   (`internal/cli/install_log.go`).
+- [x] Init closes with the Nimbus banner, the single log path, the pending
+  pre-reboot tasks (`nvidia-mok`, `fde`), the reboot or logout instruction
+  and the after-reboot `nimbus setup-notes` pointer; session-only checks no
+  longer read as verification problems (`internal/cli/final_report.go`).
 - [ ] Drill before the package ships: one sudo password prompt, live dnf
   progress, Ctrl+C, terminal resize and a readable `engine.log` in a
   disposable VM, then the bare-metal rerun on Secure Boot where the report

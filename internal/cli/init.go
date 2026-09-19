@@ -283,13 +283,6 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 		opts.installLog = previousLog
 		cmd.SetOut(oldOut)
 		cmd.SetErr(oldErr)
-		if _, err := fmt.Fprintf(oldOut, "Installation time: %s; logs: %s\n", time.Since(log.started).Round(time.Second), log.dir); err != nil {
-			if errors.Is(retErr, reported{}) {
-				retErr = err
-			} else {
-				retErr = errors.Join(retErr, err)
-			}
-		}
 		if err := log.finish(retErr); err != nil {
 			_, _ = fmt.Fprintf(oldErr, "installation logging failed: %v\n", err)
 			retErr = errors.Join(retErr, err)
@@ -314,6 +307,9 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 			systemResult.Notices = append(systemResult.Notices, "Run record: "+record.path)
 		}
 		err := systemResult.renderNamed(out, "init")
+		if err == nil && retErr == nil {
+			err = renderInstallFinish(out, &systemResult, log.dir)
+		}
 		if err != nil {
 			if errors.Is(retErr, reported{}) {
 				retErr = err

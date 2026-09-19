@@ -80,7 +80,11 @@ type Task struct {
 	// BeforeReboot marks a pending task that must run before the reboot that
 	// activates it, such as enrolling a key at the next boot.
 	BeforeReboot bool `json:"before_reboot,omitzero"`
-	Logout       bool `json:"logout,omitzero"`
+	// Session marks a check that can only run inside the running desktop
+	// session. Before login its unknown state belongs to remaining setup, not
+	// to verification problems.
+	Session bool `json:"session,omitzero"`
+	Logout  bool `json:"logout,omitzero"`
 	// fdeSecure remembers the inspected Secure Boot state for the FDE task's
 	// preview; RunFDESetup re-reads it before any mutation.
 	fdeSecure bool

@@ -24,6 +24,7 @@ func noctaliaPlugins(src native.Source, in Inputs, pkg definitions.ResolvedPacka
 	t := Task{
 		ID: "noctalia-plugins", Owner: "package:" + pkg.Canonical,
 		Title: "Install missing enabled Noctalia plugins", Status: Unknown,
+		Session:       true,
 		Prerequisites: []string{"Apply Chezmoi, then run this task inside the active Noctalia desktop session with network access."},
 		Instructions:  []string{"Noctalia updates the affected sources, exports their enabled plugins and rebuilds the live registry and bar. This may also update already-installed plugins from those sources."},
 		Verification:  "Check effective enabled IDs against the running shell's local catalog and readable runtime manifests and entry scripts. This verifies installation, not account sign-in or each widget's behavior.",

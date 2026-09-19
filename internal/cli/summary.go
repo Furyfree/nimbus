@@ -117,5 +117,5 @@ func (result *syncResult) renderNamed(out io.Writer, name string) error {
 			}
 		}
 	}
-	return renderFinalDetails(out, result)
+	return renderFinalDetails(out, result, name == "init")
 }

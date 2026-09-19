@@ -186,7 +186,9 @@ installer_cleanup() {
       [ "$status" -ne 0 ] || status=1
     fi
     installer_prune "${NIMBUS_INSTALL_LOG_DIR%/*}" || { [ "$status" -ne 0 ] || status=1; }
-    printf 'Installation finished in %ss (status %s). Logs: %s\n' "$((SECONDS - installer_started))" "$status" "$NIMBUS_INSTALL_LOG_DIR"
+    if [ "$status" -ne 0 ]; then
+      printf 'Installation finished in %ss (status %s). Logs: %s\n' "$((SECONDS - installer_started))" "$status" "$NIMBUS_INSTALL_LOG_DIR" >&2
+    fi
   fi
   exit "$status"
 }

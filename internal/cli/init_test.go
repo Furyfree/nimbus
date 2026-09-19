@@ -107,7 +107,7 @@ func TestInitReportsResultWriteFailures(t *testing.T) {
 	}{
 		{"selector", "selected vm; selector written to", false},
 		{"manifest", "; the Git change is yours to commit", true},
-		{"footer", "Installation time:", false},
+		{"finish", "Logs:", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, src := installerFixture(t)
@@ -133,7 +133,7 @@ func TestInitReportsResultWriteFailures(t *testing.T) {
 			if err := cmd.Execute(); !errors.Is(err, syscall.ENOSPC) || errors.Is(err, reported{}) {
 				t.Fatalf("result output error = %v", err)
 			}
-			if tc.name != "footer" && len(src.calls) != 0 {
+			if tc.name != "finish" && len(src.calls) != 0 {
 				t.Fatalf("mutated after a failed selection report: %v", src.calls)
 			}
 			if tc.newMachine {

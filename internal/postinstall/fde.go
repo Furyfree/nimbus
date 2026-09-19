@@ -29,6 +29,7 @@ func fdeTask(src native.Source, in Inputs) Task {
 		},
 		Verification: "Inspection reads the mounted root, the TPM2 device, the firmware mode, the hook payload, the marker, the firmware entry and the installed tools. The image content and its embedded command line need the approved read-only check.",
 		Recovery:     "The disk passphrase and Fedora's GRUB entries always remain a valid unlock and boot path. Run nimbus postinstall fde --remove to clear the enrollment before deselecting the component.",
+		BeforeReboot: true,
 	}
 	mounts, err := src.ReadFile("/proc/mounts")
 	if err != nil {

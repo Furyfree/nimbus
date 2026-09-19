@@ -307,9 +307,12 @@ requires it, retaining progress, resizing and cancellation while the sudo
 credential cache covers the whole run. Authentication input and
 secret-capable output stay outside transcripts. No progress percentage is
 invented. One closing report distinguishes completed changes, failed and
-skipped phases, prerequisites for the requested reboot, verification
-problems and a pointer to remaining setup and guidance. An unavailable
-check is reported, never treated as proof of matching state.
+skipped phases and verification problems. Init closes with the log directory,
+the pending prerequisites for its requested reboot, the reboot or logout
+instruction and the after-reboot pointer to `nimbus setup-notes`; sync keeps
+the plain lines. Session-dependent checks stay unknown until the desktop
+session runs and count as remaining setup instead of verification problems.
+An unavailable check is reported, never treated as proof of matching state.
 
 Nimbus output uses shared bright terminal colors (green success, yellow
 pending, red failure, cyan actions and historical verification), bold

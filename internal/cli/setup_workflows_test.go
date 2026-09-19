@@ -139,18 +139,30 @@ func TestOnePasswordSelectedFilesAndFailedVerification(t *testing.T) {
 	}
 }
 func TestFinalReportRetainsFailuresAndNotices(t *testing.T) {
-	r := syncResult{Steps: []runStep{{Name: "configuration", Status: "succeeded"}, {Name: "updates", Status: "failed", Detail: "download failed"}}, Notices: []string{"Noctalia overrides disable lockscreen widgets"}, Notes: []setupNote{{ID: "note", Revision: 1, Text: "Guidance"}}, Tasks: []postinstall.Task{{ID: "nvidia-mok", Status: postinstall.Pending, Title: "Sign NVIDIA modules and enroll their key", Detail: "certificate pending enrollment", Reboot: true, BeforeReboot: true}, {ID: "fde-enroll", Status: postinstall.Blocked, Title: "Enroll the FDE key", Detail: "reboot first", Reboot: true, BeforeReboot: true}}, Reboot: true}
+	r := syncResult{Steps: []runStep{{Name: "configuration", Status: "succeeded"}, {Name: "updates", Status: "failed", Detail: "download failed"}}, Notices: []string{"Noctalia overrides disable lockscreen widgets"}, Notes: []setupNote{{ID: "note", Revision: 1, Text: "Guidance"}}, Tasks: []postinstall.Task{{ID: "nvidia-mok", Status: postinstall.Pending, Title: "Sign NVIDIA modules and enroll their key", Detail: "certificate pending enrollment", Reboot: true, BeforeReboot: true}, {ID: "fde-enroll", Status: postinstall.Blocked, Title: "Enroll the FDE key", Detail: "reboot first", Reboot: true, BeforeReboot: true}, {ID: "hyprland-plugins", Status: postinstall.Unknown, Session: true, Detail: "Run this task from a terminal in the active Hyprland desktop session."}, {ID: "fingerprint", Status: postinstall.Unknown, Detail: "Fingerprint device and enrollment state could not be established."}}, Reboot: true}
 	var out strings.Builder
 	if err := r.render(&out, false); err != nil {
 		t.Fatal(err)
 	}
-	for _, text := range []string{"download failed", "Noctalia overrides", "Reboot required", "Run before rebooting: nimbus postinstall nvidia-mok (Sign NVIDIA modules and enroll their key)", "2 tasks, 1 setup note. Run: nimbus setup-notes"} {
+	for _, text := range []string{"download failed", "Noctalia overrides", "Reboot required", "Run before rebooting: nimbus postinstall nvidia-mok (Sign NVIDIA modules and enroll their key)", "3 tasks, 1 setup note. Run: nimbus setup-notes", "Verification problems:", "Fingerprint device and enrollment state could not be established."} {
 		if !strings.Contains(out.String(), text) {
 			t.Fatal(out.String())
 		}
 	}
-	if strings.Contains(out.String(), "Guidance") || strings.Contains(out.String(), "fde-enroll") || strings.Count(out.String(), "Run before rebooting") != 1 {
-		t.Fatal("report repeated task detail or mislabeled a blocked task", out.String())
+	if strings.Contains(out.String(), "Guidance") || strings.Contains(out.String(), "fde-enroll") || strings.Contains(out.String(), "active Hyprland desktop session") || strings.Count(out.String(), "Run before rebooting") != 1 {
+		t.Fatal("report repeated task detail or mislabeled a task", out.String())
+	}
+	var finish strings.Builder
+	if err := renderInstallFinish(&finish, &r, "/tmp/logs"); err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"Logs: /tmp/logs", "Before rebooting:", "nimbus postinstall nvidia-mok", "Reboot to finish.", "nimbus setup-notes", "remaining setup and guidance: 3 tasks, 1 setup note"} {
+		if !strings.Contains(finish.String(), text) {
+			t.Fatal(finish.String())
+		}
+	}
+	if strings.Contains(finish.String(), "fde-enroll") || strings.Contains(finish.String(), "Fingerprint") {
+		t.Fatal("finish block repeated remaining or blocked tasks", finish.String())
 	}
 	if err := r.render(&previewErrorWriter{err: syscall.ENOSPC}, false); !errors.Is(err, syscall.ENOSPC) {
 		t.Fatal(err)
