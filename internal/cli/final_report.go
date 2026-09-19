@@ -52,7 +52,7 @@ func renderFinalDetails(out io.Writer, result *syncResult, install bool) error {
 			}
 		}
 		for _, task := range result.Tasks {
-			if result.Reboot && task.BeforeReboot && task.Status == postinstall.Pending {
+			if result.Reboot && task.BeforeReboot && beforeRebootReady(task) {
 				if _, err := fmt.Fprintf(out, "Run before rebooting: nimbus postinstall %s (%s)\n", task.ID, task.Title); err != nil {
 					return err
 				}
@@ -119,7 +119,7 @@ func renderInstallFinish(out io.Writer, result *syncResult, logDir string) error
 	if result.Reboot {
 		var before []postinstall.Task
 		for _, task := range result.Tasks {
-			if task.BeforeReboot && task.Status == postinstall.Pending {
+			if task.BeforeReboot && beforeRebootReady(task) {
 				before = append(before, task)
 			}
 		}
@@ -172,6 +172,12 @@ func renderInstallFinish(out io.Writer, result *syncResult, logDir string) error
 // setup instead.
 func reportProblem(task postinstall.Task) bool {
 	return !task.Session && (task.Status == postinstall.Unknown || task.VerificationNeedsRoot)
+}
+
+// beforeRebootReady reports whether a pre-reboot task still needs to run:
+// pending right away, or merely unverifiable until the approved root check.
+func beforeRebootReady(task postinstall.Task) bool {
+	return task.Status == postinstall.Pending || (task.Status == postinstall.Unknown && task.VerificationNeedsRoot)
 }
 
 func taskNoteCounts(tasks, notes int) string {

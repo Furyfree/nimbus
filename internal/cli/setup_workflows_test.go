@@ -139,24 +139,24 @@ func TestOnePasswordSelectedFilesAndFailedVerification(t *testing.T) {
 	}
 }
 func TestFinalReportRetainsFailuresAndNotices(t *testing.T) {
-	r := syncResult{Steps: []runStep{{Name: "configuration", Status: "succeeded"}, {Name: "updates", Status: "failed", Detail: "download failed"}}, Notices: []string{"Noctalia overrides disable lockscreen widgets"}, Notes: []setupNote{{ID: "note", Revision: 1, Text: "Guidance"}}, Tasks: []postinstall.Task{{ID: "nvidia-mok", Status: postinstall.Pending, Title: "Sign NVIDIA modules and enroll their key", Detail: "certificate pending enrollment", Reboot: true, BeforeReboot: true}, {ID: "fde-enroll", Status: postinstall.Blocked, Title: "Enroll the FDE key", Detail: "reboot first", Reboot: true, BeforeReboot: true}, {ID: "hyprland-plugins", Status: postinstall.Unknown, Session: true, Detail: "Run this task from a terminal in the active Hyprland desktop session."}, {ID: "fingerprint", Status: postinstall.Unknown, Detail: "Fingerprint device and enrollment state could not be established."}}, Reboot: true}
+	r := syncResult{Steps: []runStep{{Name: "configuration", Status: "succeeded"}, {Name: "updates", Status: "failed", Detail: "download failed"}}, Notices: []string{"Noctalia overrides disable lockscreen widgets"}, Notes: []setupNote{{ID: "note", Revision: 1, Text: "Guidance"}}, Tasks: []postinstall.Task{{ID: "nvidia-mok", Status: postinstall.Pending, Title: "Sign NVIDIA modules and enroll their key", Detail: "certificate pending enrollment", Reboot: true, BeforeReboot: true}, {ID: "fde", Status: postinstall.Unknown, VerificationNeedsRoot: true, Title: "Set up TPM automatic disk unlock", Detail: "The image content needs the approved read-only check.", BeforeReboot: true}, {ID: "fde-enroll", Status: postinstall.Blocked, Title: "Enroll the FDE key", Detail: "reboot first", Reboot: true, BeforeReboot: true}, {ID: "hyprland-plugins", Status: postinstall.Unknown, Session: true, Detail: "Run this task from a terminal in the active Hyprland desktop session."}, {ID: "fingerprint", Status: postinstall.Unknown, Detail: "Fingerprint device and enrollment state could not be established."}}, Reboot: true}
 	var out strings.Builder
 	if err := r.render(&out, false); err != nil {
 		t.Fatal(err)
 	}
-	for _, text := range []string{"download failed", "Noctalia overrides", "Reboot required", "Run before rebooting: nimbus postinstall nvidia-mok (Sign NVIDIA modules and enroll their key)", "3 tasks, 1 setup note. Run: nimbus setup-notes", "Verification problems:", "Fingerprint device and enrollment state could not be established."} {
+	for _, text := range []string{"download failed", "Noctalia overrides", "Reboot required", "Run before rebooting: nimbus postinstall nvidia-mok (Sign NVIDIA modules and enroll their key)", "Run before rebooting: nimbus postinstall fde (Set up TPM automatic disk unlock)", "3 tasks, 1 setup note. Run: nimbus setup-notes", "Verification problems:", "Fingerprint device and enrollment state could not be established."} {
 		if !strings.Contains(out.String(), text) {
 			t.Fatal(out.String())
 		}
 	}
-	if strings.Contains(out.String(), "Guidance") || strings.Contains(out.String(), "fde-enroll") || strings.Contains(out.String(), "active Hyprland desktop session") || strings.Count(out.String(), "Run before rebooting") != 1 {
+	if strings.Contains(out.String(), "Guidance") || strings.Contains(out.String(), "fde-enroll") || strings.Contains(out.String(), "active Hyprland desktop session") || strings.Count(out.String(), "Run before rebooting") != 2 {
 		t.Fatal("report repeated task detail or mislabeled a task", out.String())
 	}
 	var finish strings.Builder
 	if err := renderInstallFinish(&finish, &r, "/tmp/logs"); err != nil {
 		t.Fatal(err)
 	}
-	for _, text := range []string{"Logs: /tmp/logs", "Before rebooting:", "Sign NVIDIA modules and enroll their key: $ nimbus postinstall nvidia-mok", "Reboot to finish, then open a terminal and run:", "Remaining setup and guidance (3 tasks, 1 setup note): $ nimbus setup-notes"} {
+	for _, text := range []string{"Logs: /tmp/logs", "Before rebooting:", "Sign NVIDIA modules and enroll their key: $ nimbus postinstall nvidia-mok", "Set up TPM automatic disk unlock: $ nimbus postinstall fde", "Reboot to finish, then open a terminal and run:", "Remaining setup and guidance (3 tasks, 1 setup note): $ nimbus setup-notes"} {
 		if !strings.Contains(finish.String(), text) {
 			t.Fatal(finish.String())
 		}
