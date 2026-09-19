@@ -356,6 +356,17 @@ func (s installSource) Run(name string, args ...string) ([]byte, error) {
 	return output, s.commandError(name, args, err, !probe)
 }
 
+// useLoggingTTY reports whether a command runs under the logging pty. sudo
+// commands keep the invoking terminal instead: sudo keys its credential cache
+// to the terminal session, and a pty child is a new session, which asked for
+// the password again for every privileged command during init.
+func useLoggingTTY(name string, args []string) bool {
+	if name == "sudo" {
+		return false
+	}
+	return publicInstallCommand(name, args)
+}
+
 func (s installSource) Stream(out, errOut io.Writer, name string, args ...string) error {
 	start := time.Now()
 	label := filepath.Base(name)
@@ -365,7 +376,7 @@ func (s installSource) Stream(out, errOut io.Writer, name string, args ...string
 	s.log.event("command start %s", label)
 	out, errOut = unlogged(out), unlogged(errOut)
 	var err error
-	if executor, ok := s.Source.(native.ExecSource); ok && publicInstallCommand(name, args) {
+	if executor, ok := s.Source.(native.ExecSource); ok && useLoggingTTY(name, args) {
 		err = executor.StreamLogged(out, errOut, s.log, name, args...)
 	} else {
 		if publicInstallCommand(name, args) {
