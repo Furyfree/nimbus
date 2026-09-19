@@ -304,6 +304,9 @@ func TestInstallLogPrivateDiagnosticsPreserveOutputFailure(t *testing.T) {
 				if !strings.Contains(terminal.String(), nativeSecret) || !strings.Contains(err.Error(), "see terminal diagnostics") {
 					t.Errorf("displayed diagnostic was not reported accurately: %q, %v", terminal.String(), err)
 				}
+				if !strings.Contains(err.Error(), "hook logs: "+l.dir) {
+					t.Errorf("chezmoi failure did not name the hook logs: %v", err)
+				}
 			} else if !strings.Contains(err.Error(), "output not logged") || strings.Contains(err.Error(), "see terminal diagnostics") {
 				t.Errorf("unavailable diagnostic was reported as shown: %v", err)
 			}

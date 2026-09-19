@@ -305,9 +305,11 @@ preserves selection and completed work for retry. Public native output is
 streamed through a pseudo-terminal in the invoking session when logging
 requires it, retaining progress, resizing and cancellation while the sudo
 credential cache covers the whole run. Authentication input and
-secret-capable output stay outside transcripts. No progress percentage is
-invented. One closing report distinguishes completed changes, failed and
-skipped phases and verification problems. Init closes with the log directory,
+secret-capable output stay outside transcripts; a failed Chezmoi command
+names the private hook-log directory beside the terminal diagnostic. No
+progress percentage is invented. One closing report distinguishes completed
+changes, failed and skipped phases and verification problems. Init closes
+with the log directory,
 the pending prerequisites for its requested reboot, the reboot or logout
 instruction and the after-reboot pointer to `nimbus setup-notes`; sync keeps
 the plain lines. Session-dependent checks stay unknown until the desktop

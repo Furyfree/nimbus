@@ -435,13 +435,18 @@ type privateInstallError struct {
 	name  string
 	cause error
 	shown bool
+	hint  string
 }
 
 func (e privateInstallError) Error() string {
-	if !e.shown {
-		return e.name + " failed (output not logged)"
+	msg := e.name + " failed (output not logged)"
+	if e.shown {
+		msg = e.name + " failed; see terminal diagnostics (not logged)"
 	}
-	return e.name + " failed; see terminal diagnostics (not logged)"
+	if e.hint != "" {
+		msg += "; hook logs: " + e.hint
+	}
+	return msg
 }
 func (e privateInstallError) Unwrap() error { return e.cause }
 func (s installSource) commandError(name string, args []string, err error, showDiagnostic bool) error {
@@ -454,7 +459,11 @@ func (s installSource) commandError(name string, args []string, err error, showD
 				shown = true
 			}
 		}
-		err = privateInstallError{filepath.Base(name), err, shown}
+		failure := privateInstallError{name: filepath.Base(name), cause: err, shown: shown}
+		if failure.name == "chezmoi" && s.log != nil {
+			failure.hint = s.log.dir
+		}
+		err = failure
 	}
 	s.log.mu.Lock()
 	logErr := s.log.err
