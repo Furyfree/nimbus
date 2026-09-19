@@ -517,7 +517,11 @@ signed 11 and the observed clean-boot PCR 12/13 values, only while
 - [x] 3.2 VM enrollment: marker-gated dracut module (`tpm2-tss`,
   `systemd-pcrphase`), embedded cmdline options, TPM keyslot, unattended boot,
   passphrase fallback on the GRUB path, PCR 12/13 measurement, injected ESP
-  credential refuses to unseal. VM 2026-09-18: enrollment recorded token 0 in
+  credential refuses to unseal. VM note 2026-09-19: `systemd-tpm2-setup`
+  fails on swtpm with `Device not a stream` while its early unit provides the
+  SRK LUKS uses; the unit is masked on the disposable VM only, and
+  unattended unlock was re-verified after masking. VM 2026-09-18: enrollment
+  recorded token 0 in
   keyslot 1 with PCR 7/14/12/13 and signed 11, reboots unlocked unattended,
   the LUKS passphrase remained the fallback on the GRUB path after removal,
   and a changed PCR 14 refused to unseal. A full disk copy booted with a
@@ -1171,6 +1175,8 @@ Bluetooth adapters; the next real login remains untested.
   COPR (project `furyfree/woeusb`, build 11002712).
 - [x] Select it in the development profile with its own pinned repository key
   (`54DB A577 ... 0AD8 E157`); all three machine manifests validate.
+- [x] VM 2026-09-19: a develop-channel `nimbus sync` added the woeusb
+  repository and installed the package.
 
 ## Engine channels, 2026-09-18
 
@@ -1202,7 +1208,9 @@ follows; both tracks share the COPR key and repository ID.
   `channel = "develop"`, and `nimbus channel` reported no drift. The stable
   switch-back waits for a release from `main` that carries the channel code
   and payload, because the 0.5.x engine rejects selector schema 2 and its
-  RPM lacks the boot-theme payload.
+  RPM lacks the boot-theme payload; the 0.6.0 release must include the
+  channel work, after which the reverse drill and the one-time notice for
+  devices upgrading to a channel-aware engine remain.
 - [x] Package the engine-owned payload in the RPM: both recipes now install
   the GRUB theme, drop-ins, kernel-install and dracut scripts with declared
   modes (fresh installs previously blocked on the missing boot-theme payload).
