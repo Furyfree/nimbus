@@ -98,6 +98,12 @@ project = "furyfree/wowup-cf-installer"
 key = "DFB9 21CC F686 D0F8 9343 C8DC 8C7C E799 D66B 0C71"
 priority = 134
 
+[repositories.woeusb]
+kind = "copr"
+project = "furyfree/woeusb"
+key = "54DB A577 F939 5B99 3716 7374 DCF3 6A1B 3AD8 E157"
+priority = 135
+
 [repositories.blesh]
 kind = "copr"
 project = "furyfree/blesh"
