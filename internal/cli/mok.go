@@ -3,6 +3,8 @@ package cli
 import (
 	"fmt"
 	"io"
+	"os"
+	"strings"
 
 	"github.com/Furyfree/nimbus/internal/native"
 	"github.com/Furyfree/nimbus/internal/postinstall"
@@ -14,10 +16,16 @@ import (
 type mokVerificationSource struct{ native.Source }
 
 func (s mokVerificationSource) ReadFile(path string) ([]byte, error) {
-	if path == postinstall.MOKCertificate {
-		return s.Source.Run("sudo", "-n", "--", "/usr/bin/cat", "--", path)
+	if path != postinstall.MOKCertificate {
+		return s.Source.ReadFile(path)
 	}
-	return s.Source.ReadFile(path)
+	data, err := s.Source.Run("sudo", "-n", "--", "/usr/bin/cat", "--", path)
+	// Natives run under LC_ALL=C and GNU cat names the file, so this text is
+	// stable. A miss only falls back to VerifyMOK's generic unreadable branch.
+	if err != nil && strings.Contains(err.Error(), "cat: "+path+": No such file or directory") {
+		return data, fmt.Errorf("%w: %w", os.ErrNotExist, err)
+	}
+	return data, err
 }
 func (s mokVerificationSource) Run(name string, args ...string) ([]byte, error) {
 	if name == "mokutil" && len(args) == 3 && args[0] == "--ignore-keyring" && args[1] == "--test-key" && args[2] == postinstall.MOKCertificate {

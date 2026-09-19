@@ -117,7 +117,7 @@ func TestMOKExplicitVerificationAndUnprivilegedStatus(t *testing.T) {
 	saved := postinstallTerminal
 	postinstallTerminal = func(io.Reader) bool { return true }
 	t.Cleanup(func() { postinstallTerminal = saved })
-	for _, mode := range []string{"verified", "declined", "not-enrolled", "sudo-failure"} {
+	for _, mode := range []string{"verified", "declined", "not-enrolled", "sudo-failure", "missing"} {
 		t.Run(mode, func(t *testing.T) {
 			root, base := installerFixture(t)
 			for path, data := range map[string]string{
@@ -145,7 +145,12 @@ func TestMOKExplicitVerificationAndUnprivilegedStatus(t *testing.T) {
 				src.Paths[tool] = "/usr/bin/" + tool
 			}
 			src.Paths["mokutil"] = "/usr/bin/mokutil"
-			src.Commands["sudo -n -- /usr/bin/cat -- "+postinstall.MOKCertificate] = []byte("public-certificate")
+			cat := "sudo -n -- /usr/bin/cat -- " + postinstall.MOKCertificate
+			if mode == "missing" {
+				src.Failures[cat] = cat + ": /usr/bin/cat: " + postinstall.MOKCertificate + ": No such file or directory: exit status 1"
+			} else {
+				src.Commands[cat] = []byte("public-certificate")
+			}
 			check := "sudo -n -- /usr/bin/mokutil --ignore-keyring --test-key " + postinstall.MOKCertificate
 			src.Commands[check] = []byte(postinstall.MOKCertificate + " is already enrolled")
 			src.ExitCodes = map[string]int{check: 1}
@@ -165,6 +170,22 @@ func TestMOKExplicitVerificationAndUnprivilegedStatus(t *testing.T) {
 			}
 			if slices.ContainsFunc(src.reads, func(c string) bool { return strings.HasPrefix(c, "sudo ") }) || len(src.streams) > 0 {
 				t.Fatal("read-only inspection escalated")
+			}
+			if mode == "missing" {
+				// A missing certificate must report the akmods-keygen guidance
+				// and stop before any setup stream, not "completion not recorded".
+				src.streams = nil
+				cmd, out := postinstallCommand(root, false, "nvidia-mok", "--yes")
+				err := cmd.Execute()
+				if err == nil || !strings.Contains(err.Error(), "akmods-keygen") || strings.Contains(err.Error(), "completion not recorded") || strings.Contains(out.String(), "could not be read") {
+					t.Fatal(err, out)
+				}
+				if slices.ContainsFunc(src.streams, func(stream string) bool {
+					return strings.Contains(stream, "akmods") || strings.Contains(stream, "mokutil --import") || strings.Contains(stream, "dracut")
+				}) {
+					t.Fatal("setup ran without a key pair", src.streams)
+				}
+				return
 			}
 			cmd, out := postinstallCommand(root, false, "nvidia-mok", "--mark-done")
 			answer := "yes\n"

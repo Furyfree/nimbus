@@ -490,6 +490,9 @@ func fdeEnsureMOK(src native.Source, out, errOut io.Writer, keys fdeKeyPaths) er
 		_, err := fmt.Fprintln(out, "A MOK enrollment for this certificate is already pending; complete Enroll MOK at the next boot.")
 		return err
 	}
+	if _, err := fmt.Fprintln(out, "mokutil may print \"Failed to get Subject key ID\": ukify's certificate omits that extension and only mokutil's kernel-keyring pre-check wants it. The enrollment request is still recorded."); err != nil {
+		return err
+	}
 	args := []string{"sudo", "--", "mokutil", "--import", keys.mokDER}
 	if _, err := fmt.Fprintf(out, "$ %s\n", strings.Join(args, " ")); err != nil {
 		return err

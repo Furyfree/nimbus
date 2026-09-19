@@ -931,6 +931,11 @@ func TestRunFDESetup(t *testing.T) {
 		if !strings.Contains(out.String(), "Complete Enroll MOK") {
 			t.Fatalf("missing MOK guidance:\n%s", out.String())
 		}
+		note := strings.Index(out.String(), "Failed to get Subject key ID")
+		importLine := strings.Index(out.String(), "$ sudo -- mokutil --import")
+		if note < 0 || importLine < 0 || note > importLine {
+			t.Fatalf("SKID disclosure missing or after the import:\n%s", out.String())
+		}
 		if !slices.ContainsFunc(src.streams, func(stream string) bool {
 			return strings.Contains(stream, "mokutil --import")
 		}) {

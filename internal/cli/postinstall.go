@@ -92,7 +92,7 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 				}
 				task = verified
 			}
-			if task.ID == "nvidia-mok" && !preview && (task.Action == nil || task.Action.Kind != postinstall.SetupNVIDIA) {
+			if task.ID == "nvidia-mok" && !preview && task.Status != postinstall.Blocked && (task.Action == nil || task.Action.Kind != postinstall.SetupNVIDIA) {
 				return runMOKVerification(cmd, src, before, task, yes)
 			}
 			if task.ID == "fde" && !preview && task.VerificationNeedsRoot {
