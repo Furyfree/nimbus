@@ -112,7 +112,8 @@ const nimbusBanner = `    _   _ ___ __  __ ___  _   _ ___
 // before the requested reboot, the reboot or logout instruction and the
 // after-reboot pointer to the guidance catalog. Sync keeps the plain lines.
 func renderInstallFinish(out io.Writer, result *syncResult, logDir string) error {
-	if _, err := fmt.Fprintf(out, "\n%s\n\nLogs: %s\n", output.Banner(unlogged(out), nimbusBanner), logDir); err != nil {
+	colorOut := unlogged(out)
+	if _, err := fmt.Fprintf(out, "\n%s\n\n%s %s\n", output.Banner(colorOut, nimbusBanner), output.Header(colorOut, "Logs:"), logDir); err != nil {
 		return err
 	}
 	if result.Reboot {
@@ -123,11 +124,12 @@ func renderInstallFinish(out io.Writer, result *syncResult, logDir string) error
 			}
 		}
 		if len(before) > 0 {
-			if _, err := fmt.Fprintln(out, "\nBefore rebooting:"); err != nil {
+			if _, err := fmt.Fprintf(out, "\n%s\n", output.Header(colorOut, "Before rebooting:")); err != nil {
 				return err
 			}
 			for _, task := range before {
-				if _, err := fmt.Fprintf(out, "  nimbus postinstall %-16s %s\n", task.ID, task.Title); err != nil {
+				command := output.Command(colorOut, "$ nimbus postinstall "+task.ID)
+				if _, err := fmt.Fprintf(out, "%s: %s\n", task.Title, command); err != nil {
 					return err
 				}
 			}
@@ -147,17 +149,18 @@ func renderInstallFinish(out io.Writer, result *syncResult, logDir string) error
 		case result.Logout:
 			lead = "Log out and back in to finish, then open a terminal and run:"
 		}
-		if _, err := fmt.Fprintf(out, "\n%s\n  nimbus setup-notes\n    remaining setup and guidance: %s\n", lead, taskNoteCounts(remaining, notes)); err != nil {
+		line := fmt.Sprintf("Remaining setup and guidance (%s): %s", taskNoteCounts(remaining, notes), output.Command(colorOut, "$ nimbus setup-notes"))
+		if _, err := fmt.Fprintf(out, "\n%s\n%s\n", output.Header(colorOut, lead), line); err != nil {
 			return err
 		}
 		return nil
 	}
 	if result.Reboot {
-		if _, err := fmt.Fprintln(out, "\nReboot to finish."); err != nil {
+		if _, err := fmt.Fprintf(out, "\n%s\n", output.Header(colorOut, "Reboot to finish.")); err != nil {
 			return err
 		}
 	} else if result.Logout {
-		if _, err := fmt.Fprintln(out, "\nLog out and back in to finish."); err != nil {
+		if _, err := fmt.Fprintf(out, "\n%s\n", output.Header(colorOut, "Log out and back in to finish.")); err != nil {
 			return err
 		}
 	}

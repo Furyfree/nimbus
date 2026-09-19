@@ -19,7 +19,7 @@ func TestBannerPaintsOnlyForColorWriters(t *testing.T) {
 	}
 	var out strings.Builder
 	styled := Banner(ColorWriter(&out, func() bool { return true }), "banner")
-	if !strings.HasPrefix(styled, bad+bold) || !strings.HasSuffix(styled, reset) {
+	if !strings.HasPrefix(styled, heading+bold) || !strings.HasSuffix(styled, reset) {
 		t.Fatal(styled)
 	}
 	if disabled := Banner(ColorWriter(&out, func() bool { return false }), "banner"); disabled != "banner" {
@@ -31,19 +31,19 @@ func TestPalettePreservesTextAndAlignment(t *testing.T) {
 	for _, tc := range []struct{ text, colored string }{
 		{"  succeeded  Chezmoi apply\n", good + bold + "succeeded"},
 		{"  onepassword          Verified            Local configuration checked.\n", good + bold + "Verified"},
-		{"  nvidia-mok           Previously verified Current check requires sudo.\n", accent + bold + "Previously verified"},
+		{"  nvidia-mok           Previously verified Current check requires sudo.\n", dim + "Previously verified"},
 		{"  nvidia-mok           Unable to check     Unknown enrollment.\n", warn + bold + "Unable to check"},
 		{"pending    dnf:demo\n", warn + bold + "pending"},
 		{"blocked    dnf:demo\n", bad + bold + "blocked"},
 		{"error: repository is unavailable\n", bad + bold + "error"},
 		{"unchanged  nothing to do\n", dim + "unchanged"},
-		{"Usage:\n", accent + bold + "Usage:"},
+		{"Usage:\n", heading + bold + "Usage:"},
 		{"Remaining setup:\n", warn + bold + "Remaining setup:"},
 		{"Verification problems:\n", bad + bold + "Verification problems:"},
-		{"  sync        Make the system match the definitions\n", accent + bold + "sync"},
-		{"  noctalia-lockscreen Restore the managed lockscreen layout\n", accent + bold + "noctalia-lockscreen"},
-		{"  -h, --help   help for nimbus\n", accent + bold + "-h, --help"},
-		{"      --machine string   selected machine\n", accent + bold + "--machine"},
+		{"  sync        Make the system match the definitions\n", heading + bold + "sync"},
+		{"  noctalia-lockscreen Restore the managed lockscreen layout\n", heading + bold + "noctalia-lockscreen"},
+		{"  -h, --help   help for nimbus\n", heading + bold + "-h, --help"},
+		{"      --machine string   selected machine\n", heading + bold + "--machine"},
 		{"  nimbus postinstall nvidia-mok\n", accent + bold},
 		{"    $ sudo dnf5 -y upgrade\n", accent + bold + "$ sudo"},
 		{"+enabled = true\n", good + "+enabled"},
@@ -167,7 +167,7 @@ for term,no_color,want,width in [('xterm-256color','',True,40),('xterm-256color'
 }
 
 func TestBrightOutcomesAndRemainingViews(t *testing.T) {
-	for _, text := range []string{"211 managed and unchanged\n", "37 checks passed.\n", "✓ Plugin files present.\n", "* gaming  <- machine\n", "package dnf:noctalia\n", "  selected by component:hyprland-session\n", "nvidia-mok [Previously verified]: Check enrollment\n", "3. Run software updates:\n", "Checks: 4 passed, 1 failed, 0 unknown.\n"} {
+	for _, text := range []string{"211 managed and unchanged\n", "37 checks passed.\n", "✓ Plugin files present.\n", "* gaming  <- machine\n", "package dnf:noctalia\n", "  selected by component:hyprland-session\n", "3. Run software updates:\n", "Checks: 4 passed, 1 failed, 0 unknown.\n"} {
 		styled := highlight(text, true)
 		if styled == text || !strings.Contains(styled, bold) || ansiPattern.ReplaceAllString(styled, "") != text {
 			t.Fatalf("missing emphasis or changed text: %q", styled)

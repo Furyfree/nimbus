@@ -156,7 +156,7 @@ func TestFinalReportRetainsFailuresAndNotices(t *testing.T) {
 	if err := renderInstallFinish(&finish, &r, "/tmp/logs"); err != nil {
 		t.Fatal(err)
 	}
-	for _, text := range []string{"Logs: /tmp/logs", "Before rebooting:", "nimbus postinstall nvidia-mok", "Reboot to finish, then open a terminal and run:", "nimbus setup-notes", "remaining setup and guidance: 3 tasks, 1 setup note"} {
+	for _, text := range []string{"Logs: /tmp/logs", "Before rebooting:", "Sign NVIDIA modules and enroll their key: $ nimbus postinstall nvidia-mok", "Reboot to finish, then open a terminal and run:", "Remaining setup and guidance (3 tasks, 1 setup note): $ nimbus setup-notes"} {
 		if !strings.Contains(finish.String(), text) {
 			t.Fatal(finish.String())
 		}

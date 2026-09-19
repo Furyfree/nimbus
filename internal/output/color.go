@@ -55,11 +55,26 @@ func AfterPrompt(w io.Writer) {
 	}
 }
 
-// Banner styles a multi-line marker in bright red when the writer carries
-// Nimbus colors. Other writers receive the plain text.
+// Header styles a label, section title or instruction line in bright white
+// bold: structure stays readable without borrowing a status color.
+func Header(w io.Writer, text string) string {
+	return paintFor(w, text, heading+bold)
+}
+
+// Command styles something the user runs in the shared action color.
+func Command(w io.Writer, text string) string {
+	return paintFor(w, text, accent+bold)
+}
+
+// Banner styles a multi-line marker in bright white bold when the writer
+// carries Nimbus colors. Other writers receive the plain text.
 func Banner(w io.Writer, text string) string {
+	return paintFor(w, text, heading+bold)
+}
+
+func paintFor(w io.Writer, text, style string) string {
 	if color, ok := w.(*colorWriter); ok && color.enabled() {
-		return paint(text, bad+bold)
+		return paint(text, style)
 	}
 	return text
 }
@@ -116,13 +131,14 @@ func (w *colorWriter) Write(p []byte) (int, error) {
 }
 
 const (
-	reset  = "\x1b[0m"
-	good   = "\x1b[92m"
-	warn   = "\x1b[93m"
-	bad    = "\x1b[91m"
-	accent = "\x1b[96m"
-	bold   = "\x1b[1m"
-	dim    = "\x1b[2m"
+	reset   = "\x1b[0m"
+	good    = "\x1b[92m"
+	warn    = "\x1b[93m"
+	bad     = "\x1b[91m"
+	accent  = "\x1b[96m"
+	heading = "\x1b[97m"
+	bold    = "\x1b[1m"
+	dim     = "\x1b[2m"
 )
 
 // Match output vocabulary, not arbitrary occurrences inside package names or
@@ -144,10 +160,14 @@ func statusColor(status string) string {
 		return bad + bold
 	case "pending", "unknown", "unable to check", "unmanaged", "note", "notice", "warning", "reboot required", "log out and back in":
 		return warn + bold
-	case "succeeded", "verified", "ok", "pass", "installed", "updated", "install":
+	case "succeeded", "verified", "ok", "pass", "installed", "updated", "install", "adopt":
 		return good + bold
-	case "previously verified", "adopt", "desired", "repair":
-		return accent + bold
+	case "previously verified":
+		return dim
+	case "desired":
+		return heading + bold
+	case "repair":
+		return warn + bold
 	default:
 		return dim
 	}
@@ -165,10 +185,10 @@ func highlight(line string, start bool) string {
 			return indent + text[:match[0]] + paint(text[match[0]:match[1]], statusColor(text[match[2]:match[3]])) + commands(text[match[1]:])
 		}
 		if match := phaseHeading.FindStringIndex(text); match != nil {
-			return indent + paint(text[:match[1]], accent+bold) + commands(text[match[1]:])
+			return indent + paint(text[:match[1]], heading+bold) + commands(text[match[1]:])
 		}
 		if strings.HasPrefix(text, "- ") {
-			return indent + paint("-", accent+bold) + commands(text[1:])
+			return indent + paint("-", heading+bold) + commands(text[1:])
 		}
 		if outcome.MatchString(text) || strings.HasPrefix(text, "✓ ") {
 			return indent + paint(text, good+bold)
@@ -176,12 +196,12 @@ func highlight(line string, start bool) string {
 		if strings.HasPrefix(text, "* ") {
 			selected, rest, _ := strings.Cut(text, "  <- ")
 			if rest != "" {
-				return indent + paint(selected, accent+bold) + paint("  <- "+rest, dim)
+				return indent + paint(selected, heading+bold) + paint("  <- "+rest, dim)
 			}
-			return indent + paint(text, accent+bold)
+			return indent + paint(text, heading+bold)
 		}
 		if strings.HasPrefix(text, "selected by ") || strings.HasPrefix(text, "package ") || strings.HasPrefix(text, "profile ") || strings.HasPrefix(text, "component ") {
-			return indent + paint(text, accent+bold)
+			return indent + paint(text, heading+bold)
 		}
 		if strings.HasPrefix(text, "+") || (strings.HasPrefix(text, "-") && !strings.HasPrefix(text, "->") && !strings.HasPrefix(text, "--") && !helpEntry.MatchString(text)) {
 			color := good
@@ -208,13 +228,13 @@ func highlight(line string, start bool) string {
 			return indent + paint(text, bad+bold)
 		}
 		if strings.HasSuffix(trimmed, ":") || strings.HasPrefix(text, "plan for ") || strings.HasPrefix(text, "Setup for ") {
-			return indent + paint(text, accent+bold)
+			return indent + paint(text, heading+bold)
 		}
 		if match := helpEntry.FindStringSubmatchIndex(text); indent != "" && match != nil {
-			return indent + paint(text[:match[3]], accent+bold) + text[match[3]:]
+			return indent + paint(text[:match[3]], heading+bold) + text[match[3]:]
 		}
 		if i := strings.Index(text, ": "); i > 0 && i < 32 {
-			return indent + paint(text[:i+1], bold) + commands(text[i+1:])
+			return indent + paint(text[:i+1], heading+bold) + commands(text[i+1:])
 		}
 	}
 	return commands(line)

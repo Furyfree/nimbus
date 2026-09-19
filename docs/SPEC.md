@@ -314,13 +314,24 @@ the plain lines. Session-dependent checks stay unknown until the desktop
 session runs and count as remaining setup instead of verification problems.
 An unavailable check is reported, never treated as proof of matching state.
 
-Nimbus output uses shared bright terminal colors (green success, yellow
-pending, red failure, cyan actions and historical verification), bold
-headings and totals, and dim metadata. Color never carries meaning alone.
-Styling applies only to terminals with `TERM` not `dumb` and `NO_COLOR`
-empty; redirected text, JSON and installer logs stay plain. Native tools keep
-their own writers and output. Text wraps to the terminal width with indented
-continuations; partial writes are emitted immediately.
+Nimbus output uses one meaning per color, all bright and bold:
+
+- green: success that needs nothing further (succeeded, verified,
+  installed, updated, adopt, unchanged, totals)
+- yellow: attention needed, nothing broken yet (pending, unknown, unable
+  to check, warning, notice, reboot or logout required, Remaining setup)
+- red: stopped or wrong, act before continuing (failed, error, blocked,
+  remove, Verification problems)
+- cyan: something that runs (`$` commands, `->` operations, Proceed?)
+- white: structure and instructions (headings, labels, the finish banner)
+- dim: secondary context only (paths, durations, previously verified,
+  decision reasons)
+
+Color never carries meaning alone. Styling applies only to terminals with
+`TERM` not `dumb` and `NO_COLOR` empty; redirected text, JSON and installer
+logs stay plain. Native tools keep their own writers and output. Text wraps
+to the terminal width with indented continuations; partial writes are
+emitted immediately.
 
 Run records are schema-1, mode-0600 files under `$XDG_STATE_HOME/nimbus/runs`
 containing only engine, machine, available commit, command kind, timestamps,
