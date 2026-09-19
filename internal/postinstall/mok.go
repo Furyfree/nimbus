@@ -27,13 +27,14 @@ func mok(src native.Source, in Inputs) Task {
 		Verification: "After reboot, run nvidia-smi and mokutil --sb-state. Certificate enrollment alone does not prove the driver loads.",
 		Recovery:     "Cancel enrollment before confirming it, or boot a working kernel and inspect the akmods Secure Boot instructions before changing keys.",
 		Reboot:       true,
+		BeforeReboot: true,
 	}
 	if !in.Facts.SecureBoot.Known() {
 		return t
 	}
 	switch in.Facts.SecureBoot.Value {
 	case inspect.SecureBootDisabled, inspect.SecureBootUnavailable:
-		t.Status, t.Detail, t.Reboot = NotApplicable, "MOK enrollment is not required in the observed boot mode. This does not certify Secure Boot policy or driver readiness.", false
+		t.Status, t.Detail, t.Reboot, t.BeforeReboot = NotApplicable, "MOK enrollment is not required in the observed boot mode. This does not certify Secure Boot policy or driver readiness.", false, false
 		return t
 	case inspect.SecureBootEnabled:
 	default:
@@ -127,7 +128,7 @@ func VerifyMOK(src native.Source, t Task) Task {
 		}
 	case MOKCertificate + " is already in the enrollment request":
 		if code == 1 {
-			t.Status, t.Detail = Pending, "Enrollment has been requested but still needs confirmation in the MOK manager after reboot."
+			t.Status, t.Detail, t.BeforeReboot = Pending, "Enrollment has been requested but still needs confirmation in the MOK manager after reboot.", false
 			return t
 		}
 	case MOKCertificate + " is blocked in dbx", MOKCertificate + " is blocked in MokListX":

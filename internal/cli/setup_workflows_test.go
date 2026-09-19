@@ -12,39 +12,41 @@ import (
 
 	"github.com/Furyfree/nimbus/internal/inspect"
 	"github.com/Furyfree/nimbus/internal/native/nativetest"
+	"github.com/Furyfree/nimbus/internal/postinstall"
 	"github.com/Furyfree/nimbus/internal/userstate"
 )
 
-func TestNotesRevisionDeliveryAndExplicitReadOnlyView(t *testing.T) {
+func TestNotesRevisionDeliveryAndConsumption(t *testing.T) {
 	root, base := installerFixture(t)
 	catalog := filepath.Join(root, "setup-notes.json")
 	base.Files[catalog] = []byte(`{"schema":1,"notes":[{"id":"dotfiles.shell","revision":1,"text":"Open a new terminal","profiles":[]},{"id":"dotfiles.desktop","revision":1,"text":"Desktop only","profiles":["hyprland-noctalia"]}]}`)
-	for i := range 2 {
+	for range 2 {
 		code, out, errOut := run(t, "sync", "--checkout", root, "--machine", "vm", "--yes")
-		if code != 0 || (strings.Contains(out, "Open a new terminal") != (i == 0)) || strings.Contains(out, "Desktop only") {
+		if code != 0 || !strings.Contains(out, "1 setup note. Run: nimbus setup-notes") ||
+			strings.Contains(out, "Open a new terminal") || strings.Contains(out, "Desktop only") {
 			t.Fatalf("%d %s%s", code, out, errOut)
 		}
+	}
+	code, out, errOut := run(t, "setup-notes", "--checkout", root, "--machine", "vm")
+	if code != 0 || !strings.Contains(out, "Review remaining setup with nimbus postinstall status.") || !strings.Contains(out, "Open a new terminal") || strings.Contains(out, "Desktop only") {
+		t.Fatalf("%d %s%s", code, out, errOut)
+	}
+	code, out, errOut = run(t, "sync", "--checkout", root, "--machine", "vm", "--yes")
+	if code != 0 || strings.Contains(out, "setup note. Run: nimbus setup-notes") {
+		t.Fatalf("displayed note stayed pending: %d %s%s", code, out, errOut)
+	}
+	base.Files[catalog] = []byte(`{"schema":1,"notes":[{"id":"dotfiles.shell","revision":2,"text":"Revised instructions","profiles":[]}]}`)
+	code, out, errOut = run(t, "sync", "--checkout", root, "--machine", "vm", "--yes")
+	if code != 0 || !strings.Contains(out, "1 setup note") || strings.Contains(out, "Revised instructions") {
+		t.Fatalf("%d %s%s", code, out, errOut)
+	}
+	code, out, errOut = run(t, "setup-notes", "--checkout", root, "--machine", "vm")
+	if code != 0 || !strings.Contains(out, "Revised instructions") {
+		t.Fatalf("%d %s%s", code, out, errOut)
 	}
 	store, err := userstate.Default()
 	if err != nil {
 		t.Fatal(err)
-	}
-	before, err := os.ReadFile(filepath.Join(store.Dir, "setup-notes.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	code, out, errOut := run(t, "setup-notes", "--checkout", root, "--machine", "vm")
-	if code != 0 || !strings.Contains(out, "Open a new terminal") {
-		t.Fatalf("%d %s%s", code, out, errOut)
-	}
-	after, _ := os.ReadFile(filepath.Join(store.Dir, "setup-notes.json"))
-	if string(before) != string(after) {
-		t.Fatal("explicit view changed state")
-	}
-	base.Files[catalog] = []byte(`{"schema":1,"notes":[{"id":"dotfiles.shell","revision":2,"text":"Revised instructions","profiles":[]}]}`)
-	code, out, errOut = run(t, "sync", "--checkout", root, "--machine", "vm", "--yes")
-	if code != 0 || !strings.Contains(out, "Revised instructions") {
-		t.Fatalf("%d %s%s", code, out, errOut)
 	}
 	f, err := store.Read("postinstall")
 	if err != nil || len(f.Machines) != 0 {
@@ -137,15 +139,18 @@ func TestOnePasswordSelectedFilesAndFailedVerification(t *testing.T) {
 	}
 }
 func TestFinalReportRetainsFailuresAndNotices(t *testing.T) {
-	r := syncResult{Steps: []runStep{{Name: "configuration", Status: "succeeded"}, {Name: "updates", Status: "failed", Detail: "download failed"}}, Notices: []string{"Noctalia overrides disable lockscreen widgets"}, Notes: []setupNote{{ID: "note", Revision: 1, Text: "Guidance"}}, Reboot: true}
+	r := syncResult{Steps: []runStep{{Name: "configuration", Status: "succeeded"}, {Name: "updates", Status: "failed", Detail: "download failed"}}, Notices: []string{"Noctalia overrides disable lockscreen widgets"}, Notes: []setupNote{{ID: "note", Revision: 1, Text: "Guidance"}}, Tasks: []postinstall.Task{{ID: "nvidia-mok", Status: postinstall.Pending, Title: "Sign NVIDIA modules and enroll their key", Detail: "certificate pending enrollment", Reboot: true, BeforeReboot: true}, {ID: "fde-enroll", Status: postinstall.Blocked, Title: "Enroll the FDE key", Detail: "reboot first", Reboot: true, BeforeReboot: true}}, Reboot: true}
 	var out strings.Builder
 	if err := r.render(&out, false); err != nil {
 		t.Fatal(err)
 	}
-	for _, text := range []string{"download failed", "Noctalia overrides", "Reboot required", "Guidance"} {
+	for _, text := range []string{"download failed", "Noctalia overrides", "Reboot required", "Run before rebooting: nimbus postinstall nvidia-mok (Sign NVIDIA modules and enroll their key)", "2 tasks, 1 setup note. Run: nimbus setup-notes"} {
 		if !strings.Contains(out.String(), text) {
 			t.Fatal(out.String())
 		}
+	}
+	if strings.Contains(out.String(), "Guidance") || strings.Contains(out.String(), "fde-enroll") || strings.Count(out.String(), "Run before rebooting") != 1 {
+		t.Fatal("report repeated task detail or mislabeled a blocked task", out.String())
 	}
 	if err := r.render(&previewErrorWriter{err: syscall.ENOSPC}, false); !errors.Is(err, syscall.ENOSPC) {
 		t.Fatal(err)

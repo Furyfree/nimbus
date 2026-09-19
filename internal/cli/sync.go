@@ -201,7 +201,6 @@ func runSyncWith(cmd *cobra.Command, opts *options, flags machineFlags, sf syncF
 	}
 	currentPlan = p
 	result.Digest = p.Digest
-	result.collectPlanNotices(p)
 	if !sf.plan && (p.Checkout.Origin == "" || p.Checkout.Commit == "") {
 		return errors.New("checkout origin and commit could not be inspected; sync requires an inspectable Git clone")
 	}

@@ -77,7 +77,10 @@ type Task struct {
 	Recovery              string   `json:"recovery"`
 	Action                *Action  `json:"action,omitempty"`
 	Reboot                bool     `json:"reboot,omitzero"`
-	Logout                bool     `json:"logout,omitzero"`
+	// BeforeReboot marks a pending task that must run before the reboot that
+	// activates it, such as enrolling a key at the next boot.
+	BeforeReboot bool `json:"before_reboot,omitzero"`
+	Logout       bool `json:"logout,omitzero"`
 	// fdeSecure remembers the inspected Secure Boot state for the FDE task's
 	// preview; RunFDESetup re-reads it before any mutation.
 	fdeSecure bool

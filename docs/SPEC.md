@@ -173,7 +173,7 @@ Hyprland through UWSM in Noctalia Greeter.
 | `nimbus channel` | Show the engine channel and checkout or repository drift |
 | `nimbus postinstall` | Show task commands and help |
 | `nimbus postinstall status` | Compact machine-specific setup checklist |
-| `nimbus setup-notes` | Display all applicable guidance, read-only |
+| `nimbus setup-notes` | Display all applicable guidance and mark it seen |
 | `nimbus postinstall TASK` | Guide setup and verify completion |
 | `nimbus doctor` | Report health problems and possible fixes; never repair |
 
@@ -201,8 +201,9 @@ Ordinary sync:
    prompt or snapshots.
 5. Ask before applying Chezmoi once, including its scripts and tools.
    `--yes` approves automated apply stages, never manual GUI confirmations.
-6. Inspect remaining setup and effective configuration, show new or revised
-   guidance, and produce one final report without applying again.
+6. Inspect remaining setup and effective configuration, summarize new or
+   revised guidance with `nimbus setup-notes`, and produce one final report
+   without applying again.
 
 The Chezmoi stage uses the already fetched source; it never runs
 `chezmoi update`. A machine without dotfiles skips the stage. A blocked
@@ -282,9 +283,10 @@ Nimbus owns the schema-1 `setup-notes.json` catalog at the checkout root and
 reads it directly; no Chezmoi reader or handoff is involved. Profile filters
 select applicable notes and `requires_dotfiles` limits configuration guidance.
 IDs and revisions stay stable; revisions change when required user action
-changes. `nimbus setup-notes` displays applicable notes without changing
-history. Init shows notes together; later successful syncs show only unseen
-revisions, and only successfully written output consumes a revision.
+changes. `nimbus setup-notes` displays every applicable note and consumes the
+displayed revisions; JSON output is a machine view and consumes nothing.
+Init and sync count unseen revisions and point to the command; only
+successfully written output consumes a revision.
 
 The local store uses `$XDG_STATE_HOME/nimbus` (fallback
 `~/.local/state/nimbus`). `setup-notes.json` records displayed revisions;

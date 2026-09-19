@@ -89,21 +89,7 @@ func (r *syncResult) conciseSteps() []runStep {
 	return steps
 }
 
-func (r *syncResult) collectPlanNotices(p *plan.Plan) {
-	for _, op := range p.Operations {
-		if plan.IsConstraintOperation(op) || (op.Kind == plan.KindGreeterSync && op.Action == plan.ActionKeep) {
-			continue
-		}
-		for _, note := range op.Notes {
-			if !slices.Contains(r.Notices, note) {
-				r.Notices = append(r.Notices, note)
-			}
-		}
-	}
-}
-
 func showReplanned(out io.Writer, previous, current *plan.Plan, prune bool, result *syncResult) error {
-	result.collectPlanNotices(current)
 	old := map[string]plan.Operation{}
 	for _, op := range previous.Operations {
 		old[op.ID] = op

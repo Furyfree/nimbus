@@ -309,14 +309,11 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 		steps[active].DurationMS = time.Since(stageStarted).Milliseconds()
 		log.event("stage end name=%s status=%s elapsed_ms=%d", steps[active].Name, steps[active].Status, steps[active].DurationMS)
 		systemResult.Steps = append(steps, systemResult.Steps...)
-		inspectFinal(newSource(), trial, &systemResult, retErr == nil, true)
+		inspectFinal(newSource(), trial, &systemResult, retErr == nil)
 		if retErr != nil || opts.verbose {
 			systemResult.Notices = append(systemResult.Notices, "Run record: "+record.path)
 		}
 		err := systemResult.renderNamed(out, "init")
-		if err == nil {
-			err = rememberNotes(machine, systemResult.Notes)
-		}
 		if err != nil {
 			if errors.Is(retErr, reported{}) {
 				retErr = err

@@ -114,7 +114,7 @@ func runMaintenance(cmd *cobra.Command, opts *options, flags machineFlags, sf sy
 			skippedMaintenance(&result, phase, upgrade)
 		}
 		if finalSelection != nil {
-			inspectFinal(src, finalSelection, &result, retErr == nil, false)
+			inspectFinal(src, finalSelection, &result, retErr == nil)
 		}
 		timings = append(timings, runPhase{Name: phase, DurationMS: time.Since(phaseStarted).Milliseconds()})
 		record.Phases = timings
@@ -135,9 +135,6 @@ func runMaintenance(cmd *cobra.Command, opts *options, flags machineFlags, sf sy
 			err = writeJSON(cmd.OutOrStdout(), result, nil)
 		} else {
 			err = result.render(out, false)
-		}
-		if err == nil && finalSelection != nil {
-			err = rememberNotes(finalSelection.Resolved.Machine, result.Notes)
 		}
 		if err != nil {
 			retErr = errors.Join(retErr, err)

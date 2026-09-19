@@ -63,7 +63,7 @@ func setupNotes(src native.Source, s *selected) ([]setupNote, error) {
 }
 func newSetupNotes(opts *options) *cobra.Command {
 	var flags machineFlags
-	cmd := &cobra.Command{Use: "setup-notes", Short: "Show all applicable setup guidance without changing state", Args: noArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	cmd := &cobra.Command{Use: "setup-notes", Short: "Show all applicable setup guidance and mark it seen", Args: noArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		s, err := loadSelected(flags)
 		if err != nil {
 			return err
@@ -75,25 +75,27 @@ func newSetupNotes(opts *options) *cobra.Command {
 		if opts.json {
 			return writeJSON(cmd.OutOrStdout(), notes, nil)
 		}
-		return displayNotes(cmd.OutOrStdout(), notes)
+		if err := displayNotes(cmd.OutOrStdout(), notes); err != nil {
+			return err
+		}
+		return rememberNotes(s.Resolved.Machine, notes)
 	}}
 	addMachineFlags(&flags, cmd.Flags())
 	return cmd
 }
 func displayNotes(out io.Writer, notes []setupNote) error {
-	if len(notes) == 0 {
-		return nil
-	}
 	var b bytes.Buffer
-	fmt.Fprintln(&b, "\nSetup notes:")
-	for _, n := range notes {
-		fmt.Fprintf(&b, "  - %s\n", n.Text)
+	fmt.Fprintln(&b, "Review remaining setup with nimbus postinstall status.")
+	if len(notes) > 0 {
+		fmt.Fprintln(&b, "\nSetup notes:")
+		for _, n := range notes {
+			fmt.Fprintf(&b, "  - %s\n", n.Text)
+		}
 	}
-	fmt.Fprintln(&b, "View all guidance: nimbus setup-notes")
 	_, err := b.WriteTo(out)
 	return err
 }
-func pendingNotes(src native.Source, s *selected, all bool) ([]setupNote, error) {
+func pendingNotes(src native.Source, s *selected) ([]setupNote, error) {
 	notes, err := setupNotes(src, s)
 	if err != nil {
 		return nil, err
@@ -106,9 +108,7 @@ func pendingNotes(src native.Source, s *selected, all bool) ([]setupNote, error)
 	if err != nil {
 		return nil, err
 	}
-	if !all {
-		notes = slices.DeleteFunc(notes, func(n setupNote) bool { return state.Has(s.Resolved.Machine, n.ID, n.Revision, "displayed") })
-	}
+	notes = slices.DeleteFunc(notes, func(n setupNote) bool { return state.Has(s.Resolved.Machine, n.ID, n.Revision, "displayed") })
 	return notes, nil
 }
 func rememberNotes(machine string, notes []setupNote) error {

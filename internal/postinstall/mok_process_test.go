@@ -30,23 +30,27 @@ func (s mokProcessSource) Run(name string, args ...string) ([]byte, error) {
 
 func TestMOKProductionRunnerExitSemantics(t *testing.T) {
 	for _, tc := range []struct {
-		name, body string
-		want       Status
+		name, body       string
+		want             Status
+		wantBeforeReboot bool
 	}{
-		{"enrolled", `printf '%s is already enrolled\n' "$3"; exit 1`, Complete},
-		{"not-enrolled", `printf '%s is not enrolled\n' "$3"; exit 0`, Pending},
-		{"pending", `printf '%s is already in the enrollment request\n' "$3"; exit 1`, Pending},
-		{"failure", `echo 'EFI variable read failed' >&2; exit 255`, Unknown},
-		{"stderr-not-enrollment", `printf '%s is already in the built-in trusted keyring\n' "$3" >&2; exit 255`, Unknown},
+		{"enrolled", `printf '%s is already enrolled\n' "$3"; exit 1`, Complete, false},
+		{"not-enrolled", `printf '%s is not enrolled\n' "$3"; exit 0`, Pending, true},
+		{"pending", `printf '%s is already in the enrollment request\n' "$3"; exit 1`, Pending, false},
+		{"failure", `echo 'EFI variable read failed' >&2; exit 255`, Unknown, false},
+		{"stderr-not-enrollment", `printf '%s is already in the built-in trusted keyring\n' "$3" >&2; exit 255`, Unknown, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			helper := filepath.Join(t.TempDir(), "fake-mokutil")
 			if err := os.WriteFile(helper, []byte("#!/bin/sh\n"+tc.body+"\n"), 0700); err != nil {
 				t.Fatal(err)
 			}
-			task := VerifyMOK(mokProcessSource{helper: helper}, Task{ID: "nvidia-mok"})
+			task := VerifyMOK(mokProcessSource{helper: helper}, Task{ID: "nvidia-mok", BeforeReboot: true})
 			if task.Status != tc.want {
 				t.Fatalf("got %+v, want %s", task, tc.want)
+			}
+			if tc.want == Pending && task.BeforeReboot != tc.wantBeforeReboot {
+				t.Fatalf("pending enrollment request still demands a pre-reboot run: %+v", task)
 			}
 		})
 	}

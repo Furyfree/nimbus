@@ -297,8 +297,8 @@ func TestInitDelegatesMiseToolsToChezmoiAndRetriesFailure(t *testing.T) {
 	if code != ExitOK || !strings.Contains(out, "succeeded  dotfiles and tools") || strings.Contains(out, "remaining Nimbus user tools") {
 		t.Fatalf("%d %s%s", code, out, errOut)
 	}
-	if strings.Count(out, "Sign in to 1Password.") != 1 || strings.LastIndex(out, "Setup notes:") < strings.Index(out, "init summary:") {
-		t.Fatalf("successful init did not repeat its setup notes last: %s", out)
+	if strings.Count(out, "Sign in to 1Password.") != 1 || !strings.Contains(out, "Run: nimbus setup-notes") {
+		t.Fatalf("successful init did not point to its setup notes: %s", out)
 	}
 	count := 0
 	for _, call := range src.calls {

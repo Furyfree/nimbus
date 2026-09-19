@@ -12,7 +12,7 @@ import (
 
 // inspectFinal only reads native observations. It never authenticates to an app,
 // repairs preferences, or converts an inspection failure into completion.
-func inspectFinal(src native.Source, s *selected, result *syncResult, notes bool, allNotes bool) {
+func inspectFinal(src native.Source, s *selected, result *syncResult, notes bool) {
 	snapshot, err := inspectPostinstall(src, machineFlags{checkout: s.Root, machine: s.Resolved.Machine})
 	if err != nil {
 		result.Notices = append(result.Notices, "Setup status unavailable: "+err.Error())
@@ -33,7 +33,7 @@ func inspectFinal(src native.Source, s *selected, result *syncResult, notes bool
 		}
 	}
 	if notes {
-		result.Notes, err = pendingNotes(src, s, allNotes)
+		result.Notes, err = pendingNotes(src, s)
 		if err != nil {
 			result.Notices = append(result.Notices, "Setup guidance unavailable: "+err.Error())
 		}
@@ -45,30 +45,48 @@ func renderFinalDetails(out io.Writer, result *syncResult) error {
 			return err
 		}
 	}
+	for _, task := range result.Tasks {
+		if result.Reboot && task.BeforeReboot && task.Status == postinstall.Pending {
+			if _, err := fmt.Fprintf(out, "Run before rebooting: nimbus postinstall %s (%s)\n", task.ID, task.Title); err != nil {
+				return err
+			}
+		}
+	}
 	if result.Logout {
 		if _, err := fmt.Fprintln(out, "Log out and back in to activate changed session settings or group membership."); err != nil {
 			return err
 		}
 	}
-	for _, group := range []struct {
-		title   string
-		problem bool
-	}{{"Remaining setup", false}, {"Verification problems", true}} {
-		shown := false
-		for _, task := range result.Tasks {
-			problem := task.Status == postinstall.Unknown || task.VerificationNeedsRoot
-			if problem != group.problem {
-				continue
-			}
-			if !shown {
-				if _, err := fmt.Fprintf(out, "\n%s:\n", group.title); err != nil {
-					return err
-				}
-				shown = true
-			}
-			if _, err := fmt.Fprintf(out, "  %s: %s\n    nimbus postinstall %s\n", task.ID, task.Detail, task.ID); err != nil {
+	problems, remaining := false, 0
+	for _, task := range result.Tasks {
+		if task.Status != postinstall.Unknown && !task.VerificationNeedsRoot {
+			remaining++
+			continue
+		}
+		if !problems {
+			if _, err := fmt.Fprintln(out, "\nVerification problems:"); err != nil {
 				return err
 			}
+			problems = true
+		}
+		if _, err := fmt.Fprintf(out, "  %s: %s\n    nimbus postinstall %s\n", task.ID, task.Detail, task.ID); err != nil {
+			return err
+		}
+	}
+	var setup []string
+	if remaining == 1 {
+		setup = append(setup, "1 task")
+	} else if remaining > 1 {
+		setup = append(setup, fmt.Sprintf("%d tasks", remaining))
+	}
+	if len(result.Notes) == 1 {
+		setup = append(setup, "1 setup note")
+	} else if len(result.Notes) > 1 {
+		setup = append(setup, fmt.Sprintf("%d setup notes", len(result.Notes)))
+	}
+	if len(setup) > 0 {
+		if _, err := fmt.Fprintf(out, "\nRemaining setup: %s. Run: nimbus setup-notes\n", strings.Join(setup, ", ")); err != nil {
+			return err
 		}
 	}
 
@@ -84,7 +102,7 @@ func renderFinalDetails(out io.Writer, result *syncResult) error {
 			return err
 		}
 	}
-	return displayNotes(out, result.Notes)
+	return nil
 }
 func skippedMaintenance(result *syncResult, phase string, upgrade bool) {
 	phases := []string{"repository preflight", "repository update", "system sync", "Chezmoi apply", "software updates", "agent model refresh", "final inspection"}
