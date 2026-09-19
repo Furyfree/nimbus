@@ -1,867 +1,143 @@
-# Nimbus roadmap
+# Roadmap
 
-Goal: a workstation that can be installed, maintained and repaired with a
-small CLI and a Bubble Tea interface. [SPEC.md](SPEC.md) defines the behavior;
-[TASKS.md](TASKS.md) holds current checkboxes and evidence.
-
-This sequence replaces the old phase-by-phase implementation narrative.
-Existing local code is a candidate, not proof that the new contract is shipped.
+[SPEC.md](SPEC.md) owns behavior; [TASKS.md](TASKS.md) owns the open
+checklist. This file owns implementation order, deferred scope and exit
+criteria.
 
 ## Next steps
 
-Release 0.5.10 publishes the DTU native-label verification correction. The
-owner confirmed the desktop command accepts the existing certificate, and the
-signed package is installed on the workstation; see
-[TASKS](TASKS.md#dtu-native-selinux-verification-correction).
-
-Release 0.5.9 corrects the terminal-test process-exit race that blocked the
-0.5.7 COPR build and a separate interrupt-readiness race exposed during 0.5.8
-release checks. Both changes preserve test deadlines and change no installer
-runtime behavior. Publication and validation evidence are tracked in
-[TASKS](TASKS.md#version-059-terminal-interrupt-test-correction).
-
-Extend DTU postinstall with the approved guided Linux eduroam setup: adapt the
-reviewed CAT profile, choose manual or 1Password credentials, keep existing
-DTU profiles unless replacement is explicitly confirmed, and separately confirm
-connecting. Recorded baseline packages satisfy installed prerequisites without
-being adopted by postinstall. NetworkManager stores the password in its
-root-only native file, without depending on desktop secret-agent persistence.
-The owner verified connection using both 1Password and manual credentials
-with the corrected installer on the laptop, without a second password prompt.
-The owner also reports working Wi-Fi after reboot. Off-campus setup now keeps
-automatic connection enabled and treats a missing eduroam network as configured
-for later; native fixture coverage passes. DTU-only services and password
-renewal remain separate checks.
-See [TASKS](TASKS.md#dtu-eduroam-guided-setup). The earlier certificate-only
-release remains distinct from this unpublished addition.
-
-The Tailscale operator task now distinguishes initial sign-in from an existing
-signed-in profile. Initial setup offers native sign-in with the operator set
-and verifies a running connection; existing stopped connections stay stopped.
-Release 0.5.7 includes this change. See
-[TASKS](TASKS.md#tailscale-initial-sign-in) for validation and delivery status.
-
-The lockscreen verification correction accepts equivalent native screen-size
-adjustments during restart and status inspection. It retains strict checks for
-actual layout or unrelated preference changes. Validation is tracked in
-[TASKS](TASKS.md#lockscreen-screen-adjustment-verification).
-
-The 1Password first-install correction creates managed parent directories through
-Chezmoi and replaces the automatic full diff with a concise change summary.
-Explicit `--diff` retains detailed review without a pager. See
-[TASKS](TASKS.md#onepassword-first-install-and-preview) for release evidence.
-
-The owner approved CLI simplification on 2026-09-14 after comparing desktop and
-laptop logs by engine version. The local candidate adds concise previews,
-explicit verbose detail, fewer overlapping approvals, scoped inspections and
-private metadata records. Both Nimbus and Chezmoi keep native ownership and
-interactive conflict handling. See [SPEC](SPEC.md#concise-maintenance-output-and-diagnostics)
-and [TASKS](TASKS.md#cli-simplification-2026-09-14) for the implemented contract
-and validation. No release is implied by local completion.
-
-Declared RPM-source enforcement and UWSM/session integration shipped in 0.5.3.
-This work preserves those contracts and does not reopen boot or VM setup.
-
-The prepared XDG defaults file remains unselected until explicit adoption of
-the package-owned file is supported. Chezmoi already manages the working
-per-user paths, so this does not block the engine release.
-
-1. Finish the minimal dark GRUB theme and verify booting and theme removal.
-2. Add FDE auto-unlock as an explicit post-install action, retaining passphrase
-   unlock. Verify enrollment, booting and removal on real hardware.
-3. Extract shared operations from the CLI, then build the Bubble Tea dashboard.
-
-The explicitly approved CLI simplification runs first. GRUB and FDE auto-unlock
-remain ahead of the deferred TUI work. Other installation checks below remain
-open; this change does not mark them complete.
-
-## Review draft: maintenance and setup workflows
-
-Status: approved for local implementation on 2026-09-13. The candidate now
-implements the maintenance/setup contract in both Nimbus and Chezmoi. The
-proposal below is retained as the review record; executable usage is in
-[README](../README.md#workflow) and the implemented contract is in
-[SPEC](SPEC.md#everyday-commands). Release preparation targets Nimbus 0.5.0;
-publication is tracked in TASKS.
-The acceptance marks below record automated and disposable RPM validation;
-full graphical installation and real-account checks remain explicitly separate.
-
-### Approved completion and output follow-up
-
-The follow-up to the 0.5.0 operator trial makes verify-only completion useful for
-existing setup. This supersedes the manual-acknowledgment-only behavior described
-in the original proposal below. Supported completion commands confirm manual
-prerequisites, verify native configuration and record success without applying
-files. The normal 1Password workflow also avoids applying matching files. MOK
-permission failures offer explicit read-only privileged verification, while
-routine inspection remains unprivileged and preserves uncertainty.
-The subsequent operator trial established that CLI sign-in was needed despite
-correct GUI settings, and that mokutil reports enrollment with exit 1. The
-follow-up adds explicit native sign-in recovery and fixes enrollment parsing;
-terminal handling is not a demonstrated cause of the original CLI failure.
-A successful privileged MOK check now appears as "Previously verified" when
-ordinary status cannot reread the certificate. The final report treats this as
-a notice; observed native failures continue to take precedence.
-
-The approved color pass shares terminal styling across text commands and help,
-using the terminal palette and explicit status labels. Redirected text and JSON
-stay plain; native progress and input retain their terminal connection. Nimbus
-styling stays out of installer logs. The checklist shortens successful checks
-and separates the sudo recheck command; help retains verification limits and
-JSON retains native details. The presentation pass strengthens palette colors,
-wraps terminal prose, cleans up Doctor, orders upgrade previews by execution
-and aligns historical MOK preview wording with status. Automated checks use
-fixtures and temporary
-terminals; visual review remains with the owner.
-
-Maintenance output groups unchanged ownership refreshes, shows only actual
-replan changes and separates verification problems from setup work. Empty native
-system upgrades skip transactions and snapshots after fresh checks. Usage is in
-[README](../README.md#guided-setup); the implemented contract is in
-[SPEC](SPEC.md#everyday-commands), with evidence in
-[TASKS](TASKS.md#completion-and-output-follow-up-2026-09-13).
-
-### Required work at a glance
-
-Each item below is a required part of the proposal, with its own detailed
-section and acceptance criteria. Local state and final reporting are explicit
-deliverables, not incidental parts of another task.
-
-1. [Improve init](#init-and-first-install-experience): visible installation,
-   consolidated onboarding and a clear remaining-setup report.
-2. [Simplify sync](#proposed-ordinary-sync): sudo, fresh engine check, stop for
-   an available update before either Git fetch, otherwise sync/apply once.
-3. [Simplify combined upgrade](#proposed-combined-upgrade): sudo, engine update
-   and restart if needed, one sync, Topgrade, one final summary.
-4. [Make updates reliable](#update-reliability): current repository metadata,
-   explicit check failures and no recurring manual Nimbus upgrade workaround.
-5. [Separate setup notes](#setup-notes): all notes through the dedicated
-   command and init; only unseen relevant revisions during later syncs.
-6. [Restructure postinstall](#postinstall-command-layout): help by default,
-   real task subcommands, per-task help, plan mode and compact status.
-7. [Guide task execution](#guided-task-execution-and-completion): prerequisite
-   checks, manual confirmations, approved actions, verification and automatic
-   completion. Include the full [1Password flow](#1password-walkthrough).
-8. [Implement local state](#local-state-files-and-ownership): separate note
-   display history and task completion, per-machine records, reset support
-   and native rechecks that take precedence over old completion flags.
-9. [Reduce noise and preserve progress](#output-and-progress): concise routine
-   output with live downloads, prompts, errors and elapsed-time feedback.
-10. [Improve final reporting](#final-reporting): changes, failures, remaining
-    tasks, effective-config conflicts and reboot/logout notices in one place.
-
-### Purpose and observed problems
-
-Make maintenance predictable: check engine compatibility before fetching new
-definitions, reconcile configuration once, show progress while work happens,
-and leave a useful per-machine checklist afterward.
-
-The desktop/laptop comparison and command review found:
-
-- The laptop has Nimbus 0.4.5 while 0.4.6 is published. Its privileged DNF
-  cache contains versions only through 0.4.5, and the upgrade log explicitly
-  reuses that cache. Nimbus currently calls makecache and upgrade without
-  forcing metadata refresh.
-- The old engine reads newly fetched definitions before upgrading itself.
-  A definition requiring a newer engine can block the upgrade path.
-- A successful combined upgrade performs two full syncs, including two Git
-  update passes and two Chezmoi applies with after-apply scripts.
-- Onboarding notes, policy explanations, unchanged checks and intermediate
-  summaries dominate routine output.
-- Init's output logging changes how subprocesses connect to the terminal.
-  Loss of terminal detection is a likely cause of missing progress; some
-  preparation commands also capture output instead of showing activity.
-  Reproduce the precise cases before selecting the implementation.
-- Postinstall currently dumps all task details and treats `status` as a task
-  ID. Several tasks remain generically unknown despite prior manual setup.
-- Matching managed files does not prove matching effective configuration.
-  The laptop's Noctalia GUI overrides disable the managed lockscreen widgets.
-  The explicit lockscreen repair is now implemented; the installed laptop
-  trial remains pending. Normal sync still preserves GUI overrides.
-
-### Init and first-install experience
-
-Init is explicitly part of this work, alongside both sync commands. Retain
-its role of selecting or creating a machine, installing the required system
-prerequisites and initializing Chezmoi. Improve the whole visible sequence:
-
-1. Select or reuse the machine and show the installation plan. Preserve the
-   existing trust checks, explicit 1Password SSH opt-in and approval before
-   installation. Do not infer manual setup completion from `--yes`.
-2. Install and configure system prerequisites with live native progress,
-   including large downloads. Keep installation logging without losing the
-   progress display or hiding prompts behind captured output.
-3. Initialize Chezmoi and apply user configuration and declared tools with
-   visible progress. Remove the repeated onboarding paragraphs from the Mise
-   hook; keep actual tool installation and extension verification.
-4. Present the applicable setup notes together through the same note service
-   exposed by `nimbus setup-notes`, then record successfully displayed note
-   revisions. Init remains an explicit place to see the applicable onboarding
-   guidance; later syncs show only new or revised notes.
-5. End with one installation result and a compact list of remaining tasks and
-   session/reboot requirements. Point to the relevant guided postinstall
-   commands instead of dumping every task's instructions and recovery text.
-
-Do not defer a blocking prerequisite until the closing notes. For example,
-if selected secret-backed dotfiles require an unlocked 1Password app before
-they can be rendered, explain the required action at that point. Reuse the
-guided task's prerequisite logic where appropriate; do not create competing
-1Password instructions or silently disable the selected integration.
-
-Init does not mark manual postinstalls complete just because packages were
-installed or notes were displayed. On an existing machine, native inspection
-recognizes completed automatic setup, while manual confirmations remain
-specific to that machine. Retries preserve completed work and report partial
-installation honestly. `init --plan` remains read-only.
-
-The engine-first maintenance design must also be checked against the bootstrap
-and direct-init entry points. Bootstrap must obtain a compatible engine before
-loading newer definitions. Decide during review whether direct init should
-stop or offer an engine update when outdated; that exact new behavior has not
-been agreed, and should not be inferred from the sync rules.
-
-### Proposed ordinary sync
-
-For a normal mutating `nimbus sync`, use this order:
-
-1. Validate invocation and obtain sudo credentials early. Run Nimbus as the
-   normal user; elevate only native operations that need it. Authentication
-   does not replace approval of the changes in the plan.
-2. Refresh metadata for the configured, trusted Nimbus package repository.
-   Check for a newer installable engine using RPM version semantics.
-3. If a newer engine is available, stop before fetching either repository.
-   Explain the installed and available versions and direct the user to
-   `nimbus sync --upgrade`. An unsuccessful check must not be presented as
-   "up to date" or permit fetching potentially incompatible definitions.
-4. Inspect both Git repositories and fetch their approved tracking branches.
-   Retain clean-worktree, origin and fast-forward checks. Update Nimbus and
-   Chezmoi once, then load the new definitions.
-5. Inspect the machine, show meaningful system changes and obtain approval.
-   Reconcile sources, constraints, selected packages, system files and other
-   managed resources in dependency order. Preserve native verification,
-   ownership rules, required snapshots and failure reporting.
-6. Apply Chezmoi once after the applicable approval, including declared tool
-   installation and extension hooks. Preserve machine/profile selection and
-   the explicit 1Password SSH choice.
-7. Verify results and print one closing report with new setup notes and
-   remaining postinstall, logout or reboot requirements.
-
-Plain sync does not run Topgrade or generally upgrade existing software.
-Installing required packages may still change dependencies. Chezmoi's native
-Mise install hook remains responsible for satisfying its declared tools.
-
-If no managed system changes are required, skip their mutation and snapshot
-work. Do not claim that sudo was unnecessary overall: the agreed engine
-preflight requests it at the start of normal sync.
-
-### Proposed combined upgrade
-
-For a normal mutating `nimbus sync --upgrade`, use this order:
-
-1. Validate invocation and obtain sudo credentials early.
-2. Refresh trusted Nimbus repository metadata and check the installed engine.
-3. If needed, preview and approve the engine-only RPM transaction, execute it
-   through DNF, and verify the installed result. Disclose any dependencies
-   required by that transaction. Do not fetch either Git repository yet.
-4. Restart into the updated executable when replacement occurred. Preserve
-   machine, checkout and supported arguments. Prevent restart loops and fail
-   clearly if the expected executable/version cannot be started.
-5. Run the configuration sync workflow once: update repositories, reconcile
-   system state, and apply Chezmoi and its hooks.
-6. Run Topgrade once using the resulting Chezmoi-owned configuration.
-   Its system callback remains `nimbus upgrade --system`, followed by the
-   selected native user-tool and application updaters.
-7. Perform final inspection and present one combined result. Do not fetch
-   repositories or apply Chezmoi again as part of final verification.
-
-The engine check must be possible without first resolving definitions that
-the old engine cannot understand. Use the existing trusted installation and
-selector information; do not depend on freshly downloaded manifests to find
-the engine update. "Available" means available through the configured package
-repository, not merely a tag or release on GitHub. Preserve signatures,
-package-source selection and version constraints; do not enable testing or
-switch to another provider automatically.
-
-The early engine transaction is separate from Topgrade's general RPM upgrade.
-Topgrade may inspect Nimbus again as an ordinary installed RPM; this does not
-justify an additional sync or a second special engine-update phase.
-
-Retain prerequisite ordering: a failed engine upgrade or configuration sync
-stops before later phases. Independent Topgrade steps may retain their normal
-retry behavior, but any unresolved failure remains visible in the combined
-result and exit status. Report partial completion; do not promise rollback.
-
-### Update reliability
-
-Force fresh metadata for explicit system upgrades as well as engine checks.
-The plan and privileged transaction must use consistent current metadata;
-refreshing only an unprivileged cache does not solve the observed issue.
-Handle refresh failure before claiming currency or authorizing a misleading
-transaction. Keep offline previews separate from this execution behavior.
-
-Normal maintenance must not require the recurring workaround
-`sudo dnf upgrade --refresh nimbus`. The combined command owns that fresh
-engine check and update. A newly published GitHub release is not an available
-RPM until the configured trusted package repository provides it. Never change
-repositories or weaken signature checks to make a newer engine appear.
-
-### Help, approvals and read-only commands
-
-Help, status, validation and plan-only commands must stay read-only. They must
-not request sudo, refresh metadata, fetch repositories, launch applications,
-or create completion-state files. Plan output must identify cached or unknown
-update information instead of promising the latest remote transaction.
-
-Keep approvals attached to concrete changes. Early sudo authentication is
-not blanket consent to perform every operation. Consolidate repeated wording
-and duplicate questions while retaining review of engine, system and user
-configuration changes. Specify `--yes` consistently during implementation;
-it must not silently confirm manual GUI work or bypass verification.
-
-### Setup notes
-
-Add `nimbus setup-notes` to show all guidance relevant to the selected
-machine. Notes are instructions and reminders, not completion checks.
-
-- Init shows the applicable onboarding notes together, without scattering
-  them through tool-install output.
-- Later syncs show only new or meaningfully revised applicable notes, once
-  at the end. Routine upgrades stop replaying all initial setup advice.
-- Give each note a stable ID, revision and applicability rules. Increment
-  the revision when required user action changes; wording corrections alone
-  should not repeatedly alert existing users.
-- Track displayed revisions in
-  `$XDG_STATE_HOME/nimbus/setup-notes.json`, defaulting to
-  `~/.local/state/nimbus/setup-notes.json`.
-- Record a note as shown only after it was successfully displayed. An
-  interrupted or failed display must not silently consume new guidance.
-- Explicitly viewing all notes is read-only and does not confirm tasks or
-  change the record used for automatic reminders.
-- On an existing machine with no record, show applicable unseen notes on the
-  next suitable mutating run. Do not infer prior display from package age.
-
-Owner clarification: setup notes are exclusively a Nimbus feature. Nimbus owns
-the complete catalog, command, applicability and display tracking. Read the
-catalog directly from its selected checkout; do not add a Chezmoi handoff or
-standalone reader. Chezmoi retains ordinary configuration documentation.
-
-Remove the repeated setup-note printing from the Mise after-apply hook once
-the new delivery path exists. Keep the actual Mise installation behavior.
-
-### Postinstall command layout
-
-Both `nimbus postinstall` and `nimbus postinstall --help` show the same help
-and list of task subcommands. They no longer inspect and print all tasks.
-Help stays consistent across machines; task help explains applicability.
-
-| Proposed invocation | Behavior |
-| --- | --- |
-| `nimbus postinstall` | Help and available subcommands |
-| `nimbus postinstall --help` | The same help |
-| `nimbus postinstall status` | Compact status of applicable tasks |
-| `nimbus postinstall onepassword --help` | Purpose, prerequisites and options |
-| `nimbus postinstall onepassword` | Guided setup and verified actions |
-| `nimbus postinstall onepassword --plan` | Inspect and preview only |
-| `nimbus postinstall onepassword --mark-done` | Acknowledge manual steps only |
-
-Convert existing task IDs into proper subcommands without dropping their
-native setup behavior. Keep JSON inspection available and define its output
-contract alongside the command changes. Detailed recovery guidance belongs
-in task documentation or relevant failure output, not every task-list row.
-Logout and reboot requirements become notices in status and final reports,
-rather than pretend executable setup tasks.
-
-### Guided task execution and completion
-
-For each task, distinguish manual prerequisites, automated actions and
-verification. Inspect what can be checked natively. If a requirement cannot
-be inspected, show specific instructions and request explicit confirmation
-before proceeding. A missing requirement blocks dependent actions.
-
-Show the proposed native action, obtain approval, execute it with visible
-progress, then verify its actual result. A successful guided flow records
-completion automatically; the user does not run `--mark-done` afterward.
-Starting an application or receiving exit status zero is insufficient when
-the task requires further setup or a native verification check.
-
-`--mark-done` acknowledges the relevant manual portion of a task. It does not
-run file changes implicitly, bypass automated prerequisites or mark failed
-verification successful. A mixed task can therefore remain pending after
-manual acknowledgment. Provide a way to reset acknowledgments; exact reset
-syntax remains a review detail.
-
-Use clear task statuses such as Pending, Verified, Confirmed by you,
-Blocked, and Unable to check. Keep the reason concise and actionable.
-For mixed tasks, preserve which steps were manually confirmed and which
-were verified; a single "Done" row can summarize both without conflating
-their evidence. Failure leaves remaining work incomplete and supports retry.
-
-### 1Password walkthrough
-
-The proposed task must do more than open the app and remember a checkbox:
-
-1. Offer SSH/Git opt-in when absent, defaulting to no, including after CLI-only
-   completion. Save an explicit yes through Chezmoi's native prompt flags while
-   preserving machine and profiles. `--yes` cannot opt in and `--mark-done` keeps
-   the selection unchanged. Explain sign-in/unlock and desktop CLI integration;
-   when SSH is selected, also explain enabling the SSH agent.
-2. Tell the user to skip onboarding instructions that manually edit SSH or
-   Git files: Chezmoi owns those files in this setup. Enabling GUI features
-   is still required. Preserve the existing keys and explicit SSH opt-in.
-3. Ask when the user is ready to check prerequisites and continue. Confirm
-   available CLI access and other supported checks without exposing secrets.
-4. Preview the selected managed configuration and ask to apply it through
-   Chezmoi. Coordinate the existing SSH configuration, public-key selectors,
-   agent selection and Git signing settings. Do not write competing copies
-   directly from Nimbus or apply unrelated user configuration unnecessarily.
-5. Verify applied configuration and accessible integration behavior. Keep
-   remote authentication or signing registration checks distinct from local
-   configuration, and disclose any check that contacts an external service.
-6. Record successful completion automatically, retaining the distinction
-   between confirmed GUI steps and verified configuration. If a required
-   check fails, explain what remains instead of marking the whole task done.
-
-Illustrative wording before the manual steps:
-
-~~~text
-Complete the listed settings in 1Password.
-Skip manual SSH/Git file edits; Nimbus will apply them through Chezmoi.
-
-Ready to check prerequisites and continue? [Y/n]
-~~~
-
-### Local state files and ownership
-
-Implement the local state layer as a dedicated step before wiring note and
-task workflows into it. Keep setup-note display history separate from task
-completion. Honor `$XDG_STATE_HOME`, defaulting to `~/.local/state`.
-
-| Proposed file below the state directory | Stores |
-| --- | --- |
-| `nimbus/setup-notes.json` | Note IDs/revisions successfully displayed |
-| `nimbus/postinstall.json` | Task/step confirmations and completion evidence |
-
-The exact schema and filenames remain proposed implementation details; the
-separation, per-machine behavior and verification semantics are required.
-
-Records are local to the user and machine. Do not copy them through Chezmoi
-or Git. Include a schema version, selected machine identity, stable task/step
-IDs, relevant revisions, timestamps and the source of confirmation. Use
-atomic writes and appropriate private permissions. Retain no credentials,
-key material, account payloads or raw verification output in these records.
-
-Native state remains authoritative for checkable tasks. Stored verification
-is last-observed evidence, not a substitute for inspecting current state.
-An unreadable check must not be hidden by an old "done" flag. Confirmations
-for unrelated tasks survive a task revision; invalidate only the affected
-requirements. Missing state starts manual tasks unconfirmed, while native
-inspection can immediately recognize already-completed automatic tasks.
-Unreadable or invalid state is an explicit problem, not silent data loss.
-
-Required state transitions:
-
-- Displaying a note changes only its shown revision, never task completion.
-- Confirming manual prerequisites records only those confirmed steps.
-- A guided task records overall completion automatically only after all
-  required confirmations, actions and verification succeed.
-- `--mark-done` cannot bypass automated setup or failed verification.
-- Failure or cancellation preserves earlier valid step evidence and leaves
-  the unfinished work pending. Do not mark the entire task done on exit alone.
-- Resetting an acknowledgment clears that confirmation without uninstalling
-  software, reversing configuration, or changing another machine's record.
-- Status/help/plan commands inspect without writing state. Record refreshed
-  observations only through appropriate mutating workflows.
-
-On introduction, an existing desktop and laptop each start without manual
-acknowledgments. Recognize existing automatic setup through native checks;
-let the user confirm completed manual work without unnecessarily repeating
-it. Confirming 1Password on one machine must not complete it on the other.
-
-This adds Nimbus-owned runtime state below the user's home directory. Update
-the ownership language in SPEC and applicable repository instructions when
-implementing it; Chezmoi must continue to leave that runtime state unmanaged.
-Keep existing privileged resource receipts under `/var/lib/nimbus` separate.
-
-### Output and progress
-
-Make normal output concise while keeping real work observable:
-
-- Show the active phase before work starts. Condense unchanged checks.
-- Stream native download, installation and interactive progress immediately.
-- Preserve terminal behavior when installation logging is enabled. Investigate
-  direct terminal attachment, supported native options or a terminal relay
-  as needed; do not assume another buffered writer fixes terminal detection.
-- Show activity and elapsed time for quiet operations. Do not invent progress
-  percentages or label installation as complete before verification.
-- Keep prompts, errors and changed-resource previews visible. Avoid duplicate
-  summaries from nested Nimbus callbacks; retain useful native tool output.
-- Preserve Ctrl-C, child-process exit status, terminal restoration and
-  secret-safe logging. Test interactive and redirected output separately.
-- Use the dedicated final-reporting behavior below instead of repeated
-  intermediate summaries. Failed phases must not look complete.
-
-### Final reporting
-
-Implement final reporting as its own work item across init, sync and combined
-upgrade. Aggregate phase results and print one closing Nimbus report, including
-when a run fails or is interrupted. Do not hide a native error while trying
-to simplify output, and preserve unsuccessful exit status.
-
-The report must clearly answer:
-
-1. What changed: engine version when replaced, updated repositories, relevant
-   system/user configuration changes and verified software update results.
-2. What failed: the failing phase, concise reason and the useful retry or
-   diagnostic action. Identify subsequent phases that were not run.
-3. What remains: applicable pending or blocked postinstall tasks, including a
-   short reason and the proposed command that handles each one.
-4. What needs session activation: logout/reboot notices with a reason, such
-   as the updated greeter configuration. These are notices, not setup tasks.
-5. What is overridden or unverified: known effective-configuration conflicts
-   and visual/hardware checks that have not yet been performed.
-6. Which setup notes are new: present unseen applicable revisions once and
-   point to `nimbus setup-notes` for the complete guidance.
-
-Use native task inspection plus local manual confirmations for the checklist.
-Do not print "everything complete" merely because files match or native
-commands returned zero. An unavailable check should have a specific reason.
-An unchanged phase can occupy one short line. Omit empty detail sections.
-
-Inspect known effective-configuration conflicts in that final reporting.
-For example, identify the Noctalia GUI overrides that defeat managed
-lockscreen settings. Explain a targeted repair; do not delete the whole
-settings file or silently discard unrelated preferences. Distinguish a
-verified file match from unverified visual behavior after the next login.
-
-Illustrative successful execution with remaining setup:
-
-~~~text
-Maintenance completed; setup still needs attention.
-
-Nimbus              Updated to <version>
-Configuration       Applied
-Software updates    Completed
-
-Remaining setup:
-  account-picture   Not registered
-    nimbus postinstall account-picture
-
-Configuration notice:
-  Noctalia GUI settings override the managed lockscreen widgets.
-
-Reboot required: activate the updated greeter configuration.
-View setup guidance: nimbus setup-notes
-~~~
-
-The example is a proposed display, not a claim about the current machine.
-The actual report must reflect observed results and avoid printing private
-rendered configuration or credentials.
-
-### Work across repositories
-
-This is a coordinated Nimbus and Chezmoi change:
-
-- Nimbus owns init/sync phase ordering, engine checks and restart, guided
-  postinstall commands, the note catalog and presentation, local-state tracking,
-  effective
-  checks, command progress and combined reporting.
-- Chezmoi removes repeated note printing from after-apply hooks and retains
-  native tool/extension installation,
-  and owns the actual 1Password SSH/Git configuration. Adjust its Topgrade
-  configuration only where the accepted workflow requires it.
-- Both repositories must agree on guided configuration application. Preserve
-  standalone Chezmoi behavior and test a fresh install
-  as well as maintenance on a machine with existing files and overrides.
-- COPR packages and releases the new engine after validation and separate
-  publication authorization. No new package provider is proposed here.
-
-### Scope and implementation sequence
-
-Local implementation and disposable validation are now authorized. Do not
-apply to the workstation, edit the laptop, run live privileged setup, commit,
-push or publish without separate authorization. Passwordless greeter sync
-remains deferred until the compatible Fedora Noctalia update. This work does
-not reopen the other boot/VM tasks.
-
-Implementation sequence retained from the approved proposal:
-
-1. Update the command and state contracts in SPEC, including read-only paths,
-   approval boundaries, ownership and machine selection.
-2. Implement fresh metadata and engine-first update/restart behavior, then
-   remove the repeated full sync. Keep Topgrade configuration in Chezmoi.
-3. Fix shared terminal progress and install logging, with a slow subprocess
-   regression test before broader output suppression.
-4. Implement the local state files as an independent deliverable: schemas,
-   per-machine scope, atomic persistence, revisions, reset and failure rules.
-   Test independence and native-state precedence before connecting workflows.
-5. Add the postinstall command layout and guided execution;
-   implement the complete 1Password workflow against that shared behavior.
-6. Add the Nimbus note catalog, delivery and tracking to init and maintenance,
-   then remove repetitive Chezmoi hook text.
-7. Implement final reporting as a separate deliverable: aggregate results,
-   pending postinstalls, configuration conflicts and session/reboot notices.
-   Cover successful, unchanged, partially completed and failed runs.
-8. Update shipped help and README usage, validate in disposable Fedora, and
-   record remaining physical-machine checks. Publish only when authorized.
-
-### Acceptance checklist
-
-Covered by isolated workflow fixtures, real terminal subprocesses, and the
-signed Fedora RPM container drill. These checks do not certify an actual desktop
-login, live vault authorization, or physical-device behavior. See the remaining
-operator trials in [TASKS](TASKS.md#maintenance-and-setup-candidate-2026-09-13).
-
-- [x] Fresh init shows live installation progress, applies user configuration,
-  presents the applicable notes and lists remaining setup in one closing
-  report. Logging does not remove progress or hide prerequisite prompts.
-- [x] Init retries preserve completed work; notes never mark tasks complete.
-  Selected 1Password prerequisites are handled before dependent rendering.
-- [x] Nimbus note delivery works without a Chezmoi reader or repeated hook text
-  or breaking standalone dotfile installation.
-- [x] Plain sync stops before either Git fetch when a newer engine exists.
-- [x] Combined upgrade installs and verifies the engine before fetching
-  definitions, restarts safely and preserves the selected machine/arguments.
-- [x] Stale caches cannot hide an available engine/system update; unavailable
-  metadata produces a clear failure rather than a false up-to-date result.
-- [x] A successful combined upgrade fetches each repository once, applies
-  Chezmoi once and launches Topgrade once, with no final mutating sync.
-- [x] Failures preserve completed-work reporting and stop dependent phases.
-- [x] No-op sync, dependency installs, constraints, source reconciliation and
-  Snapper behavior remain correct; approval is not replaced by sudo login.
-- [x] Help, status and previews stay read-only and usable without sudo.
-- [x] New notes appear once per relevant revision; explicit note viewing does
-  not mark tasks done. Existing machines handle missing state predictably.
-- [x] Postinstall help lists tasks and each task has its own help. Status is
-  compact, applies machine selection and explains blocked/unknown checks.
-- [x] Guided success records completion; failure, cancellation or an ineffective
-  native action does not. Manual acknowledgment cannot override failed checks.
-- [x] Desktop/laptop task state remains independent. Corrupt state, concurrent
-  writes, relevant revisions, reset and retry have defined tested behavior.
-- [x] Note display and task completion have separate records. Existing machines
-  start manual steps unconfirmed; native checks recognize completed automatic
-  setup. Reset does not undo configuration or affect another machine.
-- [x] Stored completion cannot hide missing native configuration or an
-  unavailable verification check. Read-only commands do not create state.
-- [x] 1Password GUI confirmation leads to reviewed Chezmoi configuration and
-  verification, without manual duplicate file edits or exposing secrets.
-- [x] Slow commands display output before exiting, with logging enabled.
-  Terminal prompts, resizing where relevant, cancellation and logs work.
-- [x] Final reporting distinguishes installed files, effective overrides and
-  changes still requiring logout/reboot or manual setup.
-- [x] One combined closing report identifies changes, failures, skipped phases,
-  pending postinstalls and session notices without duplicate Nimbus summaries.
-  Failed runs retain unsuccessful exit status and useful next actions.
-- [x] Nimbus `just check`, affected Chezmoi checks and disposable installation
-  trials pass. No laptop repair is claimed without later authorized testing.
+1. Finish 0.6.1: boot payload and boot validation, FDE hardware run,
+   documentation reconciliation (#39), package and publish.
+2. Channel phase 4 (#72): reverse drill after the release.
+3. Shared operations, then the TUI dashboard (#36) for 0.7.x.
+4. Desktop trial after delivery.
 
 ## 1. Simplify the documentation
 
-Keep SPEC, TASKS and ROADMAP as the product documents. INSTALLATION is the
-Fedora operator guide, recovered from history and corrected. SPEC includes
-installation, security, root-system-file ownership and a short architecture
-and test policy.
-Remove stale research narratives and completed task logs. Keep deferred work
+Give each subject one authoritative location and keep it current: README and
+the wiki for usage, SPEC for contracts, this file and TASKS for planning.
+Remove stale research narratives and completed task logs; keep deferred work
 explicit without making it a release requirement.
 
 Done when commands, ownership, recovery scope and implementation gaps agree
-across the docs, links work, and the local checks pass.
+across the documents, links work, and the local checks pass. Tracked by #39;
+completed last before publication.
 
-## 2. Align commands and ownership
+## 2. Finish workstation integration
 
-Sync first authenticates and checks fresh engine metadata. It stops for a
-newer engine, or updates clean repositories and syncs configuration once. The
-combined upgrade replaces and restarts Nimbus first when needed, syncs once,
-then runs Topgrade. This supersedes the second full sync from 0.4.2. Keep
-previews local and read-only, and make dirty/divergent errors actionable.
-Keep Topgrade configuration in Chezmoi and prevent duplicate system updates or
-recursion. Its callback remains `nimbus upgrade --system` for RPMs and system
-Flatpaks. This repository-update workflow is released in Nimbus 0.4.0;
-see TASKS for COPR delivery and installation evidence.
-The machine shell field requires engine 0.4.1 or newer; it chooses the default
-login shell while common installs both Bash and Zsh and Chezmoi retains both
-configurations.
-Deploy the new engine before applying the matching dotfiles configuration.
-Nimbus 0.3.1 asks for a machine on first use through the minimal
-`curl ... | bash` installer and supports the earlier empty snapshot mount.
-Its existing-layout VM installation and UWSM login passed. The remaining
-refactors and dashboard can follow; the desktop trial still follows the later
-gates below.
-
-Add missing managed-state previews and explicit approval independent of JSON.
-Keep direct Chezmoi commands available alongside sync's approved apply stage,
-retaining initial setup and profile handoff.
-Remove unused Cargo and installer follow-up declarations; Chezmoi and Mise
-own those tools. Keep the required Mise binary bootstrap and prerequisites.
-
-The development profile also bootstraps Zeron through its official installer
-and selects its browser dependencies. Installer effect disclosures cover its
-generated user service and lingering changes before approval. Engine 0.4.3 and
-its Fedora 44 COPR RPM now support those definitions. Chezmoi owns the asset links
-and native Topgrade updater; Zeron owns application and service state.
-
-Keep only helper RPM declarations and small post-install calls in Nimbus.
-COPR helpers own downloads, verification, installation, status and removal;
-Topgrade calls their explicit updates. No custom application provider is needed.
-Tailscale operator setup uses the same explicit post-install approval flow,
-with native preference verification and a documented revocation command.
-Validate this new action in disposable Fedora before claiming host coverage.
-Account-picture registration uses AccountsService after the Chezmoi image is
-available. The task requires engine 0.4.6 or newer; delivery and native
-validation evidence are tracked in TASKS.
-The matching greeter appearance is prepared in the Hyprland session component;
-activation of its read-only systemd mount still needs a sync/reboot trial.
-WoWUp requires a standalone install/update interface in COPR before integration
-can finish. Uninstalling a helper alone does not remove its application.
-
-Bootstrap logging and terminal supervision were reviewed and retained: they
-must work before the engine is installed and preserve cancellation. Bootstrap
-refreshes user metadata so init can present its cached installation preview.
-
-Keep current state compatibility and native ownership protections. Remove
-obsolete tests with removed behavior; consolidate repeated fixtures without
-losing preview, failure, retry or removal coverage. Apply Ponytail and Modern
-Go Guidelines for the project's Go version to each bounded code change.
-Keep package names tied to their jobs and split large files by responsibility.
-The README maps the code; repository-tool tests live outside the CLI package.
-
-Native execution and read-only inspection now have separate owners. The
-remaining extraction follows boot work, under the dashboard step below.
-
-Done when CLI workflows and fake-native integration tests match SPEC, existing
-state is handled safely, and both affected repositories pass their local gates.
-
-## 3. Finish workstation integration
-
-### GRUB first
+### Boot theme first
 
 Paper Dark activation is implemented in source: the engine package ships the
-GRUB/Plymouth payload and the inert `/etc/grub.d/36_paper_dark` drop-in, and the
-`boot-theme` component owns the `/etc/nimbus` marker plus the `grub-config` and
-`plymouth-theme` triggers. The component is selected for the test VM now and for
-the physical machines when the 0.6.0 package ships the payload. Test
-Fedora-only and Windows-present menus, the five-second timeout, Fedora
-default, older-kernel selection, encrypted-boot prompting, and removal of the
-theme. Preserve BLS entries and the EFI stub. Use a disposable VM snapshot as
-an independent test safeguard.
+GRUB/Plymouth payload and the inert `/etc/grub.d/36_paper_dark` drop-in, and
+the `boot-theme` component owns the `/etc/nimbus` marker plus the
+`grub-config` and `plymouth-theme` triggers. The component is selected for
+the test VM now and for the physical machines when the 0.6.1 package ships
+the payload.
+
+Done when Fedora-only and Windows-present menus, the five-second timeout,
+Fedora default, older-kernel selection, encrypted-boot prompting, kernel
+add/remove mirror rebuilds and theme removal pass on a real boot, with BLS
+entries and the EFI stub preserved. Use a disposable VM snapshot as an
+independent safeguard. Accepted limitations are recorded in
+[TASKS.md](TASKS.md#boot-theme-and-menu).
 
 ### FDE auto-unlock second
 
-Add an optional post-install action for the existing LUKS2 installation,
-selected with the `fde` component. Fedora's boot path, encryption, TPM and
-Secure Boot support were inspected read-only on the laptop and the disposable
-VM, and the native method and boot-change policy are settled in issue #34:
-Dracut, ukify, kernel-install and systemd-cryptenroll, PCR 7 + PCR 14 + signed
-PCR 11 with shim and PCR 7 + signed PCR 11 without. The read-only detection
-(`postinstall fde`) and the UKI build path (inert kernel-install hook, ukify
-build and firmware entry, kernel-update rebuild) are implemented; TPM
-enrollment and removal are not.
+An optional post-install action for the existing LUKS2 installation, selected
+with the `fde` component. Issue #34 owns the native method and boot-change
+policy: Dracut, ukify, kernel-install and systemd-cryptenroll, with PCR 7 +
+PCR 14 + signed PCR 11 when shim is used and PCR 7 + signed PCR 11 without.
+Detection (`postinstall fde`), the signed UKI build path, TPM enrollment,
+renewal, status and scoped removal are implemented; the VM run passed on
+2026-09-18.
 
-The action must preview the target and changes, request approval, preserve a
-working passphrase, and report unsupported setups without weakening security.
-Provide status and instructions to remove the enrollment without losing disk
-access. Sync and upgrades must not enroll a machine automatically.
+The action previews the target and changes, requests approval, preserves a
+working passphrase, and reports unsupported setups without weakening
+security. Sync and upgrades never enroll a machine automatically.
 
-Done when enrollment, unattended unlock, passphrase fallback and removal pass
-on real hardware, including fallback after a boot change that invalidates the
-chosen policy. VM checks can prepare this work but do not close the hardware
-gate. This scoped boot test precedes the dashboard; the full workstation trial
-still follows it. Until then, auto-unlock remains planned, not working.
+Done when enrollment, unattended unlock, passphrase fallback and removal
+pass on real hardware, including fallback after a boot change that
+invalidates the chosen policy. VM checks prepare this work but do not close
+the hardware gate; see [TASKS.md](TASKS.md#fde-secure-boot-and-tpm).
 
 ### Remaining integration
 
-Deliver the explicit NVIDIA MOK helper and test it on an installation needing
-signing/enrollment. The manual desktop repair passed with Secure Boot enabled;
-the helper still needs its own installed trial. Preserve native prompts and
-keys, and leave reboot confirmation to the owner. The NVIDIA Settings autostart
-condition belongs in Chezmoi, separately from signing.
+- NVIDIA MOK helper: test the installed helper on a machine needing
+  signing/enrollment. The manual desktop repair passed with Secure Boot
+  enabled. Preserve native prompts and keys; reboot confirmation stays with
+  the owner. The NVIDIA Settings autostart condition lives in Chezmoi.
+- Greeter passwordless sync: implemented in the ordinary approved init/sync
+  plan through the native helper. Done when wallpaper changes sync without
+  prompts and the next login shows the new wallpaper on desktop and laptop.
+- Noctalia plugin repair: validate from a fresh desktop session through the
+  supported command. Native Noctalia owns downloads; Chezmoi owns selection.
+- Hyprland plugin task: Chezmoi selects ScrollOverview; Nimbus supplies
+  matching development packages and coordinates native HyprPM setup. Validate
+  a fresh laptop installation before closing its hardware gate.
+- COPR application selection: verify published helper interfaces and package
+  sources, retain the Hyprland and Noctalia version families, and use native
+  dependency solving rather than coordinating library versions manually.
+- Recovery: test TTY repair with broken user configuration and retirement of
+  owned legacy session files on installed Fedora. Enable waiting Chezmoi
+  launchers only when the installed Nimbus supports them.
+- Proton-CachyOS: validate the ProtonPlus download and retry on disposable
+  Fedora; unit tests cover selection, prerequisites and the absence of
+  user-data or network reads.
+- Snapper: native setup, bounded retention and sync/system-upgrade hooks are
+  implemented. Test fresh-layout setup, snapshot pairs, cleanup and a root
+  restore on installed Fedora, with boot/EFI coverage explicit. Never claim
+  automatic rollback.
 
-Greeter passwordless-sync authorization is implemented in the ordinary approved
-init/sync plan, using the native helper for the invoking local account. The
-Fedora stable shell is now 5.1.0; retain its existing package source. Chezmoi
-owns auto-sync preferences, and the greeter owns its generated Polkit rule.
-There is no separate postinstall. Compatibility, native status, repeated setup
-and failure checks are required; see SPEC and TASKS. Complete the hardware gate
-when wallpaper changes sync without prompts and the next login shows the new
-wallpaper on desktop and laptop.
+Done when the affected installation, upgrade, removal and retry paths pass
+in a disposable Fedora VM. GRUB requires an actual boot and restoration of
+its previous configuration; FDE needs the scoped hardware test above; other
+physical-device behavior remains the later hardware trial.
 
-The Noctalia plugin post-install repair first appeared in 0.4.4. The laptop trial
-confirmed installation but exposed premature verification failure during the
-background update. Version 0.4.5 adds retries; validate missing-plugin repair
-from a fresh desktop session through the supported command. Native Noctalia
-owns downloads; Chezmoi owns selection.
-See README for usage and TASKS for validation evidence.
+## 3. Release 0.6.1 and engine channels
 
-The Hyprland plugin post-install task requires engine 0.4.6 or newer.
-Chezmoi selects ScrollOverview; Nimbus supplies matching development packages
-and coordinates native HyprPM setup after approval. Validate a fresh laptop
-installation through the task before closing its hardware gate. See README
-for usage and TASKS for evidence.
+Package the engine-owned payload in the RPM, bump the recipe version and
+archive checksum together after the release archive exists, select
+`boot-theme` in `common`, and publish through COPR. The `nimbus.toml`
+`min_engine` bump waits until `develop-version` moves to 0.6.2. Engine
+channels are tracked by #72: selector schema 2, read-only `nimbus channel`,
+bootstrap switching and the `furyfree/nimbus-develop` COPR track.
 
-NVIDIA selections include a system-wide mask for the X11 settings-loader
-autostart. Verify its next-login behavior during the NVIDIA hardware trial.
+Versioning rule: `develop-version` names the next stable release and a stable
+tag must number at or above it, so develop builds always sort below the
+release that follows them. The release source step refuses a lower tag.
 
-Complete COPR application selection after verifying the actual published
-helper interfaces and package sources. Retain the Hyprland and Noctalia version
-families. Use native dependency solving rather than manually coordinating
-library versions.
+Done when the released package passes the #40 bare-metal checklist, the
+develop-to-stable reverse drill passes, and the one-time channel notice is
+verified in a VM.
 
-Recovery session installation and the old layout inspection are removed
-locally. Test TTY repair with broken user configuration and retirement
-of existing owned session files on installed Fedora. Keep ordinary services
-and Fedora defaults. For a needed root-owned setting, compare Fedora/upstream
-with Omarchy and CachyOS-Settings using the research rules in SPEC. Record the
-source and reason for an accepted change; do not import user configuration.
-Finish post-install task behavior and enable the waiting Chezmoi launchers only
-when the installed Nimbus version supports them.
+## 4. Shared operations, then the dashboard
 
-The `proton-cachyos` post-install action delegates native Steam runner setup to
-ProtonPlus. Validate its download and retry on disposable Fedora; unit tests
-cover selection, prerequisites and the absence of user-data or network reads.
-
-Snapper remains selected by `hyprland-noctalia`. Native setup, bounded number
-retention and sync/system-upgrade hooks are implemented locally. Test initial
-setup with the documented subvolume layout and without pre-created snapshot
-storage, failure handling, cleanup and a root restore on installed Fedora.
-Use engine 0.3.1 or newer for the guide's pre-mounted empty `/.snapshots`.
-The existing-mount setup and native config listing passed on the test VM;
-fresh-layout setup, snapshot pairs, retention and restoration remain open.
-Keep separate boot/EFI coverage explicit; do not claim automatic rollback.
-
-Done when the affected installation, upgrade, removal and retry paths pass in
-a disposable Fedora VM. GRUB requires an actual boot and restoration of its
-previous configuration. FDE auto-unlock needs the scoped hardware test above;
-other physical-device behavior remains the later hardware trial.
-
-## 4. Build the dashboard
-
-After GRUB and FDE auto-unlock, extract reconciliation from Cobra, then setup,
-selection and file capture.
-Preserve the lock held across a selection write and sync. Keep presentation in
-CLI and reuse the same operations for the dashboard. Replace description-based
-execution decisions with explicit data covered by the approved plan.
+After boot work, extract reconciliation from Cobra, then setup, selection and
+file capture. Preserve the lock held across a selection write and sync; keep
+presentation in CLI and reuse the same operations for the dashboard. Replace
+description-based execution decisions with explicit data covered by the
+approved plan.
 
 Bare `nimbus` opens the TUI in a terminal and otherwise prints help. Provide
-status, sync, upgrade, software selection, post-install and diagnostics. Reuse
-the CLI's operations and approvals; do not build another state model.
+status, sync, upgrade, software selection, post-install and diagnostics. Use
+the existing Bubble Tea stack; do not build another state model.
 
-Use the existing Bubble Tea stack. Test keyboard navigation, small/resized
-terminals, cancellation, native command handoff and CLI/TUI preview parity.
-Done when these workflows work through either interface with the same effects.
+Done when these workflows work through either interface with the same
+effects, and keyboard navigation, small/resized terminals, cancellation,
+native command handoff and CLI/TUI preview parity are tested. Tracked by #36
+for 0.7.x.
 
 ## 5. Prepare the desktop trial
 
 Run the local gate and a clean disposable-VM installation from the release
-candidate. Check repeat sync, upgrades, failed-operation retry, owned removal,
-TTY repair and normal login. Test the new integration, not every application's
-entire feature set.
+candidate. Check repeat sync, upgrades, failed-operation retry, owned
+removal, TTY repair and normal login. Test the new integration, not every
+application's feature set.
 
 Commit, publication and COPR builds require their own authorization. Record
 the exact release and packaging results before calling the candidate ready.
-Run the full desktop trial after the dashboard and delivery are ready. The
-scoped FDE auto-unlock hardware test happens earlier, as described above.
-
-Engine channels: selector schema 2, read-only channel status, bootstrap
-switching and a develop COPR track (issue #72).
+Run the full desktop trial after the dashboard and delivery are ready; the
+scoped FDE hardware test happens earlier.
 
 ## Deferred beyond the desktop milestone
 
@@ -876,14 +152,19 @@ switching and a develop COPR track (issue #72).
 | Browser app launching through UWSM | Check session lifecycle separately |
 
 Revisit [UWSM app launching](https://github.com/Vladimir-csp/uwsm) for browser
-and webapp commands: terminal independence, session environment, logout cleanup
-and behavior outside UWSM. This is separate from choosing the UWSM login session.
+and webapp commands: terminal independence, session environment, logout
+cleanup and behavior outside UWSM. This is separate from choosing the UWSM
+login session.
 
-Windows VM work is planned in #33 for 0.7.x; retain the owner's preferences:
-official Microsoft media, capacity shown before setup, editable defaults of
-Windows 11 Pro with 4 vCPUs, 8 GiB RAM and 128 GiB disk, and separate data
-deletion. Revalidate the backend then; the previous container/media research is
-not a current implementation requirement.
+Windows VM work is planned in #33; retain the owner's preferences: official
+Microsoft media, capacity shown before setup, editable defaults of Windows 11
+Pro with 4 vCPUs, 8 GiB RAM and 128 GiB disk, and separate data deletion.
+Revalidate the backend then; the previous container/media research is not a
+current implementation requirement.
+
+The prepared XDG system defaults file remains unselected until explicit
+package-owned-file adoption is supported; it does not block an engine
+release.
 
 ## Hardware trial
 
@@ -892,10 +173,10 @@ audio/Bluetooth, fingerprint and NVIDIA MOK enrollment, portal file picking
 and screen sharing, UWSM session cleanup, and appearance/keyring behavior.
 
 Test the network Epson ET-5800 with native printing and scanning before adding
-vendor drivers. Choose Voxtype models and CPU/GPU backend after trials on both
-the laptop and RTX 3080 desktop and the owner's Omarchy comparison. Recheck
-Fastmail's known email-link limitation on Fedora. These are explicit remaining
-checks, not reasons to block independent local work.
+vendor drivers. Choose Voxtype models and CPU/GPU backend after trials on
+both machines and the owner's Omarchy comparison. Recheck Fastmail's known
+email-link limitation on Fedora. These are explicit remaining checks, not
+reasons to block independent local work.
 
 ## Not planned
 
@@ -903,25 +184,3 @@ Nimbus is not becoming a multi-distribution framework, fleet manager, general
 AppImage manager, backup service or custom Fedora installer image. Package
 discovery results are input for owner review, never automatically desired
 state. Fedora major-release upgrades stay with native Fedora tools.
-
-## Local agents in Copilot
-
-Repeat postinstall now selects a concise refresh-only workflow when local setup
-and managed configuration match. Provider skips and actual errors are distinct.
-
-The postinstall and post-Topgrade model refresh are implemented locally; see the
-[operator commands](../README.md#local-agents-in-copilot). Keep the upstream
-source/compatibility pin reviewed when updating Nimbus. Automatic maintenance
-refreshes catalogs, not the proxy application release. New-engine setup can
-update that native release explicitly. Follow up when Antigravity gains an
-external tool bridge or Copilot exposes a stable public registration API.
-
-## UWSM session integration
-
-The local implementation preserves browser argv while routing launches through
-an active UWSM session. Lockscreen repair recognizes Chezmoi's managed Noctalia
-service, checks its graceful-stop policy and restores it through UWSM.
-Chezmoi owns environment files, app shortcuts, shell startup and bar preferences.
-Fresh-login/logout and visual desktop validation remain operator checks; see
-[README](../README.md#uwsm-session-integration). No laptop changes or release
-are part of this implementation.

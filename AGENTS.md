@@ -93,8 +93,10 @@ Never claim restoration works without testing it.
 - `docs/TASKS.md` owns the current checklist, open decisions, evidence and risk.
 - TOML definitions own the software inventory. `system/` holds the root-owned
   configuration and assets we change; user configuration belongs to Chezmoi.
-- `README.md` is the entry point; `docs/INSTALLATION.md` is the Fedora operator
-  guide. Tool-local READMEs explain their own usage.
+- `README.md` is the entry point and the
+  [wiki](https://github.com/Furyfree/nimbus/wiki) is the usage guide
+  (installation, commands, postinstall, hardware, troubleshooting). Both stay
+  customer-facing and short; tool-local READMEs explain their own usage.
 
 Keep shared contract changes consistent across SPEC, ROADMAP and TASKS without
 copying their contents into this file. Do not add separate product documents.
