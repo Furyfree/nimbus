@@ -5,8 +5,9 @@
 #   source.sh vMAJOR.MINOR.PATCH /absolute/new-output-directory   (stable)
 #   source.sh --channel develop /absolute/new-output-directory    (develop)
 #
-# The develop version is <develop-version>~dev.<YYYYMMDD>git<shortsha>, which
-# RPM orders above the previous stable release and below the next one.
+# The develop version is <develop-version>~dev.<YYYYMMDDHHMMSS> (the source
+# commit time), which RPM orders above the previous stable release and below
+# the next one.
 set -euo pipefail
 
 fail() { printf 'release source: %s\n' "$*" >&2; exit 1; }
@@ -47,12 +48,13 @@ else
   [[ "$base" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || fail 'develop-version must be MAJOR.MINOR.PATCH'
   commit="$(git rev-parse --verify "HEAD^{commit}")" || fail 'HEAD does not resolve'
   git merge-base --is-ancestor "$commit" refs/remotes/origin/develop || fail 'commit must belong to origin/develop'
-  date="$(git show -s --format=%cd --date=format:%Y%m%d "$commit")"
-  short="$(git rev-parse --short=12 "$commit")"
-  version="${base}~dev.${date}git${short}"
+  # A numeric timestamp orders strictly under RPM; a git hash segment can
+  # sort either way because alphabetic runs outrank numeric ones.
+  stamp="$(git show -s --format=%cd --date=format:%Y%m%d%H%M%S "$commit")"
+  version="${base}~dev.${stamp}"
   # GitHub rewrites the tilde in asset names, so the archive file uses dots
   # while the RPM version and archive root keep RPM's ordering tilde.
-  archive_version="${base}.dev.${date}git${short}"
+  archive_version="${base}.dev.${stamp}"
   label="Channel: develop"
 fi
 epoch="$(git show -s --format=%ct "$commit")"

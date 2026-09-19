@@ -189,7 +189,7 @@ func TestReleaseSourceDevelop(t *testing.T) {
 			write("go.mod", "module example.invalid/fixture\n", 0644)
 			write("go.sum", "fixture checksums\n", 0644)
 			if scenario != "missing version file" {
-				version := "0.6.0"
+				version := "0.6.1"
 				if scenario == "invalid version" {
 					version = "0.6"
 				}
@@ -234,9 +234,8 @@ esac
 			if err != nil {
 				t.Fatalf("release: %v %s", err, out)
 			}
-			date := git("show", "-s", "--format=%cd", "--date=format:%Y%m%d", commit)
-			short := git("rev-parse", "--short=12", commit)
-			archive := "nimbus-0.6.0.dev." + date + "git" + short + "-vendor.tar.gz"
+			stamp := git("show", "-s", "--format=%cd", "--date=format:%Y%m%d%H%M%S", commit)
+			archive := "nimbus-0.6.1.dev." + stamp + "-vendor.tar.gz"
 			if _, err := os.Stat(filepath.Join(output, archive)); err != nil {
 				t.Fatal(err)
 			}
