@@ -33,6 +33,27 @@ Decisions:
   against a schema 1 selector prints it once and records the display under
   `$XDG_STATE_HOME/nimbus` (`internal/cli/channel.go`).
 
+## Installation output and logging
+
+- [x] Closing report trimmed to summary, differences, failures, reboot and
+  logout lines, verification problems, a pre-reboot line for pending tasks
+  that must run before the reboot (`nvidia-mok`), and one `nimbus
+  setup-notes` pointer (`internal/cli/final_report.go`).
+- [x] `nimbus setup-notes` is the guidance hub: it points at `nimbus
+  postinstall status` and consumes displayed revisions; init and sync only
+  count unseen notes (`internal/cli/setup_notes.go`).
+- [x] Public install commands stream through a same-session logging pty so
+  dnf5 shows live progress while sudo keeps its credential cache; the pty
+  never owns stdin and changes no terminal modes
+  (`internal/native/terminal.go`).
+- [x] `engine.log` drops ANSI sequences and carriage-return overdraws at the
+  log boundary; the terminal keeps the original bytes
+  (`internal/cli/install_log.go`).
+- [ ] Drill before the package ships: one sudo password prompt, live dnf
+  progress, Ctrl+C, terminal resize and a readable `engine.log` in a
+  disposable VM, then the bare-metal rerun on Secure Boot where the report
+  shows the `nvidia-mok` pre-reboot line.
+
 ## Boot theme and menu
 
 - [ ] Rerun the VM boot check for the mkconfig-only kernel hook and the

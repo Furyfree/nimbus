@@ -7,7 +7,8 @@ criteria.
 ## Next steps
 
 1. Finish 0.6.1: boot payload and boot validation, FDE hardware run,
-   documentation reconciliation (#39), package and publish.
+   installation output and logging drill, documentation reconciliation
+   (#39), package and publish.
 2. Channel phase 4 (#72): reverse drill after the release.
 3. Shared operations, then the TUI dashboard (#36) for 0.7.x.
 4. Desktop trial after delivery.
