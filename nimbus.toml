@@ -22,7 +22,9 @@ kind = "dnf"
 baseurl = "https://repos.fyralabs.com/terra$releasever"
 key_url = "https://repos.fyralabs.com/terra44/key.asc"
 key = "AE09 157A 4DE8 8B49 7EA1 D5D3 00CD AB43 DE22 6D6F"
-priority = 110
+# Below RPM Fusion, whose steam and module builds are the Fedora-recommended
+# source; Terra still ships newer builds but must not shadow them.
+priority = 122
 
 [repositories.rpmfusion-free]
 kind = "dnf"
