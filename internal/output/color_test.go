@@ -13,6 +13,20 @@ import (
 
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
+func TestBannerPaintsOnlyForColorWriters(t *testing.T) {
+	if plain := Banner(&strings.Builder{}, "banner"); plain != "banner" {
+		t.Fatal(plain)
+	}
+	var out strings.Builder
+	styled := Banner(ColorWriter(&out, func() bool { return true }), "banner")
+	if !strings.HasPrefix(styled, bad+bold) || !strings.HasSuffix(styled, reset) {
+		t.Fatal(styled)
+	}
+	if disabled := Banner(ColorWriter(&out, func() bool { return false }), "banner"); disabled != "banner" {
+		t.Fatal(disabled)
+	}
+}
+
 func TestPalettePreservesTextAndAlignment(t *testing.T) {
 	for _, tc := range []struct{ text, colored string }{
 		{"  succeeded  Chezmoi apply\n", good + bold + "succeeded"},

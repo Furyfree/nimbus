@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Furyfree/nimbus/internal/native"
+	"github.com/Furyfree/nimbus/internal/output"
 	"github.com/Furyfree/nimbus/internal/postinstall"
 )
 
@@ -111,7 +112,7 @@ const nimbusBanner = `    _   _ ___ __  __ ___  _   _ ___
 // before the requested reboot, the reboot or logout instruction and the
 // after-reboot pointer to the guidance catalog. Sync keeps the plain lines.
 func renderInstallFinish(out io.Writer, result *syncResult, logDir string) error {
-	if _, err := fmt.Fprintf(out, "\n%s\n\nLogs: %s\n", nimbusBanner, logDir); err != nil {
+	if _, err := fmt.Fprintf(out, "\n%s\n\nLogs: %s\n", output.Banner(unlogged(out), nimbusBanner), logDir); err != nil {
 		return err
 	}
 	if result.Reboot {
@@ -139,20 +140,14 @@ func renderInstallFinish(out io.Writer, result *syncResult, logDir string) error
 		}
 	}
 	if remaining > 0 || notes > 0 {
-		lead := "Then open a terminal and run:"
+		lead := "Open a terminal and run:"
 		switch {
 		case result.Reboot:
-			if _, err := fmt.Fprintln(out, "\nReboot to finish."); err != nil {
-				return err
-			}
+			lead = "Reboot to finish, then open a terminal and run:"
 		case result.Logout:
-			if _, err := fmt.Fprintln(out, "\nLog out and back in to finish."); err != nil {
-				return err
-			}
-		default:
-			lead = "Open a terminal and run:"
+			lead = "Log out and back in to finish, then open a terminal and run:"
 		}
-		if _, err := fmt.Fprintf(out, "%s\n  nimbus setup-notes\n    remaining setup and guidance: %s\n", lead, taskNoteCounts(remaining, notes)); err != nil {
+		if _, err := fmt.Fprintf(out, "\n%s\n  nimbus setup-notes\n    remaining setup and guidance: %s\n", lead, taskNoteCounts(remaining, notes)); err != nil {
 			return err
 		}
 		return nil

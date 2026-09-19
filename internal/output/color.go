@@ -55,6 +55,15 @@ func AfterPrompt(w io.Writer) {
 	}
 }
 
+// Banner styles a multi-line marker in bright red when the writer carries
+// Nimbus colors. Other writers receive the plain text.
+func Banner(w io.Writer, text string) string {
+	if color, ok := w.(*colorWriter); ok && color.enabled() {
+		return paint(text, bad+bold)
+	}
+	return text
+}
+
 func (w *colorWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()

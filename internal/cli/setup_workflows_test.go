@@ -156,13 +156,31 @@ func TestFinalReportRetainsFailuresAndNotices(t *testing.T) {
 	if err := renderInstallFinish(&finish, &r, "/tmp/logs"); err != nil {
 		t.Fatal(err)
 	}
-	for _, text := range []string{"Logs: /tmp/logs", "Before rebooting:", "nimbus postinstall nvidia-mok", "Reboot to finish.", "nimbus setup-notes", "remaining setup and guidance: 3 tasks, 1 setup note"} {
+	for _, text := range []string{"Logs: /tmp/logs", "Before rebooting:", "nimbus postinstall nvidia-mok", "Reboot to finish, then open a terminal and run:", "nimbus setup-notes", "remaining setup and guidance: 3 tasks, 1 setup note"} {
 		if !strings.Contains(finish.String(), text) {
 			t.Fatal(finish.String())
 		}
 	}
 	if strings.Contains(finish.String(), "fde-enroll") || strings.Contains(finish.String(), "Fingerprint") {
 		t.Fatal("finish block repeated remaining or blocked tasks", finish.String())
+	}
+	logout := r
+	logout.Reboot, logout.Logout = false, true
+	var logoutOut strings.Builder
+	if err := renderInstallFinish(&logoutOut, &logout, "/tmp/logs"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(logoutOut.String(), "Log out and back in to finish, then open a terminal and run:") {
+		t.Fatal(logoutOut.String())
+	}
+	quiet := r
+	quiet.Reboot, quiet.Logout = false, false
+	var quietOut strings.Builder
+	if err := renderInstallFinish(&quietOut, &quiet, "/tmp/logs"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(quietOut.String(), "Open a terminal and run:") || strings.Contains(quietOut.String(), "finish, then") {
+		t.Fatal(quietOut.String())
 	}
 	if err := r.render(&previewErrorWriter{err: syscall.ENOSPC}, false); !errors.Is(err, syscall.ENOSPC) {
 		t.Fatal(err)
