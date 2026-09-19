@@ -86,6 +86,9 @@ func runMaintenance(cmd *cobra.Command, opts *options, flags machineFlags, sf sy
 	}
 	defer stopSudo()
 	result := syncResult{Verbose: opts.verbose, Executed: []string{}, Differences: []string{}}
+	if notice := channelNotice(); notice != "" {
+		result.Notices = append(result.Notices, notice)
+	}
 	var steps []runStep
 	var restarted bool
 	phase := "Nimbus update"

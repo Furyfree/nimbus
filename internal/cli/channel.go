@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Furyfree/nimbus/internal/selector"
+	"github.com/Furyfree/nimbus/internal/userstate"
 	"github.com/Furyfree/nimbus/internal/version"
 )
 
@@ -52,6 +53,34 @@ by the checkout bootstrap.`,
 			return err
 		},
 	}
+}
+
+// channelNotice returns the one-time notice shown when a channel-aware engine
+// first runs against a selector that predates channels. It records the display
+// in local evidence, so it is shown once per machine. Read-only commands do not
+// call it.
+func channelNotice() string {
+	path, err := selector.DefaultPath()
+	if err != nil {
+		return ""
+	}
+	sel, err := selector.Load(path)
+	if err != nil || sel.Schema >= selector.CurrentSchema {
+		return ""
+	}
+	const id = "channel-awareness"
+	store, err := userstate.Default()
+	if err != nil {
+		return ""
+	}
+	if seen, err := store.Read("channel"); err == nil && seen.Has(sel.Machine, id, 1, "displayed") {
+		return ""
+	}
+	// A record failure only makes the notice repeat; it never hides it.
+	_ = store.Update("channel", sel.Machine, map[string]userstate.Evidence{
+		id: {Revision: 1, Source: "displayed"},
+	}, nil)
+	return fmt.Sprintf("Channel support: this engine follows the stable or develop track, and the existing selection counts as stable; run %s/install.sh --channel develop to follow develop, or nimbus channel to inspect the track.", sel.Checkout)
 }
 
 // engineRepoChannel names the channel the installed engine repository points

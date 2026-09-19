@@ -2,6 +2,8 @@ package cli
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -38,6 +40,37 @@ func TestChannelReport(t *testing.T) {
 	if _, drift := channelReport(stable, "main", nil, "", errors.New("missing"), "0.6.0"); len(drift) != 1 ||
 		!strings.Contains(drift[0], "could not be inspected") {
 		t.Fatalf("missing repository drift = %v", drift)
+	}
+}
+
+func TestChannelNotice(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	write := func(body string) {
+		t.Helper()
+		path, err := selector.DefaultPath()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	legacy := "schema = 1\ncheckout = \"/home/pby/.local/share/nimbus\"\nmachine = \"vm\"\norigin = \"github.com/Furyfree/nimbus\"\n"
+	write(legacy)
+	notice := channelNotice()
+	if !strings.Contains(notice, "counts as stable") || !strings.Contains(notice, "install.sh --channel develop") {
+		t.Fatalf("notice = %q", notice)
+	}
+	if repeat := channelNotice(); repeat != "" {
+		t.Fatalf("notice repeated: %q", repeat)
+	}
+	write(strings.Replace(legacy, "schema = 1", "schema = 2\nchannel = \"stable\"", 1))
+	if shown := channelNotice(); shown != "" {
+		t.Fatalf("schema 2 showed a notice: %q", shown)
 	}
 }
 
