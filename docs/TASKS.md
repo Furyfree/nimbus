@@ -1189,10 +1189,19 @@ follows; both tracks share the COPR key and repository ID.
 - [x] Phase 3b: the `furyfree/nimbus-develop` COPR project was created and
   its first build succeeded (COPR build 11002548, `nimbus-0.6.0~dev...`).
 - [ ] Phase 4: VM drills for both directions, drift and schema refusals.
-  Switching to stable before a stable release carries the channel support is
-  deliberately forward-only: the 0.5.x engine rejects selector schema 2, so
-  the release from `main` that includes the channel code is the first stable
-  target that can be switched back to.
+  Forward leg verified 2026-09-19 on a clean VM: the develop curl entry
+  cloned `develop`, installed `nimbus-0.6.1~dev.20260919020504` from the
+  `furyfree/nimbus-develop` COPR project, wrote selector schema 2 with
+  `channel = "develop"`, and `nimbus channel` reported no drift. The stable
+  switch-back waits for a release from `main` that carries the channel code
+  and payload, because the 0.5.x engine rejects selector schema 2 and its
+  RPM lacks the boot-theme payload.
+- [x] Package the engine-owned payload in the RPM: both recipes now install
+  the GRUB theme, drop-ins, kernel-install and dracut scripts with declared
+  modes (fresh installs previously blocked on the missing boot-theme payload).
+- [x] Order develop builds by the source commit's numeric timestamp
+  (`0.6.1~dev.<YYYYMMDDHHMMSS>`); git-hash segments can sort either way under
+  RPM, which left upgrades undetected.
 - [ ] Phase 4: clean-VM drills for both directions, drift refusal paths and a
   one-time notice on devices upgrading to a channel-aware engine.
 
