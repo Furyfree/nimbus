@@ -9,6 +9,16 @@ lives in Git and the release notes.
 
 Release checklist: [#40](https://github.com/Furyfree/nimbus/issues/40).
 
+- [x] Released 2026-09-20: tag `v0.6.1` at `94821f2`, GitHub release with
+  written notes, stable COPR build 11008140 (`nimbus-0.6.1-0.1.fc44`). All
+  407 tagged files match the archive; the RPM is signed by the pinned key,
+  its payload matches the tag and it carries no scriptlets; the stable
+  repository serves it. `develop-version` is 0.6.2.
+- [ ] Laptop and real desktop, both on 0.5.10: `nimbus sync --plan` first.
+  The old engine upgrades itself and restarts before it reads definitions.
+  The first apply selects the boot theme and rebuilds every initramfs; type
+  the passphrase at the prompt afterwards. The rescue entry under Previous
+  kernels is the fallback.
 - [ ] Desktop: install the released package on the clean Fedora image and
   verify passphrase prompt, auto-login, GRUB 5 seconds, `nvidia-mok` and
   `nvidia-smi` (#34).
