@@ -256,7 +256,13 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 			selectedTrigger[id] = true
 		}
 	}
-	for _, id := range slices.Sorted(maps.Keys(triggers)) {
+	ids := slices.Sorted(maps.Keys(triggers))
+	// The initramfs is rebuilt last so every kernel's image contains what
+	// the other triggers select, such as the Plymouth theme.
+	if i := slices.Index(ids, "initramfs-rebuild"); i >= 0 {
+		ids = append(slices.Delete(ids, i, i+1), "initramfs-rebuild")
+	}
+	for _, id := range ids {
 		triggerID := "trigger:" + id
 		receipt, ok := b.in.Applied.Receipts[triggerID]
 		changed := !ok || !ownedResource(receipt, triggerID, KindTrigger, b.in.Resolved.Machine)

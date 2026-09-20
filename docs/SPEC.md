@@ -641,8 +641,10 @@ edited, a value the owner set there wins, and machines with a native display
 driver in the initramfs never get the key, because there it blanks the
 prompt when that driver loads. Its `initramfs-rebuild` trigger runs
 `dracut --force --regenerate-all` after approval: every installed kernel is
-rebuilt and the rescue image is not touched. Removing the component removes
-the file and rebuilds again. Do not select it where the iGPU drives the
+rebuilt and the rescue image is not touched. It runs after the other
+triggers of the same run, so the images contain the Plymouth theme that
+`plymouth-theme` has just selected. Removing the component removes the file
+and rebuilds again. Do not select it where the iGPU drives the
 display, and do not put the NVIDIA modules in the initramfs: that ties the
 unlock prompt to akmods build order and MOK enrollment. A themed prompt
 counts as verified on a machine only after a passphrase was typed there.

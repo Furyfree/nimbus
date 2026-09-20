@@ -753,6 +753,22 @@ func TestInitramfsRebuildFollowsTheDracutDropIn(t *testing.T) {
 		!strings.Contains(strings.Join(op.Notes, " "), "rescue image is not touched") {
 		t.Fatalf("install plan: %+v", op)
 	}
+	// With the boot theme in the same run the rebuild comes last, so every
+	// kernel's image is built after the Plymouth theme is selected.
+	marker := "/etc/nimbus/boot-theme.enabled"
+	answerFile(src, marker, inspect.SystemFile{})
+	src.Files["/usr/share/plymouth/themes/nimbus/nimbus.plymouth"] = []byte("theme")
+	b.in.Resolved.Files = append(b.in.Resolved.Files, definitions.ResolvedFile{Target: marker, Content: []byte("on"), Owner: "root", Group: "root", Mode: "0644", Triggers: []string{"grub-config", "plymouth-theme"}})
+	var order []string
+	for _, planned := range b.systemResources(nil) {
+		if planned.Kind == KindTrigger {
+			order = append(order, planned.ID)
+		}
+	}
+	if !slices.Equal(order, []string{"trigger:grub-config", "trigger:plymouth-theme", "trigger:initramfs-rebuild"}) {
+		t.Fatalf("trigger order = %v", order)
+	}
+	b.in.Resolved.Files = b.in.Resolved.Files[:1]
 	// Deselecting the component removes the file; only a rebuild undoes it.
 	have := inspect.SystemFile{Exists: true, Content: []byte("omit"), Owner: "root", Group: "root", Mode: "0644"}
 	answerFile(src, target, have)
