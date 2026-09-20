@@ -63,10 +63,12 @@ fun layout() {
     # Shutdown has no meaningful progress: the wordmark stands alone.
     global.loading = Plymouth.GetMode() != "shutdown" && Plymouth.GetMode() != "reboot";
 
-    lock_width = Math.Int(18 * scale);
     gap = Math.Int(12 * scale);
     global.box_width = Math.Int(240 * scale);
     global.box_height = Math.Int(30 * scale);
+    # The lock is 84x96 and stands a little shorter than the field.
+    lock_height = Math.Int(box_height * 0.8);
+    lock_width = Math.Int(lock_height * 84 / 96);
     global.box_y = top + Math.Int(screen_height * 0.52);
     # The lock and the field are centered as a pair; the bar reuses the box.
     global.box_x = center_x - (lock_width + gap + box_width) / 2 + lock_width + gap;
@@ -75,9 +77,9 @@ fun layout() {
     centered_text(brand, "N I M B U S", 30, 0.933, center_x,
                   top + screen_height * 0.40, screen_width * 0.8);
 
-    lock.SetImage(lock_image.Scale(lock_width, Math.Int(24 * scale)));
+    lock.SetImage(lock_image.Scale(lock_width, lock_height));
     lock.SetPosition(box_x - gap - lock_width,
-                     box_y + box_height / 2 - 12 * scale, 10);
+                     box_y + box_height / 2 - lock_height / 2, 10);
     lock.SetOpacity(mode != "normal");
 
     rectangle(border[0], box_x, box_y, box_width, 1);
