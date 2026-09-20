@@ -23,8 +23,8 @@ Release checklist: [#40](https://github.com/Furyfree/nimbus/issues/40).
   verify passphrase prompt, auto-login, GRUB 5 seconds, `nvidia-mok` and
   `nvidia-smi` (#34).
 - [ ] Channel phase 4 (#72): reverse drill after a `main` release carries
-  the channel code and payload; verify the one-time notice and drift
-  refusals in a clean VM.
+  the channel code and payload; verify the schema 1 selector migration
+  and drift refusals in a clean VM.
 - [ ] Documentation reconciliation (#39), completed last.
 - [ ] Package after the release archive exists: `nimbus.spec` version and
   archive checksum together, boot-theme payload as plain 0755 files,
@@ -40,9 +40,11 @@ Decisions:
 - The `nimbus.toml` `min_engine` bump waits until `develop-version` moves to
   0.6.2, because a develop build sorts below its own base and would reject
   itself.
-- The one-time channel notice is implemented: the first channel-aware run
-  against a schema 1 selector prints it once and records the display under
-  `$XDG_STATE_HOME/nimbus` (`internal/cli/channel.go`).
+- Schema 1 selectors migrate on sync (2026-09-20): the first sync of a
+  schema 2 engine records the selector as schema 2 on stable, shown in the
+  preview and the closing report (`internal/cli/channel.go`). It replaced
+  the one-time notice and its stored display record. Open: the laptop and
+  the real desktop, both schema 1, migrate with the 0.6.2 engine.
 
 ## Installation output and logging
 

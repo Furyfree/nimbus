@@ -41,7 +41,7 @@ func Default() (Store, error) {
 	return Store{filepath.Join(base, "nimbus")}, nil
 }
 func validKind(kind string) bool {
-	return kind == "setup-notes" || kind == "postinstall" || kind == "channel"
+	return kind == "setup-notes" || kind == "postinstall"
 }
 func validID(id string) bool { return id != "" && !strings.ContainsAny(id, "\x00\r\n") }
 func check(path string, dir bool) error {

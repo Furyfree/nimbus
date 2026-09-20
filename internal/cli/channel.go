@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -8,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Furyfree/nimbus/internal/selector"
-	"github.com/Furyfree/nimbus/internal/userstate"
 	"github.com/Furyfree/nimbus/internal/version"
 )
 
@@ -55,32 +55,34 @@ by the checkout bootstrap.`,
 	}
 }
 
-// channelNotice returns the one-time notice shown when a channel-aware engine
-// first runs against a selector that predates channels. It records the display
-// in local evidence, so it is shown once per machine. Read-only commands do not
-// call it.
-func channelNotice() string {
+// migrateSelector records a selector that predates channels as schema 2 on
+// the stable track, keeping checkout, machine and origin. It is a mutation of
+// Nimbus's own file: sync announces it in the preview, prints it when it
+// happens and lists it in the closing report. Plan mode never writes. A
+// selector that is absent, already current or supplied through flags needs
+// nothing; an unreadable one is an error before any system change.
+func migrateSelector(plan bool) (detail string, err error) {
 	path, err := selector.DefaultPath()
 	if err != nil {
-		return ""
+		return "", err
 	}
 	sel, err := selector.Load(path)
-	if err != nil || sel.Schema >= selector.CurrentSchema {
-		return ""
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return "", nil
+	case err != nil:
+		return "", err
+	case sel.Schema >= selector.CurrentSchema:
+		return "", nil
 	}
-	const id = "channel-awareness"
-	store, err := userstate.Default()
-	if err != nil {
-		return ""
+	detail = fmt.Sprintf("schema %d, channel %s", selector.CurrentSchema, selector.ChannelStable)
+	if plan {
+		return detail, nil
 	}
-	if seen, err := store.Read("channel"); err == nil && seen.Has(sel.Machine, id, 1, "displayed") {
-		return ""
+	if err := selector.SetChannel(path, selector.ChannelStable); err != nil {
+		return "", fmt.Errorf("record the selector as schema %d: %w", selector.CurrentSchema, err)
 	}
-	// A record failure only makes the notice repeat; it never hides it.
-	_ = store.Update("channel", sel.Machine, map[string]userstate.Evidence{
-		id: {Revision: 1, Source: "displayed"},
-	}, nil)
-	return fmt.Sprintf("Channel support: this engine follows the stable or develop track, and the existing selection counts as stable; run %s/install.sh --channel develop to follow develop, or nimbus channel to inspect the track.", sel.Checkout)
+	return detail, nil
 }
 
 // engineRepoChannel names the channel the installed engine repository points
@@ -123,7 +125,7 @@ func channelReport(sel *selector.Selector, branch string, branchErr error, repo 
 	}
 	label := channel
 	if sel.Schema < selector.CurrentSchema {
-		label = fmt.Sprintf("%s (schema %d; recorded as schema %d by the next init or switch)", channel, sel.Schema, selector.CurrentSchema)
+		label = fmt.Sprintf("%s (schema %d; recorded as schema %d by the next sync)", channel, sel.Schema, selector.CurrentSchema)
 	}
 	lines = append(lines, "channel:  "+label)
 	if branchErr != nil {

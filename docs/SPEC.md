@@ -87,14 +87,17 @@ checkout. It refuses a dirty checkout, an unrecognized repository file and a
 target engine that cannot read the applied-state schema.
 
 The selector schema is 2 with a required `channel`. Schema 1 is read as
-stable and recorded as schema 2 by the next init or channel switch. A rerun
-of `nimbus init` keeps the recorded channel unless `--channel` names one, and
-its preview and closing line name the channel it writes. The first sync or
-upgrade of a channel-aware engine against a schema 1 selector prints a
-one-time notice about the tracks; read-only commands never do. `stable`
-follows `main` and `furyfree/nimbus`; `develop` follows the `develop` branch
-and `furyfree/nimbus-develop`. Each track pins its own COPR key under
-`system/keys/`; both use the `nimbus-engine` repository ID. The
+stable. The first `nimbus sync` of an engine that reads schema 2 records such
+a selector as schema 2 on the stable channel, keeping checkout, machine and
+origin: the preview announces it, the run prints it right after the engine
+check and before anything else changes, the closing report lists it with a
+notice about the two tracks, and `--plan` never writes. An unreadable
+selector stops the run before any change; init and a channel switch record
+schema 2 as well. A rerun of `nimbus init` keeps the recorded channel unless
+`--channel` names one, and its preview and closing line name the channel it
+writes. `stable` follows `main` and `furyfree/nimbus`; `develop` follows
+the `develop` branch and `furyfree/nimbus-develop`. Each track pins its own
+COPR key under `system/keys/`; both use the `nimbus-engine` repository ID. The
 `develop-version` file names the next stable release; develop builds use
 `<develop-version>~dev.<numeric commit timestamp>`, and a stable tag must
 number at or above it, so develop machines return to stable by normal

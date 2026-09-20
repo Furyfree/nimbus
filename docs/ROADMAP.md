@@ -101,8 +101,8 @@ tag must number at or above it, so develop builds always sort below the
 release that follows them. The release source step refuses a lower tag.
 
 Done when the released package passes the #40 bare-metal checklist, the
-develop-to-stable reverse drill passes, and the one-time channel notice is
-verified in a VM.
+develop-to-stable reverse drill passes, and the selector migration from
+schema 1 is verified on a machine that predates channels.
 
 ## 4. Shared operations, then the dashboard
 

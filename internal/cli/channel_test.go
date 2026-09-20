@@ -43,15 +43,14 @@ func TestChannelReport(t *testing.T) {
 	}
 }
 
-func TestChannelNotice(t *testing.T) {
+func TestMigrateSelector(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	path, err := selector.DefaultPath()
+	if err != nil {
+		t.Fatal(err)
+	}
 	write := func(body string) {
 		t.Helper()
-		path, err := selector.DefaultPath()
-		if err != nil {
-			t.Fatal(err)
-		}
 		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -59,18 +58,71 @@ func TestChannelNotice(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// No selector (explicit --checkout and --machine) needs nothing.
+	if detail, err := migrateSelector(false); err != nil || detail != "" {
+		t.Fatalf("missing selector: %q %v", detail, err)
+	}
 	legacy := "schema = 1\ncheckout = \"/home/pby/.local/share/nimbus\"\nmachine = \"vm\"\norigin = \"github.com/Furyfree/nimbus\"\n"
 	write(legacy)
-	notice := channelNotice()
-	if !strings.Contains(notice, "counts as stable") || !strings.Contains(notice, "install.sh --channel develop") {
-		t.Fatalf("notice = %q", notice)
+	// A preview announces the migration and writes nothing.
+	if detail, err := migrateSelector(true); err != nil || detail != "schema 2, channel stable" {
+		t.Fatalf("plan: %q %v", detail, err)
 	}
-	if repeat := channelNotice(); repeat != "" {
-		t.Fatalf("notice repeated: %q", repeat)
+	if data, _ := os.ReadFile(path); string(data) != legacy {
+		t.Fatalf("plan mode wrote the selector: %q", data)
 	}
-	write(strings.Replace(legacy, "schema = 1", "schema = 2\nchannel = \"stable\"", 1))
-	if shown := channelNotice(); shown != "" {
-		t.Fatalf("schema 2 showed a notice: %q", shown)
+	// An apply records schema 2 on stable and keeps the selection.
+	if detail, err := migrateSelector(false); err != nil || detail != "schema 2, channel stable" {
+		t.Fatalf("apply: %q %v", detail, err)
+	}
+	sel, err := selector.Load(path)
+	if err != nil || sel.Schema != selector.CurrentSchema || sel.Channel != selector.ChannelStable ||
+		sel.Checkout != "/home/pby/.local/share/nimbus" || sel.Machine != "vm" || sel.Origin != "github.com/Furyfree/nimbus" {
+		t.Fatalf("migrated selector = %+v %v", sel, err)
+	}
+	if detail, err := migrateSelector(false); err != nil || detail != "" {
+		t.Fatalf("second run migrated again: %q %v", detail, err)
+	}
+	// A develop selector is current and stays develop.
+	if err := selector.SetChannel(path, selector.ChannelDevelop); err != nil {
+		t.Fatal(err)
+	}
+	if detail, err := migrateSelector(false); err != nil || detail != "" {
+		t.Fatalf("develop selector touched: %q %v", detail, err)
+	}
+	if sel, _ = selector.Load(path); sel.Channel != selector.ChannelDevelop {
+		t.Fatalf("develop selector became %q", sel.Channel)
+	}
+	// A selector Nimbus cannot read stops the run before anything changes.
+	write("schema = 1\nchannel = \"develop\"\ncheckout = \"/x\"\nmachine = \"vm\"\norigin = \"o\"\n")
+	if _, err := migrateSelector(false); err == nil {
+		t.Fatal("a malformed selector was accepted")
+	}
+}
+
+// The preview is where the owner learns about the migration; it must say so
+// and leave the selector alone.
+func TestSyncPlanAnnouncesTheSelectorMigration(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	root := repoRoot(t)
+	withSource(t, fixtureSource(t, root))
+	path, err := selector.DefaultPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := "schema = 1\ncheckout = \"" + root + "\"\nmachine = \"vm\"\norigin = \"github.com/Furyfree/nimbus\"\n"
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(legacy), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, out, errOut := run(t, "sync", "--plan", "--checkout", root, "--machine", "vm")
+	if !strings.Contains(out, "Selector: recorded as schema 2, channel stable before anything else changes.") {
+		t.Fatalf("preview lacks the migration line:\n%s%s", out, errOut)
+	}
+	if data, _ := os.ReadFile(path); string(data) != legacy {
+		t.Fatalf("the preview wrote the selector: %q", data)
 	}
 }
 

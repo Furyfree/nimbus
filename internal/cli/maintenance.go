@@ -39,7 +39,17 @@ func runMaintenance(cmd *cobra.Command, opts *options, flags machineFlags, sf sy
 		if upgrade {
 			engine = "1. Request sudo, refresh and upgrade Nimbus if needed; restart into the updated engine."
 		}
-		if _, err := fmt.Fprintf(out, "Preview only (cached metadata):\n%s\n2. Update repositories, reconcile the system, then apply Chezmoi once.\n\n", engine); err != nil {
+		if _, err := fmt.Fprintf(out, "Preview only (cached metadata):\n%s\n2. Update repositories, reconcile the system, then apply Chezmoi once.\n", engine); err != nil {
+			return err
+		}
+		if detail, err := migrateSelector(true); err != nil {
+			return err
+		} else if detail != "" {
+			if _, err := fmt.Fprintf(out, "Selector: recorded as %s before anything else changes.\n", detail); err != nil {
+				return err
+			}
+		}
+		if _, err := fmt.Fprintln(out); err != nil {
 			return err
 		}
 		if err := runSync(cmd, opts, flags, sf); err != nil {
@@ -86,9 +96,6 @@ func runMaintenance(cmd *cobra.Command, opts *options, flags machineFlags, sf sy
 	}
 	defer stopSudo()
 	result := syncResult{Verbose: opts.verbose, Executed: []string{}, Differences: []string{}}
-	if notice := channelNotice(); notice != "" {
-		result.Notices = append(result.Notices, notice)
-	}
 	var steps []runStep
 	var restarted bool
 	phase := "Nimbus update"
@@ -151,6 +158,16 @@ func runMaintenance(cmd *cobra.Command, opts *options, flags machineFlags, sf sy
 		status = "updated"
 	}
 	steps = append(steps, runStep{Name: "Nimbus", Status: status, Detail: engine})
+	// The engine that reads schema 2 is running now, after any restart.
+	if detail, err := migrateSelector(false); err != nil {
+		return fmt.Errorf("%w\nNo system or user configuration changes were applied", err)
+	} else if detail != "" {
+		if _, err := fmt.Fprintf(out, "-> selector: recorded as %s\n", detail); err != nil {
+			return err
+		}
+		steps = append(steps, runStep{Name: "selector", Status: "updated", Detail: detail})
+		result.Notices = append(result.Notices, "Channel support: this machine follows the stable track; run install.sh --channel develop from the checkout to follow develop, or nimbus channel to inspect the track.")
+	}
 	setPhase("repository preflight")
 
 	s, err := loadSelected(flags)
