@@ -483,6 +483,13 @@ applications from prompting, and it is user configuration under `$HOME`,
 owned by Chezmoi and never written by a root process. `nvidia-mok` remains
 the only Secure Boot key flow and keeps the rules above.
 
+UWSM starts Hyprland only after `graphical.target`, so with auto-login every
+unit ordered before that target delays the desktop. `hyprland-session`
+therefore disables `NetworkManager-wait-online.service`: `docker.service` and
+`rsyslog.service` order the target behind `network-online.target`, and the
+desktop waited 14 seconds for link and DHCP. Nothing selected needs the
+network at boot; a component that does must not rely on this target.
+
 `noctalia-lockscreen` is a narrow exception to runtime-state ownership: after
 preview and approval it may remove only `lockscreen_widgets` and descendants
 from Noctalia's settings, never other preferences. It requires an unlocked

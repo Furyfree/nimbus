@@ -46,6 +46,14 @@ enabled = true
 unit = "bluetooth.service"
 enabled = true
 
+# greetd auto-login starts UWSM, which waits for graphical.target before it
+# starts Hyprland. docker.service and rsyslog.service order that target behind
+# network-online.target, so the desktop waited for the Ethernet link and DHCP
+# (14 s measured on the desktop). Nothing here needs the network at boot.
+[[services]]
+unit = "NetworkManager-wait-online.service"
+enabled = false
+
 [[files]]
 source = "etc/greetd/nimbus.toml"
 owner = "root"

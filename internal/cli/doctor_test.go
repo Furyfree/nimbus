@@ -117,7 +117,7 @@ func fixtureSource(t *testing.T, root string) *nativetest.FakeSource {
 	src.Commands[nativetest.Key("test", "-x", "/bin/zsh")] = nil
 	src.Commands[nativetest.Key("id", "-nG", "--", "test")] = []byte("test wheel\n")
 	src.Commands[nativetest.Key("systemctl", "get-default")] = []byte("multi-user.target\n")
-	for _, unit := range []string{"snapper-cleanup.timer", "greetd.service", "bluetooth.service", "avahi-daemon.service", "cups.socket", "cups.path", "docker.service", "containerd.service", "tailscaled.service", "power-profiles-daemon.service"} {
+	for _, unit := range []string{"snapper-cleanup.timer", "greetd.service", "bluetooth.service", "avahi-daemon.service", "cups.socket", "cups.path", "docker.service", "containerd.service", "tailscaled.service", "power-profiles-daemon.service", "NetworkManager-wait-online.service"} {
 		src.Commands[nativetest.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", unit)] = []byte("LoadState=loaded\nUnitFileState=disabled\nActiveState=inactive\n")
 	}
 	return src

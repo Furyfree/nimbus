@@ -88,6 +88,9 @@ Decisions:
     the host file has none (remove the hand-added line first), the image is
     about 100 MB smaller, the rescue image checksum is unchanged, and the
     passphrase is typed again.
+  - [ ] Desktop: with `NetworkManager-wait-online.service` disabled,
+    `graphical.target` no longer waits for DHCP (14 s measured 2026-09-20),
+    Hyprland starts right after auto-login, and Docker and Tailscale work.
   - [ ] Laptop: type the passphrase at the themed prompt.
 - Accepted limitations live in [SPEC.md](SPEC.md#desktop-and-recovery):
   older initramfs keeps the default Plymouth prompt until rebuild; BIOS-only
