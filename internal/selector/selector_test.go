@@ -221,6 +221,29 @@ func TestCheckoutBranch(t *testing.T) {
 	if _, err := CheckoutBranch(t.TempDir()); err == nil {
 		t.Fatal("missing checkout accepted")
 	}
+	// A linked worktree keeps its own HEAD; the shared directory's HEAD is
+	// the main worktree's branch and must not be reported.
+	main := t.TempDir()
+	wtDir := filepath.Join(main, ".git", "worktrees", "wt")
+	if err := os.MkdirAll(wtDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for path, content := range map[string]string{
+		filepath.Join(main, ".git", "HEAD"): "ref: refs/heads/main\n",
+		filepath.Join(wtDir, "HEAD"):        "ref: refs/heads/develop\n",
+		filepath.Join(wtDir, "commondir"):   "../..\n",
+	} {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wt := t.TempDir()
+	if err := os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: "+wtDir+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if branch, err := CheckoutBranch(wt); err != nil || branch != "develop" {
+		t.Fatalf("linked worktree branch = %q, %v", branch, err)
+	}
 }
 
 func TestWriteRemovesTemporaryFileOnRenameFailure(t *testing.T) {

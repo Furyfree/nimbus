@@ -227,9 +227,10 @@ func NormalizeOrigin(locator string) (string, error) {
 	return host + "/" + p, nil
 }
 
-// gitDir resolves the directory holding a checkout's Git metadata without
-// running Git. It follows a worktree .git file and its commondir.
-func gitDir(root string) (string, error) {
+// worktreeGitDir resolves the Git directory of this worktree without running
+// Git: .git itself, or the directory a linked worktree's .git file points at.
+// HEAD lives here, per worktree.
+func worktreeGitDir(root string) (string, error) {
 	gitPath := filepath.Join(root, ".git")
 	info, err := os.Lstat(gitPath)
 	if err != nil {
@@ -253,6 +254,17 @@ func gitDir(root string) (string, error) {
 		if !filepath.IsAbs(dir) {
 			dir = filepath.Join(root, dir)
 		}
+	}
+	return dir, nil
+}
+
+// gitDir resolves the directory holding a checkout's shared Git metadata,
+// such as its configuration: the worktree's Git directory, or the commondir
+// a linked worktree names.
+func gitDir(root string) (string, error) {
+	dir, err := worktreeGitDir(root)
+	if err != nil {
+		return "", err
 	}
 	common, err := os.ReadFile(filepath.Join(dir, "commondir"))
 	switch {
@@ -295,7 +307,7 @@ func CheckoutOrigin(root string) (string, error) {
 // CheckoutBranch reads the checkout's attached local branch without running
 // Git. A detached HEAD or a foreign HEAD line is an error.
 func CheckoutBranch(root string) (string, error) {
-	dir, err := gitDir(root)
+	dir, err := worktreeGitDir(root)
 	if err != nil {
 		return "", err
 	}
