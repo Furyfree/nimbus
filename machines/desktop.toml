@@ -18,6 +18,7 @@ components = [
   "intel-graphics",
   "nvidia",
   "desktop-display",
+  "boot-theme",
   "fde",
 ]
 
