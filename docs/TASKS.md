@@ -95,7 +95,7 @@ Decisions:
     only. On a real boot check the full-screen GRUB terminal box, the
     countdown number, the field and lock, and the loading bar after unlock.
   - [ ] Laptop: type the passphrase at the themed prompt.
-- Accepted limitations live in [SPEC.md](SPEC.md#desktop-and-recovery):
+- Accepted limitations live in [SPEC.md](SPEC.md#desktop-boot-and-recovery):
   older initramfs keeps the default Plymouth prompt until rebuild; BIOS-only
   systems untested; `set timeout=5` overrides `GRUB_TIMEOUT` and
   `menu_auto_hide`; a submenu reopened once shows no entries; a kernel

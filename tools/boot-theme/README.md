@@ -30,8 +30,9 @@ Plymouth needs `plymouth-plugin-script`, `plymouth-plugin-label` and
 `dejavu-sans-mono-fonts`, including the required renderer/font assets in the
 boot image; the `boot-theme` component selects these packages. The
 `plymouth-theme` trigger runs `plymouth-set-default-theme -R` and records the
-previous selection so removal restores it. Actual encrypted boot verification
-remains open. Appearance does not change LUKS, TPM, MOK or Secure Boot policy.
+previous selection so removal restores it. Each physical machine verifies the
+prompt with a typed passphrase; [TASKS.md](../../docs/TASKS.md) tracks that.
+Appearance does not change LUKS, MOK or Secure Boot policy.
 [GRUB notes](../grub/README.md) cover its separate needs.
 
 ## Generate assets

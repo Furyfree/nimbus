@@ -30,11 +30,11 @@ completed last before publication.
 Paper Dark activation is implemented in source: the engine package ships the
 GRUB/Plymouth payload and the inert `/etc/grub.d/36_paper_dark` drop-in, and
 the `boot-theme` component owns the `/etc/nimbus` marker plus the
-`grub-config` and `plymouth-theme` triggers. The component is selected for
-the test VM now and for the physical machines when the 0.6.1 package ships
-the payload. The desktop also selects `nvidia-boot-display`, which keeps the
-Intel drivers out of the initramfs so the unlock prompt reaches the monitor
-on the NVIDIA card.
+`grub-config` and `plymouth-theme` triggers. The VM, desktop and laptop
+manifests select the component; an engine without the payload blocks the
+trigger instead of applying it. The desktop also selects
+`nvidia-boot-display`, which keeps the Intel drivers out of the initramfs so
+the unlock prompt reaches the monitor on the NVIDIA card.
 
 Done when Fedora-only and Windows-present menus, the five-second timeout,
 Fedora default, older-kernel selection, encrypted-boot prompting, kernel
@@ -154,10 +154,6 @@ Microsoft media, capacity shown before setup, editable defaults of Windows 11
 Pro with 4 vCPUs, 8 GiB RAM and 128 GiB disk, and separate data deletion.
 Revalidate the backend then; the previous container/media research is not a
 current implementation requirement.
-
-The prepared XDG system defaults file remains unselected until explicit
-package-owned-file adoption is supported; it does not block an engine
-release.
 
 ## Hardware trial
 

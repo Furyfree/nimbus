@@ -18,7 +18,7 @@ users, distributions, or providers.
 - **checkout** is the selected clone of this repository that the installed
   engine reads definitions from, normally `~/.local/share/nimbus`.
 - **selector** is `~/.config/nimbus/config.toml`: checkout path, machine ID,
-  and approved origin. It holds no desired state.
+  approved origin, and engine channel. It holds no desired state.
 - **machine manifest** is `machines/<id>.toml`: the profiles, components, and
   extra packages one workstation selects.
 - **profile** is a user-facing system bundle that lists packages and selects
@@ -196,7 +196,9 @@ not Fedora.
 
 - Run focused checks while iterating and `just check` before handoff.
 - The complete local gate is `just check`: `gofmt`, `go vet ./...`,
-  `go test ./...`, `git diff --check`, and markdownlint.
+  `go test ./...`, the GRUB and boot-theme asset checks, the DTU network
+  test, `git diff --check`, markdownlint, and shellcheck. The `justfile` is
+  authoritative.
 - Read complete errors and relevant logs before fixing their cause.
 - Inspect the final diff, staged diff when applicable, and untracked files.
 - Report the exact checks run, failures, skipped checks, and unavailable tools.

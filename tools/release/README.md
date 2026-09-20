@@ -49,6 +49,14 @@ For an existing tag and a new output directory outside the checkout:
 bash tools/release/source.sh TAG /absolute/new-output-directory
 ~~~
 
+The develop channel's rolling source comes from the current `origin/develop`
+commit. Its version is `<develop-version>~dev.<UTC commit time>`; the
+`Prepare develop source` workflow runs this on every push to `develop`:
+
+~~~sh
+bash tools/release/source.sh --channel develop /absolute/new-output-directory
+~~~
+
 This downloads modules and compiles in temporary storage. It does not publish,
 install, or modify the working tree. The GitHub workflow also runs the complete
 local gate on the selected commit.

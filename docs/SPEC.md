@@ -131,9 +131,10 @@ record old/new source evidence only after success. System upgrades require
 corrections to be completed by sync first.
 
 Bare package names mean Fedora. ble.sh comes from the owner's COPR; the
-desktop uses the verified Noctalia LibrePods fork; Copilot and WoWUp use COPR
-installer helpers. Updating a helper RPM does not prove the downloaded app is
-installed; Copilot helper 0.3.0 and newer queues the app install after DNF.
+Hyprland profile uses the verified Noctalia LibrePods fork; Copilot and WoWUp
+use COPR installer helpers. Updating a helper RPM does not prove the
+downloaded app is installed; Copilot helper 0.3.0 and newer queues the app
+install after DNF.
 The TOML files are the software inventory, not a duplicated Markdown list.
 Chezmoi owns user-tool and plugin inventories.
 
@@ -323,15 +324,15 @@ An unavailable check is reported, never treated as proof of matching state.
 Nimbus output uses one meaning per color, all bright and bold:
 
 - green: success that needs nothing further (succeeded, verified,
-  installed, updated, adopt, unchanged, totals)
+  installed, updated, adopt, totals)
 - yellow: attention needed, nothing broken yet (pending, unknown, unable
   to check, warning, notice, reboot or logout required, Remaining setup)
 - red: stopped or wrong, act before continuing (failed, error, blocked,
   remove, Verification problems)
 - cyan: something that runs (`$` commands, `->` operations, Proceed?)
 - white: structure and instructions (headings, labels, the finish banner)
-- dim: secondary context only (paths, durations, previously verified,
-  decision reasons)
+- dim: secondary context only (unchanged, paths, durations, previously
+  verified, decision reasons)
 
 Color never carries meaning alone. Styling applies only to terminals with
 `TERM` not `dumb` and `NO_COLOR` empty; redirected text, JSON and installer
@@ -657,7 +658,10 @@ Accepted limitations: `grubby` and `grub2-set-default` changes apply only
 after a later `grub2-mkconfig`; a failed boot keeps the forced five-second
 timeout; a submenu opened once shows no entries on a second open; a kernel
 installed while only one entry existed appears after the next successful
-`grub2-mkconfig`; and BIOS-only systems are untested.
+`grub2-mkconfig`; `set timeout=5` overrides `GRUB_TIMEOUT` and
+`menu_auto_hide`; without `nvidia-boot-display`, `plymouth-theme` rebuilds
+only the running kernel, so older initramfs images keep the default Plymouth
+prompt until they are rebuilt; and BIOS-only systems are untested.
 
 TTY repair is the supported recovery direction; no extra recovery desktop is
 installed. Owned legacy session files are retired through receipts on a

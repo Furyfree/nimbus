@@ -31,7 +31,6 @@ def main():
         ("selection_c.png", 1, "2b2b2b"),
         ("scrollbar_frame_c.png", 4, "2b2b2b"),
         ("scrollbar_thumb_c.png", 4, "aaaaaa"),
-        ("rule.png", 1, "888888"),
     ):
         path = theme / name
         content = png(width, color)
