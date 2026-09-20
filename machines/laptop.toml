@@ -10,7 +10,6 @@ profiles = [
   "laptop-gaming",
   "hyprland-noctalia",
   "virtualization",
-  "windows-vm",
 ]
 
 components = [
