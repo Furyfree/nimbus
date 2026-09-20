@@ -24,7 +24,7 @@ func TestMOKCertificateDiagnostics(t *testing.T) {
 		root   bool
 		text   string
 	}{
-		{"missing", os.ErrNotExist, Blocked, false, "missing"},
+		{"missing", os.ErrNotExist, Blocked, false, "kmodgenca"},
 		{"permission", os.ErrPermission, Unknown, true, "Permission denied"},
 		{"other", os.ErrInvalid, Unknown, false, "could not be read"},
 	} {

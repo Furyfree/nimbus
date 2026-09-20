@@ -53,10 +53,15 @@ Decisions:
   pre-reboot tasks (`nvidia-mok`, `fde`), the reboot or logout instruction
   and the after-reboot `nimbus setup-notes` pointer; session-only checks no
   longer read as verification problems (`internal/cli/final_report.go`).
+- [x] Init prints one shared-MOK paragraph when the FDE and NVIDIA tasks can
+  enroll in one reboot, with the `sudo kmodgenca -a` key-pair hint and the
+  same-password rule; FDE reports step 1 of 2 / step 2 of 2
+  (`internal/cli/final_report.go`, `internal/postinstall/fde.go`).
 - [ ] Drill before the package ships: one sudo password prompt, live dnf
   progress, Ctrl+C, terminal resize and a readable `engine.log` in a
   disposable VM, then the bare-metal rerun on Secure Boot where the report
-  shows the `nvidia-mok` pre-reboot line.
+  shows the `nvidia-mok` pre-reboot line and one MokManager session enrolls
+  both the FDE and NVIDIA keys with a shared password.
 
 ## Boot theme and menu
 

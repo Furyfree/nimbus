@@ -310,9 +310,10 @@ names the private hook-log directory beside the terminal diagnostic. No
 progress percentage is invented. One closing report distinguishes completed
 changes, failed and skipped phases and verification problems. Init closes
 with the log directory,
-the pending prerequisites for its requested reboot, the reboot or logout
-instruction and the after-reboot pointer to `nimbus setup-notes`; sync keeps
-the plain lines. Session-dependent checks stay unknown until the desktop
+the pending prerequisites for its requested reboot, including shared MOK
+guidance when the FDE and NVIDIA keys can enroll in one session, the reboot or
+logout instruction and the after-reboot pointer to `nimbus setup-notes`; sync
+keeps the plain lines. Session-dependent checks stay unknown until the desktop
 session runs and count as remaining setup instead of verification problems.
 An unavailable check is reported, never treated as proof of matching state.
 
@@ -451,8 +452,10 @@ leaves the preference.
 
 `nvidia-mok` retains native MOK checks and the firmware enrollment procedure.
 Inspection distinguishes missing, empty, permission-denied and other
-unreadable certificate states. An approved run authenticates sudo, inspects
-and preserves the akmods key pair, rebuilds NVIDIA modules whose signing
+unreadable certificate states. A missing key pair is reported with the native
+`sudo kmodgenca -a` instruction; Nimbus never creates or replaces the pair. An
+approved run authenticates sudo, inspects and preserves the akmods key pair,
+rebuilds NVIDIA modules whose signing
 identifiers do not match the certificate, refreshes the running kernel's boot
 image and submits the untrusted certificate with `mokutil --import`.
 Passwords stay in native prompts; Nimbus never reboots or weakens Secure
@@ -491,7 +494,10 @@ rebuild and re-sign through the native hook, and Nimbus's initramfs refreshes
 rebuild the image in the same approved action. The embedded command line
 comes from `/etc/kernel/cmdline` when present, otherwise the running command
 line without `BOOT_IMAGE=` and `initrd=`. If setup cannot build the image
-after writing the marker, it removes only that marker.
+after writing the marker, it removes only that marker. The approved runs are
+reported as step 1 of 2 (setup) and step 2 of 2 (enrollment); when another
+task also requests a MOK key, the same temporary password is advised so one
+MokManager session enrolls every pending key.
 
 Enrollment writes one TPM keyslot with `systemd-cryptenroll` only while
 `BootCurrent` is the Nimbus entry, binding PCR 7 + PCR 14 + signed PCR 11 and

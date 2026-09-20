@@ -43,6 +43,9 @@ func TestFDEInspectionStates(t *testing.T) {
 		if got.Status != Pending || got.Action == nil || got.Action.Kind != SetupFDE || !strings.Contains(got.Detail, "Approved setup writes the marker") {
 			t.Fatalf("got %+v", got)
 		}
+		if got.Title != fdeStep1Title || !strings.Contains(got.Detail, "step 2 of 2") || !got.BeforeReboot {
+			t.Fatalf("missing step 1 labeling: %+v", got)
+		}
 	})
 	t.Run("unselected component", func(t *testing.T) {
 		in, src := fdeFixture(t)
@@ -202,6 +205,9 @@ func TestFDEInspectionStates(t *testing.T) {
 		if got.Status != Unknown || !got.VerificationNeedsRoot || got.Action == nil || got.Action.Kind != SetupFDE {
 			t.Fatalf("got %+v", got)
 		}
+		if got.Title != fdeStep2Title || !strings.Contains(got.Detail, "step 2 of 2") || got.BeforeReboot {
+			t.Fatalf("missing step 2 labeling: %+v", got)
+		}
 	})
 	t.Run("wrong entry offers repair", func(t *testing.T) {
 		in, src := fdeFixture(t)
@@ -210,6 +216,9 @@ func TestFDEInspectionStates(t *testing.T) {
 		got := findTask(t, Inspect(src, in), "fde")
 		if got.Status != Pending || got.Action == nil || got.Action.Kind != SetupFDE || !strings.Contains(got.Detail, "missing or different") {
 			t.Fatalf("got %+v", got)
+		}
+		if got.Title != fdeStep1Title {
+			t.Fatalf("repair must stay step 1: %+v", got)
 		}
 	})
 	t.Run("duplicate entries offer repair", func(t *testing.T) {

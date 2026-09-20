@@ -59,7 +59,7 @@ func RunNVIDIAMOK(ctx context.Context, src native.Source, out, stderr io.Writer)
 		return errors.New("akmods signing key pair is incomplete; inspect /etc/pki/akmods before retrying; neither file was replaced")
 	}
 	if !certExists {
-		return errors.New("the akmods signing key pair is missing; reboot once so akmods-keygen generates it before building modules, then retry; no keys were created")
+		return errors.New("the akmods signing key pair is missing; generate it with " + MOKKeyPairHint + " before building modules, then retry; no keys were created")
 	}
 	// Read only the public certificate. The private key stays with native tools.
 	der, err := src.Run("sudo", "-n", "--", "cat", MOKCertificate)
@@ -94,7 +94,7 @@ func RunNVIDIAMOK(ctx context.Context, src native.Source, out, stderr io.Writer)
 		}
 	}
 	if state == mokAbsent {
-		if _, err := fmt.Fprintln(out, "Choose a temporary MOK password in the native prompt. The reboot enrollment screen uses US/QWERTY. Nimbus does not record the password."); err != nil {
+		if _, err := fmt.Fprintln(out, "Choose a temporary MOK password in the native prompt; if another MOK request is pending (for example FDE), enter the same password so one MOK Manager session enrolls every key. The reboot enrollment screen uses US/QWERTY. Nimbus does not record the password."); err != nil {
 			return err
 		}
 		if err := stream("sudo", "--", "mokutil", "--import", MOKCertificate); err != nil {

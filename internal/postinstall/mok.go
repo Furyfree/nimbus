@@ -9,7 +9,13 @@ import (
 	"github.com/Furyfree/nimbus/internal/native"
 )
 
-const MOKCertificate = "/etc/pki/akmods/certs/public_key.der"
+const (
+	MOKCertificate = "/etc/pki/akmods/certs/public_key.der"
+	// MOKKeyPairHint is the native command that creates the akmods signing
+	// key pair. The closing report matches on it to tell a missing key pair
+	// apart from blocks that cannot request a key at all.
+	MOKKeyPairHint = "sudo kmodgenca -a"
+)
 
 func mok(src native.Source, in Inputs) Task {
 	t := Task{
@@ -19,9 +25,11 @@ func mok(src native.Source, in Inputs) Task {
 		Instructions: []string{
 			"After approval, authenticate sudo and inspect the akmods key pair with elevated access.",
 			"The akmods package generates the signing key pair through akmods-keygen before it builds modules; Nimbus preserves an existing or incomplete pair and never replaces it.",
+			"When that signing key pair does not exist yet, generate it with: " + MOKKeyPairHint + ".",
 			"If modules do not match the certificate: sudo -- akmods --force --rebuild --akmod nvidia --kernels <running-kernel>.",
 			"Check every NVIDIA module's signer and certificate serial, then refresh the boot image: sudo -- dracut --force --kver <running-kernel>.",
 			"If needed: sudo -- mokutil --import /etc/pki/akmods/certs/public_key.der. Enter the temporary password in mokutil's native prompt.",
+			"When FDE also requests MOK enrollment, run it before rebooting and use the same temporary password for each import, so one MokManager session can enroll every pending key.",
 			"Existing trust and pending requests are preserved. Reboot yourself when ready; Enroll MOK -> Continue -> Yes -> password -> Reboot (US/QWERTY keyboard).",
 		},
 		Verification: "After reboot, run nvidia-smi and mokutil --sb-state. Certificate enrollment alone does not prove the driver loads.",
@@ -92,10 +100,10 @@ func VerifyMOK(src native.Source, t Task) Task {
 		t.Status, t.Detail, t.VerificationNeedsRoot = Unknown, "Permission denied reading the akmods public certificate; approved setup inspects it with sudo before changing anything.", true
 		return t
 	case errors.Is(err, os.ErrNotExist):
-		t.Status, t.Detail = Blocked, "The akmods public certificate is missing at "+MOKCertificate+"; reboot once so akmods-keygen generates the key pair, then retry."
+		t.Status, t.Detail = Blocked, "The akmods public certificate is missing at "+MOKCertificate+"; generate the signing key pair with "+MOKKeyPairHint+", then retry."
 		return t
 	case err != nil:
-		t.Status, t.Detail = Unknown, "The akmods public certificate could not be read: "+err.Error()+"; if akmods has not generated the key pair yet, reboot once and retry."
+		t.Status, t.Detail = Unknown, "The akmods public certificate could not be read: "+err.Error()+"; if akmods has not generated the key pair yet, generate it with "+MOKKeyPairHint+", then retry."
 		return t
 	case len(data) == 0:
 		t.Status, t.Detail = Blocked, "The akmods public certificate is empty; inspect akmods key generation before enrollment."

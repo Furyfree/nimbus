@@ -492,7 +492,7 @@ func runFDEEnrollment(ctx context.Context, src native.Source, out, errOut io.Wri
 	if renew {
 		_, err = fmt.Fprintln(out, "TPM automatic unlock renewed and recorded. Reboot to verify that the disk unlocks without the passphrase; the disk passphrase remains the fallback.")
 	} else {
-		_, err = fmt.Fprintln(out, "TPM enrollment recorded. Reboot to verify that the disk unlocks without the passphrase; the disk passphrase remains the fallback.")
+		_, err = fmt.Fprintln(out, "Step 2 of 2 complete. TPM enrollment recorded. Reboot to verify that the disk unlocks without the passphrase; the disk passphrase remains the fallback.")
 	}
 	return err
 }

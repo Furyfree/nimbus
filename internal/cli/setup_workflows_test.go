@@ -139,27 +139,98 @@ func TestOnePasswordSelectedFilesAndFailedVerification(t *testing.T) {
 	}
 }
 func TestFinalReportRetainsFailuresAndNotices(t *testing.T) {
-	r := syncResult{Steps: []runStep{{Name: "configuration", Status: "succeeded"}, {Name: "updates", Status: "failed", Detail: "download failed"}}, Notices: []string{"Noctalia overrides disable lockscreen widgets"}, Notes: []setupNote{{ID: "note", Revision: 1, Text: "Guidance"}}, Tasks: []postinstall.Task{{ID: "nvidia-mok", Status: postinstall.Pending, Title: "Sign NVIDIA modules and enroll their key", Detail: "certificate pending enrollment", Reboot: true, BeforeReboot: true}, {ID: "fde", Status: postinstall.Unknown, VerificationNeedsRoot: true, Title: "Set up TPM automatic disk unlock", Detail: "The image content needs the approved read-only check.", BeforeReboot: true}, {ID: "fde-enroll", Status: postinstall.Blocked, Title: "Enroll the FDE key", Detail: "reboot first", Reboot: true, BeforeReboot: true}, {ID: "hyprland-plugins", Status: postinstall.Unknown, Session: true, Detail: "Run this task from a terminal in the active Hyprland desktop session."}, {ID: "fingerprint", Status: postinstall.Unknown, Detail: "Fingerprint device and enrollment state could not be established."}}, Reboot: true}
+	r := syncResult{Steps: []runStep{{Name: "configuration", Status: "succeeded"}, {Name: "updates", Status: "failed", Detail: "download failed"}}, Notices: []string{"Noctalia overrides disable lockscreen widgets"}, Notes: []setupNote{{ID: "note", Revision: 1, Text: "Guidance"}}, Tasks: []postinstall.Task{{ID: "nvidia-mok", Status: postinstall.Pending, Title: "Sign NVIDIA modules and enroll their key", Detail: "certificate pending enrollment", Reboot: true, BeforeReboot: true}, {ID: "fde", Status: postinstall.Pending, Title: "Set up TPM automatic disk unlock (step 1 of 2)", Detail: "LUKS2 root, TPM2, Secure Boot and the setup tools are present.", Reboot: true, BeforeReboot: true}, {ID: "fde-enroll", Status: postinstall.Blocked, Title: "Enroll the FDE key", Detail: "reboot first", Reboot: true, BeforeReboot: true}, {ID: "hyprland-plugins", Status: postinstall.Unknown, Session: true, Detail: "Run this task from a terminal in the active Hyprland desktop session."}, {ID: "fingerprint", Status: postinstall.Unknown, Detail: "Fingerprint device and enrollment state could not be established."}}, Reboot: true}
 	var out strings.Builder
 	if err := r.render(&out, false); err != nil {
 		t.Fatal(err)
 	}
-	for _, text := range []string{"download failed", "Noctalia overrides", "Reboot required", "Run before rebooting: nimbus postinstall nvidia-mok (Sign NVIDIA modules and enroll their key)", "Run before rebooting: nimbus postinstall fde (Set up TPM automatic disk unlock)", "3 tasks, 1 setup note. Run: nimbus setup-notes", "Verification problems:", "Fingerprint device and enrollment state could not be established."} {
+	for _, text := range []string{"download failed", "Noctalia overrides", "Reboot required", "Run before rebooting: nimbus postinstall nvidia-mok (Sign NVIDIA modules and enroll their key)", "Run before rebooting: nimbus postinstall fde (Set up TPM automatic disk unlock (step 1 of 2))", "4 tasks, 1 setup note. Run: nimbus setup-notes", "Verification problems:", "Fingerprint device and enrollment state could not be established."} {
 		if !strings.Contains(out.String(), text) {
 			t.Fatal(out.String())
 		}
 	}
-	if strings.Contains(out.String(), "Guidance") || strings.Contains(out.String(), "fde-enroll") || strings.Contains(out.String(), "active Hyprland desktop session") || strings.Count(out.String(), "Run before rebooting") != 2 {
+	if strings.Contains(out.String(), "Guidance") || strings.Contains(out.String(), "fde-enroll") || strings.Contains(out.String(), "active Hyprland desktop session") || strings.Contains(out.String(), "kmodgenca") || strings.Count(out.String(), "Run before rebooting") != 2 {
 		t.Fatal("report repeated task detail or mislabeled a task", out.String())
 	}
 	var finish strings.Builder
 	if err := renderInstallFinish(&finish, &r, "/tmp/logs"); err != nil {
 		t.Fatal(err)
 	}
-	for _, text := range []string{"Logs: /tmp/logs", "Before rebooting:", "Sign NVIDIA modules and enroll their key: $ nimbus postinstall nvidia-mok", "Set up TPM automatic disk unlock: $ nimbus postinstall fde", "Reboot to finish, then open a terminal and run:", "Remaining setup and guidance (3 tasks, 1 setup note): $ nimbus setup-notes"} {
+	for _, text := range []string{"Logs: /tmp/logs", "Before rebooting:", "Sign NVIDIA modules and enroll their key: $ nimbus postinstall nvidia-mok", "Set up TPM automatic disk unlock (step 1 of 2): $ nimbus postinstall fde", "FDE and NVIDIA share one reboot", "$ sudo kmodgenca -a", "Reboot to finish, then open a terminal and run:", "Remaining setup and guidance (4 tasks, 1 setup note): $ nimbus setup-notes"} {
 		if !strings.Contains(finish.String(), text) {
 			t.Fatal(finish.String())
 		}
+	}
+	single := r
+	single.Tasks = slices.DeleteFunc(slices.Clone(r.Tasks), func(task postinstall.Task) bool { return task.ID == "nvidia-mok" })
+	var singleOut strings.Builder
+	if err := renderInstallFinish(&singleOut, &single, "/tmp/logs"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(singleOut.String(), "kmodgenca") {
+		t.Fatal("MOK guidance appeared without the NVIDIA task", singleOut.String())
+	}
+	blocked := r
+	blocked.Tasks = slices.Clone(r.Tasks)
+	for i := range blocked.Tasks {
+		if blocked.Tasks[i].ID == "nvidia-mok" {
+			blocked.Tasks[i].Status = postinstall.Blocked
+			blocked.Tasks[i].Detail = "The akmods public certificate is missing at /etc/pki/akmods/certs/public_key.der; generate the signing key pair with " + postinstall.MOKKeyPairHint + ", then retry."
+		}
+	}
+	var blockedOut strings.Builder
+	if err := renderInstallFinish(&blockedOut, &blocked, "/tmp/logs"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(blockedOut.String(), "kmodgenca") {
+		t.Fatal("missing MOK guidance for a blocked NVIDIA task", blockedOut.String())
+	}
+	cannot := r
+	cannot.Tasks = slices.Clone(r.Tasks)
+	for i := range cannot.Tasks {
+		if cannot.Tasks[i].ID == "nvidia-mok" {
+			cannot.Tasks[i].Status = postinstall.Blocked
+			cannot.Tasks[i].Detail = "The selected NVIDIA component is missing the akmods package prerequisite."
+		}
+	}
+	var cannotOut strings.Builder
+	if err := renderInstallFinish(&cannotOut, &cannot, "/tmp/logs"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(cannotOut.String(), "kmodgenca") {
+		t.Fatal("MOK guidance appeared for a block that cannot request a key", cannotOut.String())
+	}
+	step2 := r
+	step2.Tasks = slices.Clone(r.Tasks)
+	for i := range step2.Tasks {
+		if step2.Tasks[i].ID == "fde" {
+			step2.Tasks[i].Status = postinstall.Unknown
+			step2.Tasks[i].VerificationNeedsRoot = true
+			step2.Tasks[i].BeforeReboot = false
+			step2.Tasks[i].Title = "Set up TPM automatic disk unlock (step 2 of 2)"
+		}
+	}
+	var step2Out strings.Builder
+	if err := renderInstallFinish(&step2Out, &step2, "/tmp/logs"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(step2Out.String(), "kmodgenca") || strings.Contains(step2Out.String(), "postinstall fde") {
+		t.Fatal("step 2 must stay out of the pre-reboot MOK guidance", step2Out.String())
+	}
+	inconclusive := r
+	inconclusive.Tasks = slices.Clone(r.Tasks)
+	for i := range inconclusive.Tasks {
+		if inconclusive.Tasks[i].ID == "nvidia-mok" {
+			inconclusive.Tasks[i].Status = postinstall.Unknown
+			inconclusive.Tasks[i].Detail = "mokutil did not establish certificate enrollment; inspect its native status before changing keys."
+		}
+	}
+	var inconclusiveOut strings.Builder
+	if err := renderInstallFinish(&inconclusiveOut, &inconclusive, "/tmp/logs"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(inconclusiveOut.String(), "kmodgenca") {
+		t.Fatal("MOK guidance appeared for an inconclusive NVIDIA check", inconclusiveOut.String())
 	}
 	if strings.Contains(finish.String(), "fde-enroll") || strings.Contains(finish.String(), "Fingerprint") {
 		t.Fatal("finish block repeated remaining or blocked tasks", finish.String())

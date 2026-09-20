@@ -493,6 +493,9 @@ func fdeEnsureMOK(src native.Source, out, errOut io.Writer, keys fdeKeyPaths) er
 	if _, err := fmt.Fprintln(out, "mokutil may print \"Failed to get Subject key ID\": ukify's certificate omits that extension and only mokutil's kernel-keyring pre-check wants it. The enrollment request is still recorded."); err != nil {
 		return err
 	}
+	if _, err := fmt.Fprintln(out, "When another MOK request is pending or will be requested (for example NVIDIA), enter the same temporary password so one MokManager session can enroll every key."); err != nil {
+		return err
+	}
 	args := []string{"sudo", "--", "mokutil", "--import", keys.mokDER}
 	if _, err := fmt.Fprintf(out, "$ %s\n", strings.Join(args, " ")); err != nil {
 		return err
@@ -600,9 +603,9 @@ func RunFDESetup(ctx context.Context, src native.Source, out, errOut io.Writer, 
 		return err
 	}
 	if secure {
-		_, err = fmt.Fprintln(out, "Reboot when ready. Complete Enroll MOK in MokManager with the temporary password, then boot the Nimbus image; Fedora's GRUB entries and the disk passphrase remain the fallback path.")
+		_, err = fmt.Fprintln(out, "Step 1 of 2 complete. Reboot when ready, complete Enroll MOK in MokManager with the temporary password (use the same password as any other pending import), boot the Nimbus image and run nimbus postinstall fde again for TPM enrollment. Fedora's GRUB entries and the disk passphrase remain the fallback path.")
 	} else {
-		_, err = fmt.Fprintln(out, "Reboot when ready to boot the Nimbus image. Fedora's GRUB entries and the disk passphrase remain the fallback path.")
+		_, err = fmt.Fprintln(out, "Step 1 of 2 complete. Reboot when ready to boot the Nimbus image, then run nimbus postinstall fde again for TPM enrollment. Fedora's GRUB entries and the disk passphrase remain the fallback path.")
 	}
 	return err
 }
@@ -645,12 +648,16 @@ func VerifyFDE(src native.Source, t Task) Task {
 	t.PreviouslyVerified = false
 	t.VerificationNeedsRoot = false
 	t.Status = Unknown
+	// The step labels describe the initial flow; only a run that offers the
+	// first enrollment keeps the step 2 title, repairs read as step 1.
+	t.Title = fdeTitle
 	ready, err := fdeMarkerReady(src)
 	if err != nil {
 		t.Status, t.Detail = Blocked, err.Error()
 		return t
 	}
 	if !ready {
+		t.Title = fdeStep1Title
 		t.Status, t.Detail = Pending, "Setup is not active; run the approved FDE setup first."
 		return t
 	}
@@ -667,7 +674,8 @@ func VerifyFDE(src native.Source, t Task) Task {
 	}
 	t.fdeSecure = secure
 	if !fdeEntryReady(entries, secure) {
-		t.Status, t.Detail = Pending, "No correct Nimbus firmware entry was observed; rerun the approved setup to repair it."
+		t.Title = fdeStep1Title
+		t.Status, t.Detail = Pending, "No correct Nimbus firmware entry was observed; rerun the approved setup (step 1 of 2) to repair it."
 		return t
 	}
 	expected, err := fdeBuildCmdline(src)
@@ -683,6 +691,7 @@ func VerifyFDE(src native.Source, t Task) Task {
 	}
 	inspected := fdeInspect(string(out))
 	damaged := func(detail string) Task {
+		t.Title = fdeStep1Title
 		t.Status, t.Detail = Pending, detail
 		t.Action = &Action{Kind: SetupFDE}
 		t.Reboot = true
@@ -705,13 +714,14 @@ func VerifyFDE(src native.Source, t Task) Task {
 			return t
 		}
 		if !enrolled {
+			t.Title = fdeStep1Title
 			t.Status = Pending
 			t.Action = &Action{Kind: SetupFDE}
 			t.Reboot = true
 			if pending {
-				t.Detail = "MOK enrollment is pending; complete Enroll MOK at the next boot."
+				t.Detail = "MOK enrollment is pending; complete Enroll MOK at the next boot, then run this task again."
 			} else {
-				t.Detail = "The Nimbus MOK certificate is not enrolled; rerun the approved setup."
+				t.Detail = "The Nimbus MOK certificate is not enrolled; rerun the approved setup (step 1 of 2)."
 			}
 			return t
 		}
@@ -822,10 +832,11 @@ func VerifyFDE(src native.Source, t Task) Task {
 		t.Status = Blocked
 		t.Detail = "A systemd-tpm2 token exists that Nimbus does not own; " + orphanHint(tokens[0])
 	default:
+		t.Title = fdeStep2Title
 		t.Status = Pending
 		t.Action = &Action{Kind: EnrollFDE}
 		t.Reboot = true
-		t.Detail = "The signed Nimbus image is booting. Reboot into it if this boot did not, then enroll TPM automatic unlock; the disk passphrase remains available."
+		t.Detail = "The signed Nimbus image is booting. Reboot into it if this boot did not, then enroll TPM automatic unlock (step 2 of 2); the disk passphrase remains available."
 	}
 	return t
 }

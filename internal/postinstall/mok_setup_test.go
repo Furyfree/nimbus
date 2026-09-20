@@ -114,7 +114,7 @@ func TestNVIDIAMOKSetup(t *testing.T) {
 		want    []string
 	}{
 		{"existing keys", nil, "", []string{"sudo --validate", build, dracut, enroll}},
-		{"missing keys block", func(s *mokSetupSource) { s.files = "" }, "akmods-keygen", []string{"sudo --validate"}},
+		{"missing keys block", func(s *mokSetupSource) { s.files = "" }, "kmodgenca", []string{"sudo --validate"}},
 		{"certificate only", func(s *mokSetupSource) { s.files = MOKCertificate }, "incomplete", []string{"sudo --validate"}},
 		{"private key only", func(s *mokSetupSource) { s.files = mokPrivateKey }, "incomplete", []string{"sudo --validate"}},
 		{"native authentication failure", func(s *mokSetupSource) { s.fail = "sudo --validate" }, "native failure", []string{"sudo --validate"}},

@@ -290,6 +290,24 @@ func TestMOKPreviewDisclosesFDEImageRebuild(t *testing.T) {
 	}
 }
 
+func TestNVIDIAMOKGuidance(t *testing.T) {
+	in, src := fixture("akmod-nvidia", "akmods", "mokutil")
+	in.Resolved.Components = []definitions.ResolvedComponent{{ID: "nvidia"}}
+	in.Facts.SecureBoot.Value = inspect.SecureBootEnabled
+	for _, tool := range []string{"sudo", "dracut", "modinfo", "nvidia-smi"} {
+		src.Paths[tool] = "/usr/bin/" + tool
+	}
+	src.Files[MOKCertificate] = []byte("certificate supplied to native validator")
+	got := findTask(t, Inspect(src, in), "nvidia-mok")
+	for _, want := range []string{MOKKeyPairHint, "same temporary password"} {
+		if !slices.ContainsFunc(got.Instructions, func(line string) bool {
+			return strings.Contains(line, want)
+		}) {
+			t.Fatalf("missing guidance %q in %v", want, got.Instructions)
+		}
+	}
+}
+
 func TestFingerprintReadOnlyObservation(t *testing.T) {
 	for _, test := range []struct {
 		name, devices, fingers string

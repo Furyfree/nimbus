@@ -11,13 +11,21 @@ import (
 	"github.com/Furyfree/nimbus/internal/native"
 )
 
+// The two approved runs of the fde task: setup builds and requests MOK
+// enrollment, enrollment binds the TPM after the first boot into the image.
+const (
+	fdeTitle      = "Set up TPM automatic disk unlock"
+	fdeStep1Title = fdeTitle + " (step 1 of 2)"
+	fdeStep2Title = fdeTitle + " (step 2 of 2)"
+)
+
 // fdeTask inspects the machine read-only and explains the native TPM
 // automatic-unlock flow. Setup and enrollment are separate approved work; this
 // task never enrolls, unlocks or writes. It is selected with the fde component.
 func fdeTask(src native.Source, in Inputs) Task {
 	t := Task{
 		ID: "fde", Owner: "component:fde",
-		Title: "Set up TPM automatic disk unlock", Status: Unknown,
+		Title: fdeTitle, Status: Unknown,
 		Prerequisites: []string{
 			"The root filesystem is a LUKS2 volume on an EFI system with a TPM2 device.",
 			"The selected fde packages are applied and recorded by Nimbus.",
@@ -26,6 +34,7 @@ func fdeTask(src native.Source, in Inputs) Task {
 			"Approved setup generates the key material under /var/lib/nimbus/fde, requests MOK enrollment when Secure Boot is enforced, builds the signed Nimbus image with ukify and ensures the Nimbus UKI firmware entry, which becomes the default boot target.",
 			"Kernel updates rebuild and re-sign the image through the engine-provided kernel-install hook; Fedora's GRUB entries remain selectable as the fallback path.",
 			"After the first reboot into the image, approved enrollment binds the TPM to the measured boot state; the disk passphrase always remains the fallback, and sync never changes policy.",
+			"When another task also requests MOK enrollment (for example NVIDIA), run it before rebooting and use the same temporary password for each import, so one MokManager session can enroll every pending key.",
 		},
 		Verification: "Inspection reads the mounted root, the TPM2 device, the firmware mode, the hook payload, the marker, the firmware entry and the installed tools. The image content and its embedded command line need the approved read-only check.",
 		Recovery:     "The disk passphrase and Fedora's GRUB entries always remain a valid unlock and boot path. Run nimbus postinstall fde --remove to clear the enrollment before deselecting the component.",
@@ -141,27 +150,33 @@ func fdeTask(src native.Source, in Inputs) Task {
 		return t
 	}
 	if !ready {
+		t.Title = fdeStep1Title
 		t.Status = Pending
 		t.fdeSecure = secure
 		if secure {
-			t.Detail = "LUKS2 root, TPM2, Secure Boot and the setup tools are present. Approved setup generates the key pair, requests MOK enrollment, builds and signs the Nimbus image and ensures the shim-chained firmware entry, which becomes the default boot target. TPM enrollment follows after the first reboot into the image; explicit removal clears the enrollment while keeping the disk passphrase. Status offers policy renewal when the measured state changes."
+			t.Detail = "LUKS2 root, TPM2, Secure Boot and the setup tools are present. Approved setup generates the key pair, requests MOK enrollment, builds and signs the Nimbus image and ensures the shim-chained firmware entry, which becomes the default boot target. TPM enrollment is step 2 of 2: reboot into the image, then run this task again. Explicit removal clears the enrollment while keeping the disk passphrase. Status offers policy renewal when the measured state changes."
 		} else {
-			t.Detail = "LUKS2 root, TPM2 and the setup tools are present. Approved setup writes the marker, builds the Nimbus image and ensures the firmware entry, which becomes the default boot target. Secure Boot is disabled, so the image is unsigned and the reduced protection is disclosed. TPM enrollment follows after the first reboot into the image; explicit removal clears the enrollment while keeping the disk passphrase. Status offers policy renewal when the measured state changes."
+			t.Detail = "LUKS2 root, TPM2 and the setup tools are present. Approved setup writes the marker, builds the Nimbus image and ensures the firmware entry, which becomes the default boot target. Secure Boot is disabled, so the image is unsigned and the reduced protection is disclosed. TPM enrollment is step 2 of 2: reboot into the image, then run this task again. Explicit removal clears the enrollment while keeping the disk passphrase. Status offers policy renewal when the measured state changes."
 		}
 		t.Action = &Action{Kind: SetupFDE}
 		t.Reboot = true
 		return t
 	}
 	if !fdeEntryReady(entries, secure) {
+		t.Title = fdeStep1Title
 		t.Status = Pending
-		t.Detail = "FDE setup is active but the firmware entry is missing or different; rerun the approved setup to repair it."
+		t.Detail = "FDE setup is active but the firmware entry is missing or different; rerun the approved setup (step 1 of 2) to repair it."
 		t.Action = &Action{Kind: SetupFDE}
 		t.Reboot = true
 		return t
 	}
+	t.Title = fdeStep2Title
 	t.Status = Unknown
 	t.VerificationNeedsRoot = true
-	t.Detail = "FDE setup is active and the firmware entry is correct; the approved read-only check verifies the image content and offers a rebuild if it is stale or damaged."
+	// Step 2 runs after the reboot into the Nimbus image, so it never belongs
+	// in the pre-reboot list or the shared MOK guidance.
+	t.BeforeReboot = false
+	t.Detail = "FDE setup is active and the firmware entry is correct; the approved read-only check verifies the image content, then offers TPM enrollment when it is not yet enrolled (step 2 of 2) or a rebuild if it is stale or damaged."
 	t.Action = &Action{Kind: SetupFDE}
 	t.Reboot = true
 	return t

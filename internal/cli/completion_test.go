@@ -172,12 +172,12 @@ func TestMOKExplicitVerificationAndUnprivilegedStatus(t *testing.T) {
 				t.Fatal("read-only inspection escalated")
 			}
 			if mode == "missing" {
-				// A missing certificate must report the akmods-keygen guidance
+				// A missing certificate must report the kmodgenca guidance
 				// and stop before any setup stream, not "completion not recorded".
 				src.streams = nil
 				cmd, out := postinstallCommand(root, false, "nvidia-mok", "--yes")
 				err := cmd.Execute()
-				if err == nil || !strings.Contains(err.Error(), "akmods-keygen") || strings.Contains(err.Error(), "completion not recorded") || strings.Contains(out.String(), "could not be read") {
+				if err == nil || !strings.Contains(err.Error(), "kmodgenca") || strings.Contains(err.Error(), "completion not recorded") || strings.Contains(out.String(), "could not be read") {
 					t.Fatal(err, out)
 				}
 				if slices.ContainsFunc(src.streams, func(stream string) bool {

@@ -806,7 +806,7 @@ func TestRunFDEEnroll(t *testing.T) {
 		if crypt < 0 || strings.Contains(src.streams[crypt], "--wipe-slot") {
 			t.Fatalf("enrollment argv wrong: %v", src.streams)
 		}
-		if !strings.Contains(out.String(), "TPM enrollment recorded") {
+		if !strings.Contains(out.String(), "Step 2 of 2 complete") || !strings.Contains(out.String(), "TPM enrollment recorded") {
 			t.Fatalf("missing guidance: %s", out.String())
 		}
 	})
@@ -875,7 +875,7 @@ func TestRunFDESetup(t *testing.T) {
 		if src.staged == "" || src.built != "6.19.10-300.fc44.x86_64" || !src.entry {
 			t.Fatalf("staged=%q built=%q entry=%v", src.staged, src.built, src.entry)
 		}
-		if !strings.Contains(out.String(), "Reboot when ready") {
+		if !strings.Contains(out.String(), "Step 1 of 2 complete") || !strings.Contains(out.String(), "Reboot when ready") {
 			t.Fatalf("missing reboot guidance: %s", out.String())
 		}
 		if _, err := os.Stat(filepath.Dir(src.staged)); !errors.Is(err, os.ErrNotExist) {
@@ -932,9 +932,10 @@ func TestRunFDESetup(t *testing.T) {
 			t.Fatalf("missing MOK guidance:\n%s", out.String())
 		}
 		note := strings.Index(out.String(), "Failed to get Subject key ID")
+		password := strings.Index(out.String(), "same temporary password")
 		importLine := strings.Index(out.String(), "$ sudo -- mokutil --import")
-		if note < 0 || importLine < 0 || note > importLine {
-			t.Fatalf("SKID disclosure missing or after the import:\n%s", out.String())
+		if note < 0 || password < 0 || importLine < 0 || note > importLine || password > importLine {
+			t.Fatalf("MOK guidance missing or after the import prompt:\n%s", out.String())
 		}
 		if !slices.ContainsFunc(src.streams, func(stream string) bool {
 			return strings.Contains(stream, "mokutil --import")
@@ -1082,6 +1083,9 @@ func TestVerifyFDE(t *testing.T) {
 		if got.Status != Pending || got.Action == nil || got.Action.Kind != EnrollFDE {
 			t.Fatalf("got %+v", got)
 		}
+		if got.Title != fdeStep2Title {
+			t.Fatalf("enrollment must be labeled step 2: %+v", got)
+		}
 	})
 	t.Run("changed PCR values offer renewal", func(t *testing.T) {
 		src := fdeVerifyFixture(t)
@@ -1101,6 +1105,9 @@ func TestVerifyFDE(t *testing.T) {
 		got := VerifyFDE(src, fdeSetupTask())
 		if got.Status != Pending || got.Action == nil || got.Action.Kind != RenewFDE {
 			t.Fatalf("got %+v", got)
+		}
+		if got.Title != fdeTitle {
+			t.Fatalf("renewal is maintenance, not a numbered step: %+v", got)
 		}
 	})
 	t.Run("matching PCR values complete", func(t *testing.T) {
@@ -1302,6 +1309,9 @@ func TestVerifyFDE(t *testing.T) {
 				got := VerifyFDE(src, fdeSetupTask())
 				if got.Status != Pending || got.Action == nil || got.Action.Kind != SetupFDE {
 					t.Fatalf("got %+v", got)
+				}
+				if got.Title != fdeStep1Title {
+					t.Fatalf("a rebuild reruns step 1: %+v", got)
 				}
 			})
 		}
