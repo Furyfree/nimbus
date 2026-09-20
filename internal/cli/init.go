@@ -50,7 +50,8 @@ the new-machine dialogue. Existing checkout or origin trust cannot change in ini
   --new ID         describe a new machine and write its manifest
   --dotfiles URL   the dotfiles repository for a new machine
   --no-dotfiles    a new machine without a Chezmoi handoff
-  --channel NAME   the engine channel to record: stable (default) or develop
+  --channel NAME   the engine channel to record: stable or develop
+                   (default: the recorded channel, or stable)
   -p, --plan       preview the setup without writing files or installing anything
   -y, --yes        apply the preview without asking for confirmation`,
 		Args: noArgs,
@@ -64,7 +65,7 @@ the new-machine dialogue. Existing checkout or origin trust cannot change in ini
 	cmd.Flags().StringVar(&f.dotfiles, "dotfiles", "", "the dotfiles repository for a new machine")
 	cmd.Flags().BoolVar(&f.noDotfiles, "no-dotfiles", false, "a new machine without a Chezmoi handoff")
 	cmd.Flags().BoolVar(&f.onePasswordSSH, "onepassword-ssh", false, "enable 1Password SSH integration during initial Chezmoi setup")
-	cmd.Flags().StringVar(&f.channel, "channel", selector.ChannelStable, "the engine channel to record: stable or develop")
+	cmd.Flags().StringVar(&f.channel, "channel", "", "the engine channel to record: stable or develop (default: the recorded channel, or stable)")
 	cmd.Flags().BoolVarP(&f.plan, "plan", "p", false, "preview the setup and change nothing")
 	cmd.Flags().BoolVarP(&f.yes, "yes", "y", false, "apply the preview without asking")
 	return cmd
@@ -87,7 +88,7 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	if f.newMachine == "" && (f.dotfiles != "" || f.noDotfiles) {
 		return usageError{errors.New("--dotfiles and --no-dotfiles require --new; tracked machines use their manifest")}
 	}
-	if f.channel != selector.ChannelStable && f.channel != selector.ChannelDevelop {
+	if f.channel != "" && f.channel != selector.ChannelStable && f.channel != selector.ChannelDevelop {
 		return usageError{fmt.Errorf("--channel must be %s or %s", selector.ChannelStable, selector.ChannelDevelop)}
 	}
 	checkout := f.checkout
@@ -138,6 +139,15 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	if existingSelector != nil && (existingSelector.Checkout != root || existingSelector.Origin != origin) {
 		_, _ = fmt.Fprintf(out, "Selector trust change:\n  previous: %s (%s)\n  requested: %s (%s)\n", existingSelector.Checkout, existingSelector.Origin, root, origin)
 		return fmt.Errorf("selector trust change refused; %s is unchanged; use the existing trusted checkout, or inspect and explicitly update the selector's checkout and origin before retrying", selectorPath)
+	}
+	// Switching channels is an installer action. Without the flag a rerun
+	// keeps the recorded channel instead of resetting it to stable.
+	channel := f.channel
+	if channel == "" {
+		channel = selector.ChannelStable
+		if existingSelector != nil {
+			channel = existingSelector.Channel
+		}
 	}
 	machine := f.machine
 	var newManifest []byte
@@ -208,7 +218,7 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 	if err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(out, "Select %s in %s (checkout %s; origin %s).\n", machine, selectorPath, root, origin); err != nil {
+	if _, err := fmt.Fprintf(out, "Select %s in %s (checkout %s; origin %s; channel %s).\n", machine, selectorPath, root, origin, channel); err != nil {
 		return err
 	}
 	if newManifestPath != "" {
@@ -364,10 +374,10 @@ func runInit(cmd *cobra.Command, opts *options, f initFlags) (retErr error) {
 			return fmt.Errorf("report written manifest %s: %w", newManifestPath, err)
 		}
 	}
-	if err := selector.Write(selectorPath, &selector.Selector{Schema: selector.CurrentSchema, Checkout: root, Machine: machine, Origin: origin, Channel: f.channel}); err != nil {
+	if err := selector.Write(selectorPath, &selector.Selector{Schema: selector.CurrentSchema, Checkout: root, Machine: machine, Origin: origin, Channel: channel}); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(out, "selected %s; selector written to %s\n\n", machine, selectorPath); err != nil {
+	if _, err := fmt.Fprintf(out, "selected %s on the %s channel; selector written to %s\n\n", machine, channel, selectorPath); err != nil {
 		return fmt.Errorf("report written selector %s: %w", selectorPath, err)
 	}
 

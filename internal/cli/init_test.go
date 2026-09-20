@@ -105,7 +105,7 @@ func TestInitReportsResultWriteFailures(t *testing.T) {
 		name, output string
 		newMachine   bool
 	}{
-		{"selector", "selected vm; selector written to", false},
+		{"selector", "selected vm on the stable channel; selector written to", false},
 		{"manifest", "; the Git change is yours to commit", true},
 		{"finish", "Logs:", false},
 	} {
@@ -389,12 +389,12 @@ func TestInitYesUsesExplicitMachineAndReusesSelectorWithoutConfirmation(t *testi
 	}
 	t.Cleanup(func() { approver = saved })
 	code, out, errOut := run(t, "init", "-y", "--checkout", root, "--machine", "vm")
-	if code != ExitOK || !strings.Contains(out, "selected vm; selector written to") || !strings.Contains(out, "plan for vm") || !slices.Contains(src.calls, "chezmoi apply") {
+	if code != ExitOK || !strings.Contains(out, "selected vm on the stable channel; selector written to") || !strings.Contains(out, "plan for vm") || !slices.Contains(src.calls, "chezmoi apply") {
 		t.Fatalf("init: %d\n%s%s", code, out, errOut)
 	}
 	path, _ := selector.DefaultPath()
 	sel, err := selector.Load(path)
-	if err != nil || sel.Machine != "vm" || sel.Checkout != root || sel.Origin != "github.com/Furyfree/nimbus" {
+	if err != nil || sel.Machine != "vm" || sel.Checkout != root || sel.Origin != "github.com/Furyfree/nimbus" || sel.Channel != selector.ChannelStable {
 		t.Fatalf("selector = %+v %v", sel, err)
 	}
 	// Explicitly approved reruns retain the selection.
@@ -403,6 +403,20 @@ func TestInitYesUsesExplicitMachineAndReusesSelectorWithoutConfirmation(t *testi
 		if code, out, errOut := run(t, args...); code != ExitOK || !strings.Contains(out, "the selector already names vm") {
 			t.Fatalf("rerun: %d\n%s%s", code, out, errOut)
 		}
+	}
+	// Switching channels is an installer action: a rerun without the flag
+	// keeps a recorded develop channel, shows it, and only the flag changes it.
+	if err := selector.SetChannel(path, selector.ChannelDevelop); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut = run(t, "init", "-y", "--checkout", root)
+	if sel, err = selector.Load(path); code != ExitOK || err != nil || sel.Channel != selector.ChannelDevelop ||
+		!strings.Contains(out, "channel develop).") || !strings.Contains(out, "selected vm on the develop channel") {
+		t.Fatalf("rerun reset the channel: %d %+v %v\n%s%s", code, sel, err, out, errOut)
+	}
+	code, out, errOut = run(t, "init", "-y", "--checkout", root, "--channel", "stable")
+	if sel, err = selector.Load(path); code != ExitOK || err != nil || sel.Channel != selector.ChannelStable || !strings.Contains(out, "channel stable).") {
+		t.Fatalf("explicit channel was not recorded: %d %+v %v\n%s%s", code, sel, err, out, errOut)
 	}
 }
 

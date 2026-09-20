@@ -87,7 +87,11 @@ checkout. It refuses a dirty checkout, an unrecognized repository file and a
 target engine that cannot read the applied-state schema.
 
 The selector schema is 2 with a required `channel`. Schema 1 is read as
-stable and recorded as schema 2 by the next init or channel switch. `stable`
+stable and recorded as schema 2 by the next init or channel switch. A rerun
+of `nimbus init` keeps the recorded channel unless `--channel` names one, and
+its preview and closing line name the channel it writes. The first sync or
+upgrade of a channel-aware engine against a schema 1 selector prints a
+one-time notice about the tracks; read-only commands never do. `stable`
 follows `main` and `furyfree/nimbus`; `develop` follows the `develop` branch
 and `furyfree/nimbus-develop`. Each track pins its own COPR key under
 `system/keys/`; both use the `nimbus-engine` repository ID. The
