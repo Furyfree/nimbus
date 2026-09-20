@@ -3,7 +3,10 @@ schema = 1
 
 [compatibility]
 fedora = ["44"]
-min_engine = "0.5.3"
+# 0.6.1 is the first engine that knows the grub-config, plymouth-theme and
+# initramfs-rebuild triggers these definitions use. An older engine upgrades
+# itself before it reads definitions; if it cannot, this is the error it shows.
+min_engine = "0.6.1"
 
 # Repositories other than Fedora. The table key is the prefix a package
 # reference uses. `key` is the fingerprint the signing key must have, and
