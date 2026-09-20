@@ -103,6 +103,10 @@ Decisions:
   - [ ] Laptop: type the passphrase at the themed prompt, and boot an
     older kernel from Previous kernels to confirm it is themed too, now that
     `initramfs-rebuild` rebuilds every kernel for `boot-theme`.
+- [ ] GRUB text size on high-resolution panels (#74): the theme leaves
+  GRUB's mode on `auto` on purpose, and under Secure Boot only the built-in
+  fixed-size font loads. Look at the laptop's 2880x1800 menu and run
+  `videoinfo` at the GRUB console on both machines before deciding anything.
 - Accepted limitations live in [SPEC.md](SPEC.md#desktop-boot-and-recovery):
   BIOS-only systems untested; `set timeout=5` overrides `GRUB_TIMEOUT` and
   `menu_auto_hide`; a submenu reopened once shows no entries; a kernel
