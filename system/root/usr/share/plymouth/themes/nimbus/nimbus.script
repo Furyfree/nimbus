@@ -1,9 +1,10 @@
 # Paper Dark: the wordmark and one row below it. The row is the passphrase
 # field while Plymouth asks, and a loading bar in the same box otherwise, so
 # unlocking never changes screens. Password callbacks receive a bullet count,
-# never the passphrase itself.
-Window.SetBackgroundTopColor(0.062745, 0.062745, 0.062745);
-Window.SetBackgroundBottomColor(0.062745, 0.062745, 0.062745);
+# never the passphrase itself. The background is pure black, like GRUB's
+# menu and its terminal, so the three screens are one continuous shade.
+Window.SetBackgroundTopColor(0, 0, 0);
+Window.SetBackgroundBottomColor(0, 0, 0);
 
 pixel = Image("pixel.png");
 lock_image = Image("lock.png");

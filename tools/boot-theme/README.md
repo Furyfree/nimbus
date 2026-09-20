@@ -5,9 +5,10 @@ Native renders: [GRUB](../../docs/images/paper-dark-grub.png) and
 [Plymouth unlock](../../docs/images/paper-dark-plymouth.png).
 
 The theme payload lives in `system/root/boot/grub2/themes/nimbus/` and
-`system/root/usr/share/plymouth/themes/nimbus/`. Both use `#101010` backgrounds,
-`#eeeeee` foregrounds, gray rules and monospace text. The engine package
-installs both trees; the `boot-theme` component owns
+`system/root/usr/share/plymouth/themes/nimbus/`. Both use pure black
+`#000000` backgrounds, the same black as GRUB's terminal during the handover
+to the kernel, `#eeeeee` foregrounds, gray bars and monospace text. The
+engine package installs both trees; the `boot-theme` component owns
 `/etc/nimbus/boot-theme.enabled` and activates them through the
 `grub-config`, `plymouth-theme` and `initramfs-rebuild` triggers.
 

@@ -8,4 +8,4 @@ ImageDir=/usr/share/plymouth/themes/nimbus
 ScriptFile=/usr/share/plymouth/themes/nimbus/nimbus.script
 Font=DejaVu Sans Mono 20
 MonospaceFont=DejaVu Sans Mono 20
-ConsoleLogBackgroundColor=0x101010
+ConsoleLogBackgroundColor=0x000000

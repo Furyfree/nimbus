@@ -1,5 +1,5 @@
 title-text: ""
-desktop-color: "#101010"
+desktop-color: "#000000"
 terminal-font: "DejaVu Sans Mono Regular 20"
 terminal-left: "0%"
 terminal-top: "0%"
@@ -50,7 +50,7 @@ terminal-border: "0"
     font = "DejaVu Sans Mono Regular 16"
     text_color = "#eeeeee"
     border_color = "#888888"
-    bg_color = "#101010"
+    bg_color = "#000000"
     fg_color = "#555555"
 }
 

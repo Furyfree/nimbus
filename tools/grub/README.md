@@ -1,7 +1,7 @@
 # Nimbus GRUB theme
 
 `system/root/boot/grub2/themes/nimbus/` contains the Paper Dark theme payload:
-a near-black background, off-white monospace text, gray selection, a countdown
+a pure black background, off-white monospace text, gray selection, a countdown
 bar and one line of keyboard help. The engine package installs it under
 `/boot/grub2/themes/nimbus`; the `boot-theme` component activates it through
 the inert `/etc/grub.d/36_paper_dark` drop-in.
