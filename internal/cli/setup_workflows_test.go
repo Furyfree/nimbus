@@ -161,6 +161,10 @@ func TestFinalReportRetainsFailuresAndNotices(t *testing.T) {
 			t.Fatal(finish.String())
 		}
 	}
+	guidance := strings.Index(finish.String(), "FDE and NVIDIA share one reboot")
+	if guidance < 0 || guidance > strings.Index(finish.String(), "postinstall fde") || guidance > strings.Index(finish.String(), "postinstall nvidia-mok") {
+		t.Fatal("MOK guidance must print before the postinstall commands", finish.String())
+	}
 	single := r
 	single.Tasks = slices.DeleteFunc(slices.Clone(r.Tasks), func(task postinstall.Task) bool { return task.ID == "nvidia-mok" })
 	var singleOut strings.Builder
