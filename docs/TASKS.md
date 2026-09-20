@@ -82,13 +82,13 @@ Decisions:
   - [x] Desktop, manual 2026-09-20: `UseSimpledrm=2` added by hand to the
     host `plymouthd.conf`. Prompt drawn at once (password request 4.2 s,
     accepted 8.2 s), clean handover to NVIDIA, greetd at 15.1 s.
-  - [ ] Desktop through sync: the owned drop-in (`i915 xe nouveau`) replaces
+  - [x] Desktop through sync: the owned drop-in (`i915 xe nouveau`) replaces
     the manual file, `initramfs-rebuild` runs, `lsinitrd` shows none of the
     three drivers and `UseSimpledrm=2` in the image's `plymouthd.conf` while
     the host file has none (remove the hand-added line first), the image is
     about 100 MB smaller, the rescue image checksum is unchanged, and the
     passphrase is typed again.
-  - [ ] Desktop: with `NetworkManager-wait-online.service` disabled,
+  - [x] Desktop: with `NetworkManager-wait-online.service` disabled,
     `graphical.target` no longer waits for DHCP (14 s measured 2026-09-20),
     Hyprland starts right after auto-login, and Docker and Tailscale work.
   - [ ] Simplified theme (2026-09-20): rendered in the preview container
@@ -100,6 +100,17 @@ Decisions:
     default entry boots after the countdown. Verified so far by the preview
     (function-defined submenu, order) and a desktop dry run: a generated
     `grub.cfg` passed `grub2-script-check` with the live file untouched.
+  - [x] Fresh desktop install through sync, 2026-09-20, engine
+    `0.6.1~dev.20260920185636`: the owned drop-in has its receipt, the
+    image holds no `i915`, `xe` or `nouveau` (63 MB) and carries
+    `UseSimpledrm=2` while the host `plymouthd.conf` does not,
+    `plymouth-theme` ran before `initramfs-rebuild`, `grub.cfg` orders
+    Fedora, Windows, Previous kernels, UEFI, and the mirror title is
+    `Fedora Linux`. The passphrase was typed at the pure black prompt and
+    the session came up; `NetworkManager-wait-online` is disabled and
+    userspace took 6.0 s. The lock icon was illegible at 1024x768 and was
+    redrawn solid afterwards. `plymouthd` crashed at quit again (2 of 6
+    boots, same backtrace in the script plugin, no visible effect).
   - [ ] Laptop: type the passphrase at the themed prompt, and boot an
     older kernel from Previous kernels to confirm it is themed too, now that
     `initramfs-rebuild` rebuilds every kernel for `boot-theme`.
