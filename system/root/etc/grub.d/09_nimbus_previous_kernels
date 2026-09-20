@@ -98,13 +98,20 @@ for conf in /boot/loader/entries/*.conf; do
 done
 [ "$entries" -gt 1 ] || exit 0
 
+# The submenu is only defined here. 30_previous_kernels_nimbus calls it after
+# Fedora's os-prober, so other operating systems sit directly under Fedora
+# and the older kernels follow them. The variable is set under the same guard
+# as the top-level entry, so a stale grub.cfg never shows a submenu without it.
 cat << EOF
 
-if [ -f $entries_path/$entry.conf -a -f $mirror_path/$entry.conf ]; then
+function nimbus_previous_kernels {
     submenu 'Previous kernels' {
         insmod blscfg
         set blsdir=$entries_path
         blscfg
     }
+}
+if [ -f $entries_path/$entry.conf -a -f $mirror_path/$entry.conf ]; then
+    set nimbus_previous_kernels_ready=y
 fi
 EOF

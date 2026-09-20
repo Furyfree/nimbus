@@ -94,6 +94,12 @@ Decisions:
   - [ ] Simplified theme (2026-09-20): rendered in the preview container
     only. On a real boot check the full-screen GRUB terminal box, the
     countdown number, the field and lock, and the loading bar after unlock.
+  - [ ] Menu order and plain title (2026-09-20): on a real boot the menu
+    reads Fedora Linux, Windows, Previous kernels, UEFI Firmware Settings;
+    Previous kernels opens and lists the versioned entries and rescue; the
+    default entry boots after the countdown. Verified so far by the preview
+    (function-defined submenu, order) and a desktop dry run: a generated
+    `grub.cfg` passed `grub2-script-check` with the live file untouched.
   - [ ] Laptop: type the passphrase at the themed prompt.
 - Accepted limitations live in [SPEC.md](SPEC.md#desktop-boot-and-recovery):
   older initramfs keeps the default Plymouth prompt until rebuild; BIOS-only

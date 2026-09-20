@@ -172,6 +172,34 @@ func TestCompareVersions(t *testing.T) {
 	}
 }
 
+func TestMirrorWritesAPlainTitle(t *testing.T) {
+	id := "m-7.2.5-200.fc44.x86_64"
+	src, entriesDir, grubenv, mirrorDir := mirrorFixture(t, []string{id}, id)
+	entry := "title Fedora Linux (7.2.5-200.fc44.x86_64) 44 (Forty Four)\nversion 7.2.5-200.fc44.x86_64\nlinux /vmlinuz-7.2.5-200.fc44.x86_64\noptions root=UUID=x title (kept)\n"
+	if err := os.WriteFile(filepath.Join(entriesDir, id+".conf"), []byte(entry), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Mirror(src, entriesDir, grubenv, mirrorDir); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(mirrorDir, id+".conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Replace(entry, "title Fedora Linux (7.2.5-200.fc44.x86_64) 44 (Forty Four)", "title Fedora Linux", 1)
+	if string(got) != want {
+		t.Fatalf("mirror = %q, want %q", got, want)
+	}
+	// Fedora's own entry, listed under Previous kernels, keeps its title.
+	if live, _ := os.ReadFile(filepath.Join(entriesDir, id+".conf")); string(live) != entry {
+		t.Fatalf("the live entry was modified: %q", live)
+	}
+	// A title without a parenthesis has nothing to shorten.
+	if got := plainTitle([]byte("title Custom\n")); string(got) != "title Custom\n" {
+		t.Fatalf("plain title changed: %q", got)
+	}
+}
+
 // The engine payload is a contract: the marker gate, the internal call, the
 // guard and the submenu label are what the plan and SPEC promise.
 func TestPreviousKernelsPayloadContract(t *testing.T) {
@@ -196,6 +224,31 @@ func TestPreviousKernelsPayloadContract(t *testing.T) {
 	}
 	if strings.Count(script, "if [ -f $entries_path/$entry.conf -a -f $mirror_path/$entry.conf ]") != 2 {
 		t.Fatal("both Nimbus menu blocks must be guarded on the live entry and its mirror")
+	}
+	// The submenu is only defined here and enabled under that guard;
+	// 30_previous_kernels_nimbus places it after the other operating systems.
+	for _, want := range []string{"function nimbus_previous_kernels {", "set nimbus_previous_kernels_ready=y"} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("payload lacks %q", want)
+		}
+	}
+	if guard := strings.LastIndex(script, "if [ -f $entries_path/$entry.conf"); guard < 0 || !strings.Contains(script[guard:], "set nimbus_previous_kernels_ready=y") {
+		t.Fatal("the submenu must be enabled only under the entry and mirror guard")
+	}
+	placeData, err := os.ReadFile(filepath.Join("..", "..", "system", "root", "etc", "grub.d", "30_previous_kernels_nimbus"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	place := string(placeData)
+	for _, want := range []string{Marker, `if [ "$nimbus_previous_kernels_ready" = "y" ]; then`, "    nimbus_previous_kernels\n"} {
+		if !strings.Contains(place, want) {
+			t.Fatalf("placement payload lacks %q", want)
+		}
+	}
+	// The order Fedora, other systems, Previous kernels, firmware depends on
+	// where the file sorts among Fedora's own scripts.
+	if name := "30_previous_kernels_nimbus"; name <= "30_os-prober" || name >= "30_uefi-firmware" {
+		t.Fatal("the placement script must sort between 30_os-prober and 30_uefi-firmware")
 	}
 	if !strings.Contains(script, "else\n    set blsdir=$entries_path\nfi") {
 		t.Fatal("the fallback path must point blsdir at the live entries directory")

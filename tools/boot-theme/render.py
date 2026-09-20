@@ -33,12 +33,20 @@ terminal_output gfxterm
 set theme=$prefix/themes/nimbus/theme.txt
 export theme
 set timeout=15
-menuentry 'Fedora Linux' {{ echo 'Preview only'; sleep 60; }}
-menuentry 'Windows Boot Manager (on /dev/nvme0n1p1)' {{ echo 'Preview only'; sleep 60; }}
-submenu 'Previous kernels' {{
-""" + "".join(f"menuentry 'Fedora Linux (7.2.{i}-200.fc44.x86_64) 44 (Forty Four)' {{ sleep 60; }}\n"
-              for i in range(8, 0, -1)) + """menuentry 'Fedora Linux (0-rescue) 44 (Forty Four)' { sleep 60; }
+""" + """# The same structure the engine drop-ins generate: 09 defines the submenu
+# as a function before the Fedora entry, 30 calls it after os-prober.
+function nimbus_previous_kernels {
+    submenu 'Previous kernels' {
+""" + "".join(f"        menuentry 'Fedora Linux (7.2.{i}-200.fc44.x86_64) 44 (Forty Four)' {{ sleep 60; }}\n"
+              for i in range(8, 0, -1)) + """        menuentry 'Fedora Linux (0-rescue) 44 (Forty Four)' { sleep 60; }
+    }
 }
+set nimbus_previous_kernels_ready=y
+menuentry 'Fedora Linux' { echo 'Preview only'; sleep 60; }
+menuentry 'Windows Boot Manager (on /dev/nvme0n1p1)' { echo 'Preview only'; sleep 60; }
+if [ "$nimbus_previous_kernels_ready" = "y" ]; then
+    nimbus_previous_kernels
+fi
 menuentry 'UEFI Firmware Settings' { echo 'Preview only'; sleep 60; }
 """)
     theme = Path("/work/system/root/boot/grub2/themes/nimbus")

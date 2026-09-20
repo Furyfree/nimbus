@@ -1,0 +1,19 @@
+#!/bin/sh
+# Nimbus grouped kernel menu, second half: place "Previous kernels".
+#
+# The engine package owns this file; it stays inert without
+# /etc/nimbus/boot-theme.enabled. Its name sorts after 30_os-prober and before
+# 30_uefi-firmware, which gives the menu order Fedora, other operating
+# systems, Previous kernels, UEFI Firmware Settings.
+# 09_nimbus_previous_kernels defines the submenu and sets the variable only
+# when its own entry is valid, so this file carries no state and adds nothing
+# when that script was inert, failed, or Fedora's flat menu is in effect.
+
+[ -f /etc/nimbus/boot-theme.enabled ] || exit 0
+
+cat << 'EOF'
+
+if [ "$nimbus_previous_kernels_ready" = "y" ]; then
+    nimbus_previous_kernels
+fi
+EOF

@@ -591,10 +591,18 @@ maintains a Nimbus-owned mirror of the one default BLS entry under
 `/boot/loader/entries-nimbus` through `nimbus internal boot-menu`, lists it
 with `blscfg <entry>`, and lists older kernels and rescue entries under an
 unfiltered `blscfg` submenu. The submenu is never filtered by `saved_entry`.
-Both blocks are guarded in `grub.cfg` by a check for the live BLS entry and
-its mirror, so a kernel removal followed by a failed `grub2-mkconfig` falls
-through to Fedora's flat menu. Fedora's flat menu also returns when the
-engine, marker or mirror is unavailable. Because Fedora's grub hook
+The mirror copy carries a plain title, the text before the first parenthesis
+(`Fedora Linux`); Fedora's own entry keeps its full title under Previous
+kernels, and GRUB's default is chosen by entry ID, never by title. The menu
+order is Fedora, other operating systems, Previous kernels, UEFI Firmware
+Settings: the drop-in only defines the submenu as a GRUB function, and the
+inert `/etc/grub.d/30_previous_kernels_nimbus`, which sorts between
+`30_os-prober` and `30_uefi-firmware`, calls it. Both blocks are guarded in
+`grub.cfg` by a check for the live BLS entry and its mirror; the placement
+file carries no state and adds nothing unless that guard held, so a kernel
+removal followed by a failed `grub2-mkconfig` falls through to Fedora's flat
+menu. Fedora's flat menu also returns when the engine, marker or mirror is
+unavailable. Because Fedora's grub hook
 regenerates `grub.cfg` only when BLS is disabled, the engine ships the inert
 `/etc/kernel/install.d/96-nimbus-menu.install` hook, which runs after the
 boot-entry hook on kernel installs and removals and runs

@@ -117,6 +117,7 @@ func rebuild(entriesDir, mirrorDir, chosen string) error {
 	if err != nil {
 		return err
 	}
+	data = plainTitle(data)
 	if err := os.MkdirAll(mirrorDir, 0o700); err != nil {
 		return err
 	}
@@ -171,6 +172,25 @@ func rebuild(entriesDir, mirrorDir, chosen string) error {
 		}
 	}
 	return nil
+}
+
+// plainTitle shortens the mirrored entry's title to the text before its first
+// parenthesis, so the top-level entry reads "Fedora Linux". Only the Nimbus
+// copy changes: Fedora's own entry keeps the full title and lists the kernel
+// version under Previous kernels, and GRUB's default is chosen by entry id.
+func plainTitle(data []byte) []byte {
+	lines := strings.Split(string(data), "\n")
+	for i, line := range lines {
+		rest, ok := strings.CutPrefix(line, "title ")
+		if !ok {
+			continue
+		}
+		if name, _, cut := strings.Cut(rest, " ("); cut && strings.TrimSpace(name) != "" {
+			lines[i] = "title " + strings.TrimSpace(name)
+		}
+		break
+	}
+	return []byte(strings.Join(lines, "\n"))
 }
 
 // compareVersions orders BLS ids by their Fedora version suffix: numeric
