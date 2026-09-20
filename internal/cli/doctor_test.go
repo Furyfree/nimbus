@@ -55,6 +55,8 @@ func fixtureSource(t *testing.T, root string) *nativetest.FakeSource {
 			inspect.OSReleasePath:  read("os-release"),
 			inspect.SecureBootPath: {6, 0, 0, 0, 1},
 			inspect.SELinuxPath:    []byte("1\n"),
+			// The engine package ships the boot-theme payload; fixtures model it.
+			"/usr/share/plymouth/themes/nimbus/nimbus.plymouth": []byte("[Plymouth Theme]\nName=Nimbus\n"),
 		},
 		Dirs:  map[string][]string{inspect.RepoDir: {"fedora.repo"}},
 		Paths: map[string]string{},
