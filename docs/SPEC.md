@@ -485,7 +485,10 @@ passphrase is the authentication. The default session (the Noctalia greeter)
 starts again after logout. Nimbus owns that file and leaves the package's
 PAM stack untouched; the passwordless default keyring is what keeps
 applications from prompting, and it is user configuration under `$HOME`,
-owned by Chezmoi and never written by a root process. `nvidia-mok` remains
+owned by Chezmoi and never written by a root process. Chezmoi creates it
+once, when none exists, and never manages it afterwards: a keyring is a live
+store, and comparing it to a template would prompt on every apply, print the
+stored secrets in the diff and erase them on overwrite. `nvidia-mok` remains
 the only Secure Boot key flow and keeps the rules above.
 
 UWSM starts Hyprland only after `graphical.target`, so with auto-login every
