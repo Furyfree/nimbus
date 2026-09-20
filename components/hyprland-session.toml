@@ -23,6 +23,7 @@ packages = [
   "xdg-terminal-exec",
   "gnome-keyring",
   "gnome-keyring-pam",
+  "seahorse",
   "accountsservice",
   "udiskie",
   "udisks2",
