@@ -14,8 +14,20 @@ Release checklist: [#40](https://github.com/Furyfree/nimbus/issues/40).
   407 tagged files match the archive; the RPM is signed by the pinned key,
   its payload matches the tag and it carries no scriptlets; the stable
   repository serves it. `develop-version` is 0.6.2.
-- [ ] Laptop and real desktop, both on 0.5.10: `nimbus sync --plan` first.
-  The old engine upgrades itself and restarts before it reads definitions.
+- [x] 0.6.2 released 2026-09-20: tag `v0.6.2` at `408c359`, written notes,
+  stable COPR build 11008271 (`nimbus-0.6.2-0.1.fc44`). It adds the schema 1
+  selector migration on sync; Seahorse is a definitions change and needs no
+  engine. All 407 tagged files match the archive; the RPM is signed by the
+  pinned key, its payload matches the tag, it has no scriptlets and the
+  stable repository serves it. `develop-version` is 0.6.3.
+- [x] Laptop upgraded 0.5.10 to 0.6.1 on 2026-09-20: the old engine restarted
+  into the new one before reading definitions, sync succeeded (20 operations,
+  0 failures), all three kernels were rebuilt and the rescue image was left
+  alone, the initramfs holds the theme and `amdgpu` and no `UseSimpledrm`. It
+  rebooted into auto-login; the old `Login` keyring was moved by hand.
+- [ ] Real desktop, on 0.5.10, and the laptop's 0.6.2 selector migration:
+  `nimbus sync --plan` first. The old engine upgrades itself and restarts
+  before it reads definitions.
   The first apply selects the boot theme and rebuilds every initramfs; type
   the passphrase at the prompt afterwards. The rescue entry under Previous
   kernels is the fallback.
