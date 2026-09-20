@@ -53,7 +53,7 @@ func RunNVIDIAMOK(ctx context.Context, src native.Source, out, stderr io.Writer)
 		return errors.New("akmods signing key pair is incomplete; inspect /etc/pki/akmods before retrying; neither file was replaced")
 	}
 	if !certExists {
-		return errors.New("the akmods signing key pair is missing; generate it with " + MOKKeyPairHint + " before building modules, then retry; no keys were created")
+		return errors.New("the akmods signing key pair is missing; no keys were created.\nGenerate it, then retry:\n$ " + MOKKeyPairHint)
 	}
 	// Read only the public certificate. The private key stays with native tools.
 	der, err := src.Run("sudo", "-n", "--", "cat", MOKCertificate)

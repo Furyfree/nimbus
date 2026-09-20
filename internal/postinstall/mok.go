@@ -92,10 +92,10 @@ func VerifyMOK(src native.Source, t Task) Task {
 		t.Status, t.Detail, t.VerificationNeedsRoot = Unknown, "Permission denied reading the akmods public certificate; approved setup inspects it with sudo before changing anything.", true
 		return t
 	case errors.Is(err, os.ErrNotExist):
-		t.Status, t.Detail = Blocked, "The akmods public certificate is missing at "+MOKCertificate+"; generate the signing key pair with "+MOKKeyPairHint+", then retry."
+		t.Status, t.Detail = Blocked, "The akmods public certificate is missing at "+MOKCertificate+".\nGenerate the signing key pair, then retry:\n$ "+MOKKeyPairHint
 		return t
 	case err != nil:
-		t.Status, t.Detail = Unknown, "The akmods public certificate could not be read: "+err.Error()+"; if akmods has not generated the key pair yet, generate it with "+MOKKeyPairHint+", then retry."
+		t.Status, t.Detail = Unknown, "The akmods public certificate could not be read: "+err.Error()+".\nIf akmods has not generated the key pair yet, generate it, then retry:\n$ "+MOKKeyPairHint
 		return t
 	case len(data) == 0:
 		t.Status, t.Detail = Blocked, "The akmods public certificate is empty; inspect akmods key generation before enrollment."
