@@ -178,7 +178,10 @@ func TestReleaseSourceDevelop(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			env := append(os.Environ(), "HOME="+root, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "PATH="+bin+":"+os.Getenv("PATH"))
+			env := append(os.Environ(), "HOME="+root, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "PATH="+bin+":"+os.Getenv("PATH"),
+				// A committer east of UTC, in a zone unlike the test host's: the
+				// version stamp must be the UTC time, 2026-01-01 22:04:05.
+				"GIT_COMMITTER_DATE=2026-01-02T03:04:05+05:00", "TZ=America/New_York")
 			git := func(args ...string) string {
 				t.Helper()
 				cmd := exec.Command("git", args...)
@@ -239,8 +242,7 @@ esac
 			if err != nil {
 				t.Fatalf("release: %v %s", err, out)
 			}
-			stamp := git("show", "-s", "--format=%cd", "--date=format:%Y%m%d%H%M%S", commit)
-			archive := "nimbus-0.6.1.dev." + stamp + "-vendor.tar.gz"
+			archive := "nimbus-0.6.1.dev.20260101220405-vendor.tar.gz"
 			if _, err := os.Stat(filepath.Join(output, archive)); err != nil {
 				t.Fatal(err)
 			}

@@ -58,7 +58,9 @@ else
   git merge-base --is-ancestor "$commit" refs/remotes/origin/develop || fail 'commit must belong to origin/develop'
   # A numeric timestamp orders strictly under RPM; a git hash segment can
   # sort either way because alphabetic runs outrank numeric ones.
-  stamp="$(git show -s --format=%cd --date=format:%Y%m%d%H%M%S "$commit")"
+  # The stamp is UTC: a committer's local time can run backwards across a
+  # DST change or between time zones, and a lower stamp is an RPM downgrade.
+  stamp="$(TZ=UTC git show -s --format=%cd --date=format-local:%Y%m%d%H%M%S "$commit")"
   version="${base}~dev.${stamp}"
   # GitHub rewrites the tilde in asset names, so the archive file uses dots
   # while the RPM version and archive root keep RPM's ordering tilde.
