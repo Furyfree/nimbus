@@ -300,6 +300,8 @@ if [ -e "${CHECKOUT}" ]; then
   got="$(normalize "${remote}")"
   [ "$(printf '%s' "${got}" | tr '[:upper:]' '[:lower:]')" = "${ORIGIN_ID}" ] || fail "${CHECKOUT} does not match the Nimbus origin; it is left untouched"
   current="$(git -C "${real}" branch --show-current 2>/dev/null || true)"
+  # A detached checkout, such as a linked worktree on a reviewed commit, is
+  # reused exactly as it is: no clean-tree check, switch or update.
   if [ -n "${current}" ]; then
     [ -z "$(git -C "${real}" status --porcelain)" ] || fail "${CHECKOUT} has local changes; commit or stash them before installing"
     if [ "${current}" != "${branch}" ]; then

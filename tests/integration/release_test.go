@@ -162,7 +162,7 @@ esac
 
 func TestReleaseSourceDevelop(t *testing.T) {
 	script := filepath.Join(repoRoot(t), "tools/release/source.sh")
-	for _, scenario := range []string{"success", "missing version file", "invalid version", "unmerged commit"} {
+	for _, scenario := range []string{"success", "missing version file", "invalid version", "unmerged commit", "missing channel value"} {
 		t.Run(scenario, func(t *testing.T) {
 			root := t.TempDir()
 			repo := filepath.Join(root, "repo")
@@ -231,11 +231,18 @@ esac
 			}
 			output := filepath.Join(root, "release")
 			cmd := exec.Command("bash", script, "--channel", "develop", output)
+			if scenario == "missing channel value" {
+				cmd = exec.Command("bash", script, "--channel")
+			}
 			cmd.Dir, cmd.Env = repo, env
 			out, err := cmd.CombinedOutput()
 			if scenario != "success" {
 				if err == nil {
 					t.Fatalf("accepted %s: %s", scenario, out)
+				}
+				// A forgotten value must explain itself instead of dying in shift.
+				if scenario == "missing channel value" && !strings.Contains(string(out), "usage: source.sh --channel develop") {
+					t.Fatalf("missing channel value gave no usage: %q", out)
 				}
 				return
 			}

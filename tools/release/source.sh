@@ -13,7 +13,8 @@ set -euo pipefail
 fail() { printf 'release source: %s\n' "$*" >&2; exit 1; }
 channel=stable
 if [ "${1:-}" = "--channel" ]; then
-  channel="${2:-}"
+  [ "$#" -ge 2 ] || fail 'usage: source.sh --channel develop /absolute/new-output-directory'
+  channel="$2"
   shift 2
 fi
 case "$channel" in
