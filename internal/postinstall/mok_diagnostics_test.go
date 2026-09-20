@@ -36,8 +36,10 @@ func TestMOKCertificateDiagnostics(t *testing.T) {
 		})
 	}
 	missing := VerifyMOK(certificateErrorSource{err: &os.PathError{Op: "open", Path: MOKCertificate, Err: os.ErrNotExist}}, Task{ID: "nvidia-mok", Status: Unknown})
-	if !strings.Contains(missing.Detail, "\n$ "+MOKKeyPairHint) {
-		t.Fatalf("the missing-certificate hint must put the command on its own line: %q", missing.Detail)
+	for _, line := range []string{"\n$ " + MOKKeyPairHint, "\n$ nimbus postinstall nvidia-mok"} {
+		if !strings.Contains(missing.Detail, line) {
+			t.Fatalf("the missing-certificate hint must list %q on its own line: %q", line, missing.Detail)
+		}
 	}
 	src := &nativetest.FakeSource{Files: map[string][]byte{MOKCertificate: nil}}
 	task := VerifyMOK(src, Task{ID: "nvidia-mok", Status: Unknown})
