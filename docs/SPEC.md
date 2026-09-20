@@ -477,12 +477,11 @@ their evidence no longer exist.
 Login follows the same boundary: greetd starts the owner's session directly
 from `[initial_session]` in `/etc/greetd/nimbus.toml` because the disk
 passphrase is the authentication. The default session (the Noctalia greeter)
-starts again after logout. Nimbus owns that file and `/etc/pam.d/greetd`, and
-removes the `pam_gnome_keyring` auth line so a later password login cannot
-create an encrypted keyring that auto-login cannot open. The passwordless
-default keyring is user configuration under `$HOME`, owned by Chezmoi and
-never written by a root process. `nvidia-mok` remains the only Secure Boot
-key flow and keeps the rules above.
+starts again after logout. Nimbus owns that file and leaves the package's
+PAM stack untouched; the passwordless default keyring is what keeps
+applications from prompting, and it is user configuration under `$HOME`,
+owned by Chezmoi and never written by a root process. `nvidia-mok` remains
+the only Secure Boot key flow and keeps the rules above.
 
 `noctalia-lockscreen` is a narrow exception to runtime-state ownership: after
 preview and approval it may remove only `lockscreen_widgets` and descendants

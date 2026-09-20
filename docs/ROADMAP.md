@@ -48,7 +48,7 @@ TPM auto-unlock, the signed UKI path and the `fde` component were removed:
 the disk passphrase is the authentication boundary, the Paper Dark theme
 shows its prompt, and `[initial_session]` starts the owner's session without
 a greeter. The passwordless default keyring is Chezmoi-owned user
-configuration; Nimbus owns `/etc/greetd/nimbus.toml` and `/etc/pam.d/greetd`.
+configuration; Nimbus owns `/etc/greetd/nimbus.toml` and leaves PAM alone.
 `nvidia-mok` stays the only Secure Boot key flow. Exit criteria live in
 [TASKS.md](TASKS.md#disk-encryption-and-login).
 
