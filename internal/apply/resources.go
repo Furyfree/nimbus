@@ -18,12 +18,12 @@ import (
 // and records the previous selection so removal restores what the install
 // replaced. The reviewed plan carries the exact command for both directions.
 func (ex *executor) plymouthThemeTrigger(op plan.Operation) ([]state.Receipt, []string, error) {
-	if len(op.Steps) != 1 || len(op.Steps[0].Argv) != 3 ||
-		op.Steps[0].Argv[0] != "plymouth-set-default-theme" || op.Steps[0].Argv[1] != "-R" {
+	if len(op.Steps) != 1 || len(op.Steps[0].Argv) != 2 ||
+		op.Steps[0].Argv[0] != "plymouth-set-default-theme" || strings.HasPrefix(op.Steps[0].Argv[1], "-") {
 		return nil, nil, fmt.Errorf("Plymouth trigger plan is missing its reviewed command")
 	}
 	argv := op.Steps[0].Argv
-	intended := argv[2]
+	intended := argv[1]
 	before, err := ex.opts.Source.Run("plymouth-set-default-theme")
 	if err != nil {
 		return nil, nil, fmt.Errorf("read the current Plymouth theme: %w", err)

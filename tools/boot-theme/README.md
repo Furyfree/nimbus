@@ -8,8 +8,8 @@ The theme payload lives in `system/root/boot/grub2/themes/nimbus/` and
 `system/root/usr/share/plymouth/themes/nimbus/`. Both use `#101010` backgrounds,
 `#eeeeee` foregrounds, gray rules and monospace text. The engine package
 installs both trees; the `boot-theme` component owns
-`/etc/nimbus/boot-theme.enabled` and activates them through the `grub-config`
-and `plymouth-theme` triggers.
+`/etc/nimbus/boot-theme.enabled` and activates them through the
+`grub-config`, `plymouth-theme` and `initramfs-rebuild` triggers.
 
 Both screens are deliberately bare: the `N I M B U S` wordmark and one row
 below it. GRUB shows the menu and a countdown bar. Plymouth shows a small
@@ -29,8 +29,9 @@ after unlock is only a few seconds long; it never runs backwards.
 Plymouth needs `plymouth-plugin-script`, `plymouth-plugin-label` and
 `dejavu-sans-mono-fonts`, including the required renderer/font assets in the
 boot image; the `boot-theme` component selects these packages. The
-`plymouth-theme` trigger runs `plymouth-set-default-theme -R` and records the
-previous selection so removal restores it. Each physical machine verifies the
+`plymouth-theme` trigger runs `plymouth-set-default-theme nimbus` and records
+the previous selection so removal restores it; `initramfs-rebuild` then
+rebuilds every installed kernel's image. Each physical machine verifies the
 prompt with a typed passphrase; [TASKS.md](../../docs/TASKS.md) tracks that.
 Appearance does not change LUKS, MOK or Secure Boot policy.
 [GRUB notes](../grub/README.md) cover its separate needs.

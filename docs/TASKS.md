@@ -100,10 +100,11 @@ Decisions:
     default entry boots after the countdown. Verified so far by the preview
     (function-defined submenu, order) and a desktop dry run: a generated
     `grub.cfg` passed `grub2-script-check` with the live file untouched.
-  - [ ] Laptop: type the passphrase at the themed prompt.
+  - [ ] Laptop: type the passphrase at the themed prompt, and boot an
+    older kernel from Previous kernels to confirm it is themed too, now that
+    `initramfs-rebuild` rebuilds every kernel for `boot-theme`.
 - Accepted limitations live in [SPEC.md](SPEC.md#desktop-boot-and-recovery):
-  older initramfs keeps the default Plymouth prompt until rebuild; BIOS-only
-  systems untested; `set timeout=5` overrides `GRUB_TIMEOUT` and
+  BIOS-only systems untested; `set timeout=5` overrides `GRUB_TIMEOUT` and
   `menu_auto_hide`; a submenu reopened once shows no entries; a kernel
   installed while only one entry existed appears after the next successful
   `grub2-mkconfig`; removal blocks without a recorded usable theme.

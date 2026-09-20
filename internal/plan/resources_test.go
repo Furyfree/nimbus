@@ -462,30 +462,37 @@ func TestEngineUpdateRetriesPayloadTriggers(t *testing.T) {
 	target := "/etc/nimbus.conf"
 	have := inspect.SystemFile{Exists: true, Content: []byte("same"), Owner: "root", Group: "root", Mode: "0644"}
 	answerFile(src, target, have)
-	b.in.Resolved.Files = []definitions.ResolvedFile{{Target: target, Content: have.Content, Owner: have.Owner, Group: have.Group, Mode: have.Mode, Triggers: []string{"plymouth-theme"}}}
+	triggers := []string{"plymouth-theme", "initramfs-rebuild"}
+	b.in.Resolved.Files = []definitions.ResolvedFile{{Target: target, Content: have.Content, Owner: have.Owner, Group: have.Group, Mode: have.Mode, Triggers: triggers}}
 	file := fileReceipt(target, have)
-	file.Triggers = []string{"plymouth-theme"}
+	file.Triggers = triggers
 	b.in.Applied.Receipts[file.Resource] = file
 	src.Files["/usr/share/plymouth/themes/nimbus/nimbus.plymouth"] = []byte("theme")
-	receipt := state.Receipt{Resource: "trigger:plymouth-theme", Provider: KindTrigger, Machine: "vm", Verified: true,
-		Engine: "0.5.10", Previous: "text", Intended: "nimbus", Timestamp: time.Unix(30, 0)}
-	b.in.Applied.Receipts[receipt.Resource] = receipt
-	find := func(ops []Operation) *Operation {
-		for i := range ops {
-			if ops[i].ID == receipt.Resource {
-				return &ops[i]
+	for _, id := range triggers {
+		b.in.Applied.Receipts["trigger:"+id] = state.Receipt{Resource: "trigger:" + id, Provider: KindTrigger, Machine: "vm", Verified: true,
+			Engine: "0.5.10", Previous: "text", Intended: "nimbus", Timestamp: time.Unix(30, 0)}
+	}
+	planned := func() []string {
+		var ids []string
+		for _, op := range b.systemResources(nil) {
+			if op.Kind == KindTrigger {
+				ids = append(ids, op.ID)
 			}
 		}
-		return nil
+		return ids
 	}
-	op := find(b.systemResources(nil))
-	if op == nil || op.Resource == nil || op.Resource.Previous != "text" {
-		t.Fatalf("engine update did not reschedule the payload trigger: %+v", op)
+	// The engine ships the theme and the dracut module, so another engine
+	// rebuilds the images. The theme selection itself has not changed.
+	if got := planned(); !slices.Equal(got, []string{"trigger:initramfs-rebuild"}) {
+		t.Fatalf("engine update planned %v", got)
 	}
-	receipt.Engine = version.Engine
-	b.in.Applied.Receipts[receipt.Resource] = receipt
-	if op = find(b.systemResources(nil)); op != nil {
-		t.Fatalf("matching engine repeated the trigger: %+v", op)
+	for _, id := range triggers {
+		receipt := b.in.Applied.Receipts["trigger:"+id]
+		receipt.Engine = version.Engine
+		b.in.Applied.Receipts["trigger:"+id] = receipt
+	}
+	if got := planned(); len(got) != 0 {
+		t.Fatalf("matching engine repeated %v", got)
 	}
 }
 
@@ -675,7 +682,7 @@ func TestPlymouthRemovalRestoresRecordedTheme(t *testing.T) {
 	}
 	op := trigger(b.systemResources(nil))
 	if op == nil || op.Action != ActionRemove || op.Blocked != "" ||
-		len(op.Steps) != 1 || !slices.Equal(op.Steps[0].Argv, []string{"plymouth-set-default-theme", "-R", "text"}) {
+		len(op.Steps) != 1 || !slices.Equal(op.Steps[0].Argv, []string{"plymouth-set-default-theme", "text"}) {
 		t.Fatalf("deselected theme did not restore the recorded selection: %+v", op)
 	}
 	grub := func(ops []Operation) *Operation {
@@ -703,14 +710,14 @@ func TestPlymouthRemovalRestoresRecordedTheme(t *testing.T) {
 	src.Files["/usr/share/plymouth/themes/text/text.plymouth"] = []byte("theme")
 	delete(src.Files, "/usr/share/plymouth/themes/nimbus/nimbus.plymouth")
 	if op = trigger(b.systemResources(nil)); op == nil || op.Action != ActionRemove || op.Blocked != "" ||
-		len(op.Steps) != 1 || !slices.Equal(op.Steps[0].Argv, []string{"plymouth-set-default-theme", "-R", "text"}) {
+		len(op.Steps) != 1 || !slices.Equal(op.Steps[0].Argv, []string{"plymouth-set-default-theme", "text"}) {
 		t.Fatalf("removal with a missing payload did not restore the recorded theme: %+v", op)
 	}
 	src.Files["/usr/share/plymouth/themes/nimbus/nimbus.plymouth"] = []byte("theme")
 	src.Commands[nativetest.Key("plymouth-set-default-theme")] = []byte("spinner\n")
 	src.Files["/usr/share/plymouth/themes/spinner/spinner.plymouth"] = []byte("theme")
 	if op = trigger(b.systemResources(nil)); op == nil || op.Action != ActionRemove || op.Blocked != "" ||
-		len(op.Steps) != 1 || !slices.Equal(op.Steps[0].Argv, []string{"plymouth-set-default-theme", "-R", "spinner"}) {
+		len(op.Steps) != 1 || !slices.Equal(op.Steps[0].Argv, []string{"plymouth-set-default-theme", "spinner"}) {
 		t.Fatalf("a manually selected theme was not kept and rebuilt: %+v", op)
 	}
 	delete(src.Files, "/usr/share/plymouth/themes/spinner/spinner.plymouth")

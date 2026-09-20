@@ -3,7 +3,8 @@
 # payload and the inert /etc/grub.d/36_paper_dark drop-in; this component owns
 # only the /etc/nimbus marker and the native refresh triggers. The Plymouth
 # trigger hangs on the marker so removing the component restores the theme
-# observed before install.
+# observed before install. It only selects the theme; initramfs-rebuild puts
+# it into every installed kernel's image, not just the running one.
 schema = 1
 id = "boot-theme"
 
@@ -24,4 +25,4 @@ source = "etc/nimbus/boot-theme.enabled"
 owner = "root"
 group = "root"
 mode = "0644"
-triggers = ["grub-config", "plymouth-theme"]
+triggers = ["grub-config", "plymouth-theme", "initramfs-rebuild"]

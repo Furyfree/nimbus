@@ -30,9 +30,9 @@ completed last before publication.
 Paper Dark activation is implemented in source: the engine package ships the
 GRUB/Plymouth payload and the inert `/etc/grub.d/36_paper_dark` drop-in, and
 the `boot-theme` component owns the `/etc/nimbus` marker plus the
-`grub-config` and `plymouth-theme` triggers. The VM, desktop and laptop
-manifests select the component; an engine without the payload blocks the
-trigger instead of applying it. The desktop also selects
+`grub-config`, `plymouth-theme` and `initramfs-rebuild` triggers. The VM,
+desktop and laptop manifests select the component; an engine without the
+payload blocks the trigger instead of applying it. The desktop also selects
 `nvidia-boot-display`, which keeps the Intel drivers out of the initramfs so
 the unlock prompt reaches the monitor on the NVIDIA card.
 

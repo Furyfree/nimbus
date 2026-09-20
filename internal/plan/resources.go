@@ -305,7 +305,7 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 						op.Blocked = "could not read the current Plymouth theme: " + err.Error()
 					case current != "nimbus":
 						// The user already chose another theme; keep it and
-						// rebuild the initramfs without the Nimbus payload.
+						// let the rebuild drop the Nimbus payload.
 						if current == "" {
 							op.Blocked = "the current Plymouth theme is unset; set one with plymouth-set-default-theme before removing boot-theme"
 						} else if !plymouthThemeAvailable(b.in.Source, current) {
@@ -313,8 +313,8 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 						} else {
 							op.Action = ActionRemove
 							op.Summary = "keep the current Plymouth theme"
-							op.Steps = []Step{{Description: "keep the current Plymouth theme", Argv: []string{"plymouth-set-default-theme", "-R", current}, Privileged: true}}
-							op.Notes = []string{"Rebuilds the running kernel's initramfs without the Nimbus payload."}
+							op.Steps = []Step{{Description: "keep the current Plymouth theme", Argv: []string{"plymouth-set-default-theme", current}, Privileged: true}}
+							op.Notes = []string{"The initramfs rebuild in this plan drops the Nimbus payload from every kernel."}
 						}
 					case !ok || receipt.Previous == "":
 						op.Blocked = "no recorded previous Plymouth theme; set a theme with plymouth-set-default-theme before removing boot-theme"
@@ -325,8 +325,8 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 					default:
 						op.Action = ActionRemove
 						op.Summary = "restore the previous Plymouth theme"
-						op.Steps = []Step{{Description: "restore the previous Plymouth theme", Argv: []string{"plymouth-set-default-theme", "-R", receipt.Previous}, Privileged: true}}
-						op.Notes = []string{"Rebuilds the running kernel's initramfs with the restored theme."}
+						op.Steps = []Step{{Description: "restore the previous Plymouth theme", Argv: []string{"plymouth-set-default-theme", receipt.Previous}, Privileged: true}}
+						op.Notes = []string{"The initramfs rebuild in this plan puts the restored theme into every kernel."}
 					}
 				case !plymouthThemeAvailable(b.in.Source, "nimbus"):
 					op.Blocked = "the installed engine does not ship the boot-theme payload; upgrade nimbus or deselect boot-theme"
@@ -337,7 +337,7 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 						op.Resource = &ResourceChange{Name: "plymouth-theme", Previous: receipt.Previous}
 					}
 					if op.Blocked == "" && op.Action != ActionKeep {
-						op.Notes = []string{"Selects the Paper Dark Plymouth theme and rebuilds the running kernel's initramfs."}
+						op.Notes = []string{"Selects the Paper Dark Plymouth theme; the initramfs rebuild in this plan puts it into every kernel."}
 					}
 				}
 			}

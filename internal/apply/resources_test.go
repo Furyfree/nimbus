@@ -838,11 +838,11 @@ func (s *plymouthTestSource) Run(name string, args ...string) ([]byte, error) {
 
 func (s *plymouthTestSource) Stream(_, _ io.Writer, name string, args ...string) error {
 	s.streams = append(s.streams, nativetest.Key(name, args...))
-	if name != "sudo" || len(args) != 3 || args[0] != "plymouth-set-default-theme" || args[1] != "-R" {
+	if name != "sudo" || len(args) != 2 || args[0] != "plymouth-set-default-theme" {
 		return fmt.Errorf("unexpected stream: %s %v", name, args)
 	}
 	if !s.ignore {
-		s.theme = args[2]
+		s.theme = args[1]
 	}
 	return nil
 }
@@ -874,7 +874,7 @@ func TestPlymouthThemeTriggerRecordsAndRestores(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			src := &plymouthTestSource{theme: test.theme}
 			op := plan.Operation{ID: "trigger:plymouth-theme", Kind: plan.KindTrigger, Action: test.action,
-				Steps: []plan.Step{{Argv: []string{"plymouth-set-default-theme", "-R", test.target}, Privileged: true}}}
+				Steps: []plan.Step{{Argv: []string{"plymouth-set-default-theme", test.target}, Privileged: true}}}
 			receipts, removed, err := resourceExecutor(src).systemResource(op)
 			if err != nil {
 				t.Fatalf("receipts=%v err=%v", receipts, err)
@@ -888,7 +888,7 @@ func TestPlymouthThemeTriggerRecordsAndRestores(t *testing.T) {
 					t.Fatalf("receipts=%v", receipts)
 				}
 			}
-			if !slices.Equal(src.streams, []string{"sudo plymouth-set-default-theme -R " + test.target}) {
+			if !slices.Equal(src.streams, []string{"sudo plymouth-set-default-theme " + test.target}) {
 				t.Fatalf("streams=%v", src.streams)
 			}
 		})
@@ -897,7 +897,7 @@ func TestPlymouthThemeTriggerRecordsAndRestores(t *testing.T) {
 		src := &plymouthTestSource{theme: "nimbus"}
 		op := plan.Operation{ID: "trigger:plymouth-theme", Kind: plan.KindTrigger, Action: plan.ActionRepair,
 			Resource: &plan.ResourceChange{Name: "plymouth-theme", Previous: "text"},
-			Steps:    []plan.Step{{Argv: []string{"plymouth-set-default-theme", "-R", "nimbus"}, Privileged: true}}}
+			Steps:    []plan.Step{{Argv: []string{"plymouth-set-default-theme", "nimbus"}, Privileged: true}}}
 		receipts, _, err := resourceExecutor(src).systemResource(op)
 		if err != nil || len(receipts) != 1 || receipts[0].Previous != "text" {
 			t.Fatalf("receipts=%v err=%v", receipts, err)
@@ -916,9 +916,17 @@ func TestPlymouthThemeTriggerRecordsAndRestores(t *testing.T) {
 	t.Run("verification failure", func(t *testing.T) {
 		src := &plymouthTestSource{theme: "text", ignore: true}
 		op := plan.Operation{ID: "trigger:plymouth-theme", Kind: plan.KindTrigger, Action: plan.ActionRepair,
-			Steps: []plan.Step{{Argv: []string{"plymouth-set-default-theme", "-R", "nimbus"}, Privileged: true}}}
+			Steps: []plan.Step{{Argv: []string{"plymouth-set-default-theme", "nimbus"}, Privileged: true}}}
 		if _, _, err := resourceExecutor(src).systemResource(op); err == nil || !strings.Contains(err.Error(), "verification failed") {
 			t.Fatalf("unverified selection was accepted: %v", err)
+		}
+	})
+	t.Run("the tool's own rebuild flag is refused", func(t *testing.T) {
+		src := &plymouthTestSource{theme: "text"}
+		op := plan.Operation{ID: "trigger:plymouth-theme", Kind: plan.KindTrigger, Action: plan.ActionRepair,
+			Steps: []plan.Step{{Argv: []string{"plymouth-set-default-theme", "-R"}, Privileged: true}}}
+		if _, _, err := resourceExecutor(src).systemResource(op); err == nil || len(src.streams) != 0 {
+			t.Fatalf("a flag was accepted as the theme: streams=%v err=%v", src.streams, err)
 		}
 	})
 	t.Run("forged plan", func(t *testing.T) {

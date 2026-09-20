@@ -38,7 +38,10 @@ func TriggerArgs(id string) []string {
 		// entries and /etc/kernel/cmdline from /etc/default/grub.
 		return []string{"grub2-mkconfig", "--no-grubenv-update", "-o", "/boot/grub2/grub.cfg"}
 	case "plymouth-theme":
-		return []string{"plymouth-set-default-theme", "-R", "nimbus"}
+		// Selection only. initramfs-rebuild, which the same marker triggers,
+		// puts the theme into every installed kernel's image; the tool's own
+		// -R would rebuild the running kernel alone.
+		return []string{"plymouth-set-default-theme", "nimbus"}
 	case "initramfs-rebuild":
 		// Every installed kernel is rebuilt so the older-kernel menu entries
 		// boot the same initramfs. dracut walks /lib/modules, so the rescue
@@ -51,9 +54,10 @@ func TriggerArgs(id string) []string {
 // TriggerTracksEngine marks triggers whose result depends on payload shipped
 // by the engine package. A receipt from another engine re-runs them once, so
 // an engine update reaches the initramfs and grub.cfg without a kernel event.
+// The theme selection itself does not change with the engine.
 func TriggerTracksEngine(id string) bool {
 	switch id {
-	case "grub-config", "plymouth-theme":
+	case "grub-config", "initramfs-rebuild":
 		return true
 	}
 	return false

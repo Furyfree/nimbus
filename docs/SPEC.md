@@ -622,15 +622,20 @@ font.
 The engine package ships the payload under `/boot/grub2/themes/nimbus` and
 `/usr/share/plymouth/themes/nimbus` plus the inert
 `/etc/grub.d/36_paper_dark` drop-in. The `boot-theme` component owns only
-`/etc/nimbus/boot-theme.enabled`; its `grub-config` and `plymouth-theme`
-triggers regenerate `grub.cfg` and reselect the theme after approval. Both
-triggers re-run once when their receipt came from another engine version, and
-a repeat run keeps the theme recorded before Nimbus took over. Removing the
-marker restores Fedora's default configuration: a theme chosen by the user is
-kept and rebuilt without the Nimbus payload, while a current Nimbus theme is
-restored from the record. Removal blocks when no usable previous theme was
-recorded, when it is Nimbus's own, or when it is no longer installed. The
-trigger receipt is retired only after a successful run.
+`/etc/nimbus/boot-theme.enabled`; its `grub-config`, `plymouth-theme` and
+`initramfs-rebuild` triggers regenerate `grub.cfg`, select the theme with
+`plymouth-set-default-theme nimbus` and rebuild every installed kernel's
+initramfs after approval. The theme trigger only selects: the native tool's
+own `-R` would rebuild the running kernel alone and leave the older kernels
+unthemed. `grub-config` and `initramfs-rebuild` re-run once when their
+receipt came from another engine version, because the engine ships the GRUB
+and Plymouth payload; a repeat run keeps the theme recorded before Nimbus
+took over. Removing the marker restores Fedora's default configuration: a
+theme chosen by the user is kept, a current Nimbus theme is restored from
+the record, and the rebuild drops the Nimbus payload from every kernel.
+Removal blocks when no usable previous theme was recorded, when it is
+Nimbus's own, or when it is no longer installed. The trigger receipt is
+retired only after a successful run.
 
 Plymouth must only see the GPU that has the monitor. In the initramfs it
 binds the first native DRM driver and accepts the firmware framebuffer only
@@ -667,9 +672,7 @@ after a later `grub2-mkconfig`; a failed boot keeps the forced five-second
 timeout; a submenu opened once shows no entries on a second open; a kernel
 installed while only one entry existed appears after the next successful
 `grub2-mkconfig`; `set timeout=5` overrides `GRUB_TIMEOUT` and
-`menu_auto_hide`; without `nvidia-boot-display`, `plymouth-theme` rebuilds
-only the running kernel, so older initramfs images keep the default Plymouth
-prompt until they are rebuilt; and BIOS-only systems are untested.
+`menu_auto_hide`; and BIOS-only systems are untested.
 
 TTY repair is the supported recovery direction; no extra recovery desktop is
 installed. Owned legacy session files are retired through receipts on a
