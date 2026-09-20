@@ -10,12 +10,15 @@ profiles = [
   "laptop-gaming",
   "hyprland-noctalia",
   "virtualization",
+  "windows-vm",
 ]
 
 components = [
   "dtu-network",
   "amd-graphics",
   "laptop-power",
+  "boot-theme",
+  "fde",
 ]
 
 packages = []
