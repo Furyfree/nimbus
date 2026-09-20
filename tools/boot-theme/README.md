@@ -11,12 +11,20 @@ installs both trees; the `boot-theme` component owns
 `/etc/nimbus/boot-theme.enabled` and activates them through the `grub-config`
 and `plymouth-theme` triggers.
 
-Plymouth uses its native script plugin for boot activity, password prompts,
-ordinary questions and messages. Password callbacks receive only a bullet
-count. At most 32 dots are shown; this does not limit the actual passphrase.
-Native prompt wording remains visible below the field for alternate volumes,
-PINs and recovery keys. Plymouth owns input handling and submission. The
-activity pulse is indeterminate, not a completion percentage.
+Both screens are deliberately bare: the `N I M B U S` wordmark and one row
+below it. GRUB shows the menu and a countdown bar. Plymouth shows a small
+lock and the passphrase field; after unlock the same box becomes the loading
+bar, so unlocking never changes screens. Shutdown shows the wordmark alone.
+
+Plymouth uses its native script plugin for password prompts, ordinary
+questions and messages. Password callbacks receive only a bullet count. At
+most 18 dots are shown; this does not limit the actual passphrase. The
+ordinary "Please enter passphrase" wording is hidden because the lock says
+the same; any other native wording (alternate volumes, PINs, recovery keys)
+and Plymouth messages stay visible below the field, small and dim. Plymouth
+owns input handling and submission. The bar follows Plymouth's own boot
+progress estimate with an eased minimum that stops at 70%, because the boot
+after unlock is only a few seconds long; it never runs backwards.
 
 Plymouth needs `plymouth-plugin-script`, `plymouth-plugin-label` and
 `dejavu-sans-mono-fonts`, including the required renderer/font assets in the

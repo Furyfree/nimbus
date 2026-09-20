@@ -91,6 +91,9 @@ Decisions:
   - [ ] Desktop: with `NetworkManager-wait-online.service` disabled,
     `graphical.target` no longer waits for DHCP (14 s measured 2026-09-20),
     Hyprland starts right after auto-login, and Docker and Tailscale work.
+  - [ ] Simplified theme (2026-09-20): rendered in the preview container
+    only. On a real boot check the full-screen GRUB terminal box, the
+    countdown number, the field and lock, and the loading bar after unlock.
   - [ ] Laptop: type the passphrase at the themed prompt.
 - Accepted limitations live in [SPEC.md](SPEC.md#desktop-and-recovery):
   older initramfs keeps the default Plymouth prompt until rebuild; BIOS-only

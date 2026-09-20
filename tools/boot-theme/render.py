@@ -32,11 +32,15 @@ set gfxmode={width}x{height}
 terminal_output gfxterm
 set theme=$prefix/themes/nimbus/theme.txt
 export theme
-set timeout=60
+set timeout=15
 menuentry 'Fedora Linux' {{ echo 'Preview only'; sleep 60; }}
-menuentry 'Windows Boot Manager' {{ echo 'Preview only'; sleep 60; }}
-menuentry 'Fedora Linux - previous kernel' {{ echo 'Preview only'; sleep 60; }}
-""" + "".join(f"menuentry 'Older kernel {i}' {{ sleep 60; }}\n" for i in range(8)))
+menuentry 'Windows Boot Manager (on /dev/nvme0n1p1)' {{ echo 'Preview only'; sleep 60; }}
+submenu 'Previous kernels' {{
+""" + "".join(f"menuentry 'Fedora Linux (7.2.{i}-200.fc44.x86_64) 44 (Forty Four)' {{ sleep 60; }}\n"
+              for i in range(8, 0, -1)) + """menuentry 'Fedora Linux (0-rescue) 44 (Forty Four)' { sleep 60; }
+}
+menuentry 'UEFI Firmware Settings' { echo 'Preview only'; sleep 60; }
+""")
     theme = Path("/work/system/root/boot/grub2/themes/nimbus")
     run("grub2-mkstandalone", "-O", "x86_64-efi", "--locales=", "--fonts=",
         "-o", str(esp / "BOOTX64.EFI"), f"boot/grub/grub.cfg={config}",
@@ -83,9 +87,10 @@ menuentry 'Fedora Linux - previous kernel' {{ echo 'Preview only'; sleep 60; }}
                 ppm = work / "screen.ppm"
                 command("screendump", {"filename": str(ppm)})
                 run("magick", str(ppm), str(out / f"grub-{width}.png"))
-                for _ in range(7):
-                    command("send-key", {"keys": [{"type": "qcode", "data": "down"}]})
-                    time.sleep(.15)
+                # Open the Previous kernels submenu and scroll to its end.
+                for key in ["down", "down", "ret"] + ["down"] * 8:
+                    command("send-key", {"keys": [{"type": "qcode", "data": key}]})
+                    time.sleep(.3)
                 command("screendump", {"filename": str(ppm)})
                 run("magick", str(ppm), str(out / f"grub-{width}-scroll.png"))
                 command("quit")
@@ -117,7 +122,7 @@ def plymouth(out):
 
             capture("plymouth-boot.png")
             ask = subprocess.Popen(["plymouth", "ask-for-password",
-                                    "--prompt=Unlock encrypted disk"],
+                                    "--prompt=Please enter passphrase for disk WDS500G1X0E-00AFY0 (luks-0000):"],
                                    stdout=subprocess.DEVNULL, env=env)
             time.sleep(1)
             run("xdotool", "type", "sample", env=env)

@@ -1,45 +1,55 @@
-# Paper Dark: original Nimbus artwork and native Plymouth password callbacks.
-# Password callbacks receive a bullet count, never the passphrase itself.
+# Paper Dark: the wordmark and one row below it. The row is the passphrase
+# field while Plymouth asks, and a loading bar in the same box otherwise, so
+# unlocking never changes screens. Password callbacks receive a bullet count,
+# never the passphrase itself.
 Window.SetBackgroundTopColor(0.062745, 0.062745, 0.062745);
 Window.SetBackgroundBottomColor(0.062745, 0.062745, 0.062745);
 
 pixel = Image("pixel.png");
 lock_image = Image("lock.png");
 bullet_image = Image("bullet.png");
+max_dots = 18;
 brand = Sprite();
-rule = Sprite();
 lock = Sprite();
-title = Sprite();
-hint = Sprite();
+fill = Sprite();
+answer = Sprite();
 prompt_label = Sprite();
 message = Sprite();
-answer = Sprite();
-activity = Sprite();
 for (i = 0; i < 4; i++) border[i] = Sprite();
-for (i = 0; i < 32; i++) dots[i] = Sprite();
+for (i = 0; i < max_dots; i++) dots[i] = Sprite();
 
 mode = "normal";
 native_prompt = "";
 question_answer = "";
 message_text = "";
 bullet_count = 0;
+progress = 0;
 frame = 0;
+normal_since = 0;
 screen_width = 0;
 screen_height = 0;
 
-fun centered_text(sprite, text, size, shade, y, max_width) {
+fun centered_text(sprite, text, size, shade, middle, y, max_width) {
     image = Image.Text(text, shade, shade, shade, 1,
                        "DejaVu Sans Mono " + Math.Int(size * scale), "center");
     if (image.GetWidth() > max_width)
         image = image.Scale(max_width,
                             image.GetHeight() * max_width / image.GetWidth());
     sprite.SetImage(image);
-    sprite.SetPosition(center_x - image.GetWidth() / 2, y, 10);
+    sprite.SetPosition(middle - image.GetWidth() / 2, y, 10);
 }
 
 fun rectangle(sprite, x, y, width, height) {
     sprite.SetImage(pixel.Scale(Math.Int(width), Math.Int(height)));
     sprite.SetPosition(x, y, 5);
+}
+
+fun draw_bar() {
+    width = Math.Int((box_width - 6 * scale) * progress);
+    if (width < 1) width = 1;
+    rectangle(fill, box_x + 3 * scale, box_y + 3 * scale,
+              width, box_height - 6 * scale + 1);
+    fill.SetOpacity(mode == "normal" && loading);
 }
 
 fun layout() {
@@ -49,63 +59,51 @@ fun layout() {
     if (scale < 0.6) global.scale = 0.6;
     global.center_x = Window.GetX() + screen_width / 2;
     global.top = Window.GetY();
-    global.field_width = Math.Int(400 * scale);
-    global.field_height = Math.Int(60 * scale);
-    global.field_x = center_x - field_width / 2;
-    global.field_y = top + screen_height * 0.55;
+    # Shutdown has no meaningful progress: the wordmark stands alone.
+    global.loading = Plymouth.GetMode() != "shutdown" && Plymouth.GetMode() != "reboot";
 
-    centered_text(brand, "N I M B U S", 14, 0.933,
-                  top + screen_height * 0.065, screen_width * 0.8);
-    rectangle(rule, center_x - screen_width * 0.3,
-              top + screen_height * 0.13, screen_width * 0.6, 1);
-    lock.SetImage(lock_image.Scale(48 * scale, 64 * scale));
-    lock.SetPosition(center_x - 24 * scale, top + screen_height * 0.27, 10);
+    lock_width = Math.Int(18 * scale);
+    gap = Math.Int(12 * scale);
+    global.box_width = Math.Int(240 * scale);
+    global.box_height = Math.Int(30 * scale);
+    global.box_y = top + Math.Int(screen_height * 0.52);
+    # The lock and the field are centered as a pair; the bar reuses the box.
+    global.box_x = center_x - (lock_width + gap + box_width) / 2 + lock_width + gap;
+    if (mode == "normal") global.box_x = center_x - box_width / 2;
 
-    is_dialog = mode != "normal";
-    lock.SetOpacity(is_dialog);
-    rectangle(border[0], field_x, field_y, field_width, 1);
-    rectangle(border[1], field_x, field_y + field_height, field_width, 1);
-    rectangle(border[2], field_x, field_y, 1, field_height);
-    rectangle(border[3], field_x + field_width, field_y, 1, field_height + 1);
-    for (i = 0; i < 4; i++) border[i].SetOpacity(is_dialog);
+    centered_text(brand, "N I M B U S", 30, 0.933, center_x,
+                  top + screen_height * 0.40, screen_width * 0.8);
 
-    if (mode == "password") {
-        heading = "Unlock encrypted disk";
-        instructions = "Enter to unlock";
-    } else if (mode == "question") {
-        heading = "Boot requires input";
-        instructions = "Enter to continue";
-    } else {
-        heading = "Starting Fedora";
-        if (Plymouth.GetMode() == "shutdown") heading = "Shutting down";
-        instructions = "";
+    lock.SetImage(lock_image.Scale(lock_width, Math.Int(24 * scale)));
+    lock.SetPosition(box_x - gap - lock_width,
+                     box_y + box_height / 2 - 12 * scale, 10);
+    lock.SetOpacity(mode != "normal");
+
+    rectangle(border[0], box_x, box_y, box_width, 1);
+    rectangle(border[1], box_x, box_y + box_height, box_width, 1);
+    rectangle(border[2], box_x, box_y, 1, box_height);
+    rectangle(border[3], box_x + box_width, box_y, 1, box_height + 1);
+    for (i = 0; i < 4; i++) border[i].SetOpacity(mode != "normal" || loading);
+
+    for (i = 0; i < max_dots; i++) {
+        dots[i].SetImage(bullet_image.Scale(8 * scale, 8 * scale));
+        dots[i].SetPosition(box_x + (10 + 12 * i) * scale,
+                            box_y + box_height / 2 - 4 * scale, 12);
+        dots[i].SetOpacity(mode == "password" && i < bullet_count);
     }
-    centered_text(title, heading, 26, 0.933,
-                  top + screen_height * 0.42, screen_width * 0.86);
-    centered_text(hint, instructions, 14, 0.667,
-                  field_y + field_height + 28 * scale, screen_width * 0.8);
-
-    # Keep native wording visible for PINs, alternate volumes and recovery keys.
-    prompt_text = native_prompt;
-    if (prompt_text == "Unlock encrypted disk") prompt_text = "";
-    centered_text(prompt_label, prompt_text, 13, 0.667,
-                  top + screen_height * 0.77, screen_width * 0.88);
-    centered_text(message, message_text, 13, 0.933,
-                  top + screen_height * 0.86, screen_width * 0.88);
-
-    visible_dots = Math.Min(bullet_count, 32);
-    for (i = 0; i < 32; i++) {
-        dots[i].SetImage(bullet_image.Scale(10 * scale, 10 * scale));
-        dots[i].SetPosition(field_x + (20 + 11 * i) * scale,
-                            field_y + field_height / 2 - 5 * scale, 12);
-        dots[i].SetOpacity(mode == "password" && i < visible_dots);
-    }
-    centered_text(answer, question_answer, 20, 0.933,
-                  field_y + 12 * scale, field_width - 30 * scale);
+    centered_text(answer, question_answer, 13, 0.933, box_x + box_width / 2,
+                  box_y + 5 * scale, box_width - 16 * scale);
     answer.SetOpacity(mode == "question");
-    rectangle(activity, center_x - 40 * scale,
-              top + screen_height * 0.57, 80 * scale, 2);
-    activity.SetOpacity(mode == "normal");
+
+    # The ordinary disk prompt says nothing the lock does not. Other wording
+    # (PINs, recovery keys, questions) stays visible, small and dim.
+    prompt_text = native_prompt;
+    if (String(prompt_text).SubString(0, 23) == "Please enter passphrase") prompt_text = "";
+    centered_text(prompt_label, prompt_text, 11, 0.533, center_x,
+                  box_y + box_height + 22 * scale, screen_width * 0.8);
+    centered_text(message, message_text, 11, 0.667, center_x,
+                  box_y + box_height + 46 * scale, screen_width * 0.8);
+    draw_bar();
 }
 
 fun display_password(prompt, bullets) {
@@ -125,6 +123,7 @@ fun display_question(prompt, entry) {
 }
 
 fun display_normal() {
+    if (mode != "normal") global.normal_since = frame;
     global.mode = "normal";
     global.native_prompt = "";
     global.question_answer = "";
@@ -142,12 +141,24 @@ fun hide_message(text) {
     layout();
 }
 
+fun boot_progress(duration, fraction) {
+    if (fraction > progress) global.progress = fraction;
+}
+
 fun refresh() {
     if (screen_width != Window.GetWidth() || screen_height != Window.GetHeight())
         layout();
     global.frame++;
-    # An indeterminate pulse, not an invented boot-completion percentage.
-    if (mode == "normal") activity.SetOpacity(0.4 + 0.3 * (1 + Math.Sin(frame / 25)));
+    # Plymouth's own estimate drives the bar. The boot after unlock is short,
+    # so an eased minimum keeps the bar moving; it never runs backwards and
+    # never claims more than 70% on its own.
+    if (mode == "normal") {
+        elapsed = (frame - normal_since) / 50 / 8;
+        if (elapsed > 1) elapsed = 1;
+        eased = (1 - (1 - elapsed) * (1 - elapsed)) * 0.7;
+        if (eased > progress) global.progress = eased;
+        draw_bar();
+    }
 }
 
 Plymouth.SetDisplayPasswordFunction(display_password);
@@ -155,5 +166,6 @@ Plymouth.SetDisplayQuestionFunction(display_question);
 Plymouth.SetDisplayNormalFunction(display_normal);
 Plymouth.SetDisplayMessageFunction(display_message);
 Plymouth.SetHideMessageFunction(hide_message);
+Plymouth.SetBootProgressFunction(boot_progress);
 Plymouth.SetRefreshFunction(refresh);
 layout();
