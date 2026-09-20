@@ -590,7 +590,11 @@ boot-entry hook on kernel installs and removals and runs
 transaction. The marker-gated dracut module
 `/usr/lib/dracut/modules.d/40nimbus-plymouth` keeps `fc-match`, fontconfig and
 the monospace faces in the initramfs while the marker exists, verifying them
-before installing so a missing dependency skips the module. The GRUB drop-in
+before installing so a missing dependency skips the module. It also installs
+the script plugin and the complete `themes/nimbus` payload itself:
+`plymouth-populate-initrd` reads only the first key of `[Daemon]` to pick the
+theme, so any key before `Theme=` would otherwise leave the theme out of the
+initramfs. The GRUB drop-in
 loads custom faces only when Secure Boot is off, because the shim-lock
 verifier refuses `loadfont`; with Secure Boot the theme uses GRUB's built-in
 font.
@@ -607,6 +611,34 @@ kept and rebuilt without the Nimbus payload, while a current Nimbus theme is
 restored from the record. Removal blocks when no usable previous theme was
 recorded, when it is Nimbus's own, or when it is no longer installed. The
 trigger receipt is retired only after a successful run.
+
+Plymouth must only see the GPU that has the monitor. In the initramfs it
+binds the first native DRM driver and accepts the firmware framebuffer only
+after `DeviceTimeout`. On the desktop the monitor hangs on the NVIDIA card,
+whose driver RPM Fusion keeps out of the initramfs, while the Intel iGPU
+drives nothing; with `i915` in the initramfs the unlock prompt was invisible
+or took no keyboard input. The desktop-only `nvidia-boot-display` component
+owns `/etc/dracut.conf.d/90-nimbus-boot-display.conf`, which omits `i915`
+and `xe`, so Plymouth draws the Paper Dark prompt on the firmware framebuffer.
+The Intel drivers load from the root filesystem after unlock. The file also
+omits `nouveau`, which the kernel command line blacklists and which otherwise
+adds about 100 MB of firmware to the initramfs. Plymouth accepts the firmware
+framebuffer only after `DeviceTimeout`, eight seconds of black, so while that
+drop-in exists `40nimbus-plymouth` adds `UseSimpledrm=2` after `Theme=` in
+the initramfs copy of `plymouthd.conf`. The package-owned host file is never
+edited, a value the owner set there wins, and machines with a native display
+driver in the initramfs never get the key, because there it blanks the
+prompt when that driver loads. Its `initramfs-rebuild` trigger runs
+`dracut --force --regenerate-all` after approval: every installed kernel is
+rebuilt and the rescue image is not touched. Removing the component removes
+the file and rebuilds again. Do not select it where the iGPU drives the
+display, and do not put the NVIDIA modules in the initramfs: that ties the
+unlock prompt to akmods build order and MOK enrollment. A themed prompt
+counts as verified on a machine only after a passphrase was typed there.
+
+When the unlock prompt fails, boot the rescue entry under Previous kernels;
+its generic initramfs has no Plymouth DRM renderer and asks on the console.
+Alternatively press `e` on the default entry and delete `rhgb` for one boot.
 
 Accepted limitations: `grubby` and `grub2-set-default` changes apply only
 after a later `grub2-mkconfig`; a failed boot keeps the forced five-second

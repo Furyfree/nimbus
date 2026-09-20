@@ -732,3 +732,36 @@ func TestPlymouthRemovalRestoresRecordedTheme(t *testing.T) {
 		t.Fatalf("a nimbus previous theme was not blocked: %+v", op)
 	}
 }
+
+func TestInitramfsRebuildFollowsTheDracutDropIn(t *testing.T) {
+	b, src := resourceBuilder()
+	target := "/etc/dracut.conf.d/90-nimbus-boot-display.conf"
+	want := []string{"dracut", "--force", "--regenerate-all"}
+	find := func(ops []Operation) *Operation {
+		for i := range ops {
+			if ops[i].ID == "trigger:initramfs-rebuild" {
+				return &ops[i]
+			}
+		}
+		return nil
+	}
+	// A new drop-in rebuilds every kernel and says so in the plan.
+	answerFile(src, target, inspect.SystemFile{})
+	b.in.Resolved.Files = []definitions.ResolvedFile{{Target: target, Content: []byte("omit"), Owner: "root", Group: "root", Mode: "0644", Triggers: []string{"initramfs-rebuild"}}}
+	op := find(b.systemResources(nil))
+	if op == nil || op.Action != ActionRepair || len(op.Steps) != 1 || !slices.Equal(op.Steps[0].Argv, want) || !op.Steps[0].Privileged ||
+		!strings.Contains(strings.Join(op.Notes, " "), "rescue image is not touched") {
+		t.Fatalf("install plan: %+v", op)
+	}
+	// Deselecting the component removes the file; only a rebuild undoes it.
+	have := inspect.SystemFile{Exists: true, Content: []byte("omit"), Owner: "root", Group: "root", Mode: "0644"}
+	answerFile(src, target, have)
+	file := fileReceipt(target, have)
+	file.Triggers = []string{"initramfs-rebuild"}
+	b.in.Applied.Receipts[file.Resource] = file
+	b.in.Resolved.Files = nil
+	op = find(b.systemResources(nil))
+	if op == nil || op.Action != ActionRemove || len(op.Steps) != 1 || !slices.Equal(op.Steps[0].Argv, want) {
+		t.Fatalf("removal plan: %+v", op)
+	}
+}

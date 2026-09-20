@@ -71,6 +71,24 @@ Decisions:
   kernel end to end; the VM had no Windows entry.
 - [ ] Verify Fedora flat-menu fallback after kernel removal and marker
   removal on installed Fedora.
+- [ ] Typed-passphrase gate: the themed unlock prompt counts as verified
+  on a physical machine only after a passphrase was typed at it there. The
+  VM pass and the TPM unlock never exercised keyboard input.
+  - [x] Desktop, manual 2026-09-20: a hand-written
+    `90-nimbus-boot-display.conf` omitting `i915` plus
+    `dracut --force --kver`. Paper Dark prompt after about eight seconds of
+    black, keyboard worked, unlock, greetd auto-login into Hyprland, no
+    failed units. `xe` loaded in the initramfs and declined the iGPU.
+  - [x] Desktop, manual 2026-09-20: `UseSimpledrm=2` added by hand to the
+    host `plymouthd.conf`. Prompt drawn at once (password request 4.2 s,
+    accepted 8.2 s), clean handover to NVIDIA, greetd at 15.1 s.
+  - [ ] Desktop through sync: the owned drop-in (`i915 xe nouveau`) replaces
+    the manual file, `initramfs-rebuild` runs, `lsinitrd` shows none of the
+    three drivers and `UseSimpledrm=2` in the image's `plymouthd.conf` while
+    the host file has none (remove the hand-added line first), the image is
+    about 100 MB smaller, the rescue image checksum is unchanged, and the
+    passphrase is typed again.
+  - [ ] Laptop: type the passphrase at the themed prompt.
 - Accepted limitations live in [SPEC.md](SPEC.md#desktop-and-recovery):
   older initramfs keeps the default Plymouth prompt until rebuild; BIOS-only
   systems untested; `set timeout=5` overrides `GRUB_TIMEOUT` and

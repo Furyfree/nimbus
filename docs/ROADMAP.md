@@ -32,7 +32,9 @@ GRUB/Plymouth payload and the inert `/etc/grub.d/36_paper_dark` drop-in, and
 the `boot-theme` component owns the `/etc/nimbus` marker plus the
 `grub-config` and `plymouth-theme` triggers. The component is selected for
 the test VM now and for the physical machines when the 0.6.1 package ships
-the payload.
+the payload. The desktop also selects `nvidia-boot-display`, which keeps the
+Intel drivers out of the initramfs so the unlock prompt reaches the monitor
+on the NVIDIA card.
 
 Done when Fedora-only and Windows-present menus, the five-second timeout,
 Fedora default, older-kernel selection, encrypted-boot prompting, kernel

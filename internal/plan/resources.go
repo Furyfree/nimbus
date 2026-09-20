@@ -335,6 +335,14 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 					}
 				}
 			}
+			if id == "initramfs-rebuild" {
+				if removalTrigger[id] && !selectedTrigger[id] {
+					// Removing the drop-in only takes effect in a rebuilt image.
+					op.Action = ActionRemove
+					op.Summary = "rebuild the initramfs without the removed dracut drop-in"
+				}
+				op.Notes = []string{"Rebuilds the initramfs of every installed kernel through dracut --force --regenerate-all; the rescue image is not touched."}
+			}
 			if id == "grub-config" {
 				if removalTrigger[id] && !selectedTrigger[id] {
 					// Removing the marker restores Fedora's flat menu; the

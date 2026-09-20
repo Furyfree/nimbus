@@ -1,0 +1,18 @@
+# Desktop whose only monitor hangs on the NVIDIA card while an Intel iGPU is
+# present. Keeps the Intel drivers out of the initramfs so Plymouth draws the
+# disk-unlock prompt on the firmware framebuffer of that monitor. Do not
+# select it where the iGPU drives the display: docs/SPEC.md has the rule.
+schema = 1
+id = "nvidia-boot-display"
+
+requires = ["nvidia"]
+conflicts = []
+packages = []
+removes = []
+
+[[files]]
+source = "etc/dracut.conf.d/90-nimbus-boot-display.conf"
+owner = "root"
+group = "root"
+mode = "0644"
+triggers = ["initramfs-rebuild"]

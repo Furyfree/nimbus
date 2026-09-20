@@ -17,6 +17,7 @@ components = [
   "dtu-network",
   "intel-graphics",
   "nvidia",
+  "nvidia-boot-display",
   "desktop-display",
   "boot-theme",
 ]

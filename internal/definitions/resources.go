@@ -39,6 +39,11 @@ func TriggerArgs(id string) []string {
 		return []string{"grub2-mkconfig", "--no-grubenv-update", "-o", "/boot/grub2/grub.cfg"}
 	case "plymouth-theme":
 		return []string{"plymouth-set-default-theme", "-R", "nimbus"}
+	case "initramfs-rebuild":
+		// Every installed kernel is rebuilt so the older-kernel menu entries
+		// boot the same initramfs. dracut walks /lib/modules, so the rescue
+		// image, which has no module directory, is not touched.
+		return []string{"dracut", "--force", "--regenerate-all"}
 	}
 	return nil
 }
