@@ -9,14 +9,15 @@ lives in Git and the release notes.
 
 Release checklist: [#40](https://github.com/Furyfree/nimbus/issues/40).
 
-- [ ] FDE 3.5 hardware run: laptop first, then desktop with both MOKs
-  enrolled before TPM enrollment (#34).
+- [ ] Desktop: install the released package on the clean Fedora image and
+  verify passphrase prompt, auto-login, GRUB 5 seconds, `nvidia-mok` and
+  `nvidia-smi` (#34).
 - [ ] Channel phase 4 (#72): reverse drill after a `main` release carries
   the channel code and payload; verify the one-time notice and drift
   refusals in a clean VM.
 - [ ] Documentation reconciliation (#39), completed last.
 - [ ] Package after the release archive exists: `nimbus.spec` version and
-  archive checksum together, boot-theme/FDE payload as plain 0755 files,
+  archive checksum together, boot-theme payload as plain 0755 files,
   `boot-theme` selected in `common`.
 - [ ] Bare metal: install the released package and run the #40 checklist.
 
@@ -50,18 +51,17 @@ Decisions:
   log boundary; the terminal keeps the original bytes
   (`internal/cli/install_log.go`).
 - [x] Init closes with the Nimbus banner, the single log path, the pending
-  pre-reboot tasks (`nvidia-mok`, `fde`), the reboot or logout instruction
-  and the after-reboot `nimbus setup-notes` pointer; session-only checks no
-  longer read as verification problems (`internal/cli/final_report.go`).
-- [x] Init prints one shared-MOK paragraph when the FDE and NVIDIA tasks can
-  enroll in one reboot, with the `sudo kmodgenca -a` key-pair hint and the
-  same-password rule; FDE reports step 1 of 2 / step 2 of 2
-  (`internal/cli/final_report.go`, `internal/postinstall/fde.go`).
+  pre-reboot task (`nvidia-mok`), the reboot or logout instruction and the
+  after-reboot `nimbus setup-notes` pointer; session-only checks no longer
+  read as verification problems (`internal/cli/final_report.go`).
+- [x] The shared-MOK paragraph, FDE step labels and the whole signed-image
+  path were removed for passphrase-only encryption plus greetd auto-login
+  (2026-09-20).
 - [ ] Drill before the package ships: one sudo password prompt, live dnf
   progress, Ctrl+C, terminal resize and a readable `engine.log` in a
   disposable VM, then the bare-metal rerun on Secure Boot where the report
-  shows the `nvidia-mok` pre-reboot line and one MokManager session enrolls
-  both the FDE and NVIDIA keys with a shared password.
+  shows the `nvidia-mok` pre-reboot line, one MokManager screen enrolls the
+  NVIDIA key and a skipped enrollment still boots.
 
 ## Boot theme and menu
 
@@ -78,24 +78,23 @@ Decisions:
   installed while only one entry existed appears after the next successful
   `grub2-mkconfig`; removal blocks without a recorded usable theme.
 
-## FDE, Secure Boot and TPM
+## Disk encryption and login
 
-Policy and design: issue #34. Signed shim chain, enrollment, renewal,
-status and scoped removal are implemented; VM run passed 2026-09-18/19.
+Decision (2026-09-20): passphrase-only LUKS with greetd auto-login, matching
+Omarchy and Ryoku. The signed UKI, TPM policy and `fde` component are removed.
 
-- [ ] VM-only gates: `--tpm2-signature` at enrollment time (omit when
-  cryptenroll refuses from the running system), the elected
-  `rd.luks.options` unlock path, and the observed clean-boot PCR 12/13
-  values.
-- [ ] Hardware 3.5: enrollment, unattended unlock, passphrase fallback,
-  renewal after a boot change (MOK/akmods/dbx changes PCR 14) and scoped
-  removal on the laptop, then the desktop.
-- [ ] Desktop: run `nvidia-mok` before FDE enrollment and exercise the
-  NVIDIA dracut to UKI reconcile caller.
-- Hardware-only gates: firmware OptionalData handling, fall-through to the
-  Fedora entry, fwupd/dbx renewal, Windows/NVIDIA entries.
-- `systemd-tpm2-setup` fails on swtpm (`Device not a stream`); the unit is
-  masked on disposable VMs only. Do not mask it on hardware.
+- [ ] VM: auto-login reaches Hyprland, `secret-tool` reads the passwordless
+  default keyring without a prompt, logout returns to the Noctalia greeter,
+  and a manual password login cannot create an encrypted keyring.
+- [ ] VM: with the NVIDIA key pending, skipping the MokManager screen leaves
+  a bootable system (GRUB default, SSH reachable) and the next boot offers
+  enrollment again.
+- [ ] Bare metal: passphrase prompt in the Paper Dark theme, auto-login,
+  GRUB menu visible for 5 seconds, `nvidia-mok` then `nvidia-smi`.
+- [ ] Chezmoi: ship the passwordless `Default_keyring.keyring` and the
+  `default` alias (user files; Nimbus never writes `$HOME`).
+- Accepted limit: a rebooted machine waits at the passphrase prompt, so
+  unattended remote boot is not available.
 
 ## Postinstall and owner trials
 

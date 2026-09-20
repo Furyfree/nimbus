@@ -68,7 +68,6 @@ func newInternal() *cobra.Command {
 	}}
 	group.AddCommand(selectorChannel)
 	group.AddCommand(newInternalSystemFile())
-	group.AddCommand(newInternalFDEUKI())
 	group.AddCommand(newInternalBootMenu())
 	var expected string
 	adopt := &cobra.Command{Use: "snapper-adopt", Hidden: true, Args: noArgs, RunE: func(cmd *cobra.Command, args []string) error {

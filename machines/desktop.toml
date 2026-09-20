@@ -19,7 +19,6 @@ components = [
   "nvidia",
   "desktop-display",
   "boot-theme",
-  "fde",
 ]
 
 packages = [

@@ -6,9 +6,8 @@ criteria.
 
 ## Next steps
 
-1. Finish 0.6.1: boot payload and boot validation, FDE hardware run,
-   installation output and logging drill, documentation reconciliation
-   (#39), package and publish.
+1. Finish 0.6.1: boot payload and boot validation, installation output and
+   logging drill, documentation reconciliation (#39), package and publish.
 2. Channel phase 4 (#72): reverse drill after the release.
 3. Shared operations, then the TUI dashboard (#36) for 0.7.x.
 4. Desktop trial after delivery.
@@ -42,24 +41,16 @@ entries and the EFI stub preserved. Use a disposable VM snapshot as an
 independent safeguard. Accepted limitations are recorded in
 [TASKS.md](TASKS.md#boot-theme-and-menu).
 
-### FDE auto-unlock second
+### Disk encryption and login (decided 2026-09-20)
 
-An optional post-install action for the existing LUKS2 installation, selected
-with the `fde` component. Issue #34 owns the native method and boot-change
-policy: Dracut, ukify, kernel-install and systemd-cryptenroll, with PCR 7 +
-PCR 14 + signed PCR 11 when shim is used and PCR 7 + signed PCR 11 without.
-Detection (`postinstall fde`), the signed UKI build path, TPM enrollment,
-renewal, status and scoped removal are implemented; the VM run passed on
-2026-09-18.
-
-The action previews the target and changes, requests approval, preserves a
-working passphrase, and reports unsupported setups without weakening
-security. Sync and upgrades never enroll a machine automatically.
-
-Done when enrollment, unattended unlock, passphrase fallback and removal
-pass on real hardware, including fallback after a boot change that
-invalidates the chosen policy. VM checks prepare this work but do not close
-the hardware gate; see [TASKS.md](TASKS.md#fde-secure-boot-and-tpm).
+Passphrase-only LUKS with greetd auto-login, matching Omarchy and Ryoku.
+TPM auto-unlock, the signed UKI path and the `fde` component were removed:
+the disk passphrase is the authentication boundary, the Paper Dark theme
+shows its prompt, and `[initial_session]` starts the owner's session without
+a greeter. The passwordless default keyring is Chezmoi-owned user
+configuration; Nimbus owns `/etc/greetd/nimbus.toml` and `/etc/pam.d/greetd`.
+`nvidia-mok` stays the only Secure Boot key flow. Exit criteria live in
+[TASKS.md](TASKS.md#disk-encryption-and-login).
 
 ### Remaining integration
 
@@ -91,8 +82,8 @@ the hardware gate; see [TASKS.md](TASKS.md#fde-secure-boot-and-tpm).
 
 Done when the affected installation, upgrade, removal and retry paths pass
 in a disposable Fedora VM. GRUB requires an actual boot and restoration of
-its previous configuration; FDE needs the scoped hardware test above; other
-physical-device behavior remains the later hardware trial.
+its previous configuration; other physical-device behavior remains the later
+hardware trial.
 
 ## 3. Release 0.6.1 and engine channels
 
@@ -137,8 +128,7 @@ application's feature set.
 
 Commit, publication and COPR builds require their own authorization. Record
 the exact release and packaging results before calling the candidate ready.
-Run the full desktop trial after the dashboard and delivery are ready; the
-scoped FDE hardware test happens earlier.
+Run the full desktop trial after the dashboard and delivery are ready.
 
 ## Deferred beyond the desktop milestone
 

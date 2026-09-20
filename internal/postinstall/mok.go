@@ -12,8 +12,7 @@ import (
 const (
 	MOKCertificate = "/etc/pki/akmods/certs/public_key.der"
 	// MOKKeyPairHint is the native command that creates the akmods signing
-	// key pair. The closing report matches on it to tell a missing key pair
-	// apart from blocks that cannot request a key at all.
+	// key pair when it is missing.
 	MOKKeyPairHint = "sudo kmodgenca -a"
 )
 
@@ -29,7 +28,7 @@ func mok(src native.Source, in Inputs) Task {
 			"If modules do not match the certificate: sudo -- akmods --force --rebuild --akmod nvidia --kernels <running-kernel>.",
 			"Check every NVIDIA module's signer and certificate serial, then refresh the boot image: sudo -- dracut --force --kver <running-kernel>.",
 			"If needed: sudo -- mokutil --import /etc/pki/akmods/certs/public_key.der. Enter the temporary password in mokutil's native prompt.",
-			"When FDE also requests MOK enrollment, run it before rebooting and use the same temporary password for each import, so one MokManager session can enroll every pending key.",
+			"Until enrollment, the NVIDIA modules are untrusted under Secure Boot and the driver does not load; do not skip the blue Enroll MOK screen at this reboot.",
 			"Existing trust and pending requests are preserved. Reboot yourself when ready; Enroll MOK -> Continue -> Yes -> password -> Reboot (US/QWERTY keyboard).",
 		},
 		Verification: "After reboot, run nvidia-smi and mokutil --sb-state. Certificate enrollment alone does not prove the driver loads.",
@@ -47,13 +46,6 @@ func mok(src native.Source, in Inputs) Task {
 	case inspect.SecureBootEnabled:
 	default:
 		return t
-	}
-	switch ready, err := fdeMarkerReady(src); {
-	case err != nil:
-		t.Status, t.Detail = Blocked, "The FDE marker could not be read: "+err.Error()
-		return t
-	case ready:
-		t.Instructions = append(t.Instructions, "FDE is enabled: after the boot-image refresh, the signed Nimbus image for the running kernel is rebuilt too (sudo nimbus internal fde-uki add <running-kernel> --only-if-current).")
 	}
 	for _, name := range []string{"akmod-nvidia", "akmods", "mokutil"} {
 		found := false

@@ -42,10 +42,6 @@ const (
 	SetupVoxtype              ActionKind = "setup-voxtype"
 	SetHostname               ActionKind = "set-hostname"
 	SetupNVIDIA               ActionKind = "setup-nvidia"
-	SetupFDE                  ActionKind = "setup-fde"
-	EnrollFDE                 ActionKind = "enroll-fde"
-	RemoveFDE                 ActionKind = "remove-fde"
-	RenewFDE                  ActionKind = "renew-fde"
 )
 
 // Action describes native commands offered for explicit user selection.
@@ -85,16 +81,7 @@ type Task struct {
 	// to verification problems.
 	Session bool `json:"session,omitzero"`
 	Logout  bool `json:"logout,omitzero"`
-	// fdeSecure remembers the inspected Secure Boot state for the FDE task's
-	// preview; RunFDESetup re-reads it before any mutation.
-	fdeSecure bool
-	// fdeRenewMode remembers which renewal commands verification approved:
-	// "wipe-first" or "add-wipe" (default).
-	fdeRenewMode string
 }
-
-// FDESecure reports the inspected Secure Boot state for the FDE task.
-func (t Task) FDESecure() bool { return t.fdeSecure }
 
 type Inputs struct {
 	Task     string // Empty inspects the complete checklist; a task ID inspects only its prerequisites.
@@ -166,9 +153,6 @@ func Inspect(src native.Source, in Inputs) []Task {
 		add("dtu-network", func() Task { return dtuNetwork(src, in) })
 	}
 	add("hostname", func() Task { return hostnameTask(src, in) })
-	if slices.ContainsFunc(in.Resolved.Components, func(c definitions.ResolvedComponent) bool { return c.ID == "fde" }) {
-		add("fde", func() Task { return fdeTask(src, in) })
-	}
 	if in.Task == "" {
 		result = append(result, sessionTasks(src, in)...)
 	}

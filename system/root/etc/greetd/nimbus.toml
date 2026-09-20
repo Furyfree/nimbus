@@ -6,6 +6,13 @@ vt = 1
 # Interactive shells load their own configuration.
 source_profile = false
 
+# The LUKS passphrase is the authentication boundary, so the first session
+# starts without a greeter. Once the owner logs out, greetd falls back to
+# default_session below.
+[initial_session]
+command = "uwsm start -e -D Hyprland hyprland.desktop"
+user = "pby"
+
 [default_session]
 command = "/usr/bin/noctalia-greeter-session"
 user = "greetd"

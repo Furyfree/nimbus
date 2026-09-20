@@ -42,12 +42,6 @@ func RunNVIDIAMOK(ctx context.Context, src native.Source, out, stderr io.Writer)
 	if err := stream("sudo", "--validate"); err != nil {
 		return err
 	}
-	// Read the marker before any change so a foreign or unreadable marker
-	// stops the task before akmods and dracut run.
-	rebuild, err := FDEUKIRebuildArgv(src, kernel)
-	if err != nil {
-		return fmt.Errorf("read the FDE marker: %w; no changes were made", err)
-	}
 	files, err := src.Run("sudo", "-n", "--", "find", "/etc/pki/akmods", "-maxdepth", "2", "(", "-path", MOKCertificate, "-o", "-path", mokPrivateKey, ")", "-print")
 	if err != nil {
 		return fmt.Errorf("inspect akmods key files: %w; no key generation was attempted", err)
@@ -88,13 +82,8 @@ func RunNVIDIAMOK(ctx context.Context, src native.Source, out, stderr io.Writer)
 	if err := stream("sudo", "--", "dracut", "--force", "--kver", kernel); err != nil {
 		return fmt.Errorf("refresh boot image: %w; enrollment was not changed; correct the error and retry", err)
 	}
-	if rebuild != nil {
-		if err := stream(rebuild[0], rebuild[1:]...); err != nil {
-			return fmt.Errorf("the initramfs was regenerated but the signed Nimbus image could not be rebuilt: %w; the previous image and the disk passphrase remain; enrollment was not changed", err)
-		}
-	}
 	if state == mokAbsent {
-		if _, err := fmt.Fprintln(out, "Choose a temporary MOK password in the native prompt; if another MOK request is pending (for example FDE), enter the same password so one MOK Manager session enrolls every key. The reboot enrollment screen uses US/QWERTY. Nimbus does not record the password."); err != nil {
+		if _, err := fmt.Fprintln(out, "Choose a temporary MOK password in the native prompt. The reboot enrollment screen uses US/QWERTY. Nimbus does not record the password."); err != nil {
 			return err
 		}
 		if err := stream("sudo", "--", "mokutil", "--import", MOKCertificate); err != nil {
@@ -109,7 +98,7 @@ func RunNVIDIAMOK(ctx context.Context, src native.Source, out, stderr io.Writer)
 		}
 	}
 	if state == mokRequested {
-		_, err = fmt.Fprintln(out, "NVIDIA modules are signed and the boot image is refreshed. Enrollment is pending, not complete.\nReboot when ready. In MOK Manager: Enroll MOK -> Continue -> Yes -> temporary password -> Reboot. Keyboard: US/QWERTY.")
+		_, err = fmt.Fprintln(out, "NVIDIA modules are signed and the boot image is refreshed. Enrollment is pending, not complete. The driver does not load until the key is enrolled, so do not skip the blue Enroll MOK screen at this reboot.\nReboot when ready. In MOK Manager: Enroll MOK -> Continue -> Yes -> temporary password -> Reboot. Keyboard: US/QWERTY.")
 	} else {
 		_, err = fmt.Fprintln(out, "NVIDIA modules are signed, the boot image is refreshed, and the certificate is trusted. Reboot when ready to load the driver.")
 	}

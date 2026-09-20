@@ -18,7 +18,6 @@ var taskDescriptions = []struct{ id, title, help string }{
 	{"copilot", "Install GitHub Copilot", "Requires the selected native installer helper. The helper owns installation, updates and removal."},
 	{"dtu-network", "Set up DTU eduroam on Linux", "Requires the selected dtu-network component and installed packages with verified Nimbus receipts or recorded baseline identities. After approval, install the reviewed CAT CA bundle and configure a user-restricted eduroam profile through NetworkManager. Choose manual credentials or a 1Password item UUID with username and password fields; a bare username receives @dtu.dk. Existing eduroam/DTUsecure profiles require a separate default-No deletion/recreation confirmation, including with --yes; declining preserves profiles and certificates without reading credentials. Automatic connection is enabled after profile/password verification, even off campus. A separate prompt offers immediate connection; if eduroam is not found, setup stays configured for later. Status and --plan stay offline, never read credentials and never request sudo. Completion verifies configuration, not Wi-Fi or Internet access. --reset clears evidence only."},
 	{"fingerprint", "Enroll a fingerprint", "Requires fprintd and a supported reader. Native enrollment verifies completion."},
-	{"fde", "Set up TPM automatic disk unlock", "Requires the selected fde component and its recorded packages. Status inspects read-only: mounted LUKS2 root, TPM2 device, firmware mode, hook payload, marker, firmware entry, tools, TPM token and the ownership record. After approval, setup writes the marker, generates the key material, builds and signs /boot/efi/EFI/Linux/nimbus.efi and ensures the Nimbus UKI firmware entry as the default target; kernel updates rebuild and re-sign it. Reboot into the image, then run this task again to enroll TPM automatic unlock with the native passphrase prompt. Removal is explicit (--remove), wipes only the recorded keyslot and keeps the disk passphrase; --yes cannot accept it."},
 	{"hostname", "Set the persistent hostname", "Requires the machine manifest hostname. Close browsers first: Chromium treats a lock naming another hostname as another computer. After approval, set the static hostname through hostnamectl and verify it. NetworkManager then keeps the name stable across Wi-Fi changes and reboots. Status and --plan stay read-only; no browser data or profile locks are touched."},
 	{"hyprland-plugins", "Install selected Hyprland plugins", "Requires the active matching Hyprland session, development headers and Chezmoi plugin selection."},
 	{"noctalia-lockscreen", "Restore the managed lockscreen layout", "Requires an applied Chezmoi layout and the unlocked Noctalia desktop session. After approval, gracefully stop only Noctalia, save a private settings backup, remove only lockscreen_widgets overrides, restart the shell and verify configuration. Close the lockscreen editor first. The bar briefly disappears; applications and Hyprland stay running. No sudo, automatic locking or repair during sync. --reset clears evidence only; it does not restore the backup."},
@@ -186,9 +185,6 @@ func resetTask(machine, id string) error {
 		return err
 	}
 	keys := []string{id + ".manual", id + ".complete"}
-	if id == "fde" {
-		keys = append(keys, postinstall.FDEEvidence)
-	}
 	return store.Update("postinstall", machine, nil, keys)
 }
 func unknownPostinstallTask(cmd *cobra.Command, name string) error {

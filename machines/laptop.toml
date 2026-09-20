@@ -18,7 +18,6 @@ components = [
   "amd-graphics",
   "laptop-power",
   "boot-theme",
-  "fde",
 ]
 
 packages = []

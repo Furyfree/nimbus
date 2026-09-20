@@ -8,6 +8,14 @@
       "profiles": []
     },
     {
+      "id": "nimbus.autologin",
+      "revision": 1,
+      "text": "Auto-login starts the session after the disk passphrase. The default keyring is passwordless by design so apps do not prompt; 1Password keeps its own unlock.",
+      "profiles": [
+        "hyprland-noctalia"
+      ]
+    },
+    {
       "id": "dotfiles.shell",
       "revision": 1,
       "text": "Open a new terminal after installation to load shell and Mise configuration.",

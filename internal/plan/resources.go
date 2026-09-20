@@ -334,9 +334,6 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 						op.Notes = []string{"Selects the Paper Dark Plymouth theme and rebuilds the running kernel's initramfs."}
 					}
 				}
-				if op.Blocked == "" && b.fdeMarkerInstalled() {
-					op.Notes = append(op.Notes, "The signed Nimbus image is rebuilt for the running kernel unless it already targets another kernel, because FDE is enabled.")
-				}
 			}
 			if id == "grub-config" {
 				if removalTrigger[id] && !selectedTrigger[id] {
@@ -351,9 +348,6 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 					} else {
 						op.Notes = []string{"Rewrites /boot/loader/entries-nimbus and regenerates grub.cfg through grub2-mkconfig --no-grubenv-update; the installed kernel-install hook keeps it current on kernel updates."}
 					}
-				}
-				if op.Blocked == "" && b.fdeMarkerInstalled() {
-					op.Notes = append(op.Notes, "Plymouth regenerates the running kernel's initramfs; the signed Nimbus image is rebuilt for the running kernel afterwards unless it already targets another kernel, because FDE is enabled.")
 				}
 			}
 			ops = append(ops, op)

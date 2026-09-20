@@ -439,18 +439,9 @@ func enrichPostinstall(src native.Source, s *selected, view *postinstallView) er
 	}
 	for i := range view.Tasks {
 		t := &view.Tasks[i]
-		evidenceID := t.ID + ".complete"
-		if t.ID == "fde" {
-			evidenceID = postinstall.FDEEvidence
-		}
-		if (t.ID == "nvidia-mok" || t.ID == "fde") && t.VerificationNeedsRoot && evidence.Has(view.Machine, evidenceID, 1, "verified") {
+		if t.ID == "nvidia-mok" && t.VerificationNeedsRoot && evidence.Has(view.Machine, t.ID+".complete", 1, "verified") {
 			t.PreviouslyVerified = true
-			switch t.ID {
-			case "nvidia-mok":
-				t.Detail = "Enrollment verified earlier; current check requires sudo. Recheck: nimbus postinstall nvidia-mok (requests sudo)."
-			case "fde":
-				t.Detail = "Setup verified earlier; the image content needs sudo to recheck. Recheck: nimbus postinstall fde (requests sudo)."
-			}
+			t.Detail = "Enrollment verified earlier; current check requires sudo. Recheck: nimbus postinstall nvidia-mok (requests sudo)."
 		}
 		if t.ID != "onepassword" || t.Action == nil {
 			continue

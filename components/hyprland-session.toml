@@ -53,6 +53,12 @@ group = "root"
 mode = "0644"
 
 [[files]]
+source = "etc/pam.d/greetd"
+owner = "root"
+group = "root"
+mode = "0644"
+
+[[files]]
 source = "etc/systemd/system/greetd.service.d/nimbus.conf"
 owner = "root"
 group = "root"

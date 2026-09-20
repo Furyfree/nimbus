@@ -82,8 +82,7 @@ func (s *mokSetupSource) Stream(_, _ io.Writer, name string, args ...string) err
 		return errors.New("native failure")
 	}
 	switch command {
-	case "sudo --validate", "sudo -- dracut --force --kver test-kernel", "nvidia-smi",
-		"sudo -- /usr/bin/nimbus internal fde-uki add test-kernel --only-if-current":
+	case "sudo --validate", "sudo -- dracut --force --kver test-kernel", "nvidia-smi":
 	case "sudo -- akmods --force --rebuild --akmod nvidia --kernels test-kernel":
 		s.signed = !s.buildUnsigned
 		if s.cancel != nil {
@@ -137,18 +136,9 @@ func TestNVIDIAMOKSetup(t *testing.T) {
 		{"enrolled unsigned modules", func(s *mokSetupSource) { s.enrollment = " is already enrolled" }, "", []string{"sudo --validate", build, dracut}},
 		{"trusted signed retry", func(s *mokSetupSource) { s.enrollment = " is already enrolled"; s.signed = true }, "", []string{"sudo --validate", dracut}},
 		{"retry boot image", func(s *mokSetupSource) { s.signed = true }, "", []string{"sudo --validate", dracut, enroll}},
-		{"fde rebuild after dracut", func(s *mokSetupSource) {
-			s.Files = map[string][]byte{FDEUKIMarker: []byte(fdeMarkerText)}
-		}, "", []string{"sudo --validate", build, dracut, "sudo -- /usr/bin/nimbus internal fde-uki add test-kernel --only-if-current", enroll}},
-		{"foreign fde marker stops before changes", func(s *mokSetupSource) {
-			s.Files = map[string][]byte{FDEUKIMarker: []byte("foreign")}
-		}, "FDE marker", []string{"sudo --validate"}},
 		{"disabled Secure Boot", func(s *mokSetupSource) { s.Commands["mokutil --sb-state"] = []byte("SecureBoot disabled") }, "requires confirmed enabled Secure Boot", nil},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			previous := fdeExecutable
-			fdeExecutable = func() (string, error) { return "/usr/bin/nimbus", nil }
-			t.Cleanup(func() { fdeExecutable = previous })
 			src := &mokSetupSource{FakeSource: &nativetest.FakeSource{Commands: map[string][]byte{
 				"mokutil --sb-state": []byte("SecureBoot enabled"), "uname -r": []byte("test-kernel"),
 				"sudo -n -- cat " + MOKCertificate: mokTestCertificate(t),

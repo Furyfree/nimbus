@@ -310,10 +310,9 @@ names the private hook-log directory beside the terminal diagnostic. No
 progress percentage is invented. One closing report distinguishes completed
 changes, failed and skipped phases and verification problems. Init closes
 with the log directory,
-the pending prerequisites for its requested reboot, including shared MOK
-guidance when the FDE and NVIDIA keys can enroll in one session, the reboot or
-logout instruction and the after-reboot pointer to `nimbus setup-notes`; sync
-keeps the plain lines. Session-dependent checks stay unknown until the desktop
+the pending prerequisites for its requested reboot, the reboot or logout
+instruction and the after-reboot pointer to `nimbus setup-notes`; sync keeps
+the plain lines. Session-dependent checks stay unknown until the desktop
 session runs and count as remaining setup instead of verification problems.
 An unavailable check is reported, never treated as proof of matching state.
 
@@ -468,56 +467,22 @@ shown as "Previously verified" in notices, with JSON retaining native
 `unknown` and `previously_verified: true`; it is not current verification.
 Status, help and `--plan` never authenticate.
 
-`fde` is an optional explicit action selected with the `fde` component. The
-accepted policy uses Dracut, ukify, kernel-install and systemd-cryptenroll
-with Fedora's shim and GRUB retained. Secure Boot with shim uses PCR 7 +
-PCR 14 + signed PCR 11; without shim, PCR 7 + signed PCR 11; with Secure Boot
-disabled an explicit reduced-protection confirmation binds PCR 7 to that
-state. PCR 11 uses signed expected measurements. The signed path starts
-Fedora's shim with the UKI path `\EFI\Linux\nimbus.efi` as its load option;
-the Fedora GRUB and Windows entries stay untouched. A private shim copy is a
-documented recovery procedure, not the default. `systemd-pcrlock` stays
-complementary and is never implicit.
+Disk encryption stays Fedora's: an installed LUKS2 root unlocked only by its
+passphrase. Nimbus enrolls no TPM policy, generates no key material, builds
+no unified kernel image, and owns no firmware entry or kernel-install hook.
+GRUB remains the default boot path and the Paper Dark theme shows the
+passphrase prompt during boot. The `fde` component, its postinstall task and
+their evidence no longer exist.
 
-Inspection is read-only: mounted LUKS2 root, TPM2, Secure Boot, tools and the
-installed inert hook `/etc/kernel/install.d/90-nimbus-uki.install`, which
-does nothing until approved setup writes `/etc/nimbus/fde-uki.enabled`.
-Setup generates one key-pair set with `ukify genkey` under
-`/var/lib/nimbus/fde/` (directory 0700, private keys 0400), imports the MOK
-certificate in a native prompt, and builds a signed image with ukify at
-`/boot/efi/EFI/Linux/nimbus.efi`, signed for `enter-initrd` only with the
-embedded per-volume `rd.luks.options=...tpm2-device=auto` and
-`rd.shell=0 rd.emergency=reboot`. A marker-gated dracut module adds
-`tpm2-tss` and `systemd-pcrphase`. Exactly one `Nimbus UKI` firmware entry
-becomes the default; a stale same-label duplicate is repaired. Kernel updates
-rebuild and re-sign through the native hook, and Nimbus's initramfs refreshes
-rebuild the image in the same approved action. The embedded command line
-comes from `/etc/kernel/cmdline` when present, otherwise the running command
-line without `BOOT_IMAGE=` and `initrd=`. If setup cannot build the image
-after writing the marker, it removes only that marker. The approved runs are
-reported as step 1 of 2 (setup) and step 2 of 2 (enrollment); when another
-task also requests a MOK key, the same temporary password is advised so one
-MokManager session enrolls every pending key.
-
-Enrollment writes one TPM keyslot with `systemd-cryptenroll` only while
-`BootCurrent` is the Nimbus entry, binding PCR 7 + PCR 14 + signed PCR 11 and
-the observed clean-boot PCR 12/13 values, with `--tpm2-pcrlock=` empty. The
-passphrase and unrelated slots are preserved. Nimbus records the LUKS UUID,
-slot, token, public-key fingerprint, PCR set and observed TPM SRK fingerprint
-under `/var/lib/nimbus`; a foreign or unknown TPM token is an explicit
-problem and a different TPM offers renewal, with the passphrase still
-required. Removal wipes only the recorded slot and removes the firmware
-entry, image, marker and key material; it never uses `--wipe-slot=tpm2` or
-`all`, requires interactive confirmation and cannot be accepted by `--yes`.
-Renewal is offered when recorded literal PCR 7/12/13/14 values no longer
-match; it enrolls the same policy into a new keyslot, wipes only the recorded
-slot and rewrites the record from root observation. A different or
-unidentified TPM removes the recorded slot before adding (systemd-cryptenroll
-refuses an identical policy); changed measurements keep add-then-wipe; a
-no-op whose record proves the TPM refreshes metadata alone. Sync and upgrades
-never enroll or change unlock policy. While the marker exists, deselecting
-`fde` blocks the plan; run removal first. Enrollment, boot, fallback, renewal
-and removal require real-hardware validation before support is claimed.
+Login follows the same boundary: greetd starts the owner's session directly
+from `[initial_session]` in `/etc/greetd/nimbus.toml` because the disk
+passphrase is the authentication. The default session (the Noctalia greeter)
+starts again after logout. Nimbus owns that file and `/etc/pam.d/greetd`, and
+removes the `pam_gnome_keyring` auth line so a later password login cannot
+create an encrypted keyring that auto-login cannot open. The passwordless
+default keyring is user configuration under `$HOME`, owned by Chezmoi and
+never written by a root process. `nvidia-mok` remains the only Secure Boot
+key flow and keeps the rules above.
 
 `noctalia-lockscreen` is a narrow exception to runtime-state ownership: after
 preview and approval it may remove only `lockscreen_widgets` and descendants
@@ -629,9 +594,7 @@ the monospace faces in the initramfs while the marker exists, verifying them
 before installing so a missing dependency skips the module. The GRUB drop-in
 loads custom faces only when Secure Boot is off, because the shim-lock
 verifier refuses `loadfont`; with Secure Boot the theme uses GRUB's built-in
-font. When the FDE marker holds the approved content, Plymouth and NVIDIA
-initramfs refreshes also rebuild the running kernel's signed image in the
-same approved action, skipping when the image targets another kernel.
+font.
 
 The engine package ships the payload under `/boot/grub2/themes/nimbus` and
 `/usr/share/plymouth/themes/nimbus` plus the inert

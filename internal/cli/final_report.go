@@ -127,22 +127,6 @@ func renderInstallFinish(out io.Writer, result *syncResult, logDir string) error
 			if _, err := fmt.Fprintf(out, "\n%s\n", output.Header(colorOut, "Before rebooting:")); err != nil {
 				return err
 			}
-			// A pending NVIDIA task still needs the MOK session guidance. A
-			// blocked one only when the akmods key pair is what is missing;
-			// other blocks and inconclusive checks cannot request a key.
-			fde := slices.ContainsFunc(before, func(task postinstall.Task) bool { return task.ID == "fde" })
-			nvidia := slices.ContainsFunc(result.Tasks, func(task postinstall.Task) bool {
-				if task.ID != "nvidia-mok" {
-					return false
-				}
-				return beforeRebootReady(task) || (task.Status == postinstall.Blocked && strings.Contains(task.Detail, postinstall.MOKKeyPairHint))
-			})
-			if fde && nvidia {
-				line := fmt.Sprintf("FDE and NVIDIA share one reboot: use the same temporary password for each MOK import, so one MokManager session at the next boot enrolls every key. If the akmods signing key pair does not exist yet, create it first with: %s", output.Command(colorOut, "$ "+postinstall.MOKKeyPairHint))
-				if _, err := fmt.Fprintf(out, "%s\n\n", line); err != nil {
-					return err
-				}
-			}
 			for _, task := range before {
 				command := output.Command(colorOut, "$ nimbus postinstall "+task.ID)
 				if _, err := fmt.Fprintf(out, "%s: %s\n", task.Title, command); err != nil {
