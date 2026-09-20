@@ -91,7 +91,7 @@ Decisions:
   - [x] Desktop: with `NetworkManager-wait-online.service` disabled,
     `graphical.target` no longer waits for DHCP (14 s measured 2026-09-20),
     Hyprland starts right after auto-login, and Docker and Tailscale work.
-  - [ ] Simplified theme (2026-09-20): rendered in the preview container
+  - [x] Simplified theme (2026-09-20): rendered in the preview container
     only. On a real boot check the full-screen GRUB terminal box, the
     countdown number, the field and lock, and the loading bar after unlock.
   - [ ] Menu order and plain title (2026-09-20): on a real boot the menu
@@ -111,6 +111,11 @@ Decisions:
     userspace took 6.0 s. The lock icon was illegible at 1024x768 and was
     redrawn solid afterwards. `plymouthd` crashed at quit again (2 of 6
     boots, same backtrace in the script plugin, no visible effect).
+  - [x] Owner's photos of that boot, 2026-09-20: the menu reads Fedora Linux,
+    Windows Boot Manager, Previous kernels, UEFI Firmware Settings with the
+    countdown number and the key hints; the prompt shows the wordmark, lock
+    and field with bullets; the loading bar follows in the same place. Still
+    to look at: opening Previous kernels, and the redrawn lock.
   - [ ] Laptop: type the passphrase at the themed prompt, and boot an
     older kernel from Previous kernels to confirm it is themed too, now that
     `initramfs-rebuild` rebuilds every kernel for `boot-theme`.
