@@ -62,5 +62,5 @@ components = [
   "media-codecs",
   "printing",
   "voxtype",
-  "github-copilot",
+  # "github-copilot",
 ]
