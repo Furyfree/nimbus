@@ -66,6 +66,9 @@
 
 ## Hardware and session checks
 
+- [ ] Laptop MT7925 Wi-Fi: after sync and reboot, verify the retry recovers
+  the failed initial handshake without another password prompt; an already
+  connected interface stays connected. Keep this component off desktop/VM.
 - [ ] GPU, suspend/resume, power, audio and Bluetooth on both machines.
 - [ ] Portal file picking and screen sharing; UWSM logout, relogin and
   cleanup, including regular/private browser and webapp launches.
