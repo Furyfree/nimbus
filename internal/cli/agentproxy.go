@@ -14,6 +14,7 @@ import (
 )
 
 var runAgentProxy = agentproxy.Run
+var checkAgentProxyUninstall = agentproxy.CheckUninstall
 
 const proxySetupHelp = `Connect GitHub Copilot to local Codex, Claude, Grok and Antigravity agents.
 Prerequisites: open Copilot, apply Mise tools (Node 24+, Herdr and the agent CLIs),
@@ -100,6 +101,12 @@ func newAgentProxyPostinstall(opts *options, flags *machineFlags) *cobra.Command
 			plan, mode, err := agentProxyOperation(src, status, reset, uninstall)
 			if err != nil {
 				return err
+			}
+
+			if uninstall {
+				if err := checkAgentProxyUninstall(src); err != nil {
+					return err
+				}
 			}
 
 			if opts.json && preview {

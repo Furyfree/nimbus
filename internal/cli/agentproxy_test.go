@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -9,13 +10,23 @@ import (
 	"testing"
 
 	"github.com/Furyfree/nimbus/internal/agentproxy"
+	"github.com/Furyfree/nimbus/internal/native"
 	"github.com/Furyfree/nimbus/internal/native/nativetest"
 )
+
+func agentProxyFixture(t *testing.T) string {
+	t.Helper()
+	root, _ := postinstallFixture(t)
+	if err := os.WriteFile(filepath.Join(root, "profiles/common.toml"), []byte("schema=1\nid='common'\ncomponents=['github-copilot']\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
 
 func TestAgentProxyPreviewNeverRunsAdapter(t *testing.T) {
 	for _, mode := range []string{"help", "plan", "json", "nonterminal"} {
 		t.Run(mode, func(t *testing.T) {
-			root, _ := postinstallFixture(t)
+			root := agentProxyFixture(t)
 			old := runAgentProxy
 			t.Cleanup(func() { runAgentProxy = old })
 			runAgentProxy = func(context.Context, string, string, io.Writer) (agentproxy.Result, error) {
@@ -139,5 +150,26 @@ func TestAgentProxyResultsSeparateSkippedProvidersFromFailures(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Warning: Antigravity") {
 		t.Fatal(out.String())
+	}
+}
+
+func TestAgentProxyUninstallChecksBeforeApproval(t *testing.T) {
+	root := agentProxyFixture(t)
+	oldCheck, oldTerminal, oldApprover, oldRun := checkAgentProxyUninstall, postinstallTerminal, approver, runAgentProxy
+	t.Cleanup(func() {
+		checkAgentProxyUninstall, postinstallTerminal, approver, runAgentProxy = oldCheck, oldTerminal, oldApprover, oldRun
+	})
+	checkAgentProxyUninstall = func(native.Source) error { return errors.New("unrecognized override: /tmp/foreign.conf") }
+	postinstallTerminal = func(io.Reader) bool { return true }
+	approver = func(io.Reader, io.Writer, string) bool { t.Fatal("asked before ownership was checked"); return false }
+	runAgentProxy = func(context.Context, string, string, io.Writer) (agentproxy.Result, error) {
+		t.Fatal("unsafe removal started")
+		return agentproxy.Result{}, nil
+	}
+	for _, args := range [][]string{{"agent-proxy", "--uninstall"}, {"agent-proxy", "--uninstall", "--plan"}} {
+		cmd, _ := postinstallCommand(root, false, args...)
+		if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "/tmp/foreign.conf") {
+			t.Fatal(err)
+		}
 	}
 }

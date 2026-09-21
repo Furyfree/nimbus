@@ -1,61 +1,13 @@
 // Native installer from upstream 66cc75af597f; no --purge, so user data stays.
 import fs from "node:fs/promises";
-import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { data, configDir, statePath, ancestors, Failure } from "./storage.mjs";
-import { installedRelease, release, command } from "./setup.mjs";
+import { data, statePath, Failure } from "./storage.mjs";
+import { release, command } from "./setup.mjs";
+import { checkUninstall, stat, unitState, units } from "./ownership.mjs";
 import { connect } from "./ipc.mjs";
 
-const exec = promisify(execFile);
-const units = ["agent-proxy.service", "herdr.service"];
-async function stat(file) {
-  await ancestors(file);
-  try {
-    const info = await fs.lstat(file);
-    if (info.isSymbolicLink() || info.uid !== process.getuid())
-      throw new Failure("Unrecognized proxy ownership; refusing removal");
-    return info;
-  } catch (e) {
-    if (e.code !== "ENOENT") throw e;
-  }
-}
-async function unitState(unit) {
-  const { stdout } = await exec("systemctl", ["--user", "show", unit,
-    "--property=LoadState,ActiveState,FragmentPath,DropInPaths"]);
-  const fields = Object.fromEntries(stdout.trim().split("\n").map((s) => {
-    const i = s.indexOf("=");
-    return [s.slice(0, i), s.slice(i + 1)];
-  }));
-  if (!fields.LoadState || !fields.ActiveState)
-    throw new Failure("Cannot verify proxy user services");
-  return fields;
-}
 export async function uninstall(state, report, open = connect) {
-  const installed = await stat(data);
-  if (installed) {
-    if (!installed.isDirectory()) throw new Failure("Invalid proxy installation directory");
-    const current = await fs.realpath(path.join(data, "current"));
-    if (current !== path.join(data, "releases", release))
-      throw new Failure("Unrecognized proxy release; refusing removal");
-    await ancestors(path.join(current, "VERSION"));
-    if ((await installedRelease()) !== release)
-      throw new Failure("Unrecognized proxy release; refusing removal");
-  }
-  for (const unit of units) {
-    const file = path.join(path.dirname(configDir), "systemd/user", unit);
-    const info = await stat(file);
-    if (info) {
-      const entry = unit === "herdr.service" ? "herdr/server.js" : "index.js";
-      if (!info.isFile() || !(await fs.readFile(file, "utf8")).split("\n").some(
-        (line) => line === `ExecStart=/usr/bin/env node "${data}/current/packages/server/dist/${entry}"`,
-      )) throw new Failure("Unrecognized proxy user service; refusing removal");
-    }
-    const observed = await unitState(unit);
-    if (observed.DropInPaths || (observed.LoadState !== "not-found" && (!info || observed.FragmentPath !== file)))
-      throw new Failure("Foreign or overridden proxy service; refusing removal");
-  }
+  await checkUninstall(release);
   let rpc;
   if (state) {
     try { rpc = await open(); } catch {

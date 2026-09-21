@@ -93,8 +93,11 @@ func checkZeronOwner(src native.Source, observed zeronState) error {
 			return err
 		}
 		if !st.IsDir() || st.Mode()&os.ModeSymlink != 0 {
-			return errors.New("unsafe Zeron unit ancestor")
+			return fmt.Errorf("unsafe Zeron unit ancestor: %s", dir)
 		}
+	}
+	if err := checkZeronDropIns(src, observed.DropIns); err != nil {
+		return err
 	}
 	st, err := os.Lstat(file)
 	if errors.Is(err, os.ErrNotExist) && observed.absent() {
@@ -104,15 +107,44 @@ func checkZeronOwner(src native.Source, observed zeronState) error {
 		return err
 	}
 	owner, ok := st.Sys().(*syscall.Stat_t)
-	if !ok || owner.Uid != uint32(os.Getuid()) || !st.Mode().IsRegular() || st.Mode().Perm()&0022 != 0 || observed.Fragment != file || observed.DropIns != "" {
-		return errors.New("unrecognized Zeron unit ownership; refusing replacement or removal")
+	if !ok || owner.Uid != uint32(os.Getuid()) || !st.Mode().IsRegular() || st.Mode().Perm()&0022 != 0 || observed.Fragment != file {
+		return fmt.Errorf("unrecognized Zeron unit ownership: %s (loaded from %s); refusing replacement or removal", file, observed.Fragment)
 	}
 	data, err := src.ReadFile(file)
 	if err != nil {
 		return err
 	}
 	if !slices.Contains(strings.Split(string(data), "\n"), "ExecStart=%h/.zeron/app/current/zeron headless") {
-		return errors.New("zeron.service does not belong to the selected native installation")
+		return fmt.Errorf("unexpected ExecStart in %s; not the selected Zeron installation", file)
+	}
+	return nil
+}
+
+// Fedora applies this timeout policy to every user service. It does not change
+// the native installation's identity; all other overrides still block changes.
+func checkZeronDropIns(src native.Source, dropIns string) error {
+	for file := range strings.FieldsSeq(dropIns) {
+		if file != "/usr/lib/systemd/user/service.d/10-timeout-abort.conf" {
+			return fmt.Errorf("unrecognized Zeron override: %s", file)
+		}
+		info, err := src.Run("stat", "--format=%u:%a:%F", "--", file)
+		if err != nil || strings.TrimSpace(string(info)) != "0:644:regular file" {
+			return fmt.Errorf("unsafe Fedora timeout override ownership or permissions: %s", file)
+		}
+		data, err := src.ReadFile(file)
+		if err != nil {
+			return fmt.Errorf("read Fedora timeout override %s: %w", file, err)
+		}
+		var settings []string
+		for line := range strings.Lines(string(data)) {
+			line = strings.TrimSpace(line)
+			if line != "" && !strings.HasPrefix(line, "#") && !strings.HasPrefix(line, ";") {
+				settings = append(settings, line)
+			}
+		}
+		if strings.Join(settings, "\n") != "[Service]\nTimeoutStopFailureMode=abort" {
+			return fmt.Errorf("unexpected settings in Fedora timeout override: %s", file)
+		}
 	}
 	return nil
 }
@@ -202,6 +234,14 @@ func newZeronPostinstall(opts *options, flags *machineFlags) *cobra.Command {
 			if _, err := zeronOptedIn(s.Resolved.Machine); err != nil {
 				return err
 			}
+			src := newSource()
+			observed, err := inspectZeron(src)
+			if err != nil {
+				return err
+			}
+			if err := checkZeronOwner(src, observed); err != nil {
+				return err
+			}
 			verb := "install"
 			if disable {
 				verb = "uninstall"
@@ -238,7 +278,7 @@ func newZeronPostinstall(opts *options, flags *machineFlags) *cobra.Command {
 			if _, err := zeronOptedIn(s.Resolved.Machine); err != nil {
 				return err
 			}
-			if err := changeZeron(newSource(), cmd.OutOrStdout(), !disable); err != nil {
+			if err := changeZeron(src, cmd.OutOrStdout(), !disable); err != nil {
 				return err
 			}
 			if !disable {
@@ -273,6 +313,9 @@ func syncZeron(cmd *cobra.Command, src native.Source, s *selected, out io.Writer
 	}
 	if before.absent() {
 		return nil
+	}
+	if err := checkZeronOwner(src, before); err != nil {
+		return err
 	}
 	if _, err := fmt.Fprintln(out, "Zeron daemon is not opted in: run zeron daemon uninstall. Keep the GUI and linger setting."); err != nil {
 		return err

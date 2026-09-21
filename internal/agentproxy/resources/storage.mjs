@@ -34,7 +34,7 @@ export async function ancestors(file) {
         st.isSymbolicLink() ||
         (st.mode & 0o022 && !(st.mode & 0o1000))
       )
-        throw new Failure("Unsafe writable path ancestor");
+        throw new Failure(`Unsafe path ancestor: ${p}`);
     } catch (e) {
       if (e.code !== "ENOENT") throw e;
     }

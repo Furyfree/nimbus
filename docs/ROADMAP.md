@@ -6,8 +6,8 @@ criteria.
 
 ## Next steps
 
-Deliver 0.6.3's proxy removal, Zeron daemon opt-in and laptop Wi-Fi retry,
-then test their native behavior on the laptop after explicit owner approval.
+Fix Fedora user-service policy recognition for proxy and Zeron removal, then
+resume the laptop trial after delivery and explicit owner approval.
 
 1. Finish 0.6.1: boot payload and boot validation, installation output and
    logging drill, documentation reconciliation (#39), package and publish.

@@ -161,9 +161,10 @@ Omarchy and Ryoku. The signed UKI, TPM policy and `fde` component are removed.
 
 ## Postinstall and owner trials
 
-- [ ] 0.6.3 laptop: after explicit approval, sync, uninstall agent-proxy and
-  reboot. Verify proxy services absent, Zeron off unless opted in, Wi-Fi
-  connected, and Copilot, proxy config and Mise Herdr retained.
+- [ ] Laptop: after delivery of the service-ownership fix and explicit
+  approval, sync, uninstall agent-proxy and reboot. Verify proxy services
+  absent, Zeron off unless opted in, Wi-Fi connected, and Copilot, proxy config
+  and Mise Herdr retained.
 - [ ] Zeron daemon: installed opt-in, update, sync and opt-out trial. Fixtures
   verify the choice and failure paths; native desktop behavior is untested.
 - [ ] NVIDIA MOK helper (#48 steps in #40): installed trial on a machine

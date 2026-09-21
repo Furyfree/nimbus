@@ -7,7 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Furyfree/nimbus/internal/native"
 )
+
+const fedoraTimeout = "/usr/lib/systemd/user/service.d/10-timeout-abort.conf"
 
 const zeronShow = "systemctl --user show zeron.service --property=LoadState,ActiveState,UnitFileState,FragmentPath,DropInPaths"
 
@@ -29,6 +33,8 @@ func zeronFixture(t *testing.T) (string, *postinstallSource) {
 		t.Fatal(err)
 	}
 	src.Paths["zeron"] = "/fixture/zeron"
+	src.Commands["stat --format=%u:%a:%F -- "+fedoraTimeout] = []byte("0:644:regular file\n")
+	src.Files[fedoraTimeout] = []byte("# Fedora default\n[Service]\nTimeoutStopFailureMode=abort\n")
 	setZeronFixture(t, src, true)
 	src.onStream = func(key string) {
 		if key == "zeron daemon uninstall" {
@@ -56,7 +62,7 @@ func setZeronFixture(t *testing.T, src *postinstallSource, running bool) {
 			t.Fatal(err)
 		}
 		src.Files[file] = data
-		src.Commands[zeronShow] = fmt.Appendf(nil, "LoadState=loaded\nActiveState=active\nUnitFileState=enabled\nFragmentPath=%s\nDropInPaths=\n", file)
+		src.Commands[zeronShow] = fmt.Appendf(nil, "LoadState=loaded\nActiveState=active\nUnitFileState=enabled\nFragmentPath=%s\nDropInPaths=%s\n", file, fedoraTimeout)
 	} else {
 		if err := os.Remove(file); err != nil && !os.IsNotExist(err) {
 			t.Fatal(err)
@@ -151,7 +157,10 @@ func TestZeronPreviewFailureAndForeignOwnership(t *testing.T) {
 }
 
 func TestAgentProxyUninstallPreviewAndMode(t *testing.T) {
-	root, _ := postinstallFixture(t)
+	root := agentProxyFixture(t)
+	old := checkAgentProxyUninstall
+	t.Cleanup(func() { checkAgentProxyUninstall = old })
+	checkAgentProxyUninstall = func(native.Source) error { return nil }
 	cmd, out := postinstallCommand(root, false, "agent-proxy", "--uninstall", "--plan")
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
@@ -162,5 +171,42 @@ func TestAgentProxyUninstallPreviewAndMode(t *testing.T) {
 	cmd, _ = postinstallCommand(root, false, "agent-proxy", "--uninstall", "--reset")
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("conflicting modes accepted")
+	}
+}
+
+func TestZeronRejectsOverridesBeforeApprovalAndRechecks(t *testing.T) {
+	for _, mode := range []string{"unknown", "changed contents", "wrong owner", "writable", "symlink", "while approving"} {
+		t.Run(mode, func(t *testing.T) {
+			root, src := zeronFixture(t)
+			bad := func() {
+				src.Commands[zeronShow] = []byte(strings.ReplaceAll(string(src.Commands[zeronShow]), fedoraTimeout, "/tmp/foreign.conf"))
+			}
+			want := fedoraTimeout
+			switch mode {
+			case "unknown":
+				bad()
+				want = "/tmp/foreign.conf"
+			case "changed contents":
+				src.Files[fedoraTimeout] = []byte("[Service]\nTimeoutStopFailureMode=abort\nExecStart=/other/daemon\n")
+			case "wrong owner":
+				src.Commands["stat --format=%u:%a:%F -- "+fedoraTimeout] = []byte("1000:644:regular file")
+			case "writable":
+				src.Commands["stat --format=%u:%a:%F -- "+fedoraTimeout] = []byte("0:666:regular file")
+			case "symlink":
+				src.Commands["stat --format=%u:%a:%F -- "+fedoraTimeout] = []byte("0:777:symbolic link")
+			case "while approving":
+				want = "/tmp/foreign.conf"
+			}
+			oldTerminal, oldApprover := postinstallTerminal, approver
+			t.Cleanup(func() { postinstallTerminal, approver = oldTerminal, oldApprover })
+			postinstallTerminal = func(io.Reader) bool { return true }
+			asked := false
+			approver = func(io.Reader, io.Writer, string) bool { asked = true; bad(); return true }
+			cmd, _ := postinstallCommand(root, false, "zeron", "--disable")
+			err := cmd.Execute()
+			if err == nil || !strings.Contains(err.Error(), want) || asked != (mode == "while approving") || len(src.streams) != 0 {
+				t.Fatalf("error=%v asked=%v mutations=%v", err, asked, src.streams)
+			}
+		})
 	}
 }

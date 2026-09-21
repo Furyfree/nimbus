@@ -12,6 +12,7 @@ test("native uninstall preserves user tools/config and refuses unsafe or failed 
   const bin = path.join(root, "bin");
   await fs.mkdir(bin);
   process.env.PATH = bin + ":" + process.env.PATH;
+  const { checkUninstall } = await import("./ownership.mjs");
   const { uninstall } = await import("./uninstall.mjs");
   const { data, configDir, statePath } = await import("./storage.mjs");
   const { release } = await import("./setup.mjs");
@@ -27,13 +28,23 @@ if (args.includes('show')) {
   console.log('LoadState=' + (present ? 'loaded' : 'not-found'));
   console.log('ActiveState=' + (present && !fs.existsSync(file+'.stopped') ? 'active' : 'inactive'));
   console.log('FragmentPath=' + (present ? file : ''));
-  console.log('DropInPaths=');
+  console.log('DropInPaths=' + (process.env.TEST_DROPIN || ''));
 } else if (args.includes('disable') || args.includes('stop')) {
   if (process.env.FAIL_STOP) process.exit(1);
   if (file) fs.writeFileSync(file+'.stopped', '');
 }
 `;
   await fs.writeFile(path.join(bin, "systemctl"), mock, { mode: 0o700 });
+  const fedoraTimeout = "/usr/lib/systemd/user/service.d/10-timeout-abort.conf";
+  process.env.TEST_DROPIN = fedoraTimeout;
+  await fs.writeFile(path.join(bin, "stat"), `#!${process.execPath}
+if (process.argv.at(-1) !== ${JSON.stringify(fedoraTimeout)}) process.exit(1);
+console.log(process.env.TEST_STAT || '0:644:regular file');
+`, { mode: 0o700 });
+  await fs.writeFile(path.join(bin, "cat"), `#!${process.execPath}
+if (process.argv.at(-1) !== ${JSON.stringify(fedoraTimeout)}) process.exit(1);
+console.log(process.env.TEST_CONTENT || '# Fedora default\\n[Service]\\nTimeoutStopFailureMode=abort');
+`, { mode: 0o700 });
   await fs.writeFile(path.join(bin, "herdr"), "keep Mise CLI");
   async function fixture() {
     await fs.mkdir(path.join(data, "releases", release), { recursive: true, mode: 0o700 });
@@ -52,6 +63,26 @@ if (args.includes('show')) {
   const closed = async () => { throw Error("closed"); };
   try {
     await fixture();
+    await checkUninstall(release); // Preview is read-only and accepts Fedora's policy.
+    await fs.access(statePath);
+    await fs.access(path.join(data, "current"));
+    for (const [key, value, pattern] of [
+      ["TEST_DROPIN", "/tmp/foreign.conf", /foreign.conf/],
+      ["TEST_DROPIN", fedoraTimeout + " /tmp/foreign.conf", /foreign.conf/],
+      ["TEST_STAT", "1000:644:regular file", /ownership or permissions/],
+      ["TEST_STAT", "0:666:regular file", /ownership or permissions/],
+      ["TEST_STAT", "0:777:symbolic link", /ownership or permissions/],
+      ["TEST_CONTENT", "[Service]\nTimeoutStopFailureMode=abort\nExecStart=/foreign", /Unexpected settings/],
+    ]) {
+      const previous = process.env[key];
+      process.env[key] = value;
+      await assert.rejects(checkUninstall(release), pattern);
+      await assert.rejects(uninstall(state, report(), closed), pattern);
+      if (previous === undefined) delete process.env[key]; else process.env[key] = previous;
+      await fs.access(statePath);
+      await fs.access(path.join(data, "current"));
+      await assert.rejects(fs.access(path.join(unitDir, "agent-proxy.service.stopped")));
+    }
     const unit = path.join(unitDir, "herdr.service");
     const original = await fs.readFile(unit);
     await fs.writeFile(unit, "ExecStart=/foreign/herdr\n");

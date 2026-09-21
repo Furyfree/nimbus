@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -107,6 +108,49 @@ func Inspect(src native.Source, machine string) Result {
 		return Result{Status: "pending", Detail: "Proxy installation needs setup; run nimbus postinstall agent-proxy."}
 	}
 	return Result{Status: "configured", Detail: "Local integration registered; run the task to recheck services and refresh models."}
+}
+
+// CheckUninstall inspects local ownership without extracting helpers, taking a
+// lock, writing state or contacting Copilot. Uninstall repeats this same check.
+func CheckUninstall(src native.Source) error {
+	runtimePath, err := src.Run("mise", "which", "node")
+	if err != nil {
+		return errors.New("Mise could not resolve Node; apply the tool selection first")
+	}
+	node := strings.TrimSpace(string(runtimePath))
+	if !filepath.IsAbs(node) {
+		return errors.New("Mise returned an invalid Node path")
+	}
+	storage, err := resources.ReadFile("resources/storage.mjs")
+	if err != nil {
+		return err
+	}
+	ownership, err := resources.ReadFile("resources/ownership.mjs")
+	if err != nil {
+		return err
+	}
+	// Data URLs keep this embedded, read-only module entirely in memory.
+	module := strings.ReplaceAll(string(ownership), "./storage.mjs", "data:text/javascript;base64,"+base64.StdEncoding.EncodeToString(storage))
+	module += `
+try {
+  await checkUninstall("1.3.0-nimbus.2-source");
+  process.stdout.write(JSON.stringify(""));
+} catch (e) {
+  process.stdout.write(JSON.stringify(e.message));
+}
+`
+	out, err := src.Run(node, "--input-type=module", "--eval", module)
+	if err != nil {
+		return errors.New("cannot inspect proxy ownership through Node")
+	}
+	var detail string
+	if err := json.Unmarshal(out, &detail); err != nil {
+		return errors.New("invalid proxy ownership inspection result")
+	}
+	if detail != "" {
+		return errors.New(detail)
+	}
+	return nil
 }
 
 // Run is called only after approval, or for an already opted-in upgrade refresh.

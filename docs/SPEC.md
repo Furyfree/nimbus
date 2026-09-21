@@ -580,8 +580,8 @@ without `--purge`, verifies removal, then deletes Nimbus registration state.
 It unregisters only the recorded loopback provider through Copilot's API when
 the app is open. When Copilot is unavailable, local removal proceeds and the
 report asks the user to remove the stale provider in the app. Foreign units,
-overrides, changed provider identity and failed stops block deletion. Copilot,
-Chezmoi's `config.yaml`, native credentials/data and Mise Herdr remain.
+unknown overrides, changed provider identity and failed stops block deletion.
+Copilot, Chezmoi's `config.yaml`, native credentials/data and Mise Herdr remain.
 
 Zeron's daemon is off unless explicitly opted in. After ordinary sync and
 after Topgrade in combined sync, Nimbus previews and approves
@@ -594,6 +594,14 @@ under `postinstall.json`. Later syncs leave opted-in daemons alone.
 only after verification. Missing evidence means off; corrupt evidence blocks
 changes. Native Zeron owns its unit, sessions and credentials. The GUI and
 linger setting remain. Standalone upgrades do not reconcile the daemon.
+
+Zeron and proxy removal inspect local service ownership before approval and
+recheck it before mutation. Errors identify the rejected path or setting.
+The shared Fedora user-service drop-in
+`/usr/lib/systemd/user/service.d/10-timeout-abort.conf` is accepted only as a
+root-owned regular file with mode 0644 whose sole setting is
+`[Service] TimeoutStopFailureMode=abort`. Comments and blank lines are ignored.
+This policy stays in place; other overrides still block native unit changes.
 
 The laptop alone selects `wifi-retry`: a system oneshot waits eight seconds
 after NetworkManager starts and calls `nmcli device connect` once for Wi-Fi

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Furyfree/nimbus/internal/native"
 	"github.com/Furyfree/nimbus/internal/native/nativetest"
 )
 
@@ -104,5 +105,42 @@ func TestStatePathRejectsRelativeXDG(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", "relative")
 	if _, err := StatePath(); err == nil {
 		t.Fatal("relative state accepted")
+	}
+}
+
+func TestUninstallPreflightUsesEmbeddedCheckWithoutWritingState(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node not installed")
+	}
+	root := t.TempDir()
+	t.Setenv("HOME", root)
+	for _, key := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"} {
+		t.Setenv(key, filepath.Join(root, key))
+	}
+	bin := t.TempDir()
+	commands := map[string]string{
+		"mise":      "#!/bin/sh\nprintf '%s\\n' '" + node + "'\n",
+		"systemctl": "#!/bin/sh\n[ \"$2\" = show ] || exit 1\nprintf '%s\\n' LoadState=not-found ActiveState=inactive FragmentPath= \"DropInPaths=${TEST_DROPIN-}\"\n",
+		"stat":      "#!/bin/sh\nprintf '%s\\n' '0:644:regular file'\n",
+		"cat":       "#!/bin/sh\nprintf '%s\\n' '[Service]' 'TimeoutStopFailureMode=abort'\n",
+	}
+	for name, contents := range commands {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte(contents), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	t.Setenv("TEST_DROPIN", "/usr/lib/systemd/user/service.d/10-timeout-abort.conf")
+	if err := CheckUninstall(native.ExecSource{}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TEST_DROPIN", "/tmp/foreign.conf")
+	if err := CheckUninstall(native.ExecSource{}); err == nil || !strings.Contains(err.Error(), "/tmp/foreign.conf") {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("preflight wrote into the user home: %v, %v", entries, err)
 	}
 }
