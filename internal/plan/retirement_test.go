@@ -50,7 +50,7 @@ func TestSourceRetirementUsesOwnedIdentityAndPreservesPreexistingSources(t *test
 }
 
 func TestSourceRetirementRejectsLegacyForeignChangedAndUnknownState(t *testing.T) {
-	for _, which := range []string{"legacy", "unverified", "foreign", "changed URL", "duplicate", "unknown packages", "unknown provenance", "unsafe native ID"} {
+	for _, which := range []string{"legacy", "unverified", "foreign", "changed URL", "duplicate", "unknown packages", "unsafe native ID"} {
 		t.Run(which, func(t *testing.T) {
 			b, _, receipt := retirementFixture(KindRepository)
 			switch which {
@@ -66,8 +66,6 @@ func TestSourceRetirementRejectsLegacyForeignChangedAndUnknownState(t *testing.T
 				b.in.Facts.Repositories.Value = append(b.in.Facts.Repositories.Value, b.in.Facts.Repositories.Value[0])
 			case "unknown packages":
 				b.in.Facts.Packages.Error = "unreadable"
-			case "unknown provenance":
-				b.in.Facts.Packages.Value = []inspect.Package{{Name: "adopted", FromRepo: "@commandline"}}
 			case "unsafe native ID":
 				receipt.Source.Applied[0].ID = "*"
 			}
@@ -75,6 +73,43 @@ func TestSourceRetirementRejectsLegacyForeignChangedAndUnknownState(t *testing.T
 			ops := b.sourceRetirements()
 			if ops[0].Blocked == "" || len(ops[0].Steps) != 0 {
 				t.Fatalf("uncertain source retirement allowed: %+v", ops[0])
+			}
+		})
+	}
+}
+
+func TestSourceRetirementDefersUnknownProvenanceWithoutBlockingSync(t *testing.T) {
+	for _, from := range []string{"", "@commandline", "@System"} {
+		t.Run(from, func(t *testing.T) {
+			b, src, receipt := retirementFixture(KindRepository)
+			b.in.Facts.Packages.Value = []inspect.Package{{Name: "local-app", Arch: "x86_64", FromRepo: from}}
+			b.in.Resolved.Services = []definitions.ResolvedService{{ServiceDecl: definitions.ServiceDecl{Unit: "demo.service", Enabled: new(true), Running: new(true)}}}
+			answerUnit(src, "demo.service", "disabled", "inactive")
+			p, err := Build(b.in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			op := find(p, receipt.Resource)
+			service := find(p, "service:demo.service")
+			if !p.Complete || op == nil || service == nil || service.Blocked != "" || service.After != "" || len(service.Steps) != 2 {
+				t.Fatalf("deferred cleanup blocked an unrelated service: %+v", p)
+			}
+			if op.Blocked != "" || op.Action != ActionKeep || op.After != "" || len(op.Steps) != 0 {
+				t.Fatalf("unknown provenance should retain the source without blocking sync: %+v", op)
+			}
+			if notes := strings.Join(op.Notes, " "); !strings.Contains(notes, "old") || !strings.Contains(notes, "local-app.x86_64") || !strings.Contains(notes, "deferred") {
+				t.Fatalf("deferred cleanup is not explained: %q", notes)
+			}
+			if err := CheckSourceRetirement(*op, b.in.Facts, src); err == nil {
+				t.Fatal("unknown provenance authorized repository removal")
+			}
+			if b.in.Applied.Receipts[receipt.Resource].Source != receipt.Source {
+				t.Fatal("deferred cleanup discarded ownership")
+			}
+			b.in.Facts.Packages.Value[0].FromRepo = "fedora"
+			resolved := b.sourceRetirements()[0]
+			if resolved.Blocked != "" || resolved.Action != ActionRemove || len(resolved.Steps) == 0 {
+				t.Fatalf("resolved provenance did not allow cleanup: %+v", resolved)
 			}
 		})
 	}

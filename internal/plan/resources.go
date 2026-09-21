@@ -138,7 +138,17 @@ func (b *builder) systemResources(earlier []Operation) []Operation {
 	for _, service := range b.in.Resolved.Services {
 		id := "service:" + service.Unit
 		selected[id] = true
-		op := b.serviceOperation(id, service.ServiceDecl, service.Component, pendingPackages)
+		pending := pendingPackages
+		for _, file := range ops {
+			if file.File != nil && file.File.Target == "/etc/systemd/system/"+service.Unit &&
+				file.Blocked == "" && (file.Action == ActionInstall || file.Action == ActionRepair || file.File.ActivationChanged) &&
+				slices.Contains(file.File.Triggers, "systemd-daemon-reload") {
+				// Reinspect the unit after its file and reload have completed.
+				pending = "trigger:systemd-daemon-reload"
+				break
+			}
+		}
+		op := b.serviceOperation(id, service.ServiceDecl, service.Component, pending)
 		ops = append(ops, op)
 	}
 	for _, group := range b.in.Resolved.Groups {
@@ -414,14 +424,14 @@ func (b *builder) serviceOperation(id string, want definitions.ServiceDecl, comp
 		return op
 	}
 	switch {
+	case managed && !ownedResource(receipt, id, KindService, b.in.Resolved.Machine):
+		op.Blocked = "service receipt is invalid or foreign"
 	case have.Load == "not-found" && pending != "":
 		op.After = pending
 	case have.Load != "loaded":
 		op.Blocked = "unit is not loaded: " + have.Load
 	case have.Enabled == "masked" || have.Enabled == "masked-runtime":
 		op.Blocked = "masked unit requires explicit manual migration"
-	case managed && !ownedResource(receipt, id, KindService, b.in.Resolved.Machine):
-		op.Blocked = "service receipt is invalid or foreign"
 	}
 	if want.Enabled != nil {
 		enabled := have.Enabled == "enabled"

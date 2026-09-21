@@ -96,6 +96,10 @@ func (b *builder) sourceRetirements(prior ...[]Operation) []Operation {
 					op.Summary = "retain source " + name + " while installed software needs it"
 					op.Notes = []string{err.Error()}
 				}
+			} else if _, ok := errors.AsType[sourceUnknownProvenance](err); ok {
+				op.Action = ActionKeep
+				op.Summary = "retain source " + name + "; cleanup deferred"
+				op.Notes = []string{op.Summary + ": " + err.Error()}
 			} else {
 				op.Blocked = err.Error()
 			}
@@ -152,6 +156,12 @@ type sourceInUse struct {
 }
 
 func (e sourceInUse) Error() string { return e.reason }
+
+type sourceUnknownProvenance struct{ packageID string }
+
+func (e sourceUnknownProvenance) Error() string {
+	return fmt.Sprintf("cannot retire source while installed package %s has unknown repository provenance", e.packageID)
+}
 
 func sourceRemovalDependency(inUse sourceInUse, ops []Operation) string {
 	pending := map[string]bool{}
@@ -251,7 +261,7 @@ func CheckSourceRetirement(op Operation, f *inspect.Facts, src native.Source) er
 		var consumers []string
 		for _, pkg := range f.Packages.Value {
 			if pkg.FromRepo == "" || strings.HasPrefix(pkg.FromRepo, "@") {
-				return fmt.Errorf("cannot retire source while installed package %s has unknown repository provenance", pkg.ID())
+				return sourceUnknownProvenance{packageID: pkg.ID()}
 			}
 			if slices.Contains(consumedIDs, pkg.FromRepo) {
 				consumers = append(consumers, pkg.ID())

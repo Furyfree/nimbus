@@ -156,6 +156,89 @@ func TestServiceEnablementDoesNotStartGreeterAndRejectsForeignManager(t *testing
 	}
 }
 
+func TestServiceWaitsForManagedUnitAndReload(t *testing.T) {
+	const unit = "demo.service"
+	const target = "/etc/systemd/system/" + unit
+	for _, tc := range []struct {
+		name, target string
+		reload       bool
+		blocked      bool
+	}{
+		{"managed unit", target, true, false},
+		{"missing unit", "", false, true},
+		{"unrelated unit", "/etc/systemd/system/other.service", true, true},
+		{"missing reload", target, false, true},
+		{"foreign service receipt", target, true, true},
+		{"foreign file receipt", target, true, true},
+		{"masked unit", target, true, true},
+		{"inspection failure", target, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, src := resourceBuilder()
+			b.in.Resolved.Services = []definitions.ResolvedService{{ServiceDecl: definitions.ServiceDecl{Unit: unit, Enabled: new(true), Running: new(true)}}}
+			src.Commands[nativetest.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", unit)] = []byte("LoadState=not-found\nUnitFileState=\nActiveState=inactive\n")
+			if tc.target != "" {
+				file := definitions.ResolvedFile{Target: tc.target, Content: []byte("[Service]\nExecStart=/usr/bin/true\n"), Owner: "root", Group: "root", Mode: "0644"}
+				if tc.reload {
+					file.Triggers = []string{"systemd-daemon-reload"}
+				}
+				b.in.Resolved.Files = []definitions.ResolvedFile{file}
+			}
+			switch tc.name {
+			case "foreign service receipt":
+				b.in.Applied.Receipts["service:"+unit] = state.Receipt{Resource: "service:" + unit, Provider: KindService, Machine: "other", Verified: true}
+			case "foreign file receipt":
+				b.in.Applied.Receipts["file:"+target] = state.Receipt{Resource: "file:" + target, Provider: KindFile, Machine: "other", Verified: true}
+			case "masked unit":
+				answerUnit(src, unit, "masked", "inactive")
+			case "inspection failure":
+				src.Failures[nativetest.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", unit)] = "inspection failed"
+			}
+			p, err := Build(b.in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			op := find(p, "service:"+unit)
+			if op == nil || p.Complete == tc.blocked || (op.Blocked != "") != tc.blocked {
+				t.Fatalf("missing unit planning: complete=%t operation=%+v", p.Complete, op)
+			}
+			if tc.blocked {
+				return
+			}
+			if op.After != "trigger:systemd-daemon-reload" {
+				t.Fatalf("service did not wait for unit installation and reload: %+v", op)
+			}
+			fileIndex := slices.IndexFunc(p.Operations, func(op Operation) bool { return op.ID == "file:"+target })
+			reloadIndex := slices.IndexFunc(p.Operations, func(op Operation) bool { return op.ID == "trigger:systemd-daemon-reload" })
+			if fileIndex < 0 || reloadIndex <= fileIndex {
+				t.Fatal("unit installation must precede its reload")
+			}
+			// The Wi-Fi unit used to block sync before Nimbus could install it.
+			file := b.in.Resolved.Files[0]
+			for parent, child := range map[string]string{"/etc": "systemd", "/etc/systemd": "system", "/etc/systemd/system": unit} {
+				src.Dirs[parent] = []string{child}
+				src.Commands[nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", parent)] = []byte("directory|root|root|755|1")
+			}
+			src.Files[target] = file.Content
+			src.Commands[nativetest.Key("stat", "--format=%F|%U|%G|%a|%h", "--", target)] = []byte("regular file|root|root|644|1")
+			have := inspect.SystemFile{Exists: true, Content: file.Content, Owner: file.Owner, Group: file.Group, Mode: file.Mode}
+			r := fileReceipt(target, have)
+			r.Definitions.Digest, r.Triggers = b.in.Definitions, file.Triggers
+			b.in.Applied.Receipts[r.Resource] = r
+			b.in.Applied.Receipts["trigger:systemd-daemon-reload"] = state.Receipt{Resource: "trigger:systemd-daemon-reload", Provider: KindTrigger, Machine: "vm", Verified: true, Timestamp: time.Unix(10, 0)}
+			answerUnit(src, unit, "disabled", "inactive")
+			p, err = Build(b.in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			op = find(p, "service:"+unit)
+			if !p.Complete || op == nil || op.After != "" || len(op.Steps) != 2 || op.Steps[0].Argv[1] != "enable" || op.Steps[1].Argv[1] != "start" {
+				t.Fatalf("installed unit cannot proceed after replan: %+v", op)
+			}
+		})
+	}
+}
+
 func TestServicePlanningRetainsObservationFailures(t *testing.T) {
 	const cause = "systemctl inspection unavailable"
 	for _, tc := range []struct {
