@@ -269,6 +269,8 @@ func applyEnv(t *testing.T) string {
 	root := editableCheckout(t)
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	// Agent-proxy fixtures need an absolute data path even when CI leaves it unset.
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("NIMBUS_INSTALL_LOG_DIR", "")
 	saved := stateRoot
 	stateRoot = filepath.Join(t.TempDir(), "state")
