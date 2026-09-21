@@ -39,6 +39,7 @@ packages = [
   "file",
   "jq",
   "poppler-utils",
+  "yt-dlp",
   "terra:typst",
   "ImageMagick",
   "terra:golang-github-jesseduffield-lazygit",
