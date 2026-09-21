@@ -42,6 +42,10 @@ func TestInspectNeverInvokesNativeCommands(t *testing.T) {
 	if got := Inspect(src, "desktop"); got.Status != "pending" {
 		t.Fatalf("receipt hid missing installation: %+v", got)
 	}
+	src.Files[p] = []byte(`{"version":1,"machine":"desktop","providerId":"owned","configured":false}`)
+	if got := Inspect(src, "desktop"); got.Status != "pending" || !strings.Contains(got.Detail, "refresh is disabled") || !strings.Contains(got.Detail, "does not stop") {
+		t.Fatalf("refresh opt-out confused with service disable: %+v", got)
+	}
 	src.Files[p] = []byte(`not json`)
 	if got := Inspect(src, "desktop"); got.Status != "blocked" {
 		t.Fatal(got)

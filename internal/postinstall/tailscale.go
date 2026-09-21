@@ -91,11 +91,13 @@ func tailscaleOperator(src native.Source, in Inputs, pkg definitions.ResolvedPac
 		return t
 	case "Running", "Stopped":
 		// A signed-in but intentionally stopped machine needs no connection change.
+		t.CurrentState = backend
 	default:
 		t.Detail = "Tailscale is not ready (" + backend + "); wait for the daemon, then retry. No changes are offered."
 		return t
 	}
 	if operator == action.User {
+		t.Summary = "Signed in; operator configured"
 		t.Status, t.Detail = Complete, action.User+" is already the local Tailscale operator."
 		if backend == "Stopped" {
 			t.Detail += " Signed in; connection is stopped and left unchanged."
@@ -105,6 +107,7 @@ func tailscaleOperator(src native.Source, in Inputs, pkg definitions.ResolvedPac
 		return t
 	}
 	t.Status = Pending
+	t.Summary = "Signed in; operator needs setup"
 	t.Detail = fmt.Sprintf("Signed in (%s). Change the local Tailscale operator from %s to %s. Connection state and other preferences are unchanged.", backend, operator, action.User)
 	t.Action = action
 	return t

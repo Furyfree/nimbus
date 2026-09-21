@@ -3,6 +3,7 @@ package postinstall
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/Furyfree/nimbus/internal/definitions"
@@ -25,10 +26,31 @@ func fingerprint(src native.Source, in Inputs, pkg definitions.ResolvedPackage) 
 		return t
 	}
 	if _, err := src.LookPath("busctl"); err != nil {
+		t.Status, t.Detail = Blocked, "busctl is unavailable; repair the selected packages first."
 		return t
 	}
-	devices, err := fprintCall(src, "/net/reactivated/Fprint/Manager", fprintService+".Manager", "GetDevices", "ao")
+	return checkFingerprint(src, t, false)
+}
+
+// VerifyFingerprint may activate fprintd and is only called after approval.
+// It never enrolls, reads templates or changes authentication configuration.
+func VerifyFingerprint(src native.Source, task Task) Task {
+	return checkFingerprint(src, task, true)
+}
+
+func checkFingerprint(src native.Source, t Task, activate bool) Task {
+	t.Status, t.Action, t.ActivationRequired = Unknown, nil, false
+	t.Detail = "Fingerprint reader or enrollment could not be checked."
+	devices, err := fprintCall(src, activate, "/net/reactivated/Fprint/Manager", fprintService+".Manager", "GetDevices", "ao")
 	if err != nil {
+		if !activate {
+			state, stateErr := src.Run("systemctl", "show", "fprintd.service", "--property=LoadState,ActiveState")
+			fields := strings.Split(strings.TrimSpace(string(state)), "\n")
+			if stateErr == nil && slices.Contains(fields, "LoadState=loaded") && slices.Contains(fields, "ActiveState=inactive") {
+				t.ActivationRequired = true
+				t.Detail = "Enrollment not checked: fprintd is idle. Run nimbus postinstall fingerprint to approve activation and check the reader."
+			}
+		}
 		return t
 	}
 	if len(devices) == 0 {
@@ -43,7 +65,7 @@ func fingerprint(src native.Source, in Inputs, pkg definitions.ResolvedPackage) 
 		}
 		// An empty username means the D-Bus caller, avoiding authorization
 		// requests for another user's enrollment records.
-		fingers, err := fprintCall(src, device, fprintService+".Device", "ListEnrolledFingers", "as", "s", "")
+		fingers, err := fprintCall(src, activate, device, fprintService+".Device", "ListEnrolledFingers", "as", "s", "")
 		if err != nil {
 			unknown = true
 			continue
@@ -62,7 +84,7 @@ func fingerprint(src native.Source, in Inputs, pkg definitions.ResolvedPackage) 
 		}
 	}
 	if unknown {
-		t.Detail = "A fingerprint reader is present, but enrollment could not be determined without interactive authorization."
+		t.Detail = "A fingerprint reader is present, but its enrollment response could not be read or recognized."
 		return t
 	}
 	t.Status, t.Detail = Pending, "A supported fingerprint reader is present and reports no enrolled fingers for this user."
@@ -72,15 +94,22 @@ func fingerprint(src native.Source, in Inputs, pkg definitions.ResolvedPackage) 
 	return t
 }
 
-func fprintCall(src native.Source, path, iface, method, signature string, args ...string) ([]string, error) {
+func fprintCall(src native.Source, activate bool, path, iface, method, signature string, args ...string) ([]string, error) {
 	argv := []string{"--system", "--auto-start=no", "--allow-interactive-authorization=no", "--json=short", "call", fprintService, path, iface, method}
+	if activate {
+		argv[1] = "--auto-start=yes"
+	}
 	argv = append(argv, args...)
 	out, err := src.Run("busctl", argv...)
 	if err != nil {
-		// busctl drops the D-Bus error name. fprintd's NoEnrolledPrints
-		// becomes this exact message; other failures must remain unknown.
-		noPrints := "busctl " + strings.Join(argv, " ") + ": Call failed: No fingerprints enrolled: exit status 1"
-		if method == "ListEnrolledFingers" && len(out) == 0 && err.Error() == noPrints {
+		// busctl drops the D-Bus error name. fprintd 1.94.5's
+		// ListEnrolledFingers uses "Failed to discover prints" for
+		// NoEnrolledPrints; preserve the older spelling too. Match the
+		// complete command, message and exit status, never arbitrary errors.
+		prefix := "busctl " + strings.Join(argv, " ") + ": Call failed: "
+		if method == "ListEnrolledFingers" && len(out) == 0 &&
+			(err.Error() == prefix+"No fingerprints enrolled: exit status 1" ||
+				err.Error() == prefix+"Failed to discover prints: exit status 1") {
 			return []string{}, nil
 		}
 		return nil, err

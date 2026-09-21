@@ -205,9 +205,14 @@ func TestMOKExplicitVerificationAndUnprivilegedStatus(t *testing.T) {
 			src.reads = nil
 			src.streams = nil
 			cmd, out = postinstallCommand(root, false, "status")
+			// Full current details and historical evidence are opt-in.
+			cmd = newPostinstall(&options{verbose: true})
+			cmd.SetArgs([]string{"--checkout", root, "--machine", "vm", "status"})
+			cmd.SetOut(out)
+			cmd.SetErr(out)
 			want := "Permission denied"
 			if mode == "verified" {
-				want = "Previously verified"
+				want = "Enrollment verified earlier; current check requires sudo."
 			}
 			if err := cmd.Execute(); err != nil || !strings.Contains(out.String(), want) {
 				t.Fatal(err, out)
@@ -216,8 +221,8 @@ func TestMOKExplicitVerificationAndUnprivilegedStatus(t *testing.T) {
 				if !strings.Contains(out.String(), "Recheck: nimbus postinstall nvidia-mok (requests sudo)") {
 					t.Fatal("missing administrator recheck command", out)
 				}
-				if strings.Contains(out.String(), "Unable to check") {
-					t.Fatal("historical verification displayed as failure", out)
+				if !strings.Contains(out.String(), "Unable to check") {
+					t.Fatal("historical verification hid unavailable current check", out)
 				}
 				var result syncResult
 				inspectFinal(certificateDeniedSource{src}, selected, &result, false)

@@ -158,10 +158,12 @@ func statusColor(status string) string {
 	switch strings.ToLower(status) {
 	case "failed", "failure", "fail", "error", "blocked", "remove":
 		return bad + bold
-	case "pending", "unknown", "unable to check", "unmanaged", "note", "notice", "warning", "reboot required", "log out and back in":
+	case "pending", "unknown", "not checked", "unable to check", "unmanaged", "note", "notice", "warning", "reboot required", "log out and back in":
 		return warn + bold
-	case "succeeded", "verified", "ok", "pass", "installed", "updated", "install", "adopt":
+	case "succeeded", "verified", "ok", "pass", "installed", "updated", "install", "adopt", "running", "configured", "loaded", "files present", "enrolled":
 		return good + bold
+	case "off", "stopped":
+		return ""
 	case "previously verified":
 		return dim
 	case "desired":

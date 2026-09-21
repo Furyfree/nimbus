@@ -17,6 +17,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/Furyfree/nimbus/internal/apply"
+	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/inspect"
 	"github.com/Furyfree/nimbus/internal/native"
 	"github.com/Furyfree/nimbus/internal/postinstall"
@@ -71,6 +72,9 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 				}
 				_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s acknowledgment reset for %s. Native configuration will still be inspected.\n", task.ID, before.view.Machine)
 				return err
+			}
+			if task.ID == "fingerprint" && !preview {
+				return runFingerprint(cmd, src, before, task, yes, markDone)
 			}
 			if markDone {
 				return markExistingTask(cmd, src, before, task, yes)
@@ -219,7 +223,7 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "approve the selected native action after its preview")
 	cmd.Flags().BoolVarP(&preview, "plan", "p", false, "show the selected task without running its action")
-	if slices.Contains([]string{"onepassword", "nvidia-mok", "proton-cachyos"}, taskID) {
+	if slices.Contains([]string{"onepassword", "nvidia-mok", "proton-cachyos", "fingerprint"}, taskID) {
 		cmd.Flags().BoolVar(&markDone, "mark-done", false, "verify existing setup and record completion without applying configuration")
 	}
 	cmd.Flags().BoolVar(&reset, "reset", false, "reset this machine's acknowledgment without changing configuration")
@@ -237,6 +241,74 @@ func postinstallExecutor(opts *options, flags *machineFlags, taskID string) *cob
 		cmd.MarkFlagsMutuallyExclusive("plan", "reset")
 	}
 	return cmd
+}
+
+func runFingerprint(cmd *cobra.Command, src native.Source, before *postinstallSnapshot, task postinstall.Task, yes, verifyOnly bool) error {
+	if task.Status == postinstall.Blocked || (task.Status == postinstall.Unknown && !task.ActivationRequired) {
+		return errors.New(task.Detail)
+	}
+	if task.Status == postinstall.NotApplicable {
+		return renderPostinstall(cmd.OutOrStdout(), postinstallView{Machine: before.view.Machine, Tasks: []postinstall.Task{task}})
+	}
+	if task.Status == postinstall.Complete {
+		return markExistingTask(cmd, src, before, task, yes)
+	}
+	plan := "Check the fingerprint reader and enrollment; this may start fprintd through D-Bus. No authentication settings are changed."
+	if !verifyOnly {
+		plan += " If no finger is enrolled, run fprintd-enroll for this user, then check enrollment again. Keep password login available."
+	}
+	if _, err := fmt.Fprintln(cmd.OutOrStdout(), plan); err != nil {
+		return err
+	}
+	if !yes && (!postinstallTerminal(cmd.InOrStdin()) || !approver(cmd.InOrStdin(), cmd.OutOrStdout(), before.digest)) {
+		return errors.New("fingerprint check not approved; nothing was run")
+	}
+	path, err := apply.LockPath()
+	if err != nil {
+		return err
+	}
+	lock, err := apply.Acquire(path, apply.LockInfo{Command: "postinstall fingerprint", Operation: before.digest, PID: os.Getpid(), Started: time.Now().UTC()})
+	if err != nil {
+		return err
+	}
+	defer lock.Release()
+	fresh, err := inspectPostinstall(src, machineFlags{checkout: before.selected.Root, machine: before.view.Machine}, task.ID)
+	if err != nil {
+		return err
+	}
+	if fresh.digest != before.digest {
+		return errors.New("fingerprint selection or observed state changed after approval; retry the task")
+	}
+	if err := inspect.CheckPlatform(src, fresh.selected.Checkout.Definitions().Compatibility.Fedora); err != nil {
+		return err
+	}
+	if err := cmd.Context().Err(); err != nil {
+		return err
+	}
+	current := postinstall.VerifyFingerprint(src, task)
+	if current.Status == postinstall.Pending && !verifyOnly {
+		if err := cmd.Context().Err(); err != nil {
+			return err
+		}
+		argv, err := postinstallArgv(current)
+		if err != nil {
+			return err
+		}
+		if err := src.Stream(cmd.OutOrStdout(), cmd.ErrOrStderr(), argv[0], argv[1:]...); err != nil {
+			return fmt.Errorf("fingerprint enrollment failed: %w", err)
+		}
+		current = postinstall.VerifyFingerprint(src, current)
+	}
+	if err := renderPostinstall(cmd.OutOrStdout(), postinstallView{Machine: before.view.Machine, Tasks: []postinstall.Task{current}}); err != nil {
+		return err
+	}
+	if current.Status == postinstall.NotApplicable {
+		return nil
+	}
+	if current.Status != postinstall.Complete {
+		return fmt.Errorf("fingerprint enrollment not verified: %s", current.Detail)
+	}
+	return recordTask(before.view.Machine, task.ID+".complete", "verified")
 }
 
 func inspectPostinstall(src native.Source, flags machineFlags, tasks ...string) (*postinstallSnapshot, error) {
@@ -257,6 +329,16 @@ func inspectPostinstall(src native.Source, flags machineFlags, tasks ...string) 
 	if zeronSelected(s) && (taskID == "" || taskID == "zeron") {
 		view.Tasks = append(view.Tasks, zeronTask(src, s.Resolved.Machine))
 	}
+	if taskID == "" || taskID == "agent-proxy" {
+		selected := slices.ContainsFunc(s.Resolved.Packages, func(p definitions.ResolvedPackage) bool { return p.Name == "github-copilot-installer" })
+		if task, present := inspectAgentProxyTask(src, s.Resolved.Machine, selected); present {
+			view.Tasks = append(view.Tasks, task)
+		}
+	}
+	for i := range view.Tasks {
+		view.Tasks[i].Removal = postinstallRemoval(view.Tasks[i].ID)
+	}
+	slices.SortFunc(view.Tasks, func(a, b postinstall.Task) int { return strings.Compare(a.ID, b.ID) })
 	if err := enrichPostinstall(src, s, &view); err != nil {
 		return nil, err
 	}
@@ -395,6 +477,12 @@ func renderPostinstall(out io.Writer, view postinstallView) error {
 			continue
 		}
 		fmt.Fprintf(&b, "\n%s [%s]: %s\n%s\n", task.ID, postinstallStatusLabel(task), task.Title, task.Detail)
+		if task.ActivationRequired {
+			fmt.Fprintln(&b, "After approval: activate fprintd, check enrollment and run fprintd-enroll only if needed. --mark-done checks only.")
+		}
+		if task.Removal != "" {
+			fmt.Fprintln(&b, "Removal: "+task.Removal)
+		}
 		for _, prerequisite := range task.Prerequisites {
 			fmt.Fprintf(&b, "Prerequisite: %s\n", prerequisite)
 		}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/Furyfree/nimbus/internal/agentproxy"
 	"github.com/Furyfree/nimbus/internal/native"
+	"github.com/Furyfree/nimbus/internal/postinstall"
 	"github.com/spf13/cobra"
 )
 
@@ -36,6 +37,7 @@ Use --uninstall to stop and remove the proxy and its bundled Herdr service,
 remove its installation and Nimbus registration, and unregister its Copilot
 provider when Copilot is open. Copilot, config.yaml and Mise Herdr stay.
 With Copilot closed, remove the stale Local agents provider in the app later.
+Uninstall and --reset remain available when Copilot is deselected.
 `
 
 const proxySetupPreview = `Set up local agents in Copilot:
@@ -93,7 +95,7 @@ func newAgentProxyPostinstall(opts *options, flags *machineFlags) *cobra.Command
 					break
 				}
 			}
-			if !applicable {
+			if !applicable && !uninstall && !reset {
 				return errors.New("agent-proxy requires the selected GitHub Copilot component")
 			}
 			src := newSource()
@@ -162,6 +164,51 @@ func newAgentProxyPostinstall(opts *options, flags *machineFlags) *cobra.Command
 	cmd.Flags().BoolVar(&uninstall, "uninstall", false, "remove the proxy and its services, keeping Copilot, config and Mise Herdr")
 	cmd.MarkFlagsMutuallyExclusive("reset", "uninstall")
 	return cmd
+}
+
+// Registration controls refresh opt-in; only systemd establishes live service
+// state. Inspect leftovers even after Copilot is deselected, without claiming
+// ownership from a unit name (uninstall performs the strict ownership check).
+func inspectAgentProxyTask(src native.Source, machine string, selected bool) (postinstall.Task, bool) {
+	registration := agentproxy.Inspect(src, machine)
+	proxy, proxyErr := inspectUserUnit(src, "agent-proxy.service")
+	herdr, herdrErr := inspectUserUnit(src, "herdr.service")
+	base := os.Getenv("XDG_DATA_HOME")
+	if base == "" {
+		home, _ := os.UserHomeDir()
+		base = filepath.Join(home, ".local", "share")
+	}
+	_, installErr := src.ReadDir(filepath.Join(base, "agent-proxy"))
+	present := selected || registration.Status != "not-configured" || !errors.Is(installErr, os.ErrNotExist) || (proxyErr == nil && !proxy.absent())
+	t := postinstall.Task{ID: "agent-proxy", Owner: "agent-proxy", Title: "Connect Copilot to local agents", Status: postinstall.Pending,
+		Instructions: []string{"Setup requires selected Copilot. Uninstall remains available after deselection; service ownership is checked before removal."},
+		Verification: "Current user-service states and local installation/registration. Provider access and model availability are not checked by status.",
+		Recovery:     "Retry setup with Copilot open, or use --uninstall to remove an owned installation."}
+	if !present {
+		return t, false
+	}
+	t.Detail = registration.Detail
+	if proxyErr != nil || herdrErr != nil {
+		t.Status = postinstall.Unknown
+		t.Detail += " " + errors.Join(proxyErr, herdrErr).Error()
+	} else {
+		t.CurrentState = proxy.label()
+		t.Summary = "Startup " + proxy.Enabled + " · Herdr " + herdr.label()
+		if proxy.absent() {
+			t.Summary = "Proxy absent · Herdr " + herdr.label()
+		}
+		t.Detail = "agent-proxy.service: " + proxy.detail() + "; herdr.service: " + herdr.detail() + ". " + registration.Detail
+		if proxy.running() && herdr.running() && registration.Status == "configured" {
+			t.Status = postinstall.Complete
+		}
+		if registration.Status == "blocked" {
+			t.Status = postinstall.Unknown
+		}
+	}
+	if !selected {
+		t.Detail += " Copilot is not selected; existing resources can still be uninstalled."
+	}
+	return t, true
 }
 
 func renderAgentProxy(out io.Writer, result agentproxy.Result) error {

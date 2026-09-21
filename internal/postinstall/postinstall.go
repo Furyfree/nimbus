@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/Furyfree/nimbus/internal/agentproxy"
 	"github.com/Furyfree/nimbus/internal/definitions"
 	"github.com/Furyfree/nimbus/internal/inspect"
 	"github.com/Furyfree/nimbus/internal/native"
@@ -60,6 +59,10 @@ type Action struct {
 }
 
 type Task struct {
+	Summary               string   `json:"summary,omitempty"`
+	CurrentState          string   `json:"current_state,omitempty"`
+	Removal               string   `json:"removal,omitempty"`
+	ActivationRequired    bool     `json:"activation_required,omitzero"`
 	PreviouslyVerified    bool     `json:"previously_verified,omitzero"`
 	VerificationNeedsRoot bool     `json:"verification_needs_root,omitzero"`
 	ID                    string   `json:"id"`
@@ -117,17 +120,6 @@ func Inspect(src native.Source, in Inputs) []Task {
 				id = "wowup"
 			}
 			add(id, func() Task { return installerHelper(src, in, pkg) })
-			if pkg.Name == "github-copilot-installer" && (in.Task == "" || in.Task == "agent-proxy") {
-				observed := agentproxy.Inspect(src, in.Resolved.Machine)
-				status := Pending
-				if observed.Status == "configured" {
-					status = Complete
-				}
-				if observed.Status == "blocked" {
-					status = Unknown
-				}
-				result = append(result, Task{ID: "agent-proxy", Owner: "agent-proxy", Title: "Connect Copilot to local agents", Status: status, Detail: observed.Detail, Instructions: []string{"Run nimbus postinstall agent-proxy for approved native setup and model refresh."}, Verification: "Local registration and installation files; runtime access is checked only by the explicit task.", Recovery: "Retry the task with Copilot open. Existing models are retained when discovery fails."})
-			}
 		case pkg.Name == "noctalia" && pkg.Prefix != "flatpak":
 			add("noctalia-plugins", func() Task { return noctaliaPlugins(src, in, pkg) })
 			add("noctalia-lockscreen", func() Task { return noctaliaLockscreen(src, in, pkg) })

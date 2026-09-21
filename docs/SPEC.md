@@ -326,16 +326,21 @@ An unavailable check is reported, never treated as proof of matching state.
 
 Nimbus output uses one meaning per color, all bright and bold:
 
-- green: success that needs nothing further (succeeded, verified,
-  installed, updated, adopt, totals)
+- green: a successful check or running service (succeeded, verified,
+  installed, updated, adopt, totals, running, configured, loaded, files
+  present, enrolled)
 - yellow: attention needed, nothing broken yet (pending, unknown, unable
-  to check, warning, notice, reboot or logout required, Remaining setup)
-- red: stopped or wrong, act before continuing (failed, error, blocked,
+  to check, not checked, warning, notice, reboot or logout required,
+  Remaining setup)
+- red: failed or wrong, act before continuing (failed, error, blocked,
   remove, Verification problems)
 - cyan: something that runs (`$` commands, `->` operations, Proceed?)
 - white: structure and instructions (headings, labels, the finish banner)
 - dim: secondary context only (unchanged, paths, durations, previously
   verified, decision reasons)
+
+Status task names are bright white; descriptions and deliberate Off/Stopped
+states use normal text. Colors use the terminal's palette.
 
 Color never carries meaning alone. Styling applies only to terminals with
 `TERM` not `dumb` and `NO_COLOR` empty; redirected text, JSON and installer
@@ -359,8 +364,14 @@ Bare `postinstall` and `postinstall --help` list task commands without
 inspection. Each named task has its own help and `--plan`; `postinstall
 status` shows applicable tasks and session notices. JSON supports status and
 previews, not execution. Reboot and logout are notices, not commands.
-Inspection reports Pending, Verified, Blocked or Unable to check with a
-reason.
+Inspection shows current facts: running, stopped, failed, absent, installed,
+configured or enrolled, with the limits of each check. Service activity and
+startup enablement are separate. Completion means the task's setup condition
+holds, not that an app is running or an account is still unlocked. Never use
+historical verification as the current status. An unavailable observation
+stays unknown; status does not activate services or authenticate to check it.
+JSON retains the setup `status`, observed `current_state` and short `summary`,
+`removal` guidance and `activation_required` for an idle fingerprint daemon.
 
 Guided tasks show prerequisites, request confirmation where required, preview
 native actions, take the operation lock and recheck before execution. They
@@ -369,8 +380,25 @@ insufficient, and verified tasks need no repeated action. `--mark-done`
 confirms a manual prerequisite and verifies existing setup without installing
 or applying configuration. `--reset` clears the machine's manual and
 completion evidence without undoing configuration. Failed checks explain what
-remains and point to the task. Task help documents verification limits; native
-details stay in JSON and previews.
+remains and point to the task. Task help documents verification limits;
+default status uses one aligned row per task with a short current summary.
+Full details and removal guidance remain in `status --verbose`, JSON, task
+help and previews. Native tools own
+removal; tasks that change preferences have no universal uninstall. A reset
+is not an undo. Chezmoi continues to own managed user configuration.
+
+`fingerprint` observes the reader and the invoking user's enrollment through
+non-activating fprintd D-Bus calls. When fprintd is installed but idle, report
+"Not checked" and activation required under remaining setup, not verification
+problems. Other inspection errors remain unknown. Explicit setup previews
+daemon activation and conditional `fprintd-enroll`, asks once, locks and
+rechecks selection before allowing D-Bus activation. Already enrolled users
+need no enrollment; no reader is not applicable. `--mark-done` can approve
+activation and verify existing enrollment but never enrolls. Verify after
+enrollment; failure or an empty result never records completion. Status,
+previews and closing reports never activate fprintd. Enrollment does not prove
+PAM/greeter integration; preserve password login and never read biometric
+templates. Native fprintd owns deleting enrollments.
 
 1Password first offers SSH/Git integration when not selected, including after
 CLI-only setup. The terminal choice defaults to no and `--yes` cannot opt in;
@@ -471,7 +499,8 @@ an exact enrolled/trusted result with exit 1 is complete, an exact
 not-enrolled result with exit 0 or a pending request with exit 1 stays
 pending, denylisted keys are blocked, and unexpected output or exit status is
 unknown. Stored verification prevented from rechecking by permissions is
-shown as "Previously verified" in notices, with JSON retaining native
+shown as "Unable to check" with the earlier verification in its detail and
+historical notices, with JSON retaining native
 `unknown` and `previously_verified: true`; it is not current verification.
 Status, help and `--plan` never authenticate.
 
@@ -556,9 +585,12 @@ started once. ProtonPlus owns runner downloads, updates and removal; Nimbus
 neither queries releases during inspection nor records completion from an
 exit code. This is never an automatic download during init or sync.
 
-`agent-proxy` is selected with GitHub Copilot. Help, plan and status read
-only local definitions and registration evidence; execution requires
-approval, a running Copilot desktop, Mise-selected Node 24 or newer, Herdr
+`agent-proxy` setup is selected with GitHub Copilot. Help, plan and status read
+only local definitions, installation/registration and user-service state;
+they never contact providers or open credentials. Status still shows an
+existing proxy unit, installation or registration after Copilot deselection.
+Registration alone cannot establish that either service is running. Setup
+requires approval, a running Copilot desktop, Mise-selected Node 24 or newer, Herdr
 and authenticated CLIs. Authentication stays a separate native step and the
 task never starts sign-in or asks for privileges. Chezmoi owns the
 loopback-only proxy configuration; the upstream current-user installer owns
@@ -574,7 +606,8 @@ after Topgrade in `sync --upgrade`; ordinary sync, standalone `upgrade` and
 any discovery or mutation. Reset disables the opt-in and retains services,
 credentials, configuration and model ownership.
 
-`agent-proxy --uninstall` validates the proxy installation and both native
+`agent-proxy --uninstall` and `--reset` remain available after deselection.
+Uninstall validates the proxy installation and both native
 user units before stopping them. It invokes the pinned upstream installer
 without `--purge`, verifies removal, then deletes Nimbus registration state.
 It unregisters only the recorded loopback provider through Copilot's API when

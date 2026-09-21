@@ -17,7 +17,7 @@ var taskDescriptions = []struct{ id, title, help string }{
 	{"account-picture", "Register the managed account picture", "Requires AccountsService, a valid managed JPEG and the desktop authorization session."},
 	{"copilot", "Install GitHub Copilot", "Requires the selected native installer helper. The helper owns installation, updates and removal."},
 	{"dtu-network", "Set up DTU eduroam on Linux", "Requires the selected dtu-network component and installed packages with verified Nimbus receipts or recorded baseline identities. After approval, install the reviewed CAT CA bundle and configure a user-restricted eduroam profile through NetworkManager. Choose manual credentials or a 1Password item UUID with username and password fields; a bare username receives @dtu.dk. Existing eduroam/DTUsecure profiles require a separate default-No deletion/recreation confirmation, including with --yes; declining preserves profiles and certificates without reading credentials. Automatic connection is enabled after profile/password verification, even off campus. A separate prompt offers immediate connection; if eduroam is not found, setup stays configured for later. Status and --plan stay offline, never read credentials and never request sudo. Completion verifies configuration, not Wi-Fi or Internet access. --reset clears evidence only."},
-	{"fingerprint", "Enroll a fingerprint", "Requires fprintd and a supported reader. Native enrollment verifies completion."},
+	{"fingerprint", "Enroll a fingerprint", "Requires fprintd and a supported reader. After approval, activate fprintd through D-Bus, check this user's enrollment and run fprintd-enroll only when needed. --mark-done approves checking only, never enrollment. Status and --plan never activate the daemon. An idle daemon leaves enrollment unknown, not failed. Enrollment alone does not verify fingerprint login."},
 	{"hostname", "Set the persistent hostname", "Requires the machine manifest hostname. Close browsers first: Chromium treats a lock naming another hostname as another computer. After approval, set the static hostname through hostnamectl and verify it. NetworkManager then keeps the name stable across Wi-Fi changes and reboots. Status and --plan stay read-only; no browser data or profile locks are touched."},
 	{"hyprland-plugins", "Install selected Hyprland plugins", "Requires the active matching Hyprland session, development headers and Chezmoi plugin selection."},
 	{"noctalia-lockscreen", "Restore the managed lockscreen layout", "Requires an applied Chezmoi layout and the unlocked Noctalia desktop session. After approval, gracefully stop only Noctalia, save a private settings backup, remove only lockscreen_widgets overrides, restart the shell and verify configuration. Close the lockscreen editor first. The bar briefly disappears; applications and Hyprland stay running. No sudo, automatic locking or repair during sync. --reset clears evidence only; it does not restore the backup."},
@@ -50,6 +50,8 @@ func newPostinstall(opts *options) *cobra.Command {
 	for _, spec := range taskDescriptions {
 		child := postinstallExecutor(opts, &flags, spec.id)
 		child.Use, child.Short, child.Long = spec.id, spec.title, spec.help
+		child.Long += "\n\nRemoval: " + postinstallRemoval(spec.id)
+		child.Long += "\n--reset clears Nimbus acknowledgment only; it does not disable or uninstall anything."
 		if child.Flags().Lookup("mark-done") != nil {
 			child.Long += "\n\nUse --mark-done for existing setup: verify and record completion without installation or configuration changes."
 		}
@@ -78,6 +80,7 @@ func newPostinstall(opts *options) *cobra.Command {
 	return cmd
 }
 func renderPostinstallStatus(out io.Writer, view postinstallView, verbose ...bool) error {
+	full := len(verbose) > 0 && verbose[0]
 	if _, err := fmt.Fprintf(out, "Setup for %s:\n", view.Machine); err != nil {
 		return err
 	}
@@ -94,62 +97,120 @@ func renderPostinstallStatus(out io.Writer, view postinstallView, verbose ...boo
 			continue
 		}
 		status := postinstallStatusLabel(t)
-		detail := postinstallStatusDetail(t)
-		if len(verbose) > 0 && verbose[0] {
+		if t.ID == "zeron" && t.CurrentState == "Absent" && t.Status == postinstall.Complete {
+			status = "Off"
+		}
+		detail := postinstallStatusSummary(t)
+		if full {
 			detail = t.Detail
 		}
 		if err := output.StatusRow(out, t.ID, status, detail); err != nil {
 			return err
 		}
-		if t.PreviouslyVerified && t.Status == postinstall.Unknown && t.VerificationNeedsRoot {
+		if full && t.Removal != "" {
+			if _, err := fmt.Fprintln(out, "    Removal: "+t.Removal); err != nil {
+				return err
+			}
+		}
+		if full && t.PreviouslyVerified && t.Status == postinstall.Unknown && t.VerificationNeedsRoot {
 			if _, err := fmt.Fprintf(out, "    Recheck: nimbus postinstall %s (requests sudo)\n", t.ID); err != nil {
 				return err
 			}
 		}
 	}
+	if !full {
+		_, err := fmt.Fprintln(out, "\nUse --verbose for details and removal options.")
+		return err
+	}
 	return nil
 }
 
-func postinstallStatusLabel(task postinstall.Task) string {
-	if task.PreviouslyVerified && task.Status == postinstall.Unknown && task.VerificationNeedsRoot {
-		return "Previously verified"
+func postinstallStatusSummary(task postinstall.Task) string {
+	detail := task.Detail
+	switch {
+	case task.Summary != "":
+		detail = task.Summary
+	case task.ActivationRequired:
+		detail = "Daemon idle; approve a check"
+	case task.VerificationNeedsRoot:
+		detail = "Current check needs authorization"
+	case task.ID == "fingerprint" && task.Status == postinstall.Pending:
+		detail = "No fingers enrolled"
+	case task.Status == postinstall.Complete:
+		switch task.ID {
+		case "account-picture":
+			detail = "Matches managed picture"
+		case "hostname":
+			detail = strings.TrimSuffix(strings.TrimPrefix(detail, "The static hostname is already "), ".")
+		case "hyprland-plugins":
+			detail = "Selected plugins enabled and loaded"
+		case "noctalia-lockscreen":
+			detail = "Layout matches; appearance unchecked"
+		case "noctalia-plugins":
+			detail = "Enabled plugin files present"
+		case "onepassword":
+			detail = "Local files checked; sign-in unchecked"
+		case "fingerprint":
+			detail = "Finger enrolled; login unchecked"
+		case "proton-cachyos":
+			detail = "Proton-CachyOS Latest installed"
+		}
 	}
-	return map[postinstall.Status]string{postinstall.Complete: "Verified", postinstall.Pending: "Pending", postinstall.Unknown: "Unable to check", postinstall.Blocked: "Blocked", postinstall.NotApplicable: "Not applicable"}[task.Status]
+	// Keep the default row within 80 columns; verbose and JSON retain all text.
+	runes := []rune(strings.Join(strings.Fields(detail), " "))
+	if len(runes) > 42 {
+		return strings.TrimSpace(string(runes[:39])) + "..."
+	}
+	return string(runes)
 }
 
-// Compact successful checks for the checklist only. Native details remain in
-// JSON and task previews; never replace a pending or failed check's explanation.
-func postinstallStatusDetail(task postinstall.Task) string {
-	if task.PreviouslyVerified && task.Status == postinstall.Unknown && task.VerificationNeedsRoot {
-		return "Recheck requires sudo."
+func postinstallStatusLabel(task postinstall.Task) string {
+	if task.CurrentState != "" {
+		return task.CurrentState
+	}
+	if task.ActivationRequired {
+		return "Not checked"
 	}
 	if task.Status != postinstall.Complete {
-		return task.Detail
+		return map[postinstall.Status]string{postinstall.Pending: "Pending", postinstall.Unknown: "Unable to check", postinstall.Blocked: "Blocked", postinstall.NotApplicable: "Not applicable"}[task.Status]
 	}
 	switch task.ID {
-	case "account-picture":
-		return "Matches managed picture."
-	case "copilot":
-		return "Application installed."
+	case "copilot", "wowup", "proton-cachyos":
+		return "Installed"
 	case "hyprland-plugins":
-		return "ScrollOverview built and loaded."
-	case "hostname":
-		return "Static hostname matches the manifest."
+		return "Loaded"
 	case "noctalia-plugins":
-		return "Enabled plugin files present."
+		return "Files present"
 	case "nvidia-mok":
-		return "Certificate enrolled or trusted."
+		return "Key checked"
+	case "fingerprint":
+		return "Enrolled"
 	case "onepassword":
-		return "GUI and local integration checked."
-	case "proton-cachyos":
-		return "Latest runner installed."
-	case "tailscale-operator":
-		return task.Detail
-	case "voxtype":
-		return "Model downloaded and user unit enabled."
+		return "Configured"
 	default:
-		return task.Detail
+		return "Configured"
 	}
+}
+
+func postinstallRemoval(id string) string {
+	return map[string]string{
+		"zeron":               "nimbus postinstall zeron --disable removes the daemon; GUI and data stay.",
+		"agent-proxy":         "nimbus postinstall agent-proxy --uninstall removes proxy and bundled herdr.service; config, data, Copilot and Mise Herdr stay. --reset only disables model refresh.",
+		"copilot":             "Use github-copilot-installer uninstall before removing its helper RPM; personal data stays outside Nimbus ownership.",
+		"wowup":               "Use wowup-cf-installer uninstall before removing its helper RPM; keep profile data unless separately choosing native purge.",
+		"voxtype":             "systemctl --user disable --now voxtype.service stops and disables dictation; models and configuration stay.",
+		"fingerprint":         "Use fprintd-delete to delete this user's enrollments. Disabling fingerprint login is a separate authentication setting; keep password login available.",
+		"hyprland-plugins":    "Change Chezmoi's plugin selection, then use hyprpm to disable or remove the plugin.",
+		"noctalia-plugins":    "Change the managed plugin selection in Chezmoi; Noctalia owns downloaded plugin files.",
+		"proton-cachyos":      "Remove the runner through ProtonPlus; Steam and game data stay.",
+		"tailscale-operator":  "Use native Tailscale settings to revoke the local operator. Disconnecting or signing out is a separate action.",
+		"dtu-network":         "Use NetworkManager to disable or delete the exact DTU profile. Nimbus has no uninstall action; credentials and CA are not removed by --reset.",
+		"onepassword":         "Change managed SSH/Git integration through Chezmoi; sign-out and app removal are separate native actions. Nimbus never deletes vault data.",
+		"hostname":            "Change the static name through hostnamectl; Nimbus will report any difference from the manifest.",
+		"account-picture":     "Choose another picture through AccountsService or desktop settings; the managed source stays in Chezmoi.",
+		"noctalia-lockscreen": "No automatic undo. The task keeps a private settings backup; restoring it requires reviewing later settings changes.",
+		"nvidia-mok":          "No Nimbus uninstall. Native MOK deletion requires firmware confirmation and can prevent signed drivers from loading; never delete signing keys as cleanup.",
+	}[id]
 }
 
 func confirmManual(cmd *cobra.Command, message string) error {

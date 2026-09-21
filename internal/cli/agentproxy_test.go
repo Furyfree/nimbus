@@ -12,6 +12,7 @@ import (
 	"github.com/Furyfree/nimbus/internal/agentproxy"
 	"github.com/Furyfree/nimbus/internal/native"
 	"github.com/Furyfree/nimbus/internal/native/nativetest"
+	"github.com/Furyfree/nimbus/internal/postinstall"
 )
 
 func agentProxyFixture(t *testing.T) string {
@@ -171,5 +172,85 @@ func TestAgentProxyUninstallChecksBeforeApproval(t *testing.T) {
 		if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "/tmp/foreign.conf") {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestAgentProxyLiveStatusSurvivesDeselection(t *testing.T) {
+	_, src := postinstallFixture(t)
+	p, _ := agentproxy.StatePath()
+	src.Files[p] = []byte(`{"version":1,"machine":"vm","configured":true,"providerId":"test"}`)
+	src.Files[filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "agent-proxy/config.yaml")] = []byte("fixture")
+	src.Files[filepath.Join(os.Getenv("XDG_DATA_HOME"), "agent-proxy/current/VERSION")] = []byte("1.3.0-nimbus.2-source")
+	src.Paths["mise"], src.Paths["herdr"] = "mise", "herdr"
+	proxyShow := strings.Replace(zeronShow, "zeron.service", "agent-proxy.service", 1)
+	herdrShow := strings.Replace(zeronShow, "zeron.service", "herdr.service", 1)
+	absent := []byte("LoadState=not-found\nActiveState=inactive\nUnitFileState=\nFragmentPath=\n")
+	running := []byte("LoadState=loaded\nActiveState=active\nUnitFileState=enabled\n")
+	src.Commands[herdrShow] = running
+	for _, test := range []struct{ state, label string }{
+		{string(running), "Running"},
+		{"LoadState=loaded\nActiveState=inactive\nUnitFileState=enabled\n", "Stopped"},
+		{"LoadState=loaded\nActiveState=failed\nUnitFileState=enabled\n", "Failed"},
+		{string(absent), "Absent"},
+	} {
+		src.Commands[proxyShow] = []byte(test.state)
+		task, present := inspectAgentProxyTask(src, "vm", false)
+		if !present || task.CurrentState != test.label || !strings.Contains(task.Detail, "Copilot is not selected") {
+			t.Fatalf("deselected installation hidden: %+v", task)
+		}
+		if (task.Status == postinstall.Complete) != (test.label == "Running") {
+			t.Fatalf("registration masked current state: %+v", task)
+		}
+	}
+	delete(src.Commands, proxyShow)
+	task, present := inspectAgentProxyTask(src, "vm", false)
+	if !present || task.Status != postinstall.Unknown || task.CurrentState != "" {
+		t.Fatalf("unavailable service query trusted registration: %+v", task)
+	}
+	// A leftover native unit is visible even when registration has gone.
+	delete(src.Files, p)
+	src.Commands[proxyShow] = running
+	if task, present := inspectAgentProxyTask(src, "vm", false); !present || task.Status == postinstall.Complete {
+		t.Fatalf("unregistered service hidden or treated as owned: %+v", task)
+	}
+	src.Commands[proxyShow], src.Commands[herdrShow] = absent, absent
+	if _, present := inspectAgentProxyTask(src, "vm", false); present {
+		t.Fatal("absent deselected proxy exposed a task")
+	}
+	if len(src.streams) != 0 {
+		t.Fatal("status changed native state", src.streams)
+	}
+}
+
+func TestAgentProxyDeselectedUninstallKeepsOwnershipChecks(t *testing.T) {
+	root, _ := postinstallFixture(t)
+	oldCheck, oldRun := checkAgentProxyUninstall, runAgentProxy
+	t.Cleanup(func() { checkAgentProxyUninstall, runAgentProxy = oldCheck, oldRun })
+	checked, ran := 0, 0
+	checkAgentProxyUninstall = func(native.Source) error { checked++; return nil }
+	runAgentProxy = func(_ context.Context, mode, machine string, _ io.Writer) (agentproxy.Result, error) {
+		ran++
+		if mode != "uninstall" || machine != "vm" {
+			t.Fatal(mode, machine)
+		}
+		return agentproxy.Result{Status: "succeeded", Detail: "Removed owned proxy"}, nil
+	}
+	for _, args := range [][]string{{"agent-proxy", "--uninstall", "--plan"}, {"agent-proxy", "--uninstall", "--yes"}} {
+		cmd, _ := postinstallCommand(root, false, args...)
+		if err := cmd.Execute(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if checked != 2 || ran != 1 {
+		t.Fatalf("ownership checks=%d runs=%d", checked, ran)
+	}
+	checkAgentProxyUninstall = func(native.Source) error { return errors.New("foreign unit") }
+	cmd, _ := postinstallCommand(root, false, "agent-proxy", "--uninstall", "--yes")
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "foreign unit") || ran != 1 {
+		t.Fatalf("ownership bypass: %v, runs=%d", err, ran)
+	}
+	cmd, _ = postinstallCommand(root, false, "agent-proxy", "--yes")
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "requires the selected") || ran != 1 {
+		t.Fatalf("deselected setup allowed: %v, runs=%d", err, ran)
 	}
 }

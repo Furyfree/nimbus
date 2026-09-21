@@ -145,13 +145,6 @@ func TestInstallerHelpersDoNotImplyApplicationCompletion(t *testing.T) {
 			}
 			guard := &readGuard{FakeSource: src}
 			got := withoutMachineTasks(Inspect(guard, in))
-			if name == "github-copilot-installer" {
-				if len(got) != 2 || len(guard.files) != 1 {
-					t.Fatalf("expected local proxy registration inspection: %+v", got)
-				}
-				got = slices.DeleteFunc(got, func(task Task) bool { return task.ID == "agent-proxy" })
-				guard.files = nil
-			}
 			if len(got) != 1 || !slices.Equal(guard.commands, []string{statusCommand}) || len(guard.files) != 0 {
 				t.Fatalf("unexpected helper inspection: tasks=%+v commands=%v files=%v", got, guard.commands, guard.files)
 			}
@@ -159,7 +152,7 @@ func TestInstallerHelpersDoNotImplyApplicationCompletion(t *testing.T) {
 				t.Fatalf("helper installation became application completion: %+v", got[0])
 			}
 			delete(src.Paths, helper)
-			got = slices.DeleteFunc(withoutMachineTasks(Inspect(src, in)), func(task Task) bool { return task.ID == "agent-proxy" })
+			got = withoutMachineTasks(Inspect(src, in))
 			if got[0].Status != Blocked || got[0].Action != nil {
 				t.Fatalf("missing helper can run: %+v", got[0])
 			}
@@ -306,7 +299,7 @@ func TestFingerprintReadOnlyObservation(t *testing.T) {
 				t.Fatalf("got %+v, want %s", got, test.want)
 			}
 			for _, command := range guard.commands {
-				if !strings.HasPrefix(command, "busctl --system --auto-start=no --allow-interactive-authorization=no ") {
+				if !strings.HasPrefix(command, "busctl --system --auto-start=no --allow-interactive-authorization=no ") && command != "systemctl show fprintd.service --property=LoadState,ActiveState" {
 					t.Fatalf("unexpected mutating or interactive command %s", command)
 				}
 			}
@@ -317,8 +310,11 @@ func TestFingerprintReadOnlyObservation(t *testing.T) {
 func TestFingerprintNativeNoEnrolledPrintsError(t *testing.T) {
 	for _, message := range []string{
 		"Call failed: No fingerprints enrolled: exit status 1",
+		"Call failed: Failed to discover prints: exit status 1",
 		"Call failed: Permission denied: exit status 1",
 		"Call failed: No fingerprints enrolled: exit status 2",
+		"Call failed: Failed to discover prints: exit status 2",
+		"Call failed: Failed to discover prints; authorization denied: exit status 1",
 		"Call failed: No fingerprints enrolled; authorization denied: exit status 1",
 	} {
 		t.Run(message, func(t *testing.T) {
@@ -331,11 +327,14 @@ func TestFingerprintNativeNoEnrolledPrintsError(t *testing.T) {
 			src.Failures[fingers] = fingers + ": " + message
 			got := findTask(t, Inspect(src, in), "fingerprint")
 			want := Unknown
-			if message == "Call failed: No fingerprints enrolled: exit status 1" {
+			if message == "Call failed: No fingerprints enrolled: exit status 1" || message == "Call failed: Failed to discover prints: exit status 1" {
 				want = Pending
 			}
 			if got.Status != want || (got.Action != nil) != (want == Pending) {
 				t.Fatalf("got %+v; want %s", got, want)
+			}
+			if strings.Contains(got.Detail, "without interactive authorization") {
+				t.Fatal("unknown response incorrectly diagnosed as authorization failure")
 			}
 		})
 	}
@@ -447,7 +446,7 @@ func TestSingleTaskInspectionMatchesFullCatalogWithoutOtherProbes(t *testing.T) 
 	in, src := fixture("1password", "fprintd", "tailscale", "github-copilot-installer", "wowup-cf-installer", "noctalia", "hyprland-devel", "accountsservice", "protonplus", "steam")
 	in.Resolved.Components = append(in.Resolved.Components, definitions.ResolvedComponent{ID: "nvidia"})
 	all := Inspect(src, in)
-	if len(all) != 13 {
+	if len(all) != 12 { // Proxy lifecycle is inspected by the CLI, including deselected installations.
 		t.Fatalf("task coverage changed: %d", len(all))
 	}
 	for _, task := range all {

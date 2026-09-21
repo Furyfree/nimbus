@@ -9,11 +9,42 @@ import (
 	"testing"
 
 	"github.com/Furyfree/nimbus/internal/native"
+	"github.com/Furyfree/nimbus/internal/postinstall"
 )
 
 const fedoraTimeout = "/usr/lib/systemd/user/service.d/10-timeout-abort.conf"
 
 const zeronShow = "systemctl --user show zeron.service --property=LoadState,ActiveState,UnitFileState,FragmentPath,DropInPaths"
+
+func TestZeronStatusUsesLiveServiceDespiteRecordedOptIn(t *testing.T) {
+	_, src := zeronFixture(t)
+	if err := recordTask("vm", "zeron.daemon", "verified"); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct{ active, enabled, label string }{
+		{"active", "enabled", "Running"}, {"inactive", "enabled", "Stopped"},
+		{"active", "disabled", "Running"}, {"failed", "enabled", "Failed"},
+	} {
+		src.Commands[zeronShow] = fmt.Appendf(nil, "LoadState=loaded\nActiveState=%s\nUnitFileState=%s\n", test.active, test.enabled)
+		task := zeronTask(src, "vm")
+		if postinstallStatusLabel(task) != test.label || !strings.Contains(task.Detail, "startup="+test.enabled) || !strings.Contains(task.Detail, "activity="+test.active) {
+			t.Fatalf("lost current service state: %+v", task)
+		}
+		if (task.Status == postinstall.Complete) != (test.active == "active" && test.enabled == "enabled") {
+			t.Fatalf("historical opt-in masked current state: %+v", task)
+		}
+	}
+	setZeronFixture(t, src, false)
+	task := zeronTask(src, "vm")
+	if task.Status != postinstall.Pending || task.CurrentState != "Absent" {
+		t.Fatalf("external removal hidden by opt-in: %+v", task)
+	}
+	delete(src.Commands, zeronShow)
+	task = zeronTask(src, "vm")
+	if task.Status != postinstall.Unknown || task.CurrentState != "" {
+		t.Fatalf("failed inspection became a live state: %+v", task)
+	}
+}
 
 func zeronFixture(t *testing.T) (string, *postinstallSource) {
 	t.Helper()

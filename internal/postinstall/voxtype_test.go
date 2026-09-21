@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Furyfree/nimbus/internal/native/nativetest"
@@ -71,6 +72,8 @@ func TestVoxtypeSetupStates(t *testing.T) {
 		{name: "model disabled", installed: true, want: Pending, commands: [][]string{enable}},
 		{name: "model enabled", installed: true, enabled: "enabled", active: "active", want: Complete},
 		{name: "model enabled but stopped", installed: true, enabled: "enabled", active: "inactive", want: Complete},
+		{name: "model enabled but failed", installed: true, enabled: "enabled", active: "failed", want: Pending},
+		{name: "running but disabled", installed: true, enabled: "disabled", active: "active", want: Pending, commands: [][]string{enable}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			in, src := voxtypeFixture(t)
@@ -86,6 +89,9 @@ func TestVoxtypeSetupStates(t *testing.T) {
 			got := findTask(t, Inspect(src, in), "voxtype")
 			if got.Status != test.want {
 				t.Fatalf("got %s (%s), want %s", got.Status, got.Detail, test.want)
+			}
+			if test.active != "" && (!strings.Contains(got.Detail, "activity: "+test.active) || got.CurrentState == "") {
+				t.Fatalf("current activity missing: %+v", got)
 			}
 			if test.commands == nil {
 				if got.Action != nil {

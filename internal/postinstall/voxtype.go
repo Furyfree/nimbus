@@ -122,14 +122,20 @@ func voxtypeSetup(src native.Source, in Inputs, pkg definitions.ResolvedPackage)
 		t.Detail = err.Error()
 		return t
 	}
+	t.CurrentState = active
+	if active == "active" {
+		t.CurrentState = "Running"
+	} else if active == "inactive" {
+		t.CurrentState = "Stopped"
+	} else if active == "failed" {
+		t.CurrentState = "Failed"
+	}
 	switch {
 	case installed && enabled:
 		t.Status = Complete
 		t.Detail = "The " + model + " model is installed and voxtype.service is enabled."
-		if active {
+		if active == "active" {
 			t.Detail += " Dictation is running."
-		} else {
-			t.Detail += " It starts at the next graphical login."
 		}
 	case !installed:
 		t.Status = Pending
@@ -139,6 +145,22 @@ func voxtypeSetup(src native.Source, in Inputs, pkg definitions.ResolvedPackage)
 		t.Status = Pending
 		t.Detail = "The " + model + " model is installed, but voxtype.service is not enabled."
 		t.Action = &Action{Kind: SetupVoxtype, Commands: [][]string{voxtypeEnableCommand()}}
+	}
+	t.Detail += " Current service activity: " + active + "."
+	if !enabled {
+		t.Detail += " Startup is not enabled."
+	}
+	if active == "failed" {
+		t.Status = Pending
+	}
+	t.Summary = "Startup disabled"
+	if enabled {
+		t.Summary = "Startup enabled"
+	}
+	if installed {
+		t.Summary += " · model: " + model
+	} else {
+		t.Summary += " · model missing: " + model
 	}
 	return t
 }
@@ -222,7 +244,7 @@ func voxtypeModelInstalled(src native.Source, model string) (bool, error) {
 // voxtypeUnitState reads the persistent and current unit state. Native user
 // units are disabled by default; is-enabled reports that as a non-zero exit
 // with the state on stdout.
-func voxtypeUnitState(src native.Source) (enabled, active bool, err error) {
+func voxtypeUnitState(src native.Source) (enabled bool, active string, err error) {
 	out, runErr := src.Run("systemctl", "--user", "is-enabled", "voxtype.service")
 	state := strings.TrimSpace(string(out))
 	switch state {
@@ -231,21 +253,20 @@ func voxtypeUnitState(src native.Source) (enabled, active bool, err error) {
 	case "disabled", "static", "masked", "linked", "indirect", "alias", "generated", "transient":
 	default:
 		if runErr != nil {
-			return false, false, errors.New("The voxtype.service unit state could not be read; check that a user systemd session is available, then retry")
+			return false, "", errors.New("The voxtype.service unit state could not be read; check that a user systemd session is available, then retry")
 		}
-		return false, false, errors.New("The voxtype.service unit returned an unrecognized state; inspect systemctl --user status voxtype.service")
+		return false, "", errors.New("The voxtype.service unit returned an unrecognized state; inspect systemctl --user status voxtype.service")
 	}
 	out, runErr = src.Run("systemctl", "--user", "is-active", "voxtype.service")
 	state = strings.TrimSpace(string(out))
 	switch state {
-	case "active":
-		active = true
-	case "inactive", "failed", "activating", "deactivating":
+	case "active", "inactive", "failed", "activating", "deactivating":
+		active = state
 	default:
 		if runErr != nil {
-			return false, false, errors.New("The voxtype.service activity could not be read; check that a user systemd session is available, then retry")
+			return false, "", errors.New("The voxtype.service activity could not be read; check that a user systemd session is available, then retry")
 		}
-		return false, false, errors.New("The voxtype.service unit returned an unrecognized activity state; inspect systemctl --user status voxtype.service")
+		return false, "", errors.New("The voxtype.service unit returned an unrecognized activity state; inspect systemctl --user status voxtype.service")
 	}
 	return enabled, active, nil
 }

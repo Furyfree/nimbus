@@ -6,8 +6,10 @@ criteria.
 
 ## Next steps
 
-Fix Fedora user-service policy recognition for proxy and Zeron removal, then
-resume the laptop trial after delivery and explicit owner approval.
+Validate live postinstall status, removal guidance and approved fingerprint
+activation (#75) locally before the next release. Keep passive inspection
+non-activating and test proxy removal after Copilot deselection. Resume the
+laptop trial only after explicit owner approval.
 
 1. Finish 0.6.1: boot payload and boot validation, installation output and
    logging drill, documentation reconciliation (#39), package and publish.

@@ -251,7 +251,7 @@ func TestDTUCLIApprovalAndCompletion(t *testing.T) {
 				delete(src.Files, postinstall.DTUCertificatePath)
 				src.Dirs["/etc/NetworkManager/certs"] = nil
 				cmd, out = postinstallCommand(root, false, "status")
-				if err := cmd.Execute(); err != nil || !strings.Contains(out.String(), "existing eduroam/DTUsecure") {
+				if err := cmd.Execute(); err != nil || !strings.Contains(out.String(), "Existing profiles; setup unchecked") || strings.Contains(out.String(), "Profile + CA checked") {
 					t.Fatalf("completion hid missing file: %v %s", err, out)
 				}
 			}

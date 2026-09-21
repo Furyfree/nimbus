@@ -161,6 +161,11 @@ Omarchy and Ryoku. The signed UKI, TPM policy and `fde` component are removed.
 
 ## Postinstall and owner trials
 
+- [ ] Owner trial: compare postinstall service activity and startup state
+  against systemd, including stopped/removed services and a deselected proxy.
+- [ ] Fingerprint (#75): approve the local candidate with fprintd idle,
+  check existing enrollment or complete native enrollment, then confirm
+  passive status never starts the daemon. No release until requested.
 - [ ] Laptop: after delivery of the service-ownership fix and explicit
   approval, sync, uninstall agent-proxy and reboot. Verify proxy services
   absent, Zeron off unless opted in, Wi-Fi connected, and Copilot, proxy config

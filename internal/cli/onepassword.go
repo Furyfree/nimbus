@@ -506,7 +506,7 @@ func enrichPostinstall(src native.Source, s *selected, view *postinstallView) er
 				continue
 			}
 		}
-		t.Status, t.Detail = postinstall.Complete, "GUI prerequisites confirmed; local configuration checked. Current vault unlock and remote access are not inspected by status."
+		t.Status, t.Detail = postinstall.Complete, "Local configuration matches the earlier verified setup. GUI readiness was confirmed earlier; current sign-in, vault unlock and remote access are not checked."
 	}
 	return nil
 }

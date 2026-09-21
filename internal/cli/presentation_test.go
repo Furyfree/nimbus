@@ -24,7 +24,7 @@ func TestMOKPreviewShowsSetupOnlyWithoutHistoricalEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := b.String()
-	if !strings.Contains(text, "[Previously verified]") || !strings.Contains(text, "read-only") || strings.Contains(text, "MOK manager") {
+	if !strings.Contains(text, "[Unable to check]") || !strings.Contains(text, "verified earlier") || !strings.Contains(text, "read-only") || strings.Contains(text, "MOK manager") {
 		t.Fatal(text)
 	}
 	task.PreviouslyVerified = false

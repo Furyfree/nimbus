@@ -50,12 +50,16 @@ func zeronUnitPath() (string, error) {
 	return filepath.Join(base, "systemd/user/zeron.service"), nil
 }
 
-type zeronState struct{ Load, Active, Enabled, Fragment, DropIns string }
+type userUnitState struct{ Load, Active, Enabled, Fragment, DropIns string }
 
-func inspectZeron(src native.Source) (zeronState, error) {
-	out, err := src.Run("systemctl", "--user", "show", "zeron.service", "--property=LoadState,ActiveState,UnitFileState,FragmentPath,DropInPaths")
+func inspectZeron(src native.Source) (userUnitState, error) {
+	return inspectUserUnit(src, "zeron.service")
+}
+
+func inspectUserUnit(src native.Source, unit string) (userUnitState, error) {
+	out, err := src.Run("systemctl", "--user", "show", unit, "--property=LoadState,ActiveState,UnitFileState,FragmentPath,DropInPaths")
 	if err != nil {
-		return zeronState{}, errors.New("cannot inspect zeron.service; check the user systemd session")
+		return userUnitState{}, fmt.Errorf("cannot inspect %s; check the user systemd session", unit)
 	}
 	fields := map[string]string{}
 	for line := range strings.Lines(string(out)) {
@@ -64,22 +68,49 @@ func inspectZeron(src native.Source) (zeronState, error) {
 			fields[key] = value
 		}
 	}
-	s := zeronState{fields["LoadState"], fields["ActiveState"], fields["UnitFileState"], fields["FragmentPath"], fields["DropInPaths"]}
+	s := userUnitState{fields["LoadState"], fields["ActiveState"], fields["UnitFileState"], fields["FragmentPath"], fields["DropInPaths"]}
 	if s.Load == "" || s.Active == "" {
-		return s, errors.New("incomplete zeron.service inspection")
+		return s, fmt.Errorf("incomplete %s inspection", unit)
 	}
 	return s, nil
 }
 
-func (s zeronState) absent() bool {
+func (s userUnitState) absent() bool {
 	return s.Load == "not-found" && s.Active == "inactive" && s.Fragment == ""
 }
-func (s zeronState) running() bool {
+func (s userUnitState) running() bool {
 	return s.Load == "loaded" && s.Active == "active" && s.Enabled == "enabled"
 }
 
+func (s userUnitState) label() string {
+	if s.absent() {
+		return "Absent"
+	}
+	switch s.Active {
+	case "active":
+		return "Running"
+	case "inactive":
+		return "Stopped"
+	case "failed":
+		return "Failed"
+	default:
+		return s.Active
+	}
+}
+
+func (s userUnitState) detail() string {
+	if s.absent() {
+		return "unit absent, not running"
+	}
+	startup := s.Enabled
+	if startup == "" {
+		startup = "not reported"
+	}
+	return "load=" + s.Load + ", activity=" + s.Active + ", startup=" + startup
+}
+
 // The native CLI owns the unit. Refuse collisions and symlink escapes before invoking it.
-func checkZeronOwner(src native.Source, observed zeronState) error {
+func checkZeronOwner(src native.Source, observed userUnitState) error {
 	file, err := zeronUnitPath()
 	if err != nil {
 		return err
@@ -207,11 +238,24 @@ func zeronTask(src native.Source, machine string) postinstall.Task {
 		return t
 	}
 	if !opted && observed.absent() {
-		t.Status, t.Detail = postinstall.Complete, "Daemon is off by default; the Zeron GUI remains available."
+		t.Status = postinstall.Complete
 	} else if opted && observed.running() {
-		t.Status, t.Detail = postinstall.Complete, "Daemon is enabled by explicit opt-in."
+		t.Status = postinstall.Complete
 	} else {
-		t.Status, t.Detail = postinstall.Pending, "Daemon differs from the recorded choice; run nimbus postinstall zeron or --disable."
+		t.Status = postinstall.Pending
+	}
+	t.CurrentState = observed.label()
+	t.Summary = "Startup " + observed.Enabled
+	if observed.absent() {
+		t.Summary = "Daemon absent · GUI retained"
+	}
+	t.Detail = "zeron.service: " + observed.detail() + ". Recorded choice: off. GUI remains installed."
+	if opted {
+		t.Detail = "zeron.service: " + observed.detail() + ". Recorded choice: daemon on."
+	}
+	if t.Status == postinstall.Pending {
+		t.Detail += " Service differs from the recorded choice."
+		t.Summary += "; differs from choice"
 	}
 	return t
 }

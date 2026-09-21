@@ -121,8 +121,10 @@ func dtuNetwork(src native.Source, in Inputs) Task {
 	t.Status, t.Action = Pending, action
 	if len(profile.Existing) > 0 {
 		t.Status = Complete
+		t.CurrentState, t.Summary = "Not checked", "Existing profiles; setup unchecked"
 		t.Detail = fmt.Sprintf("%d existing eduroam/DTUsecure profile(s) found. Setup is skipped unless you explicitly approve deletion and replacement; existing settings are not certified by Nimbus.", len(profile.Existing))
 		if verified {
+			t.CurrentState, t.Summary = "Configured", "Profile + CA checked; connection unchecked"
 			t.Detail = "Nimbus DTU profile and CA configuration verified. Rerunning keeps them unless replacement is explicitly approved; Internet access and reboot reconnection are not verified."
 		}
 	}

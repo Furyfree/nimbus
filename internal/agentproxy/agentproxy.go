@@ -80,8 +80,11 @@ func Inspect(src native.Source, machine string) Result {
 	if len(data) > 4<<20 || json.Unmarshal(data, &state) != nil || state.Version != 1 || state.ProviderID == "" {
 		return Result{Status: "blocked", Detail: "Invalid agent-proxy registration state; preserve it for inspection."}
 	}
-	if state.Machine != machine || !state.Configured {
+	if state.Machine != machine {
 		return Result{Status: "pending", Detail: "Agent-proxy setup has not completed for this machine."}
+	}
+	if !state.Configured {
+		return Result{Status: "pending", Detail: "Automatic model refresh is disabled; this does not stop or remove the services."}
 	}
 	for _, cmd := range []string{"mise", "herdr"} {
 		if _, err := src.LookPath(cmd); err != nil {
@@ -107,7 +110,7 @@ func Inspect(src native.Source, machine string) Result {
 	if err != nil || strings.TrimSpace(string(version)) != "1.3.0-nimbus.2-source" {
 		return Result{Status: "pending", Detail: "Proxy installation needs setup; run nimbus postinstall agent-proxy."}
 	}
-	return Result{Status: "configured", Detail: "Local integration registered; run the task to recheck services and refresh models."}
+	return Result{Status: "configured", Detail: "Local integration registered; automatic model refresh is opted in. Provider access and models are not checked by status."}
 }
 
 // CheckUninstall inspects local ownership without extracting helpers, taking a

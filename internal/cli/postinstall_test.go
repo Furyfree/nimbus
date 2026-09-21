@@ -19,6 +19,7 @@ import (
 	"github.com/Furyfree/nimbus/internal/native/nativetest"
 	"github.com/Furyfree/nimbus/internal/postinstall"
 	"github.com/Furyfree/nimbus/internal/state"
+	"github.com/Furyfree/nimbus/internal/userstate"
 )
 
 type postinstallSource struct {
@@ -75,6 +76,122 @@ func postinstallCommand(root string, jsonOutput bool, args ...string) (*cobra.Co
 	return cmd, &out
 }
 
+func TestFingerprintActivationAndEnrollment(t *testing.T) {
+	for _, mode := range []string{"status", "plan", "decline", "enroll", "enrolled", "no reader", "mark done enrolled", "mark done empty", "activation failure", "enrollment failure", "unverified enrollment", "changed selection", "native empty list", "native empty list decline", "native empty list plan"} {
+		t.Run(mode, func(t *testing.T) {
+			root, src := postinstallFixture(t)
+			profile := filepath.Join(root, "profiles/common.toml")
+			if err := os.WriteFile(profile, []byte("schema=1\nid='common'\npackages=['fprintd']\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			key := nativetest.Key("dnf5", inspect.PackageQueryArgs...)
+			src.Commands[key] = append(src.Commands[key], []byte("fprintd|0|1.94.5|1|x86_64|fedora|User\n")...)
+			r := state.Receipt{Schema: state.ReceiptSchema, Machine: "vm", Resource: "package:dnf:fprintd", Provider: "dnf", Verified: true, Operation: "install", PlanDigest: "fixture"}
+			if err := state.Record(stateRoot, "fixture", &state.Stage{Schema: state.Schema, PlanDigest: "fixture", Receipts: []state.Receipt{r}}); err != nil {
+				t.Fatal(err)
+			}
+			src.Paths["busctl"], src.Paths["fprintd-enroll"] = "/usr/bin/busctl", "/usr/bin/fprintd-enroll"
+			src.Commands["systemctl show fprintd.service --property=LoadState,ActiveState"] = []byte("LoadState=loaded\nActiveState=inactive\n")
+			base := []string{"--system", "--auto-start=yes", "--allow-interactive-authorization=no", "--json=short", "call", "net.reactivated.Fprint"}
+			devices := nativetest.Key("busctl", append(slices.Clone(base), "/net/reactivated/Fprint/Manager", "net.reactivated.Fprint.Manager", "GetDevices")...)
+			fingers := nativetest.Key("busctl", append(slices.Clone(base), "/net/reactivated/Fprint/Device/0", "net.reactivated.Fprint.Device", "ListEnrolledFingers", "s", "")...)
+			src.Commands[devices] = []byte(`{"type":"ao","data":[["/net/reactivated/Fprint/Device/0"]]}`)
+			src.Commands[fingers] = []byte(`{"type":"as","data":[[]]}`)
+			if strings.HasPrefix(mode, "native empty list") {
+				src.Failures = map[string]string{}
+				passiveDevices := strings.Replace(devices, "--auto-start=yes", "--auto-start=no", 1)
+				passiveFingers := strings.Replace(fingers, "--auto-start=yes", "--auto-start=no", 1)
+				src.Commands[passiveDevices] = src.Commands[devices]
+				delete(src.Commands, fingers)
+				for _, call := range []string{passiveFingers, fingers} {
+					src.Failures[call] = call + ": Call failed: Failed to discover prints: exit status 1"
+				}
+			}
+			enrolled := []byte(`{"type":"as","data":[["right-index-finger"]]}`)
+			if mode == "enrolled" || mode == "mark done enrolled" {
+				src.Commands[fingers] = enrolled
+			}
+			if mode == "no reader" {
+				src.Commands[devices] = []byte(`{"type":"ao","data":[[]]}`)
+			}
+			if mode == "activation failure" {
+				delete(src.Commands, devices)
+			}
+			src.onStream = func(command string) {
+				if command != "fprintd-enroll" {
+					t.Fatalf("unexpected action: %s", command)
+				}
+				if mode == "enrollment failure" {
+					src.streamErr = errors.New("reader disconnected")
+				} else if mode != "unverified enrollment" {
+					delete(src.Failures, fingers)
+					src.Commands[fingers] = enrolled
+				}
+			}
+			oldTerminal, oldApprover := postinstallTerminal, approver
+			t.Cleanup(func() { postinstallTerminal, approver = oldTerminal, oldApprover })
+			postinstallTerminal = func(io.Reader) bool { return true }
+			approvals := 0
+			approver = func(io.Reader, io.Writer, string) bool {
+				approvals++
+				if mode == "changed selection" {
+					if err := os.WriteFile(profile, []byte("schema=1\nid='common'\npackages=[]\n"), 0644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return !strings.HasSuffix(mode, "decline")
+			}
+			args := []string{"fingerprint"}
+			if mode == "status" {
+				args = []string{"status"}
+			} else if strings.HasSuffix(mode, "plan") {
+				args = append(args, "--plan")
+			} else if strings.HasPrefix(mode, "mark done") {
+				args = append(args, "--mark-done")
+			}
+			cmd, out := postinstallCommand(root, false, args...)
+			err := cmd.Execute()
+			wantError := slices.Contains([]string{"decline", "mark done empty", "activation failure", "enrollment failure", "unverified enrollment", "changed selection", "native empty list decline"}, mode)
+			if (err != nil) != wantError {
+				t.Fatalf("err=%v output=%s", err, out)
+			}
+			passive := mode == "status" || strings.HasSuffix(mode, "plan")
+			if (passive && approvals != 0) || (!passive && approvals != 1) {
+				t.Fatalf("approval count=%d", approvals)
+			}
+			activated := slices.Contains(src.reads, devices)
+			if activated != (!passive && !strings.HasSuffix(mode, "decline") && mode != "changed selection") {
+				t.Fatalf("unexpected activation: %v", src.reads)
+			}
+			wantEnroll := slices.Contains([]string{"enroll", "enrollment failure", "unverified enrollment", "native empty list"}, mode)
+			if (len(src.streams) != 0) != wantEnroll {
+				t.Fatalf("unexpected enrollment: %v", src.streams)
+			}
+			store, _ := userstate.Default()
+			evidence, err := store.Read("postinstall")
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantComplete := slices.Contains([]string{"enroll", "enrolled", "mark done enrolled", "native empty list"}, mode)
+			if evidence.Has("vm", "fingerprint.complete", 1, "verified") != wantComplete {
+				t.Fatalf("incorrect completion evidence for %s", mode)
+			}
+			if passive {
+				if mode == "native empty list plan" {
+					if !strings.Contains(out.String(), "Pending") || !strings.Contains(out.String(), "no enrolled fingers") || !strings.Contains(out.String(), "fprintd-enroll") {
+						t.Fatal(out.String())
+					}
+				} else if !strings.Contains(out.String(), "Not checked") || !strings.Contains(out.String(), "idle") {
+					t.Fatal(out.String())
+				}
+				if _, err := os.Stat(filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), "nimbus", "operation.lock")); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("passive check created lock: %v", err)
+				}
+			}
+		})
+	}
+}
+
 func TestPostinstallListingStaysReadOnlyAndAvoidsUserData(t *testing.T) {
 	for _, jsonOutput := range []bool{false, true} {
 		t.Run(map[bool]string{false: "text", true: "json"}[jsonOutput], func(t *testing.T) {
@@ -87,7 +204,7 @@ func TestPostinstallListingStaysReadOnlyAndAvoidsUserData(t *testing.T) {
 			if len(src.streams) != 0 {
 				t.Fatalf("listing executed %v", src.streams)
 			}
-			allowed := []string{"uname -m", nativetest.Key("dnf5", inspect.PackageQueryArgs...), "id -un", nativetest.Key("chezmoi", inspect.ChezmoiDataArgs...), zeronShow}
+			allowed := []string{"uname -m", nativetest.Key("dnf5", inspect.PackageQueryArgs...), "id -un", nativetest.Key("chezmoi", inspect.ChezmoiDataArgs...), zeronShow, strings.Replace(zeronShow, "zeron.service", "agent-proxy.service", 1), strings.Replace(zeronShow, "zeron.service", "herdr.service", 1)}
 			for _, command := range src.reads {
 				if !slices.Contains(allowed, command) {
 					t.Fatalf("unnecessary inspection: %s", command)

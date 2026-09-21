@@ -171,7 +171,7 @@ func renderInstallFinish(out io.Writer, result *syncResult, logDir string) error
 // check before first login is expected to be unknown and stays in remaining
 // setup instead.
 func reportProblem(task postinstall.Task) bool {
-	return !task.Session && (task.Status == postinstall.Unknown || task.VerificationNeedsRoot)
+	return !task.Session && !task.ActivationRequired && (task.Status == postinstall.Unknown || task.VerificationNeedsRoot)
 }
 
 // beforeRebootReady reports whether a pre-reboot task still needs to run:
