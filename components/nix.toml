@@ -1,4 +1,4 @@
-# Nix from Fedora. nix-daemon.service arrives with the service resource type.
+# Nix from Fedora with its multi-user daemon enabled and running.
 schema = 1
 id = "nix"
 
@@ -6,3 +6,8 @@ requires = []
 conflicts = []
 packages = ["nix", "nix-daemon"]
 removes = []
+
+[[services]]
+unit = "nix-daemon.service"
+enabled = true
+running = true
