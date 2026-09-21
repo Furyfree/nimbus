@@ -86,13 +86,13 @@ func TestVersion(t *testing.T) {
 	}
 }
 
-func TestValidateRepositoryCheckout(t *testing.T) {
-	root := filepath.Join("..", "..")
+func TestValidateOutput(t *testing.T) {
+	root, _ := installerFixture(t)
 	code, out, errOut := run(t, "validate", "--checkout", root)
 	if code != ExitOK {
 		t.Fatalf("exit %d\n%s%s", code, out, errOut)
 	}
-	if !strings.Contains(out, "machine desktop:") || !strings.HasSuffix(out, "ok\n") {
+	if !strings.Contains(out, "machine vm:") || !strings.HasSuffix(out, "ok\n") {
 		t.Fatalf("unexpected output:\n%s", out)
 	}
 	code, out, _ = run(t, "validate", "--checkout", root, "--json")
@@ -112,7 +112,7 @@ func TestValidateRepositoryCheckout(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &env); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(env.Data.Digest, "sha256:") || len(env.Data.Machines) != 3 || env.Data.Machines[0].Profiles[0] != "common" {
+	if !strings.HasPrefix(env.Data.Digest, "sha256:") || env.OutputSchema != 1 || len(env.Data.Machines) != 1 || env.Data.Machines[0].Machine != "vm" || env.Data.Machines[0].Profiles[0] != "common" {
 		t.Fatalf("envelope = %+v", env)
 	}
 }

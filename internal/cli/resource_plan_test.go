@@ -29,15 +29,47 @@ func TestPlanShowsSystemFileDiffAndNativeUnitChanges(t *testing.T) {
 }
 
 func TestWhyExplainsSelectedSystemResourcesWithoutInspection(t *testing.T) {
-	code, out, errOut := run(t, "why", "login-shell", "--checkout", repoRoot(t), "--machine", "vm")
+	root, src := installerFixture(t)
+	for path, data := range map[string]string{
+		"machines/vm.toml":     "schema=1\nid='vm'\nprofiles=['common']\nshell='zsh'\n",
+		"profiles/common.toml": "schema=1\nid='common'\ncomponents=['session']\n",
+		"components/session.toml": `schema=1
+id="session"
+packages=["noctalia", "noctalia-greeter"]
+greeter_passwordless_sync=true
+default_target="graphical.target"
+[[services]]
+unit="greetd.service"
+enabled=true
+[[files]]
+source="etc/greetd/example.toml"
+owner="root"
+group="root"
+mode="0644"
+triggers=["systemd-daemon-reload"]
+`,
+		"system/root/etc/greetd/example.toml": "# Example payload\n",
+	} {
+		full := filepath.Join(root, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, out, errOut := run(t, "why", "login-shell", "--checkout", root, "--machine", "vm")
 	if code != ExitOK || !strings.Contains(out, "machine:shell") {
 		t.Fatalf("login shell: %d %s %s", code, out, errOut)
 	}
-	for _, resource := range []string{"file:/etc/greetd/nimbus.toml", "service:greetd.service", "trigger:systemd-daemon-reload", "default-target", "greeter-sync"} {
-		code, out, errOut := run(t, "why", resource, "--checkout", repoRoot(t), "--machine", "vm")
-		if code != ExitOK || !strings.Contains(out, "component:hyprland-session") || !strings.Contains(out, "profile:hyprland-noctalia") {
+	for _, resource := range []string{"file:/etc/greetd/example.toml", "service:greetd.service", "trigger:systemd-daemon-reload", "default-target", "greeter-sync"} {
+		code, out, errOut := run(t, "why", resource, "--checkout", root, "--machine", "vm")
+		if code != ExitOK || !strings.Contains(out, "component:session") || !strings.Contains(out, "profile:common") {
 			t.Fatalf("%s: %d %s %s", resource, code, out, errOut)
 		}
+	}
+	if len(src.reads) != 0 || len(src.calls) != 0 {
+		t.Fatalf("why inspected or mutated the host: reads=%v calls=%v", src.reads, src.calls)
 	}
 }
 

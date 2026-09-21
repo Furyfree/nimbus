@@ -19,13 +19,44 @@ import (
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
-// repository loads and resolves the tracked desktop machine.
+// repository supplies fixed package-provider examples, independent of the
+// owner's software selection. Resource tests construct their own declarations.
 func repository(t *testing.T) (*definitions.Checkout, *definitions.Resolved) {
 	t.Helper()
-	c, err := definitions.Load(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatal(err)
+	c := &definitions.Checkout{
+		Root: t.TempDir(),
+		Root_: definitions.Root{Schema: 1,
+			Compatibility: definitions.Compatibility{Fedora: []string{"44"}, MinEngine: "0.0.0"},
+			DNF:           map[string]any{"defaultyes": true, "fastestmirror": true, "max_parallel_downloads": int64(20)},
+			Repositories:  map[string]definitions.Repository{},
+		},
+		Machines: map[string]*definitions.Machine{
+			"desktop": {Schema: 1, ID: "desktop", Profiles: []string{"common", "development"}},
+		},
+		Profiles: map[string]*definitions.Profile{
+			"common": {Schema: 1, ID: "common", Components: []string{"mise", "media"}, Packages: []string{
+				"bash", "dnf5-plugins", "flatpak", "git", "ripgrep", "terra:ghostty", "flatpak:com.spotify.Client",
+				"onepassword:1password", "brave:brave-browser", "vscodium:codium", "chatgpt:chatgpt",
+				"hyprland-copr:hyprland", "rpmfusion-free:ffmpeg", "rpmfusion-nonfree:steam",
+			}},
+			"development": {Schema: 1, ID: "development", Packages: []string{"docker:docker-ce", "docker:docker-ce-cli"}, Components: []string{"zeron"}},
+		},
+		Components: map[string]*definitions.Component{
+			"media": {Schema: 1, ID: "media", Removes: []string{"ffmpeg-free"}},
+			"mise":  {Schema: 1, ID: "mise", Installer: &definitions.Installer{URL: "https://example.invalid/mise.sh", Binary: ".local/bin/mise"}},
+			"zeron": {Schema: 1, ID: "zeron", Installer: &definitions.Installer{URL: "https://example.invalid/zeron.sh", Binary: ".local/bin/zeron", Effects: []string{"restarts zeron.service", "loginctl enable-linger with sudo -n; services run after logout"}}},
+		},
 	}
+	for i, id := range []string{"docker", "onepassword", "brave", "vscodium", "chatgpt", "terra"} {
+		c.Root_.Repositories[id] = definitions.Repository{Kind: "dnf", BaseURL: "https://example.invalid/repos/" + id,
+			KeyURL: "https://example.invalid/" + id + ".asc", Key: "060A61C51B558A7F742B77AAC52FEB6B621E9F35", Priority: new(100 + i)}
+	}
+	for i, id := range []string{"rpmfusion-free", "rpmfusion-nonfree"} {
+		c.Root_.Repositories[id] = definitions.Repository{Kind: "dnf", ReleasePackage: "https://example.invalid/" + id + "-release-44.noarch.rpm",
+			SHA256: strings.Repeat("a", 64), Key: strings.Repeat("2", 40), Priority: new(120 + i)}
+	}
+	c.Root_.Repositories["hyprland-copr"] = definitions.Repository{Kind: "copr", Project: "fixture/hyprland", Key: strings.Repeat("3", 40), Priority: new(130)}
+	c.Root_.Repositories["flathub"] = definitions.Repository{Kind: "flatpak", URL: "https://dl.flathub.org/repo/flathub.flatpakrepo", Key: strings.Repeat("4", 40)}
 	if errs := definitions.Validate(c); len(errs) > 0 {
 		t.Fatal(errs)
 	}
@@ -33,14 +64,6 @@ func repository(t *testing.T) (*definitions.Checkout, *definitions.Resolved) {
 	if len(errs) > 0 {
 		t.Fatal(errs)
 	}
-	// These package-provider tests isolate resources covered by resources_test.go.
-	r.Shell = ""
-	r.Components = slices.DeleteFunc(r.Components, func(c definitions.ResolvedComponent) bool { return c.ID == "snapper" })
-	r.Files = nil
-	r.Constraints = nil
-	r.Services = nil
-	r.Groups = nil
-	r.DefaultTarget = ""
 	return c, r
 }
 

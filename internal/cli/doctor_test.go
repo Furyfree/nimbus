@@ -16,8 +16,7 @@ import (
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
-// fixtureSource replays a healthy Fedora 44 host whose checkout is the
-// repository itself.
+// fixtureSource replays a healthy Fedora 44 host with the supplied checkout.
 func fixtureSource(t *testing.T, root string) *nativetest.FakeSource {
 	t.Helper()
 	if stateRoot == state.Root {
@@ -132,15 +131,8 @@ func withSource(t *testing.T, src native.Source) {
 	t.Cleanup(func() { newSource = saved })
 }
 
-func TestDoctorOnRepositoryCheckout(t *testing.T) {
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
-	root, err = filepath.EvalSymlinks(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestDoctorOnValidCheckout(t *testing.T) {
+	root := editableCheckout(t)
 	withSource(t, fixtureSource(t, root))
 	code, out, errOut := run(t, "doctor", "--checkout", root)
 	if code != ExitOK {
@@ -171,8 +163,7 @@ func TestDoctorOnRepositoryCheckout(t *testing.T) {
 }
 
 func TestDoctorFailsWithExitOneAndExplains(t *testing.T) {
-	root, _ := filepath.Abs(filepath.Join("..", ".."))
-	root, _ = filepath.EvalSymlinks(root)
+	root := editableCheckout(t)
 	src := fixtureSource(t, root)
 	src.Files[inspect.SELinuxPath] = []byte("0\n")
 	withSource(t, src)

@@ -58,6 +58,20 @@ func TestReconcileVendorRepositoriesAfterPackageTransaction(t *testing.T) {
 	for _, mode := range []string{"success", "native failure", "verification failure", "key drift", "checkout drift", "preview header failure", "preview plan failure"} {
 		t.Run(mode, func(t *testing.T) {
 			root := applyEnv(t)
+			config := filepath.Join(root, "nimbus.toml")
+			data, err := os.ReadFile(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, id := range []string{"chatgpt", "onepassword"} {
+				data = fmt.Appendf(data, "\n[repositories.%s]\nkind='dnf'\nbaseurl='https://example.invalid/%s'\nkey_url='https://example.invalid/%s.asc'\nkey='3333333333333333333333333333333333333333'\npriority=%d\n", id, id, id, 110+i)
+			}
+			if err := os.WriteFile(config, data, 0644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "profiles/common.toml"), []byte("schema=1\nid='common'\npackages=['chatgpt:chatgpt','onepassword:1password']\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
 			fake := fixtureSource(t, root)
 			readyRepositories(t, fake, root)
 			fake.Commands["dnf5 makecache"] = nil

@@ -1,14 +1,176 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/Furyfree/nimbus/internal/inspect"
+	"github.com/Furyfree/nimbus/internal/native/nativetest"
 	"github.com/Furyfree/nimbus/internal/selector"
 )
+
+func channelSwitchFixture(t *testing.T, channel, script string) (string, *nativetest.FakeSource) {
+	t.Helper()
+	root := editableCheckout(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	path, err := selector.DefaultPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := selector.Write(path, &selector.Selector{Schema: selector.CurrentSchema, Checkout: root, Machine: "laptop", Origin: "github.com/Furyfree/nimbus", Channel: channel}); err != nil {
+		t.Fatal(err)
+	}
+	branch, project := "main", "nimbus"
+	if channel == selector.ChannelDevelop {
+		branch, project = "develop", "nimbus-develop"
+	}
+	for name, body := range map[string]string{".git/HEAD": "ref: refs/heads/" + branch + "\n", "install.sh": script} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	src := fixtureSource(t, root)
+	src.Files[engineRepoFile] = []byte("[nimbus-engine]\nbaseurl=https://download.copr.fedorainfracloud.org/results/furyfree/" + project + "/fedora-44-x86_64/\n")
+	withSource(t, src)
+	return root, src
+}
+
+func TestChannelSwitchDelegatesToSelectedCheckout(t *testing.T) {
+	for _, target := range []string{selector.ChannelStable, selector.ChannelDevelop} {
+		t.Run(target, func(t *testing.T) {
+			current := selector.ChannelStable
+			if target == current {
+				current = selector.ChannelDevelop
+			}
+			root, _ := channelSwitchFixture(t, current, `test "$PWD" = "$NIMBUS_CHECKOUT" || exit 90
+test "$NIMBUS_CHANNEL_SWITCH" = 1 || exit 91
+printf 'checkout=%s\n' "$PWD"
+printf '<%s>\n' "$@"
+printf 'installer progress\n' >&2
+`)
+			t.Chdir(t.TempDir())
+			cmd := New()
+			cmd.SetArgs([]string{"channel", "switch", target})
+			cmd.SetIn(strings.NewReader("yes\n"))
+			var out, errOut bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetErr(&errOut)
+			if err := cmd.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(out.String(), "Proceed?") || !strings.Contains(out.String(), "checkout="+root+"\n<--channel>\n<"+target+">\n") || errOut.String() != "installer progress\n" {
+				t.Fatalf("stdout=%q stderr=%q", out.String(), errOut.String())
+			}
+		})
+	}
+}
+
+func TestChannelSwitchStopsBeforeInstaller(t *testing.T) {
+	for _, scenario := range []string{"aligned", "declined", "EOF", "missing checkout", "missing installer", "foreign origin", "detached", "dirty", "unknown repository", "selection changed", "dirty during approval"} {
+		t.Run(scenario, func(t *testing.T) {
+			root, src := channelSwitchFixture(t, selector.ChannelStable, "printf 'UNEXPECTED INSTALLER'\n")
+			input, target := "yes\n", selector.ChannelDevelop
+			want := ""
+			path, _ := selector.DefaultPath()
+			switch scenario {
+			case "aligned":
+				target, want = selector.ChannelStable, "Already on stable"
+			case "declined":
+				input, want = "no\n", "cancelled"
+			case "EOF":
+				input, want = "", "cancelled"
+			case "missing checkout":
+				sel, _ := selector.Load(path)
+				sel.Checkout = filepath.Join(root, "missing")
+				if err := selector.Write(path, sel); err != nil {
+					t.Fatal(err)
+				}
+				want = "resolve checkout"
+			case "missing installer":
+				if err := os.Remove(filepath.Join(root, "install.sh")); err != nil {
+					t.Fatal(err)
+				}
+				want = "read channel installer"
+			case "foreign origin":
+				if err := os.WriteFile(filepath.Join(root, ".git/config"), []byte("[remote \"origin\"]\nurl=https://example.invalid/other.git\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				want = "does not match"
+			case "detached":
+				if err := os.WriteFile(filepath.Join(root, ".git/HEAD"), []byte(strings.Repeat("a", 40)), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				want = "not an attached"
+			case "dirty":
+				src.Commands[nativetest.Key("git", inspect.GitArgs(root, "status", "--porcelain")...)] = []byte(" M install.sh\n")
+				want = "local changes"
+			case "unknown repository":
+				src.Files[engineRepoFile] = []byte("baseurl=https://example.invalid/\n")
+				want = "not a recognized channel"
+			case "selection changed", "dirty during approval":
+				old := approver
+				t.Cleanup(func() { approver = old })
+				approver = func(io.Reader, io.Writer, string) bool {
+					if scenario == "selection changed" {
+						if err := selector.SetChannel(path, selector.ChannelDevelop); err != nil {
+							t.Fatal(err)
+						}
+					} else {
+						src.Commands[nativetest.Key("git", inspect.GitArgs(root, "status", "--porcelain")...)] = []byte(" M install.sh\n")
+					}
+					return true
+				}
+				want = "selection changed"
+				if scenario == "dirty during approval" {
+					want = "local changes"
+				}
+			}
+			cmd := New()
+			cmd.SetArgs([]string{"channel", "switch", target})
+			cmd.SetIn(strings.NewReader(input))
+			var out bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetErr(&out)
+			err := cmd.Execute()
+			result := out.String()
+			if err != nil {
+				result += err.Error()
+			}
+			if (err == nil) != (scenario == "aligned") || !strings.Contains(result, want) || strings.Contains(result, "UNEXPECTED INSTALLER") {
+				t.Fatalf("err=%v output=%q", err, result)
+			}
+		})
+	}
+}
+
+func TestChannelSwitchArgumentsAndNativeFailures(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	for _, args := range [][]string{{"channel", "switch"}, {"channel", "switch", "nightly"}, {"channel", "switch", "stable", "develop"}, {"channel", "switch", "develop", "--json"}} {
+		if code, _, _ := run(t, args...); code != ExitUsage {
+			t.Fatalf("%v: exit %d, want usage error", args, code)
+		}
+	}
+	for _, failure := range []struct {
+		body string
+		code int
+	}{{"exit 23", 23}, {"kill -INT $$", 130}} {
+		t.Run(failure.body, func(t *testing.T) {
+			channelSwitchFixture(t, selector.ChannelStable, failure.body)
+			old := approver
+			approver = func(io.Reader, io.Writer, string) bool { return true }
+			t.Cleanup(func() { approver = old })
+			if code, _, _ := run(t, "channel", "switch", "develop"); code != failure.code {
+				t.Fatalf("exit %d, want %d", code, failure.code)
+			}
+		})
+	}
+}
 
 func TestChannelReport(t *testing.T) {
 	stable := &selector.Selector{Schema: selector.CurrentSchema, Channel: selector.ChannelStable,
@@ -104,8 +266,7 @@ func TestMigrateSelector(t *testing.T) {
 // and leave the selector alone.
 func TestSyncPlanAnnouncesTheSelectorMigration(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	root := repoRoot(t)
-	withSource(t, fixtureSource(t, root))
+	root, _ := installerFixture(t)
 	path, err := selector.DefaultPath()
 	if err != nil {
 		t.Fatal(err)

@@ -18,6 +18,7 @@ func TestBootstrapCOPR(t *testing.T) {
 	}{
 		{"install", "", "init --checkout", true},
 		{"existing engine", "existing", "init --checkout", false},
+		{"channel repair", "channel-repair", "internal selector-channel stable", false},
 		{"GnuPG prerequisite", "gpg-install", "init --checkout", true},
 		{"missing key", "missing-key", "public key is not available", false},
 		{"wrong key", "wrong-key", "fingerprint mismatch", false},
@@ -132,7 +133,7 @@ esac
 				if err := os.Remove(filepath.Join(bin, "gpg")); err != nil {
 					t.Fatal(err)
 				}
-			case "existing":
+			case "existing", "channel-repair":
 				engine, err := os.ReadFile(filepath.Join(root, "engine"))
 				if err != nil {
 					t.Fatal(err)
@@ -159,12 +160,15 @@ esac
 			cmd := exec.Command(filepath.Join(bin, "bash"), filepath.Join(root, "bootstrap"), "--machine", "vm", "--onepassword-ssh")
 			cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 			cmd.Env = []string{"PATH=" + bin, "HOME=" + root, "TMPDIR=" + filepath.Join(root, "tmp"), "ROOT=" + root, "TRACE=" + filepath.Join(root, "trace"), "FAILURE=" + tc.failure, "LC_ALL=C", "REAL_GPG=" + mustLookPath(t, "gpg"), "work=" + filepath.Join(root, "preserve")}
+			if tc.failure == "channel-repair" {
+				cmd.Env = append(cmd.Env, "NIMBUS_CHANNEL_SWITCH=1")
+			}
 			output, err := cmd.CombinedOutput()
-			success := tc.failure == "" || tc.failure == "existing" || tc.failure == "gpg-install"
+			success := tc.failure == "" || tc.failure == "existing" || tc.failure == "gpg-install" || tc.failure == "channel-repair"
 			if (err == nil) != success || !strings.Contains(string(output), tc.want) {
 				t.Fatalf("bootstrap: %v\n%s", err, output)
 			}
-			if success && !strings.Contains(string(output), "--machine vm --onepassword-ssh") {
+			if success && tc.failure != "channel-repair" && !strings.Contains(string(output), "--machine vm --onepassword-ssh") {
 				t.Fatal("installer arguments were not forwarded")
 			}
 			trace, _ := os.ReadFile(filepath.Join(root, "trace"))
@@ -191,8 +195,8 @@ esac
 					t.Fatalf("mutation preceded required signature verification: %s", trace)
 				}
 			}
-			if !success && strings.Contains(string(trace), "init --checkout") {
-				t.Fatal("init ran after bootstrap failed")
+			if (!success || tc.failure == "channel-repair") && strings.Contains(string(trace), "init --checkout") {
+				t.Fatal("init ran after bootstrap failed or during a channel-only switch")
 			}
 			entries, err := os.ReadDir(filepath.Join(root, "tmp"))
 			if err != nil || len(entries) != 0 {

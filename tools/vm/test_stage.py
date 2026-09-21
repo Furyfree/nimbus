@@ -5,13 +5,15 @@ import hashlib
 import importlib.util
 import io
 import json
-from pathlib import Path
 import subprocess
 import tarfile
 import tempfile
 import unittest
+from pathlib import Path
 
-spec = importlib.util.spec_from_file_location("stage", Path(__file__).with_name("stage.py"))
+spec = importlib.util.spec_from_file_location(
+    "stage", Path(__file__).with_name("stage.py")
+)
 stage = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(stage)
 
@@ -22,20 +24,37 @@ class StageTests(unittest.TestCase):
             source = Path(work) / "source"
             source.mkdir()
             stage.run("git", "-c", "init.templateDir=", "init", "--quiet", str(source))
-            stage.run("git", "remote", "add", "origin",
-                      "https://github.com/Furyfree/nimbus.git", cwd=source)
+            stage.run(
+                "git",
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/Furyfree/nimbus.git",
+                cwd=source,
+            )
             (source / "nimbus.toml").write_text("old\n")
             (source / ".gitignore").write_text("*.secret\n")
             stage.run("git", "add", ".", cwd=source)
-            stage.run("git", "-c", "user.name=Fixture", "-c",
-                      "user.email=fixture@example.invalid", "commit", "--quiet",
-                      "-m", "fixture", cwd=source)
+            stage.run(
+                "git",
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "--quiet",
+                "-m",
+                "fixture",
+                cwd=source,
+            )
             (source / "nimbus.toml").write_text("uncommitted\n")
             (source / "internal").mkdir()
             (source / "internal/new.go").write_text("package example\n")
             (source / "internal/token.secret").write_text("private\n")
             (source / "tests/integration").mkdir(parents=True)
-            (source / "tests/integration/new_test.go").write_text("package integration\n")
+            (source / "tests/integration/new_test.go").write_text(
+                "package integration\n"
+            )
             (source / "tests/integration/token.secret").write_text("private\n")
             (source / "private.txt").write_text("private\n")
             (source / ".git/private").write_text("private\n")
@@ -44,11 +63,19 @@ class StageTests(unittest.TestCase):
             self.assertEqual(stage.run("git", "rev-parse", "HEAD", cwd=dest), head)
             self.assertEqual((dest / "nimbus.toml").read_text(), "uncommitted\n")
             self.assertTrue((dest / "internal/new.go").exists())
-            self.assertEqual((dest / "tests/integration/new_test.go").read_text(),
-                             "package integration\n")
-            self.assertIn("M nimbus.toml", stage.run("git", "status", "--short", cwd=dest))
-            for rel in (".git/private", "private.txt", "internal/token.secret",
-                        "tests/integration/token.secret"):
+            self.assertEqual(
+                (dest / "tests/integration/new_test.go").read_text(),
+                "package integration\n",
+            )
+            self.assertIn(
+                "M nimbus.toml", stage.run("git", "status", "--short", cwd=dest)
+            )
+            for rel in (
+                ".git/private",
+                "private.txt",
+                "internal/token.secret",
+                "tests/integration/token.secret",
+            ):
                 self.assertFalse((dest / rel).exists())
             self.assertEqual((source / ".git/private").read_text(), "private\n")
 
@@ -58,8 +85,13 @@ class StageTests(unittest.TestCase):
             files = {
                 "nimbus": b"candidate binary",
                 "checkout/nimbus.toml": b"schema = 1\n",
-                "candidate.json": json.dumps({"binary_sha256": "bad" if wrong_hash else
-                    hashlib.sha256(b"candidate binary").hexdigest()}).encode(),
+                "candidate.json": json.dumps(
+                    {
+                        "binary_sha256": "bad"
+                        if wrong_hash
+                        else hashlib.sha256(b"candidate binary").hexdigest()
+                    }
+                ).encode(),
             }
             for name, data in files.items():
                 info = tarfile.TarInfo(name)
@@ -83,11 +115,13 @@ class StageTests(unittest.TestCase):
             self.assertEqual((stable / "keep").read_text(), "stable")
 
     def test_rejects_escape_links_duplicates_and_corruption(self):
-        for name, kind in [("../outside", tarfile.REGTYPE),
-                           ("/tmp/outside", tarfile.REGTYPE),
-                           ("checkout/link", tarfile.SYMTYPE),
-                           ("checkout/hardlink", tarfile.LNKTYPE),
-                           ("nimbus", tarfile.REGTYPE)]:
+        for name, kind in [
+            ("../outside", tarfile.REGTYPE),
+            ("/tmp/outside", tarfile.REGTYPE),
+            ("checkout/link", tarfile.SYMTYPE),
+            ("checkout/hardlink", tarfile.LNKTYPE),
+            ("nimbus", tarfile.REGTYPE),
+        ]:
             with self.subTest(name=name), tempfile.TemporaryDirectory() as work:
                 info = tarfile.TarInfo(name)
                 info.type, info.linkname = kind, "/tmp/outside"
@@ -102,9 +136,18 @@ class StageTests(unittest.TestCase):
     def test_receiver_runs_as_ssh_inline_python_without_file_global(self):
         with tempfile.TemporaryDirectory() as work:
             result = subprocess.run(
-                ["python3", "-I", "-B", "-c", Path(stage.__file__).read_text(), "--receive"],
-                input=self.archive().read(), env={"HOME": work, "PATH": "/usr/bin:/bin"},
-                capture_output=True)
+                [
+                    "python3",
+                    "-I",
+                    "-B",
+                    "-c",
+                    Path(stage.__file__).read_text(),
+                    "--receive",
+                ],
+                input=self.archive().read(),
+                env={"HOME": work, "PATH": "/usr/bin:/bin"},
+                capture_output=True,
+            )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn(b"No candidate command has been executed", result.stdout)
 

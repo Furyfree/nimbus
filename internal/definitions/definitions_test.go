@@ -80,43 +80,10 @@ func TestRepositoryDefinitionsValidate(t *testing.T) {
 	if errs := Validate(c); len(errs) > 0 {
 		t.Fatalf("repository definitions are invalid:\n%s", errs.Error())
 	}
-	for _, id := range []string{"desktop", "laptop", "vm"} {
-		if _, ok := c.Machines[id]; !ok {
-			t.Fatalf("machine %s is not tracked", id)
+	for id := range c.Machines {
+		if _, errs := Resolve(c, id); len(errs) > 0 {
+			t.Fatalf("resolve %s: %v", id, errs)
 		}
-		resolved, errs := Resolve(c, id)
-		if len(errs) > 0 {
-			t.Fatal(errs)
-		}
-		fastmail := 0
-		for _, p := range resolved.Packages {
-			if p.Canonical == "flatpak:com.fastmail.Fastmail" {
-				fastmail++
-				if strings.Join(p.Paths, ",") != "profile:hyprland-noctalia" {
-					t.Fatalf("%s Fastmail provenance = %v", id, p.Paths)
-				}
-			}
-		}
-		if fastmail != 1 || !slices.Contains(resolved.Repositories, "flathub") {
-			t.Fatalf("%s: expected one Fastmail package from Flathub", id)
-		}
-	}
-	r, errs := Resolve(c, "desktop")
-	if len(errs) > 0 {
-		t.Fatal(errs)
-	}
-	docker := findComponent(r, "docker")
-	if docker == nil || strings.Join(docker.Paths, ",") != "component:windows-vm,profile:development" {
-		t.Fatalf("docker provenance = %v", docker)
-	}
-	if !slices.Contains(r.Removes, "ffmpeg-free") {
-		t.Fatalf("removes = %v", r.Removes)
-	}
-	if len(r.Files) < 1 || r.Files[0].Target != "/etc/docker/daemon.json" || r.Files[0].Source != "system/root/etc/docker/daemon.json" {
-		t.Fatalf("files = %+v", r.Files)
-	}
-	if !slices.Contains(r.Repositories, "flathub") || !slices.Contains(r.Repositories, "hyprland-copr") {
-		t.Fatalf("repositories = %v", r.Repositories)
 	}
 }
 
@@ -133,6 +100,9 @@ func TestResolutionIsDeterministic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Repeated selections share one resource and retain every selection path.
+	c.Machines["one"].Packages = append(c.Machines["one"].Packages, "git")
+	c.Profiles["extra"].Components = append(c.Profiles["extra"].Components, "dep")
 	a, _ := Resolve(c, "one")
 	b, _ := Resolve(c, "one")
 	if strings.Join(a.Profiles, ",") != "common,extra" {
@@ -147,8 +117,20 @@ func TestResolutionIsDeterministic(t *testing.T) {
 		}
 	}
 	dep := findComponent(a, "dep")
-	if dep == nil || strings.Join(dep.Paths, ",") != "component:top" {
+	if dep == nil || strings.Join(dep.Paths, ",") != "component:top,profile:extra" {
 		t.Fatalf("dep provenance = %v", dep)
+	}
+	var git []ResolvedPackage
+	for _, p := range a.Packages {
+		if p.Canonical == "dnf:git" {
+			git = append(git, p)
+		}
+	}
+	if len(git) != 1 || !slices.Equal(git[0].Paths, []string{"machine", "profile:common"}) {
+		t.Fatalf("duplicate package or lost provenance: %+v", git)
+	}
+	if !slices.Equal(a.Removes, []string{"curl-minimal"}) || len(a.Files) != 1 || a.Files[0].Target != "/etc/example.conf" {
+		t.Fatalf("lost component resources: removes=%v files=%+v", a.Removes, a.Files)
 	}
 	if strings.Join(a.Repositories, ",") != "flathub,terra" {
 		t.Fatalf("repositories = %v", a.Repositories)

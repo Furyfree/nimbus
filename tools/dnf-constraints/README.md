@@ -8,8 +8,8 @@ NIMBUS_DNF_TEST_IMAGE=nimbus-dnf-test go test ./internal/plan \
   -run '^TestNativeDNFConstraints$' -count=1 -v
 ~~~
 
-The test renders policy from the VM manifest through the Go implementation,
-then mounts it read-only into a network-disabled container. Synthetic, empty
+The test renders policy from fixed example constraints through the Go implementation,
+then sends it through stdin to a network-disabled container. Synthetic, empty
 RPMs exercise range boundaries, prereleases, epoch changes, similarly named
 subpackages, solver conflicts, patch and packaging upgrades, downgrade refusal,
 and removal of the generated policy. Only the fixture repository disables

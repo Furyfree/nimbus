@@ -5,7 +5,6 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path, PurePosixPath
 import re
 import shlex
 import shutil
@@ -13,6 +12,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+from pathlib import Path, PurePosixPath
 
 
 def run(*args, cwd=None, env=None):
@@ -26,7 +26,8 @@ def snapshot(source, target):
         raise ValueError("source must be a Git checkout root")
     origin = run("git", "remote", "get-url", "origin", cwd=source)
     if origin.lower().removesuffix(".git").rstrip("/") not in (
-        "https://github.com/furyfree/nimbus", "git@github.com:furyfree/nimbus"
+        "https://github.com/furyfree/nimbus",
+        "git@github.com:furyfree/nimbus",
     ):
         raise ValueError("source origin must be the Nimbus repository")
     head = run("git", "rev-parse", "HEAD", cwd=source)
@@ -34,22 +35,55 @@ def snapshot(source, target):
     # A fresh shallow clone carries identity, not local hooks, credentials,
     # reflogs, remote state, or links back into the developer's checkout.
     run("git", "-c", "init.templateDir=", "init", "--quiet", str(target))
-    run("git", "-c", "protocol.file.allow=always", "fetch", "--quiet",
-        "--depth=1", "--no-tags", source.as_uri(), head, cwd=target)
+    run(
+        "git",
+        "-c",
+        "protocol.file.allow=always",
+        "fetch",
+        "--quiet",
+        "--depth=1",
+        "--no-tags",
+        source.as_uri(),
+        head,
+        cwd=target,
+    )
     run("git", "update-ref", "refs/heads/candidate", head, cwd=target)
     run("git", "symbolic-ref", "HEAD", "refs/heads/candidate", cwd=target)
     run("git", "read-tree", "HEAD", cwd=target)
-    run("git", "remote", "add", "origin",
-        "https://github.com/Furyfree/nimbus.git", cwd=target)
+    run(
+        "git",
+        "remote",
+        "add",
+        "origin",
+        "https://github.com/Furyfree/nimbus.git",
+        cwd=target,
+    )
     paths = subprocess.check_output(
         ["git", "ls-files", "-z", "--cached"], cwd=source
     ).split(b"\0")
     # Include new implementation and definition files, but never arbitrary
     # untracked files, build output, or ignored runtime state at the root.
     paths += subprocess.check_output(
-        ["git", "ls-files", "-z", "--others", "--exclude-standard", "--",
-         "nimbus.toml", "setup-notes.json", "machines", "profiles", "components", "system",
-         "cmd", "internal", "tests", "tools", "docs"], cwd=source
+        [
+            "git",
+            "ls-files",
+            "-z",
+            "--others",
+            "--exclude-standard",
+            "--",
+            "nimbus.toml",
+            "setup-notes.json",
+            "machines",
+            "profiles",
+            "components",
+            "system",
+            "cmd",
+            "internal",
+            "tests",
+            "tools",
+            "docs",
+        ],
+        cwd=source,
     ).split(b"\0")
     for raw in sorted(set(paths) - {b""}):
         rel = Path(os.fsdecode(raw))
@@ -77,15 +111,34 @@ def build(source, destination):
     head = snapshot(source, checkout)
     env = dict(os.environ, CGO_ENABLED="0", GOOS="linux", GOARCH="amd64")
     binary = destination / "nimbus"
-    subprocess.run(["go", "build", "-trimpath", "-ldflags",
-                    "-s -w -X github.com/Furyfree/nimbus/internal/version.Engine="
-                    f"0.0.0-dev.{head[:12]}", "-o", str(binary), "./cmd/nimbus"],
-                   cwd=checkout, env=env, check=True)
+    subprocess.run(
+        [
+            "go",
+            "build",
+            "-trimpath",
+            "-ldflags",
+            "-s -w -X github.com/Furyfree/nimbus/internal/version.Engine="
+            f"0.0.0-dev.{head[:12]}",
+            "-o",
+            str(binary),
+            "./cmd/nimbus",
+        ],
+        cwd=checkout,
+        env=env,
+        check=True,
+    )
     digest = hashlib.sha256(binary.read_bytes()).hexdigest()
-    (destination / "candidate.json").write_text(json.dumps({
-        "commit": head, "binary_sha256": digest,
-        "note": "Unpublished candidate; checkout includes local changes."
-    }, indent=2) + "\n")
+    (destination / "candidate.json").write_text(
+        json.dumps(
+            {
+                "commit": head,
+                "binary_sha256": digest,
+                "note": "Unpublished candidate; checkout includes local changes.",
+            },
+            indent=2,
+        )
+        + "\n"
+    )
     return destination
 
 
@@ -101,9 +154,14 @@ def receive(stream, home):
             total = 0
             for member in archive:
                 rel = PurePosixPath(member.name)
-                if (rel.is_absolute() or ".." in rel.parts or not rel.parts
-                        or rel.parts[0] not in {"checkout", "nimbus", "candidate.json"}
-                        or member.name in seen or not member.isfile()):
+                if (
+                    rel.is_absolute()
+                    or ".." in rel.parts
+                    or not rel.parts
+                    or rel.parts[0] not in {"checkout", "nimbus", "candidate.json"}
+                    or member.name in seen
+                    or not member.isfile()
+                ):
                     raise ValueError(f"unsafe candidate member: {member.name}")
                 seen.add(member.name)
                 total += member.size
@@ -134,7 +192,9 @@ def receive(stream, home):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path)
-    parser.add_argument("--output", type=Path, help="build locally into a new directory only")
+    parser.add_argument(
+        "--output", type=Path, help="build locally into a new directory only"
+    )
     parser.add_argument("--host", default="pby@127.0.0.1")
     parser.add_argument("--port", type=int, default=2222)
     parser.add_argument("--receive", action="store_true", help=argparse.SUPPRESS)
@@ -157,12 +217,27 @@ def main():
         with tarfile.open(archive, "w:gz") as output:
             for path in sorted(destination.rglob("*")):
                 if path.is_file():
-                    output.add(path, arcname=str(path.relative_to(destination)), recursive=False)
+                    output.add(
+                        path,
+                        arcname=str(path.relative_to(destination)),
+                        recursive=False,
+                    )
         receiver = Path(__file__).read_text()
         command = "python3 -I -B -c " + shlex.quote(receiver) + " --receive"
         with archive.open("rb") as data:
-            subprocess.run(["ssh", "-o", "BatchMode=yes", "-p", str(args.port),
-                            args.host, command], stdin=data, check=True)
+            subprocess.run(
+                [
+                    "ssh",
+                    "-o",
+                    "BatchMode=yes",
+                    "-p",
+                    str(args.port),
+                    args.host,
+                    command,
+                ],
+                stdin=data,
+                check=True,
+            )
 
 
 if __name__ == "__main__":

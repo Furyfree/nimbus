@@ -1,9 +1,9 @@
 # Testing an unpublished candidate
 
 Use a local candidate for development. It tests uncommitted code and
-definitions without a release, a Git push, or changes to stable COPR. A separate
-beta COPR project can later test RPM installation and upgrade behavior with
-published source; it is unnecessary for the first engine/resource drills.
+definitions without a release, a Git push, or changes to stable COPR. Use the
+develop COPR channel for RPM installation and upgrade trials with
+published source; it is unnecessary for local engine/resource drills.
 
 Run the complete local gate first. Then, when VM staging is authorized:
 

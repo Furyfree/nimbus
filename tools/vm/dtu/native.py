@@ -1,12 +1,13 @@
 """Disposable container only: real NM persistence with no agent or a non-saving agent."""
-import importlib.util
+
 import contextlib
+import importlib.util
 import io
 import os
-from pathlib import Path
 import subprocess
 import sys
 import time
+from pathlib import Path
 from unittest.mock import patch
 
 
@@ -22,15 +23,20 @@ def agent():
     import dbus.service
     from dbus.mainloop.glib import DBusGMainLoop
     from gi.repository import GLib
+
     DBusGMainLoop(set_as_default=True)
     bus = dbus.SystemBus()
     interface = "org.freedesktop.NetworkManager.SecretAgent"
 
     class Agent(dbus.service.Object):
-        @dbus.service.method(interface, in_signature="a{sa{sv}}osasu", out_signature="a{sa{sv}}")
+        @dbus.service.method(
+            interface, in_signature="a{sa{sv}}osasu", out_signature="a{sa{sv}}"
+        )
         def GetSecrets(self, connection, path, setting, hints, flags):
             raise dbus.exceptions.DBusException(
-                "No stored secrets", name="org.freedesktop.NetworkManager.SecretAgent.NoSecrets")
+                "No stored secrets",
+                name="org.freedesktop.NetworkManager.SecretAgent.NoSecrets",
+            )
 
         @dbus.service.method(interface, in_signature="os", out_signature="")
         def CancelGetSecrets(self, path, setting):
@@ -45,9 +51,13 @@ def agent():
             pass
 
     service = Agent(bus, "/org/freedesktop/NetworkManager/SecretAgent")
-    manager = dbus.Interface(bus.get_object("org.freedesktop.NetworkManager",
-                            "/org/freedesktop/NetworkManager/AgentManager"),
-                            "org.freedesktop.NetworkManager.AgentManager")
+    manager = dbus.Interface(
+        bus.get_object(
+            "org.freedesktop.NetworkManager",
+            "/org/freedesktop/NetworkManager/AgentManager",
+        ),
+        "org.freedesktop.NetworkManager.AgentManager",
+    )
     manager.Register("nimbus-dtu-fixture")
     Path("/tmp/agent-ready").touch()
     GLib.MainLoop().run()
@@ -78,10 +88,16 @@ def main():
 <policy context="default"><allow user="*"/><allow own="*"/>
 <allow send_destination="*"/><allow receive_sender="*"/></policy>
 </busconfig>""")
-    subprocess.run(["dbus-daemon", "--config-file=/tmp/test-bus.conf", "--fork", "--nopidfile"], check=True)
+    subprocess.run(
+        ["dbus-daemon", "--config-file=/tmp/test-bus.conf", "--fork", "--nopidfile"],
+        check=True,
+    )
+
     def start_nm():
         with open("/tmp/networkmanager.log", "ab") as log:
-            process = subprocess.Popen(["NetworkManager", "--no-daemon"], stdout=log, stderr=log)
+            process = subprocess.Popen(
+                ["NetworkManager", "--no-daemon"], stdout=log, stderr=log
+            )
         wait_for(lambda: dtu.Network().status())
         return process
 
@@ -91,16 +107,26 @@ def main():
     password = "synthetic-test-password"
     try:
         network = dtu.Network()
-        legacy_path = network.settings.AddConnection({
-            "connection": {"id": "Existing eduroam", "type": "802-11-wireless"},
-            "802-11-wireless": {"ssid": network.dbus.ByteArray(b"eduroam")},
-            "ipv4": {"method": "auto"}, "ipv6": {"method": "auto"}})
-        home_path = network.settings.AddConnection({
-            "connection": {"id": "Home", "type": "802-11-wireless"},
-            "802-11-wireless": {"ssid": network.dbus.ByteArray(b"home")},
-            "ipv4": {"method": "auto"}, "ipv6": {"method": "auto"}})
+        legacy_path = network.settings.AddConnection(
+            {
+                "connection": {"id": "Existing eduroam", "type": "802-11-wireless"},
+                "802-11-wireless": {"ssid": network.dbus.ByteArray(b"eduroam")},
+                "ipv4": {"method": "auto"},
+                "ipv6": {"method": "auto"},
+            }
+        )
+        network.settings.AddConnection(
+            {
+                "connection": {"id": "Home", "type": "802-11-wireless"},
+                "802-11-wireless": {"ssid": network.dbus.ByteArray(b"home")},
+                "ipv4": {"method": "auto"},
+                "ipv6": {"method": "auto"},
+            }
+        )
         existing = set(network.settings.ListConnections())
-        dtu.credentials = lambda _: (_ for _ in ()).throw(AssertionError("credentials before approval"))
+        dtu.credentials = lambda _: (_ for _ in ()).throw(
+            AssertionError("credentials before approval")
+        )
         try:
             network.configure(network.observe()[1], "")
             raise AssertionError("unapproved replacement allowed")
@@ -109,28 +135,39 @@ def main():
         assert existing == set(network.settings.ListConnections())
         for no_op_agent in (False, True):
             if no_op_agent:
-                secret_agent = subprocess.Popen([sys.executable, "-I", "-B", __file__, "--agent"])
+                secret_agent = subprocess.Popen(
+                    [sys.executable, "-I", "-B", __file__, "--agent"]
+                )
                 wait_for(lambda: Path("/tmp/agent-ready").exists())
             dtu.credentials = lambda _: ("s123456@dtu.dk", password)
             if no_op_agent:
                 output = io.StringIO()
-                with patch.object(sys.stdin, "isatty", return_value=True), \
-                     patch("builtins.input", return_value="y"), \
-                     contextlib.redirect_stdout(output):
+                with (
+                    patch.object(sys.stdin, "isatty", return_value=True),
+                    patch("builtins.input", return_value="y"),
+                    contextlib.redirect_stdout(output),
+                ):
                     network.configure(network.observe()[1], "", replace_existing=True)
                 assert "eduroam was not found nearby" in output.getvalue()
                 assert "Connection has not been tested" in output.getvalue()
             else:
                 network.configure(network.observe()[1], "", replace_existing=True)
-            assert network.status()["configured"], "NM normalized settings were rejected"
+            assert network.status()["configured"], (
+                "NM normalized settings were rejected"
+            )
             assert not network.status()["connected"], "unexpected connection"
             current, _ = network.observe()
             assert current[1]["connection"].get("autoconnect", True)
             network.verify_password(current[0], password)
             paths = set(network.settings.ListConnections())
             assert existing - {legacy_path} <= paths
-            assert legacy_path not in paths and len(paths - (existing - {legacy_path})) == 1
-            dtu.credentials = lambda _: (_ for _ in ()).throw(AssertionError("credentials on unapproved rerun"))
+            assert (
+                legacy_path not in paths
+                and len(paths - (existing - {legacy_path})) == 1
+            )
+            dtu.credentials = lambda _: (_ for _ in ()).throw(
+                AssertionError("credentials on unapproved rerun")
+            )
             try:
                 network.configure(network.observe()[1], "")
                 raise AssertionError("rerun replaced without approval")
@@ -151,7 +188,9 @@ def main():
         assert len(saved) == 1, "password not persisted in exactly one native keyfile"
         keyfile = saved[0]
         assert keyfile.stat().st_uid == 0 and keyfile.stat().st_gid == 0
-        assert keyfile.stat().st_mode & 0o777 == 0o600, "native keyfile is not root-only"
+        assert keyfile.stat().st_mode & 0o777 == 0o600, (
+            "native keyfile is not root-only"
+        )
         nm.terminate()
         nm.wait(timeout=10)
         nm = start_nm()
@@ -163,7 +202,9 @@ def main():
         network.interface(current[0], dtu.CONNECTION).Delete()
         assert not keyfile.exists(), "native deletion retained the credential file"
         assert len(list(Path("/etc/NetworkManager/system-connections").glob("*"))) == 1
-        print("PASS: saved credentials with absent/non-saving agents, off-campus setup succeeds with autoconnect, preserved unrelated profiles, root:root 0600 keyfile, password survives Update and daemon restart, native removal deletes password file")
+        print(
+            "PASS: saved credentials with absent/non-saving agents, off-campus setup succeeds with autoconnect, preserved unrelated profiles, root:root 0600 keyfile, password survives Update and daemon restart, native removal deletes password file"
+        )
     finally:
         if secret_agent is not None:
             secret_agent.terminate()

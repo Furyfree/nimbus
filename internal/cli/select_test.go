@@ -297,59 +297,59 @@ func TestSelectionPreservesManifestStringValues(t *testing.T) {
 	}
 }
 
-// editableCheckout copies the repository definitions into a temporary
-// directory so a selection command can write a manifest without touching
-// the real checkout.
+// editableCheckout writes a small selection fixture. It deliberately excludes
+// the owner's package inventory, services and boot configuration.
 func editableCheckout(t *testing.T) string {
 	t.Helper()
-	src := repoRoot(t)
 	dst := t.TempDir()
-	for _, dir := range []string{"machines", "profiles", "components", "system"} {
-		if err := filepath.WalkDir(filepath.Join(src, dir), func(p string, d os.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			rel, err := filepath.Rel(src, p)
-			if err != nil {
-				return err
-			}
-			if d.IsDir() {
-				return os.MkdirAll(filepath.Join(dst, rel), 0o755)
-			}
-			data, err := os.ReadFile(p)
-			if err != nil {
-				return err
-			}
-			if dir == "machines" {
-				// These package/selection fixtures predate native constraints.
-				// Constraint tests exercise the full definitions separately.
-				var manifest map[string]any
-				if err := toml.Unmarshal(data, &manifest); err != nil {
-					return err
-				}
-				delete(manifest, "package_constraints")
-				data, err = toml.Marshal(manifest)
-				if err != nil {
-					return err
-				}
-			}
-			return os.WriteFile(filepath.Join(dst, rel), data, 0o644)
-		}); err != nil {
+	files := map[string]string{
+		"nimbus.toml": `schema = 1
+[compatibility]
+fedora = ["44"]
+min_engine = "0.0.0"
+[dnf]
+defaultyes = true
+[repositories.brave]
+kind = "dnf"
+baseurl = "https://example.invalid/brave"
+key_file = "keys/brave.asc"
+key = "1111111111111111111111111111111111111111"
+priority = 100
+[repositories.terra]
+kind = "dnf"
+baseurl = "https://example.invalid/terra"
+key_url = "https://example.invalid/terra.asc"
+key = "2222222222222222222222222222222222222222"
+priority = 101
+`,
+		".git/config":           "[remote \"origin\"]\nurl = https://github.com/Furyfree/nimbus.git\n",
+		"system/keys/brave.asc": "-----BEGIN PGP PUBLIC KEY BLOCK-----\nfixture\n-----END PGP PUBLIC KEY BLOCK-----\n",
+		"machines/laptop.toml": `schema=1
+id="laptop"
+profiles=["common", "development"]
+components=["amd-graphics", "laptop-power"]
+[dotfiles]
+repo="https://github.com/Furyfree/dotfiles.git"
+`,
+		"profiles/common.toml": `schema=1
+id="common"
+packages=["ripgrep", "brave:brave-browser", "terra:ghostty"]
+`,
+		"profiles/development.toml":       "schema=1\nid='development'\ncomponents=['docker']\n",
+		"profiles/hyprland-noctalia.toml": "schema=1\nid='hyprland-noctalia'\n",
+		"profiles/gaming.toml":            "schema=1\nid='gaming'\npackages=['new-game']\n",
+		"components/docker.toml":          "schema=1\nid='docker'\n",
+		"components/amd-graphics.toml":    "schema=1\nid='amd-graphics'\n[detect]\ndisplay_vendor='1002'\n",
+		"components/laptop-power.toml":    "schema=1\nid='laptop-power'\n[detect]\nchassis='laptop'\n",
+	}
+	for rel, data := range files {
+		path := filepath.Join(dst, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 			t.Fatal(err)
 		}
-	}
-	data, err := os.ReadFile(filepath.Join(src, "nimbus.toml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dst, "nimbus.toml"), data, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(dst, ".git"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dst, ".git", "config"), []byte("[remote \"origin\"]\n\turl = https://github.com/Furyfree/nimbus.git\n"), 0o644); err != nil {
-		t.Fatal(err)
+		if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	real, err := filepath.EvalSymlinks(dst)
 	if err != nil {
@@ -442,7 +442,7 @@ func TestPickerIsUsedWhenNoIDsAreGiven(t *testing.T) {
 	if code != ExitOK || !strings.Contains(out, "already says that") {
 		t.Fatalf("empty pick: %d %q\n%s", code, errOut, out)
 	}
-	if strings.Join(offered, ",") != "dtu-network,amd-graphics,laptop-power,wifi-retry,boot-theme" {
+	if strings.Join(offered, ",") != "amd-graphics,laptop-power" {
 		t.Fatalf("picker offered %v", offered)
 	}
 	if code, _, errOut := run(t, "components", "remove", "docker", "--checkout", root, "--machine", "laptop"); code != ExitFailure || !strings.Contains(errOut, "removed by removing the profile") {

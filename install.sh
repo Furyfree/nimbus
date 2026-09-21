@@ -234,10 +234,84 @@ installer_run() {
   return "$status"
 }
 
+# Install prerequisites without a second confirmation after bootstrap approval.
+installer_prerequisites() {
+  local -a prerequisites=()
+  command -v git >/dev/null 2>&1 || prerequisites+=(git-core)
+  [ -x "$1" ] || prerequisites+=(python3)
+  if [ "${#prerequisites[@]}" -gt 0 ]; then
+    say "Installing missing bootstrap prerequisites: ${prerequisites[*]}"
+    installer_run sudo dnf5 -y install "${prerequisites[@]}"
+  fi
+}
+
+# Normalize a Git locator to its repository identity the way Nimbus does.
+normalize() {
+  local url="$1"
+  url="${url#*://}"
+  url="${url#*@}"
+  url="${url/:/\/}"
+  url="${url%/}"
+  url="${url%.git}"
+  printf '%s' "$(printf '%s' "${url%%/*}" | tr '[:upper:]' '[:lower:]')/${url#*/}"
+}
+
+installer_checkout() {
+  local branch=main real top remote got current
+  [ "${CHANNEL:-stable}" = develop ] && branch=develop
+
+  if [ -e "${CHECKOUT}" ]; then
+    real="$(realpath -e "${CHECKOUT}")" || fail "${CHECKOUT} exists but cannot be resolved"
+    top="$(git -C "${real}" rev-parse --show-toplevel 2>/dev/null)" || fail "${CHECKOUT} exists and is not a Git worktree"
+    [ "$(realpath -e "${top}")" = "${real}" ] || fail "${CHECKOUT} is not the Git worktree root"
+    remote="$(git -C "${real}" config --get remote.origin.url || true)"
+    [ -n "${remote}" ] || fail "${CHECKOUT} has no origin remote"
+    got="$(normalize "${remote}")"
+    [ "$(printf '%s' "${got}" | tr '[:upper:]' '[:lower:]')" = "${ORIGIN_ID}" ] || fail "${CHECKOUT} does not match the Nimbus origin; it is left untouched"
+    current="$(git -C "${real}" branch --show-current 2>/dev/null || true)"
+    # A detached checkout, such as a linked worktree on a reviewed commit, is
+    # reused exactly as it is: no clean-tree check, switch or update.
+    if [ -n "${current}" ]; then
+      [ -z "$(git -C "${real}" status --porcelain)" ] || fail "${CHECKOUT} has local changes; commit or stash them before installing"
+      if [ "${current}" != "${branch}" ]; then
+        say "switching ${CHECKOUT} from ${current} to ${branch}"
+        installer_run git -C "${real}" fetch origin "refs/heads/${branch}:refs/remotes/origin/${branch}"
+        installer_run git -C "${real}" switch "${branch}"
+      fi
+      # The installer always runs the channel's current code, not a stale
+      # checkout; sync continues to own ordinary updates. The explicit refspec
+      # avoids the rolling release tag of the same name.
+      installer_run git -C "${real}" fetch origin "refs/heads/${branch}:refs/remotes/origin/${branch}"
+      installer_run git -C "${real}" merge --ff-only "refs/remotes/origin/${branch}" ||
+        fail "${CHECKOUT} has local commits on ${current}; update or reset it before installing"
+    fi
+    say "reusing the existing checkout at ${real}"
+  else
+    say "cloning ${ORIGIN} (${branch})"
+    mkdir -p "$(dirname "${CHECKOUT}")"
+    installer_run git clone --branch "${branch}" "${ORIGIN}" "${CHECKOUT}"
+  fi
+}
+
+# Converge a rerun only after recognizing its native channel repository.
+engine_update() {
+  local engine="$1" switch_needed="$2" repo_current="$3" repo_project="$4"
+  # A rerun keeps the checkout and its engine on the same channel.
+  if [ -x "${engine}" ] && [ "${switch_needed}" = false ] && [ -n "${repo_current}" ]; then
+    say "Updating the Nimbus engine from ${repo_project}."
+    installer_run sudo dnf5 -y \
+      --setopt=nimbus-engine.metadata_expire=0 \
+      --setopt=nimbus-engine.gpgcheck=1 \
+      --setopt=nimbus-engine.skip_if_unavailable=0 \
+      upgrade --from-repo=nimbus-engine nimbus
+    [ -x "${engine}" ] || fail "DNF completed without the Nimbus engine"
+  fi
+}
+
 installer_main() {
 ORIGIN="https://github.com/Furyfree/nimbus.git"
 ORIGIN_ID="github.com/furyfree/nimbus"
-CHECKOUT="${HOME}/.local/share/nimbus"
+CHECKOUT="${NIMBUS_CHECKOUT:-${HOME}/.local/share/nimbus}"
 SUPPORTED_FEDORA="44"
 
 installer_arguments "$@"
@@ -269,59 +343,9 @@ say "Nimbus origin: ${ORIGIN}"
 say "checkout:      ${CHECKOUT}"
 say "channel:       ${CHANNEL} (branch ${BRANCH})"
 
-prerequisites=()
-command -v git >/dev/null 2>&1 || prerequisites+=(git-core)
-[ -x /usr/bin/python3 ] || prerequisites+=(python3)
-if [ "${#prerequisites[@]}" -gt 0 ]; then
-  say "Installing missing bootstrap prerequisites: ${prerequisites[*]}"
-  installer_run sudo dnf5 -y install "${prerequisites[@]}"
-fi
+installer_prerequisites /usr/bin/python3
 
-# Normalize a Git locator to its repository identity the way Nimbus does.
-normalize() {
-  local url="$1"
-  url="${url#*://}"
-  url="${url#*@}"
-  url="${url/:/\/}"
-  url="${url%/}"
-  url="${url%.git}"
-  printf '%s' "$(printf '%s' "${url%%/*}" | tr '[:upper:]' '[:lower:]')/${url#*/}"
-}
-
-branch=main
-[ "${CHANNEL:-stable}" = develop ] && branch=develop
-
-if [ -e "${CHECKOUT}" ]; then
-  real="$(realpath -e "${CHECKOUT}")" || fail "${CHECKOUT} exists but cannot be resolved"
-  top="$(git -C "${real}" rev-parse --show-toplevel 2>/dev/null)" || fail "${CHECKOUT} exists and is not a Git worktree"
-  [ "$(realpath -e "${top}")" = "${real}" ] || fail "${CHECKOUT} is not the Git worktree root"
-  remote="$(git -C "${real}" config --get remote.origin.url || true)"
-  [ -n "${remote}" ] || fail "${CHECKOUT} has no origin remote"
-  got="$(normalize "${remote}")"
-  [ "$(printf '%s' "${got}" | tr '[:upper:]' '[:lower:]')" = "${ORIGIN_ID}" ] || fail "${CHECKOUT} does not match the Nimbus origin; it is left untouched"
-  current="$(git -C "${real}" branch --show-current 2>/dev/null || true)"
-  # A detached checkout, such as a linked worktree on a reviewed commit, is
-  # reused exactly as it is: no clean-tree check, switch or update.
-  if [ -n "${current}" ]; then
-    [ -z "$(git -C "${real}" status --porcelain)" ] || fail "${CHECKOUT} has local changes; commit or stash them before installing"
-    if [ "${current}" != "${branch}" ]; then
-      say "switching ${CHECKOUT} from ${current} to ${branch}"
-      installer_run git -C "${real}" fetch origin "refs/heads/${branch}:refs/remotes/origin/${branch}"
-      installer_run git -C "${real}" switch "${branch}"
-    fi
-    # The installer always runs the channel's current code, not a stale
-    # checkout; sync continues to own ordinary updates. The explicit refspec
-    # avoids the rolling release tag of the same name.
-    installer_run git -C "${real}" fetch origin "refs/heads/${branch}:refs/remotes/origin/${branch}"
-    installer_run git -C "${real}" merge --ff-only "refs/remotes/origin/${branch}" ||
-      fail "${CHECKOUT} has local commits on ${current}; update or reset it before installing"
-  fi
-  say "reusing the existing checkout at ${real}"
-else
-  say "cloning ${ORIGIN} (${branch})"
-  mkdir -p "$(dirname "${CHECKOUT}")"
-  installer_run git clone --branch "${branch}" "${ORIGIN}" "${CHECKOUT}"
-fi
+installer_checkout
 
 BOOTSTRAP="${CHECKOUT}/bootstrap"
 [ -x "${BOOTSTRAP}" ] || fail "${BOOTSTRAP} is missing or not executable"

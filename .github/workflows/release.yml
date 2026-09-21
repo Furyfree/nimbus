@@ -45,6 +45,7 @@ jobs:
       - uses: extractions/setup-just@v4
       - run: npm install --global markdownlint-cli
       - run: sudo apt-get install -y shellcheck gnupg
+      - run: python3 -m pip install ruff==0.16.8
       - run: just check
       - name: Prepare and test vendored source
         env:

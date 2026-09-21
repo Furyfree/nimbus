@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Linux command supervisor preserving the caller's terminal and stdin."""
+
 import ctypes
 import errno
 import os
@@ -64,7 +65,10 @@ def main(argv):
         while True:
             failed = root_status is not None and root_status != 0
             if (cancelled or setup_failed or failed) and not signalled:
-                print("handoff: stopping command group; waiting for descendants", file=sys.stderr)
+                print(
+                    "handoff: stopping command group; waiting for descendants",
+                    file=sys.stderr,
+                )
                 # Async shell descendants can inherit SIGINT ignored. TERM is
                 # the cancellation signal; preserve the caller's exit status.
                 try:
@@ -72,7 +76,10 @@ def main(argv):
                 except ProcessLookupError:
                     pass
                 except PermissionError:
-                    print("handoff: waiting for privileged descendants to stop", file=sys.stderr)
+                    print(
+                        "handoff: waiting for privileged descendants to stop",
+                        file=sys.stderr,
+                    )
                 signalled = True
             try:
                 pid, status = os.waitpid(-1, os.WNOHANG | os.WUNTRACED)
@@ -83,7 +90,10 @@ def main(argv):
                     if pid == process.pid:
                         stopped = os.WSTOPSIG(status)
                         if tty is not None and stopped in (
-                                signal.SIGTSTP, signal.SIGTTIN, signal.SIGTTOU):
+                            signal.SIGTSTP,
+                            signal.SIGTTIN,
+                            signal.SIGTTOU,
+                        ):
                             if os.tcgetpgrp(tty) == process.pid:
                                 foreground(tty, caller_group)
                             os.killpg(caller_group, stopped)
@@ -107,10 +117,15 @@ def main(argv):
             if pid == 0:
                 if signalled:
                     try:
-                        with open(f"/proc/self/task/{os.getpid()}/children") as children:
+                        with open(
+                            f"/proc/self/task/{os.getpid()}/children"
+                        ) as children:
                             pending = children.read().strip()
                         if pending and pending != waiting_pids:
-                            print(f"handoff: waiting for process IDs: {pending}", file=sys.stderr)
+                            print(
+                                f"handoff: waiting for process IDs: {pending}",
+                                file=sys.stderr,
+                            )
                             waiting_pids = pending
                     except OSError:
                         pass  # The generic waiting message remains available.

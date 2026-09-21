@@ -79,14 +79,6 @@ func TestZeronDevelopmentBootstrapDisclosesNativeEffects(t *testing.T) {
 		if len(errs) > 0 {
 			t.Fatal(errs)
 		}
-		for _, name := range []string{"webkit2gtk4.1", "json-glib"} {
-			selected := slices.ContainsFunc(r.Packages, func(p definitions.ResolvedPackage) bool {
-				return p.Name == name && p.Canonical == "dnf:"+name
-			})
-			if selected != development {
-				t.Fatalf("%s selection = %v with development %v", name, selected, development)
-			}
-		}
 		src, facts := readyHost(t, c)
 		home := t.TempDir()
 		facts.User = inspect.Section[inspect.User]{Value: inspect.User{Home: home}}

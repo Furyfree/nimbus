@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -46,7 +47,21 @@ func repoRoot(t *testing.T) string {
 }
 
 func TestPlanRendersSectionsAndReportsIncomplete(t *testing.T) {
-	root := repoRoot(t)
+	root := viewsCheckout(t)
+	for path, data := range map[string]string{
+		"profiles/development.toml": "schema=1\nid='development'\ncomponents=['docker','zeron']\n",
+		"components/zeron.toml": `schema=1
+id="zeron"
+[installer]
+url="https://example.invalid/install.sh"
+binary=".local/bin/zeron"
+effects=["restarts zeron.service", "loginctl enable-linger with sudo -n; services run after logout"]
+`,
+	} {
+		if err := os.WriteFile(filepath.Join(root, path), []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	src := fixtureSource(t, root)
 	withForeignTerra(t, src)
 	src.Commands[nativetest.Key("dnf5", "--cacheonly", "check-upgrade")] = []byte("Repositories loaded.\n")
@@ -101,7 +116,7 @@ func TestPlanRendersSectionsAndReportsIncomplete(t *testing.T) {
 }
 
 func TestStatusSummarizesThePlan(t *testing.T) {
-	root := repoRoot(t)
+	root := viewsCheckout(t)
 	src := fixtureSource(t, root)
 	withForeignTerra(t, src)
 	withSource(t, src)
@@ -206,7 +221,7 @@ func TestStatusReportsSnapperDriftWithoutMutation(t *testing.T) {
 
 func TestMachineOverridesWithoutSelector(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	root := repoRoot(t)
+	root := viewsCheckout(t)
 	withSource(t, fixtureSource(t, root))
 	if code, _, errOut := run(t, "status", "--checkout", root); code != ExitFailure || !strings.Contains(errOut, "--machine") {
 		t.Fatalf("missing machine without a selector: %d %q", code, errOut)

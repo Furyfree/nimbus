@@ -1,11 +1,15 @@
 # The complete local gate.
-check: fmt-check vet test
+check: fmt-check vet test python-check
     python3 -I -B tools/grub/assets.py --check
     python3 -I -B tools/boot-theme/assets.py --check
     python3 -I -B internal/postinstall/dtu/test_network.py
     git diff --check HEAD
-    if command -v markdownlint >/dev/null 2>&1; then markdownlint '*.md' 'docs/**/*.md' 'tools/**/*.md'; else echo 'markdownlint not installed: skipped'; fi
-    if command -v shellcheck >/dev/null 2>&1; then shellcheck install.sh bootstrap tools/release/*.sh tools/vm/maintenance/*.sh system/root/etc/kernel/install.d/96-nimbus-menu.install system/root/etc/grub.d/09_nimbus_previous_kernels system/root/etc/grub.d/30_previous_kernels_nimbus system/root/etc/grub.d/36_paper_dark system/root/usr/lib/dracut/modules.d/40nimbus-plymouth/module-setup.sh; else echo 'shellcheck not installed: skipped'; fi
+    if command -v markdownlint >/dev/null 2>&1; then markdownlint --ignore CLAUDE.md '*.md' 'docs/**/*.md' 'tools/**/*.md'; else echo 'markdownlint not installed: skipped'; fi
+    if command -v shellcheck >/dev/null 2>&1; then shellcheck install.sh install-develop.sh bootstrap tools/release/*.sh tools/vm/maintenance/*.sh system/root/etc/kernel/install.d/96-nimbus-menu.install system/root/etc/grub.d/09_nimbus_previous_kernels system/root/etc/grub.d/30_previous_kernels_nimbus system/root/etc/grub.d/36_paper_dark system/root/usr/lib/dracut/modules.d/40nimbus-plymouth/module-setup.sh; else echo 'shellcheck not installed: skipped'; fi
+
+python-check:
+    ruff check --no-cache .
+    ruff format --check --no-cache .
 
 fmt-check:
     test -z "$(gofmt -l .)" || { gofmt -l .; echo 'gofmt: files need formatting'; exit 1; }

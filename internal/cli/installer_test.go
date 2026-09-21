@@ -261,11 +261,14 @@ func TestInitDelegatesMiseToolsToChezmoiAndRetriesFailure(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "profiles/common.toml"), []byte("schema = 1\nid = \"common\"\npackages = []\ncomponents = [\"mise\"]\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(filepath.Join(repoRoot(t), "components/mise.toml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "components/mise.toml"), data, 0644); err != nil {
+	data := []byte(`schema=1
+id="mise"
+packages=["gcc"]
+[installer]
+url="https://example.invalid/mise.sh"
+binary=".local/bin/mise"
+`)
+	if err := os.WriteFile(filepath.Join(root, "components/mise.toml"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	home := os.Getenv("HOME")
@@ -507,18 +510,6 @@ func TestSelectionRejectsChangedCheckoutIdentityBeforeWriting(t *testing.T) {
 }
 
 func TestInstallerPrerequisitesDoNotAsk(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join(repoRoot(t), "install.sh"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, body, ok := strings.Cut(string(data), "prerequisites=()\n")
-	if !ok {
-		t.Fatal("missing prerequisite installation flow")
-	}
-	body, _, ok = strings.Cut(body, "\n# Normalize a Git locator")
-	if !ok {
-		t.Fatal("missing prerequisite installation boundary")
-	}
 	for _, tc := range []struct {
 		name, gitStatus, want string
 		python                bool
@@ -535,11 +526,11 @@ func TestInstallerPrerequisitesDoNotAsk(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			script := "set -eu\nprerequisites=()\nsay() { :; }\n" +
+			script := "source \"$1\"\nsay() { :; }\n" +
 				"command() { return " + tc.gitStatus + "; }\n" +
 				"installer_run() { printf '%s\\n' \"$*\"; }\n" +
-				strings.ReplaceAll(body, "/usr/bin/python3", python)
-			cmd := exec.Command("bash", "-c", script)
+				"installer_prerequisites \"$2\""
+			cmd := exec.CommandContext(t.Context(), "bash", "-c", script, "fixture", filepath.Join(repoRoot(t), "install.sh"), python)
 			output, err := cmd.CombinedOutput()
 			if err != nil || strings.TrimSpace(string(output)) != tc.want {
 				t.Fatalf("prerequisite unexpectedly asked or changed: %v %s", err, output)
@@ -549,19 +540,6 @@ func TestInstallerPrerequisitesDoNotAsk(t *testing.T) {
 }
 
 func TestInstallerAcceptsOnlyCheckoutRoots(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join(repoRoot(t), "install.sh"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, body, ok := strings.Cut(string(data), "# Normalize a Git locator")
-	if !ok {
-		t.Fatal("missing checkout validation")
-	}
-	body = "# Normalize a Git locator" + body
-	body, _, ok = strings.Cut(body, "\nBOOTSTRAP=")
-	if !ok {
-		t.Fatal("missing checkout boundary")
-	}
 	home := t.TempDir()
 	remote := filepath.Join(home, "remote.git")
 	repo := filepath.Join(home, "repo")
@@ -590,7 +568,7 @@ func TestInstallerAcceptsOnlyCheckoutRoots(t *testing.T) {
 		path     string
 		accepted bool
 	}{{repo, true}, {worktree, true}, {nested, false}} {
-		cmd := exec.Command("bash", "-c", "set -eu\nsay() { :; }\ninstaller_run() { \"$@\"; }\nfail() { echo \"$*\"; exit 1; }\n"+body)
+		cmd := exec.CommandContext(t.Context(), "bash", "-c", "source \"$1\"\nsay() { :; }\ninstaller_run() { \"$@\"; }\ninstaller_checkout", "fixture", filepath.Join(repoRoot(t), "install.sh"))
 		cmd.Env = append(os.Environ(), "HOME="+home, "CHECKOUT="+tc.path, "ORIGIN_ID=github.com/furyfree/nimbus")
 		out, err := cmd.CombinedOutput()
 		if (err == nil) != tc.accepted {
@@ -600,21 +578,6 @@ func TestInstallerAcceptsOnlyCheckoutRoots(t *testing.T) {
 }
 
 func TestInstallerRerunConvergesTheEngine(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join(repoRoot(t), "bootstrap"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(data)
-	start := strings.Index(text, "engine_update() {")
-	if start < 0 {
-		t.Fatal("missing engine update helper")
-	}
-	end := strings.Index(text[start:], "\nfi\n")
-	if end < 0 {
-		t.Fatal("missing engine update guard")
-	}
-	block := text[start : start+end+len("\nfi\n")]
-
 	engine := filepath.Join(t.TempDir(), "nimbus")
 	if err := os.WriteFile(engine, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
@@ -632,10 +595,10 @@ func TestInstallerRerunConvergesTheEngine(t *testing.T) {
 		{"unrecognized repository", engine, "", "false", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			script := "set -eu\nsay() { :; }\nfail() { echo \"installer: $*\" >&2; exit 1; }\n" +
+			script := "source \"$1\"\nsay() { :; }\n" +
 				"installer_run() { printf '%s\\n' \"$*\"; }\nREPO_PROJECT=furyfree/nimbus-develop\n" +
-				"ENGINE=" + tc.engine + "\nrepo_current=" + tc.repoCurrent + "\nswitch_needed=" + tc.switchNeeded + "\n" + block
-			out, err := exec.Command("bash", "-c", script).CombinedOutput()
+				"ENGINE=" + tc.engine + "\nrepo_current=" + tc.repoCurrent + "\nswitch_needed=" + tc.switchNeeded + "\nengine_update \"$ENGINE\" \"$switch_needed\" \"$repo_current\" \"$REPO_PROJECT\""
+			out, err := exec.CommandContext(t.Context(), "bash", "-c", script, "fixture", filepath.Join(repoRoot(t), "install.sh")).CombinedOutput()
 			if err != nil || strings.TrimSpace(string(out)) != tc.want {
 				t.Fatalf("rerun guard behavior changed: %v\n%s", err, out)
 			}

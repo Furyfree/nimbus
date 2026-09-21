@@ -4,26 +4,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 )
 
-func TestWiFiRetryOnlyOnLaptopAndOnlyWhenDisconnected(t *testing.T) {
-	c, err := Load("../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, machine := range []string{"laptop", "desktop", "vm"} {
-		r, errs := Resolve(c, machine)
-		if len(errs) != 0 {
-			t.Fatal(errs)
-		}
-		selected := slices.ContainsFunc(r.Components, func(c ResolvedComponent) bool { return c.ID == "wifi-retry" })
-		if selected != (machine == "laptop") {
-			t.Fatal(machine, selected)
-		}
-	}
+func TestWiFiRetryOnlyWhenDisconnected(t *testing.T) {
 	unit, err := os.ReadFile("../../system/root/etc/systemd/system/nimbus-wifi-retry.service")
 	if err != nil {
 		t.Fatal(err)

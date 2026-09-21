@@ -13,26 +13,31 @@ import (
 
 // The opt-in native test uses only synthetic RPMs in a disposable container.
 func TestNativeDNFConstraints(t *testing.T) {
-	image := os.Getenv("NIMBUS_DNF_TEST_IMAGE")
-	if image == "" {
-		t.Skip("set NIMBUS_DNF_TEST_IMAGE to the prepared Fedora test image")
+	c := &definitions.Checkout{
+		Machines: map[string]*definitions.Machine{
+			"test": {Schema: 1, ID: "test", Profiles: []string{"common"},
+				PackageConstraints: map[string]string{"dnf:hyprland": "0.56.*", "dnf:noctalia": "5.*"}},
+		},
+		Profiles: map[string]*definitions.Profile{
+			"common": {Schema: 1, ID: "common", Packages: []string{"hyprland", "noctalia"}},
+		},
 	}
-	c, err := definitions.Load(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
-	r, errs := definitions.Resolve(c, "vm")
+	r, errs := definitions.Resolve(c, "test")
 	if len(errs) != 0 {
 		t.Fatal(errs)
-	}
-	if len(r.Constraints) != 2 {
-		t.Fatal("expected the selected desktop version families")
 	}
 	var policy []byte
 	for _, f := range r.Files {
 		if f.Target == definitions.VersionlockPath {
 			policy = f.Content
 		}
+	}
+	if len(policy) == 0 {
+		t.Fatal("no generated constraint policy")
+	}
+	image := os.Getenv("NIMBUS_DNF_TEST_IMAGE")
+	if image == "" {
+		t.Skip("set NIMBUS_DNF_TEST_IMAGE to the prepared Fedora image")
 	}
 	script, err := os.ReadFile(filepath.Join("..", "..", "tools", "dnf-constraints", "verify.py"))
 	if err != nil {

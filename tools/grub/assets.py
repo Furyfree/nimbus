@@ -1,16 +1,18 @@
 """Generate or check the Nimbus theme's solid-color GRUB box slices."""
 
 import argparse
-from pathlib import Path
 import struct
 import zlib
+from pathlib import Path
 
 
 def png(width, color):
     def chunk(kind, data):
         payload = kind + data
-        return struct.pack(">I", len(data)) + payload + struct.pack(
-            ">I", zlib.crc32(payload)
+        return (
+            struct.pack(">I", len(data))
+            + payload
+            + struct.pack(">I", zlib.crc32(payload))
         )
 
     return (
@@ -25,8 +27,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="check without writing")
     args = parser.parse_args()
-    theme = (Path(__file__).resolve().parents[2]
-             / "system/root/boot/grub2/themes/nimbus")
+    theme = Path(__file__).resolve().parents[2] / "system/root/boot/grub2/themes/nimbus"
     for name, width, color in (
         ("selection_c.png", 1, "2b2b2b"),
         ("scrollbar_frame_c.png", 4, "2b2b2b"),

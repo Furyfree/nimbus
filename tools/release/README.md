@@ -1,7 +1,8 @@
 # Manual releases
 
-Releases and COPR builds are separate authorized operations. A push or tag does
-not automatically publish Nimbus. The local worktree is not release input;
+Stable releases and COPR builds are separate authorized operations. A tag
+does not publish a stable release. Pushing to `develop` does publish rolling
+source assets through the develop workflow. The local worktree is not release input;
 only the selected committed tag is exported.
 
 ## Release steps
@@ -22,8 +23,8 @@ only the selected committed tag is exported.
    publication instructions belong there; a GitHub release alone is not an
    available signed RPM.
 6. Verify the published RPM and bootstrap compatibility, then run the intended
-   installation/update trial. Record the version, build and results in
-   [TASKS.md](../../docs/TASKS.md).
+   installation/update trial. Record the version, build and results in the
+   release notes or linked issue; keep only unfinished checks in [TASKS.md](../../docs/TASKS.md).
 
 The workflow reads the Go version from `go.mod`, runs `just check`, exports
 committed source and tests the vendored build without downloads. Only the draft
@@ -60,3 +61,7 @@ bash tools/release/source.sh --channel develop /absolute/new-output-directory
 This downloads modules and compiles in temporary storage. It does not publish,
 install, or modify the working tree. The GitHub workflow also runs the complete
 local gate on the selected commit.
+
+`develop-version` names the next stable release. Stable tags must number at
+or above it so a develop installation can return to stable by normal upgrade.
+After a stable release, advance this base on `develop`.

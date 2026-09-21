@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -50,6 +51,29 @@ func (s *postinstallSource) ReadFile(path string) ([]byte, error) {
 func postinstallFixture(t *testing.T) (string, *postinstallSource) {
 	t.Helper()
 	root := applyEnv(t)
+	// Each task replaces common with its prerequisites; no workstation
+	// inventory or boot resources participate in these approval tests.
+	files := map[string]string{
+		"machines/vm.toml":               "schema=1\nid='vm'\nprofiles=['common']\ncomponents = []\n[dotfiles]\nrepo='https://github.com/Furyfree/dotfiles.git'\n",
+		"profiles/common.toml":           "schema=1\nid='common'\npackages=['onepassword:1password']\n",
+		"components/github-copilot.toml": "schema=1\nid='github-copilot'\npackages=['copilot-installer:github-copilot-installer']\n",
+	}
+	for path, data := range files {
+		if err := os.WriteFile(filepath.Join(root, path), []byte(data), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	config := filepath.Join(root, "nimbus.toml")
+	data, err := os.ReadFile(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, id := range []string{"onepassword", "hyprland-copr", "copilot-installer", "rpmfusion-nonfree", "voxtype"} {
+		data = fmt.Appendf(data, "\n[repositories.%s]\nkind='dnf'\nbaseurl='https://example.invalid/%s'\nkey_url='https://example.invalid/%s.asc'\nkey='3333333333333333333333333333333333333333'\npriority=%d\n", id, id, id, 110+i)
+	}
+	if err := os.WriteFile(config, data, 0644); err != nil {
+		t.Fatal(err)
+	}
 	src := &postinstallSource{FakeSource: fixtureSource(t, root)}
 	key := nativetest.Key("dnf5", inspect.PackageQueryArgs...)
 	src.Commands[key] = append(src.Commands[key], []byte("1password|0|8.10.1|1|x86_64|onepassword|User\n")...)

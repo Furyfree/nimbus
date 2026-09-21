@@ -12,7 +12,8 @@ import (
 func TestDoctorKeepsOneResourceNameAndIndentedDetails(t *testing.T) {
 	var b bytes.Buffer
 	writeDoctorCheck(&b, doctor.Check{ID: "file:/etc/sample", Status: doctor.Pass, Observation: "/etc/sample: matches\nowner root:root"})
-	if strings.Count(b.String(), "/etc/sample") != 1 || !strings.Contains(b.String(), "\n        owner root:root\n") {
+	lines := strings.Split(strings.TrimSuffix(b.String(), "\n"), "\n")
+	if strings.Count(b.String(), "/etc/sample") != 1 || len(lines) != 2 || strings.TrimSpace(lines[1]) != "owner root:root" || !strings.HasPrefix(lines[1], " ") {
 		t.Fatal(b.String())
 	}
 }

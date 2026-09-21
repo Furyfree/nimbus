@@ -2,6 +2,8 @@ package cli
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -13,8 +15,43 @@ import (
 	"github.com/Furyfree/nimbus/internal/state"
 )
 
+// Fixed selections for ownership and provenance views, not the installed setup.
+func viewsCheckout(t *testing.T) string {
+	t.Helper()
+	root := editableCheckout(t)
+	config, err := os.ReadFile(filepath.Join(root, "nimbus.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"nimbus.toml": string(config) + `
+[repositories.docker]
+kind = "dnf"
+baseurl = "https://example.invalid/docker"
+key_url = "https://example.invalid/docker.asc"
+key = "3333333333333333333333333333333333333333"
+priority = 102
+[repositories.flathub]
+kind = "flatpak"
+url = "https://example.invalid/flathub.flatpakrepo"
+key = "4444444444444444444444444444444444444444"
+`,
+		"machines/desktop.toml":       "schema=1\nid='desktop'\nprofiles=['common','development','gaming']\ncomponents=['windows-vm']\n",
+		"profiles/common.toml":        "schema=1\nid='common'\npackages=['bash','dnf5-plugins','terra:ghostty','flatpak:com.spotify.Client']\n",
+		"profiles/laptop-gaming.toml": "schema=1\nid='laptop-gaming'\n",
+		"components/docker.toml":      "schema=1\nid='docker'\npackages=['docker:docker-ce']\n",
+		"components/windows-vm.toml":  "schema=1\nid='windows-vm'\nrequires=['docker']\n",
+	}
+	for path, data := range files {
+		if err := os.WriteFile(filepath.Join(root, path), []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
 func TestOwnershipViews(t *testing.T) {
-	root := repoRoot(t)
+	root := viewsCheckout(t)
 	withSource(t, fixtureSource(t, root))
 	base := []string{"--checkout", root, "--machine", "desktop"}
 
@@ -52,7 +89,7 @@ func TestOwnershipViews(t *testing.T) {
 func TestDesiredFlatpakIsAdoptableFromAnyRemote(t *testing.T) {
 	for _, remote := range []string{"flathub", "other-remote"} {
 		t.Run(remote, func(t *testing.T) {
-			root := repoRoot(t)
+			root := viewsCheckout(t)
 			src := fixtureSource(t, root)
 			src.Commands[nativetest.Key("flatpak", "list", "--system", "--app", "--columns=application,version,origin")] = []byte("com.spotify.Client\t1.0\t" + remote + "\n")
 			withSource(t, src)
@@ -80,7 +117,7 @@ func TestInstalledFlatpaksDoNotRequireVersionMetadata(t *testing.T) {
 		{"owned absent", "com.spotify.Client", "", false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			root := repoRoot(t)
+			root := viewsCheckout(t)
 			src := fixtureSource(t, root)
 			if tc.present {
 				src.Commands[nativetest.Key("flatpak", "list", "--system", "--app", "--columns=application,version,origin")] = []byte(tc.app + "\t\tflathub\n")
@@ -275,7 +312,7 @@ func TestRPMViewsAgreeWithPlanForExplicitArchitectureMigration(t *testing.T) {
 }
 
 func TestWhyAndSelectionLists(t *testing.T) {
-	root := repoRoot(t)
+	root := viewsCheckout(t)
 	withSource(t, fixtureSource(t, root))
 	base := []string{"--checkout", root, "--machine", "desktop"}
 
@@ -304,7 +341,7 @@ func TestWhyAndSelectionLists(t *testing.T) {
 }
 
 func TestViewsReadReceiptsAndBaseline(t *testing.T) {
-	root := repoRoot(t)
+	root := viewsCheckout(t)
 	withSource(t, fixtureSource(t, root))
 	saved := stateRoot
 	stateRoot = t.TempDir()

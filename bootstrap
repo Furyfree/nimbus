@@ -212,21 +212,7 @@ if [ ! -x "${ENGINE}" ]; then
   [ -x "${ENGINE}" ] || fail "DNF completed without installing ${ENGINE}"
 fi
 
-# engine_update converges an installed engine on its configured channel.
-engine_update() {
-  installer_run sudo dnf5 -y \
-    --setopt=nimbus-engine.metadata_expire=0 \
-    --setopt=nimbus-engine.gpgcheck=1 \
-    --setopt=nimbus-engine.skip_if_unavailable=0 \
-    upgrade --from-repo=nimbus-engine nimbus
-}
-
-# A rerun keeps the checkout and its engine on the same channel.
-if [ -x "${ENGINE}" ] && [ "${switch_needed}" = false ] && [ -n "${repo_current}" ]; then
-  say "Updating the Nimbus engine from ${REPO_PROJECT}."
-  engine_update
-  [ -x "${ENGINE}" ] || fail "DNF completed without the Nimbus engine"
-fi
+engine_update "$ENGINE" "$switch_needed" "$repo_current" "$REPO_PROJECT"
 
 [ "$(rpm -qf --qf '%{NAME}' "${ENGINE}")" = nimbus ] || fail "${ENGINE} is not owned by the Nimbus RPM"
 [ "$(command -v nimbus)" = "${ENGINE}" ] || fail "another nimbus shadows ${ENGINE} on PATH; move it aside before retrying"
@@ -237,6 +223,12 @@ if ! report="$("${ENGINE}" validate --checkout "${CHECKOUT}" 2>&1)"; then
   fail "the checkout does not validate with this engine"
 fi
 installer_event "${report}"
+# The CLI owns approval and locking; a channel repair must not start init.
+if [ "${NIMBUS_CHANNEL_SWITCH:-}" = 1 ]; then
+  installer_run "${ENGINE}" internal selector-channel "${CHANNEL}"
+  say "Channel switched to ${CHANNEL}. Run nimbus sync to reconcile the workstation."
+  exit 0
+fi
 # Release downloaded packages before starting the interactive engine.
 if [ -n "${work:-}" ]; then
   rm -rf -- "${work}"
