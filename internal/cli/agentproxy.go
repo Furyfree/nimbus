@@ -31,6 +31,10 @@ Existing trial ownership can be imported only when native identities match.
 The proxy and Herdr user services may restart; finish active requests first.
 Recovery: retry this task. The native installer owns release backups/rollback;
 Nimbus retains partial model ownership for retry. No sudo is used.
+Use --uninstall to stop and remove the proxy and its bundled Herdr service,
+remove its installation and Nimbus registration, and unregister its Copilot
+provider when Copilot is open. Copilot, config.yaml and Mise Herdr stay.
+With Copilot closed, remove the stale Local agents provider in the app later.
 `
 
 const proxySetupPreview = `Set up local agents in Copilot:
@@ -41,7 +45,10 @@ Keep Copilot open. Proxy services may restart; finish active requests first.
 See --help for prerequisites, ownership and recovery details.
 `
 
-func agentProxyOperation(src native.Source, status agentproxy.Result, reset bool) (string, string, error) {
+func agentProxyOperation(src native.Source, status agentproxy.Result, reset, uninstall bool) (string, string, error) {
+	if uninstall {
+		return "Uninstall agent-proxy and its bundled herdr.service; stop active requests.\nRemove the proxy installation and Nimbus registration. Unregister the owned\nCopilot provider if the app is open; otherwise remove it in Copilot later.\nKeep Copilot, config.yaml, native credentials/data and Mise Herdr.\n", "uninstall", nil
+	}
 	if reset {
 		return "Disable automatic model refresh. Services, credentials and models stay in place.\n", "disable-refresh", nil
 	}
@@ -71,7 +78,7 @@ func agentProxyOperation(src native.Source, status agentproxy.Result, reset bool
 }
 
 func newAgentProxyPostinstall(opts *options, flags *machineFlags) *cobra.Command {
-	var preview, yes, reset bool
+	var preview, yes, reset, uninstall bool
 	cmd := &cobra.Command{Use: "agent-proxy", Short: "Connect Copilot to local agents and refresh models", Long: proxySetupHelp, Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			s, err := loadSelected(*flags)
@@ -90,7 +97,7 @@ func newAgentProxyPostinstall(opts *options, flags *machineFlags) *cobra.Command
 			}
 			src := newSource()
 			status := agentproxy.Inspect(src, s.Resolved.Machine)
-			plan, mode, err := agentProxyOperation(src, status, reset)
+			plan, mode, err := agentProxyOperation(src, status, reset, uninstall)
 			if err != nil {
 				return err
 			}
@@ -123,6 +130,9 @@ func newAgentProxyPostinstall(opts *options, flags *machineFlags) *cobra.Command
 			if mode == "refresh" {
 				activity = "refresh model lists"
 			}
+			if mode == "uninstall" {
+				activity = "uninstall agent proxy"
+			}
 			err = native.Activity(out, activity, func() error {
 				var runErr error
 				result, runErr = runAgentProxy(cmd.Context(), mode, s.Resolved.Machine, out)
@@ -142,6 +152,8 @@ func newAgentProxyPostinstall(opts *options, flags *machineFlags) *cobra.Command
 	cmd.Flags().BoolVarP(&preview, "plan", "p", false, "show setup without downloads, authentication or writes")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "approve the displayed user-service setup and model ownership")
 	cmd.Flags().BoolVar(&reset, "reset", false, "disable automatic refresh while retaining services and model ownership")
+	cmd.Flags().BoolVar(&uninstall, "uninstall", false, "remove the proxy and its services, keeping Copilot, config and Mise Herdr")
+	cmd.MarkFlagsMutuallyExclusive("reset", "uninstall")
 	return cmd
 }
 

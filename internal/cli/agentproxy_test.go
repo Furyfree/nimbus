@@ -104,7 +104,7 @@ func TestAgentProxyChoosesOnlyNeededOperations(t *testing.T) {
 				src.ExitCodes[key] = 0
 				src.Commands[key] = []byte(" M .config/agent-proxy/config.yaml\n")
 			}
-			preview, mode, err := agentProxyOperation(src, agentproxy.Result{Status: tt.status, Detail: "unreadable state"}, tt.reset)
+			preview, mode, err := agentProxyOperation(src, agentproxy.Result{Status: tt.status, Detail: "unreadable state"}, tt.reset, false)
 			if (err != nil) != tt.fail || mode != tt.want {
 				t.Fatalf("mode=%s error=%v", mode, err)
 			}

@@ -49,7 +49,7 @@ func TestUpgradePreviewFollowsExecutionOrder(t *testing.T) {
 	root, src := installerFixture(t)
 	code, out, errOut := run(t, "sync", "--upgrade", "--plan", "--checkout", root, "--machine", "vm")
 	first, plan, last := strings.Index(out, "1. Request sudo"), strings.Index(out, "plan for"), strings.Index(out, "Run Topgrade")
-	if code != 0 || first < 0 || plan <= first || last <= plan || !strings.Contains(out, "apply Chezmoi once.\n\nplan for") || len(src.calls) != 0 {
+	if code != 0 || first < 0 || plan <= first || last <= plan || !strings.Contains(out, "apply Chezmoi once.") || !strings.Contains(out, "zeron daemon uninstall") || len(src.calls) != 0 {
 		t.Fatal(code, out, errOut, src.calls)
 	}
 }

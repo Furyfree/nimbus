@@ -94,7 +94,7 @@ func TestCatalogAndRecoveryAdapter(t *testing.T) {
 	}
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	command := exec.CommandContext(t.Context(), node, "--test", "resources/catalog.test.mjs", "resources/storage.test.mjs")
+	command := exec.CommandContext(t.Context(), node, "--test", "resources/catalog.test.mjs", "resources/storage.test.mjs", "resources/uninstall.test.mjs")
 	if data, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("%v\n%s", err, data)
 	}

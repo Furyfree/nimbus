@@ -112,7 +112,7 @@ func Inspect(src native.Source, machine string) Result {
 // Run is called only after approval, or for an already opted-in upgrade refresh.
 // All discovery, authenticated IPC and lifecycle changes stay inside this call.
 func Run(ctx context.Context, mode, machine string, out io.Writer) (Result, error) {
-	if mode != "setup" && mode != "refresh" && mode != "disable-refresh" {
+	if mode != "setup" && mode != "refresh" && mode != "disable-refresh" && mode != "uninstall" {
 		return Result{}, errors.New("invalid agent-proxy operation")
 	}
 	if os.Getuid() == 0 {

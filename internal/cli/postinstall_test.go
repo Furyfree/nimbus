@@ -87,7 +87,7 @@ func TestPostinstallListingStaysReadOnlyAndAvoidsUserData(t *testing.T) {
 			if len(src.streams) != 0 {
 				t.Fatalf("listing executed %v", src.streams)
 			}
-			allowed := []string{"uname -m", nativetest.Key("dnf5", inspect.PackageQueryArgs...), "id -un", nativetest.Key("chezmoi", inspect.ChezmoiDataArgs...)}
+			allowed := []string{"uname -m", nativetest.Key("dnf5", inspect.PackageQueryArgs...), "id -un", nativetest.Key("chezmoi", inspect.ChezmoiDataArgs...), zeronShow}
 			for _, command := range src.reads {
 				if !slices.Contains(allowed, command) {
 					t.Fatalf("unnecessary inspection: %s", command)

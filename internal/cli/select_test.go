@@ -442,7 +442,7 @@ func TestPickerIsUsedWhenNoIDsAreGiven(t *testing.T) {
 	if code != ExitOK || !strings.Contains(out, "already says that") {
 		t.Fatalf("empty pick: %d %q\n%s", code, errOut, out)
 	}
-	if strings.Join(offered, ",") != "dtu-network,amd-graphics,laptop-power,boot-theme" {
+	if strings.Join(offered, ",") != "dtu-network,amd-graphics,laptop-power,wifi-retry,boot-theme" {
 		t.Fatalf("picker offered %v", offered)
 	}
 	if code, _, errOut := run(t, "components", "remove", "docker", "--checkout", root, "--machine", "laptop"); code != ExitFailure || !strings.Contains(errOut, "removed by removing the profile") {

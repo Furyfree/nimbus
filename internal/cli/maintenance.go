@@ -49,7 +49,7 @@ func runMaintenance(cmd *cobra.Command, opts *options, flags machineFlags, sf sy
 				return err
 			}
 		}
-		if _, err := fmt.Fprintln(out); err != nil {
+		if _, err := fmt.Fprintln(out, "Zeron: if selected without daemon opt-in, preview and approve zeron daemon uninstall after sync and any software updates. The GUI stays."); err != nil {
 			return err
 		}
 		if err := runSync(cmd, opts, flags, sf); err != nil {
@@ -281,9 +281,13 @@ func runMaintenance(cmd *cobra.Command, opts *options, flags machineFlags, sf sy
 	if upgrade {
 		setPhase("software updates")
 		if err := runMaintenanceUpgrade(cmd, flags, &result, sf.yes); err != nil {
-			return err
+			return errors.Join(err, syncZeron(cmd, src, s, out, sf.yes, &result))
 		}
 		result.Steps = append(result.Steps, runStep{Name: phase, Status: "succeeded"})
+	}
+	setPhase("Zeron daemon")
+	if err := syncZeron(cmd, src, s, out, sf.yes, &result); err != nil {
+		return err
 	}
 	if upgrade {
 		setPhase("agent model refresh")

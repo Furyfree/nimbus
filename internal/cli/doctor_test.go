@@ -117,6 +117,8 @@ func fixtureSource(t *testing.T, root string) *nativetest.FakeSource {
 	src.Commands[nativetest.Key("test", "-x", "/bin/zsh")] = nil
 	src.Commands[nativetest.Key("id", "-nG", "--", "test")] = []byte("test wheel\n")
 	src.Commands[nativetest.Key("systemctl", "get-default")] = []byte("multi-user.target\n")
+	src.Commands[nativetest.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", "nimbus-wifi-retry.service")] = []byte("LoadState=not-found\nUnitFileState=\nActiveState=inactive\n")
+	src.Commands[nativetest.Key("systemctl", "--user", "show", "zeron.service", "--property=LoadState,ActiveState,UnitFileState,FragmentPath,DropInPaths")] = []byte("LoadState=not-found\nActiveState=inactive\nUnitFileState=\nFragmentPath=\nDropInPaths=\n")
 	for _, unit := range []string{"snapper-cleanup.timer", "greetd.service", "bluetooth.service", "avahi-daemon.service", "cups.socket", "cups.path", "docker.service", "containerd.service", "tailscaled.service", "power-profiles-daemon.service", "NetworkManager-wait-online.service"} {
 		src.Commands[nativetest.Key("systemctl", "show", "--property=LoadState,UnitFileState,ActiveState", "--", unit)] = []byte("LoadState=loaded\nUnitFileState=disabled\nActiveState=inactive\n")
 	}

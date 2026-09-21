@@ -254,6 +254,9 @@ func inspectPostinstall(src native.Source, flags machineFlags, tasks ...string) 
 		taskID = tasks[0]
 	}
 	view := postinstallView{Machine: s.Resolved.Machine, Tasks: postinstall.Inspect(src, postinstall.Inputs{Task: taskID, Resolved: s.Resolved, Facts: *f, Applied: *applied})}
+	if zeronSelected(s) && (taskID == "" || taskID == "zeron") {
+		view.Tasks = append(view.Tasks, zeronTask(src, s.Resolved.Machine))
+	}
 	if err := enrichPostinstall(src, s, &view); err != nil {
 		return nil, err
 	}

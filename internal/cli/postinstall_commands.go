@@ -74,7 +74,7 @@ func newPostinstall(opts *options) *cobra.Command {
 		}
 		return renderPostinstallStatus(c.OutOrStdout(), snapshot.view, opts.verbose)
 	}}
-	cmd.AddCommand(status, newAgentProxyPostinstall(opts, &flags))
+	cmd.AddCommand(status, newAgentProxyPostinstall(opts, &flags), newZeronPostinstall(opts, &flags))
 	return cmd
 }
 func renderPostinstallStatus(out io.Writer, view postinstallView, verbose ...bool) error {

@@ -1,0 +1,15 @@
+[Unit]
+Description=Retry laptop Wi-Fi once after boot
+Wants=NetworkManager.service
+After=NetworkManager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=LC_ALL=C
+ExecStartPre=/usr/bin/sleep 8
+ExecStart=/bin/bash -e -o pipefail -c 'nmcli -t -f DEVICE,TYPE,STATE device status | while IFS=: read -r dev type state; do case "$$type:$$state" in wifi:disconnected|wifi:failed|wifi:connecting*) nmcli --wait 30 device connect "$$dev" ;; esac; done'
+TimeoutStartSec=90
+
+[Install]
+WantedBy=multi-user.target

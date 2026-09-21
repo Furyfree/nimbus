@@ -19,6 +19,7 @@ import {
   validateState,
 } from "./storage.mjs";
 import { install, installedRelease, release, command } from "./setup.mjs";
+import { uninstall } from "./uninstall.mjs";
 const report = {
   status: "failed",
   detail: "Agent-proxy setup did not finish.",
@@ -63,13 +64,18 @@ async function main() {
     setup = args[0] === "--setup";
   if (
     args.length !== 3 ||
-    !["--setup", "--refresh", "--disable-refresh"].includes(args[0]) ||
+    !["--setup", "--refresh", "--disable-refresh", "--uninstall"].includes(args[0]) ||
     args[1] !== "--machine" ||
     !args[2]
   )
     throw new Failure("Invalid adapter arguments");
   const machine = args[2],
     state = await loadState(machine, setup);
+  if (args[0] === "--uninstall") {
+    stage = "proxy uninstall";
+    await uninstall(state, report);
+    return;
+  }
   if (!state || (!setup && !state.configured)) {
     report.status = "skipped";
     report.detail = "Agent proxy is not configured; no model refresh.";

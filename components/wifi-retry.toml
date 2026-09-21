@@ -1,0 +1,19 @@
+# MT7925 laptop: retry the failed first boot handshake through NetworkManager.
+# nmcli device connect reuses an available connection; no password is stored here.
+# https://networkmanager.dev/docs/api/latest/nmcli.html
+# One boot attempt only; deselect this component to remove the unit.
+schema = 1
+id = "wifi-retry"
+packages = ["NetworkManager", "NetworkManager-wifi"]
+
+[[files]]
+source = "etc/systemd/system/nimbus-wifi-retry.service"
+owner = "root"
+group = "root"
+mode = "0644"
+triggers = ["systemd-daemon-reload"]
+
+[[services]]
+unit = "nimbus-wifi-retry.service"
+enabled = true
+running = true

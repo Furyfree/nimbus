@@ -17,6 +17,7 @@ components = [
   "dtu-network",
   "amd-graphics",
   "laptop-power",
+  "wifi-retry",
   "boot-theme",
 ]
 

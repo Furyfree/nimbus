@@ -574,6 +574,34 @@ after Topgrade in `sync --upgrade`; ordinary sync, standalone `upgrade` and
 any discovery or mutation. Reset disables the opt-in and retains services,
 credentials, configuration and model ownership.
 
+`agent-proxy --uninstall` validates the proxy installation and both native
+user units before stopping them. It invokes the pinned upstream installer
+without `--purge`, verifies removal, then deletes Nimbus registration state.
+It unregisters only the recorded loopback provider through Copilot's API when
+the app is open. When Copilot is unavailable, local removal proceeds and the
+report asks the user to remove the stale provider in the app. Foreign units,
+overrides, changed provider identity and failed stops block deletion. Copilot,
+Chezmoi's `config.yaml`, native credentials/data and Mise Herdr remain.
+
+Zeron's daemon is off unless explicitly opted in. After ordinary sync and
+after Topgrade in combined sync, Nimbus previews and approves
+`zeron daemon uninstall` when Zeron is selected without opt-in and its daemon
+is present. It verifies that the native unit is gone and inactive; an exit
+code alone is insufficient. `nimbus postinstall zeron` enables and starts it
+through `zeron daemon install`, verifies native state and records the opt-in
+under `postinstall.json`. Later syncs leave opted-in daemons alone.
+`nimbus postinstall zeron --disable` uninstalls the daemon and clears opt-in
+only after verification. Missing evidence means off; corrupt evidence blocks
+changes. Native Zeron owns its unit, sessions and credentials. The GUI and
+linger setting remain. Standalone upgrades do not reconcile the daemon.
+
+The laptop alone selects `wifi-retry`: a system oneshot waits eight seconds
+after NetworkManager starts and calls `nmcli device connect` once for Wi-Fi
+devices that are disconnected, failed or still connecting. Connected,
+unmanaged and unavailable devices are left alone. Native connection selection
+and stored credentials remain with NetworkManager. Removing the component
+retires the managed unit; desktop and VM do not select it.
+
 `launch browser` and `launch webapp` prefer the default browser from
 `xdg-settings`, then installed browsers in fixed order; Firefox and LibreWolf
 support regular and private windows, not webapp mode. Private requests always
