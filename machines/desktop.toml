@@ -24,6 +24,7 @@ components = [
 
 packages = [
   "gimp",
+  "iwlwifi-mvm-firmware",
 ]
 
 package_exclusions = []
