@@ -1,9 +1,10 @@
 # RPM and COPR tooling for the copr repository: rpm-build provides rpmspec
-# and rpmbuild, rpmdevtools provides spectool, copr-cli publishes builds.
+# and rpmbuild, rpmdevtools provides spectool, copr-cli publishes builds,
+# golang and systemd-rpm-macros satisfy the Go helper specs' BuildRequires.
 schema = 1
 id = "copr"
 
 requires = []
 conflicts = []
-packages = ["rpm-build", "rpmdevtools", "copr-cli"]
+packages = ["rpm-build", "rpmdevtools", "copr-cli", "golang", "systemd-rpm-macros"]
 removes = []
