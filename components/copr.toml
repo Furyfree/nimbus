@@ -1,0 +1,9 @@
+# RPM and COPR tooling for the copr repository: rpm-build provides rpmspec
+# and rpmbuild, rpmdevtools provides spectool, copr-cli publishes builds.
+schema = 1
+id = "copr"
+
+requires = []
+conflicts = []
+packages = ["rpm-build", "rpmdevtools", "copr-cli"]
+removes = []

@@ -16,4 +16,5 @@ components = [
   "docker",
   "nix",
   "fedora-iso",
+  "copr",
 ]
