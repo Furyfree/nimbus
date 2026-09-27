@@ -28,7 +28,7 @@ packages = [
   "onepassword:1password",
   "onepassword:1password-cli",
   "flatpak:com.spotify.Client",
-  "flatpak:md.obsidian.Obsidian",
+  "obsidian-installer:obsidian-installer",
   "flatpak:com.fastmail.Fastmail",
   # Theming
   "adw-gtk3-theme",

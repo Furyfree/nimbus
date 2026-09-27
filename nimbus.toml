@@ -101,6 +101,12 @@ project = "furyfree/wowup-cf-installer"
 key = "DFB9 21CC F686 D0F8 9343 C8DC 8C7C E799 D66B 0C71"
 priority = 134
 
+[repositories.obsidian-installer]
+kind = "copr"
+project = "furyfree/obsidian-installer"
+key = "08AA 10EF D0D0 DBA4 DBAC 92CB 36AB 159C 3A80 FBFC"
+priority = 136
+
 [repositories.woeusb]
 kind = "copr"
 project = "furyfree/woeusb"
