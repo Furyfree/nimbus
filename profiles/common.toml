@@ -55,6 +55,7 @@ packages = [
   # Networking
   "NetworkManager-openconnect",
   "wireguard-tools",
+  "nmap",
 ]
 
 components = [
