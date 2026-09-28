@@ -1,0 +1,12 @@
+# Wooting keyboards: let Wootility configure and update them.
+# uaccess must sort before systemd's 73-seat-late.rules.
+# Replug the keyboard after apply; reload does not re-run rules for it.
+schema = 1
+id = "wooting-keyboard"
+
+[[files]]
+source = "etc/udev/rules.d/70-nimbus-wooting.rules"
+owner = "root"
+group = "root"
+mode = "0644"
+triggers = ["udev-reload"]

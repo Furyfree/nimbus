@@ -62,4 +62,5 @@ components = [
   "nuphy-keyboard",
   "power-management",
   "tailscale",
+  "wooting-keyboard",
 ]

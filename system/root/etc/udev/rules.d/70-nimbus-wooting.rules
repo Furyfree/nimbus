@@ -1,0 +1,4 @@
+# Wootility over WebHID/WebUSB: Wooting's generic rules, for the logged-in user.
+# https://help.wooting.io/article/147-configuring-device-access-for-wootility-under-linux-udev-rules
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="31e3", MODE:="0660", GROUP="input", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="31e3", MODE:="0660", GROUP="input", TAG+="uaccess"
