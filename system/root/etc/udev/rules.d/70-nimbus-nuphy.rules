@@ -1,0 +1,4 @@
+# NuPhy IO over WebHID: grant the logged-in user the settings channel only.
+KERNEL=="hidraw*", ATTRS{idVendor}=="19f5", ATTRS{bInterfaceNumber}=="03", TAG+="uaccess"
+# NuPhy firmware updater mode.
+KERNEL=="hidraw*", ATTRS{idVendor}=="19f5", ATTRS{idProduct}=="0722", TAG+="uaccess"

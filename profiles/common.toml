@@ -59,6 +59,7 @@ packages = [
 
 components = [
   "mise",
+  "nuphy-keyboard",
   "power-management",
   "tailscale",
 ]
