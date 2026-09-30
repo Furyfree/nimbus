@@ -115,6 +115,25 @@ func TestSourceRetirementDefersUnknownProvenanceWithoutBlockingSync(t *testing.T
 	}
 }
 
+func TestUnknownProvenanceBlocksOnlySourcesThatOfferThePackage(t *testing.T) {
+	query := "dnf5 -q --cacheonly --repo=nimbus-old --setopt=nimbus-old.skip_if_unavailable=0 repoquery --available --qf %{name}.%{arch}\\n -- local-app"
+	b, src, _ := retirementFixture(KindRepository)
+	b.in.Facts.Packages.Value = []inspect.Package{{Name: "local-app", Arch: "x86_64", FromRepo: "@commandline"}}
+	src.Commands[query] = nil
+	if op := b.sourceRetirements()[0]; op.Action != ActionRemove || op.Blocked != "" || len(op.Steps) != 1 {
+		t.Fatalf("unrelated local package blocked retirement: %+v", op)
+	}
+	src.Commands[query] = []byte("local-app.src\nlocal-app.x86_64\n")
+	if op := b.sourceRetirements()[0]; op.Action != ActionKeep || !strings.Contains(strings.Join(op.Notes, " "), "local-app.x86_64") {
+		t.Fatalf("offered local package lost its source: %+v", op)
+	}
+	removal := Operation{ID: "packages:remove-local", Kind: KindPackage, Action: ActionRemove,
+		Transaction: &Transaction{Packages: []TxPackage{{Name: "local-app", Arch: "x86_64", Section: "removing"}}}}
+	if op := b.sourceRetirements([]Operation{removal})[0]; op.After != removal.ID || op.Action != ActionRemove {
+		t.Fatalf("source did not wait for the local package's removal: %+v", op)
+	}
+}
+
 func TestRetirementRetainsSourcesUsedByAdoptedPackagesAndRuntimes(t *testing.T) {
 	b, _, _ := retirementFixture(KindRepository)
 	b.in.Facts.Packages.Value = []inspect.Package{{Name: "adopted", FromRepo: "nimbus-old"}}

@@ -199,6 +199,31 @@ func sourceRemovalDependency(inUse sourceInUse, ops []Operation) string {
 	return ""
 }
 
+// offeredPackages reads the retiring sources' cached metadata for the named
+// packages. Missing metadata is an error, never an empty answer.
+func offeredPackages(src native.Source, repos []string, packages []inspect.Package) (map[string]bool, error) {
+	if src == nil {
+		return nil, fmt.Errorf("source metadata is unavailable")
+	}
+	args := []string{"-q", "--cacheonly"}
+	for _, repo := range repos {
+		args = append(args, "--repo="+repo, "--setopt="+repo+".skip_if_unavailable=0")
+	}
+	args = append(args, "repoquery", "--available", "--qf", "%{name}.%{arch}\\n", "--")
+	for _, pkg := range packages {
+		args = append(args, pkg.Name)
+	}
+	out, err := src.Run("dnf5", args...)
+	if err != nil {
+		return nil, err
+	}
+	offered := map[string]bool{}
+	for line := range strings.Lines(string(out)) {
+		offered[strings.TrimSpace(line)] = true
+	}
+	return offered, nil
+}
+
 // CheckSourceRetirement rechecks identity and all installed consumers without
 // refreshing metadata or running a privileged/native mutation.
 func CheckSourceRetirement(op Operation, f *inspect.Facts, src native.Source) error {
@@ -259,12 +284,27 @@ func CheckSourceRetirement(op Operation, f *inspect.Facts, src native.Source) er
 			}
 		}
 		var consumers []string
+		var unknown []inspect.Package
 		for _, pkg := range f.Packages.Value {
 			if pkg.FromRepo == "" || strings.HasPrefix(pkg.FromRepo, "@") {
-				return sourceUnknownProvenance{packageID: pkg.ID()}
+				unknown = append(unknown, pkg)
+				continue
 			}
 			if slices.Contains(consumedIDs, pkg.FromRepo) {
 				consumers = append(consumers, pkg.ID())
+			}
+		}
+		// A package of unknown origin still needs the source when the source
+		// offers it; cached metadata decides. Unreadable metadata defers.
+		if len(unknown) > 0 {
+			offered, err := offeredPackages(src, retiring, unknown)
+			if err != nil {
+				return sourceUnknownProvenance{packageID: unknown[0].ID()}
+			}
+			for _, pkg := range unknown {
+				if offered[pkg.ID()] {
+					consumers = append(consumers, pkg.ID())
+				}
 			}
 		}
 		if len(consumers) > 0 {

@@ -22,7 +22,7 @@ permission does not authorize editing dotfiles. Nimbus's selector, checkout,
 private diagnostics and setup evidence are operational state.
 
 Native installers own their applications, updates and removal. Removing a
-helper RPM or deselecting it does not uninstall its application. Installer
+helper RPM uninstalls the application it verified and keeps user data. Installer
 `effects` describe additional changes in the approval preview and JSON;
 they are plain descriptions, never executable input. Sign-in stays native.
 

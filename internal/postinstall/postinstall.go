@@ -207,7 +207,7 @@ func installerHelper(src native.Source, in Inputs, pkg definitions.ResolvedPacka
 		Detail:       "The helper RPM does not include the application. The helper owns downloads, verification, installation and removal.",
 		Instructions: []string{"Inspect the helper's status before installing. Use Topgrade for configured application updates."},
 		Verification: "Check the installer helper's status and launch the application. Nimbus does not record application completion.",
-		Recovery:     "Use the helper's documented uninstall command before removing its RPM; user data remains outside Nimbus ownership.",
+		Recovery:     "Removing the helper RPM removes the verified application; user data remains outside Nimbus ownership.",
 	}
 	if status, detail := packageReady(in, pkg); status != Complete {
 		t.Status, t.Detail = status, detail

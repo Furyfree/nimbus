@@ -196,8 +196,8 @@ func postinstallRemoval(id string) string {
 	return map[string]string{
 		"zeron":               "nimbus postinstall zeron --disable removes the daemon; GUI and data stay.",
 		"agent-proxy":         "nimbus postinstall agent-proxy --uninstall removes proxy and bundled herdr.service; config, data, Copilot and Mise Herdr stay. --reset only disables model refresh.",
-		"copilot":             "Use github-copilot-installer uninstall before removing its helper RPM; personal data stays outside Nimbus ownership.",
-		"wowup":               "Use wowup-cf-installer uninstall before removing its helper RPM; keep profile data unless separately choosing native purge.",
+		"copilot":             "Removing the helper RPM removes the verified app; personal data in ~/.copilot stays.",
+		"wowup":               "Removing the helper RPM removes the verified app; profile data stays unless separately choosing native purge.",
 		"voxtype":             "systemctl --user disable --now voxtype.service stops and disables dictation; models and configuration stay.",
 		"fingerprint":         "Use fprintd-delete to delete this user's enrollments. Disabling fingerprint login is a separate authentication setting; keep password login available.",
 		"hyprland-plugins":    "Change Chezmoi's plugin selection, then use hyprpm to disable or remove the plugin.",
