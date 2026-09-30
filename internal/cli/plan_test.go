@@ -33,6 +33,14 @@ func TestSourceReviewShowsIncomingAndOutgoingPackages(t *testing.T) {
 	}
 }
 
+func TestUpdatePreviewNamesSkippedPackages(t *testing.T) {
+	tx := &plan.Transaction{Skipped: []plan.TxPackage{{Name: "t3code", Arch: "x86_64", EVR: "0.0.44-1.fc44", Repository: "nimbus-terra", Section: "skipping packages with broken dependencies"}}}
+	out := string(renderPlan(&plan.Plan{Updates: plan.Updates{Transaction: tx}}, false, true))
+	if !strings.Contains(out, "DNF skips: t3code-0.0.44-1.fc44 (broken dependencies)") {
+		t.Fatalf("preview omitted the skipped package:\n%s", out)
+	}
+}
+
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", ".."))

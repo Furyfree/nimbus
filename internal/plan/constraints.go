@@ -75,7 +75,7 @@ func (b *builder) constraintUpdates() Updates {
 	if parseErr != nil {
 		return Updates{Unavailable: parseErr.Error()}
 	}
-	if err != nil && !tx.NothingToDo && len(tx.Packages) == 0 {
+	if err != nil && !tx.NothingToDo && tx.Empty() {
 		return Updates{Unavailable: err.Error()}
 	}
 	u := Updates{Available: []Upgrade{}}

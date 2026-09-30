@@ -207,11 +207,11 @@ func (b *builder) sourceUpgrade() Updates {
 		u.Unavailable = "DNF update check failed: " + previewFailure(out, runErr, err)
 		return u
 	}
-	if runErr != nil && len(tx.Packages) == 0 {
+	if runErr != nil && tx.Empty() {
 		u.Unavailable = "DNF update check failed: " + runErr.Error()
 		return u
 	}
-	if !tx.NothingToDo && len(tx.Packages) == 0 {
+	if !tx.NothingToDo && tx.Empty() {
 		u.Unavailable = "DNF update check returned no usable transaction"
 		return u
 	}

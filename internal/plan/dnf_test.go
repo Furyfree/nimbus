@@ -77,6 +77,24 @@ func TestParsePreviewOutcomes(t *testing.T) {
 	}
 }
 
+func TestParsePreviewSkipped(t *testing.T) {
+	tx, err := ParsePreview(fixture(t, "upgrade-skipping"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tx.Rows("upgrading")) != 2 || len(tx.Packages) != 4 {
+		t.Fatalf("packages = %+v", tx.Packages)
+	}
+	if len(tx.Skipped) != 2 || tx.Skipped[0].Name != "glaze-devel" || SkipReason(tx.Skipped[0]) != "conflicts" ||
+		tx.Skipped[1].Name != "t3code" || SkipReason(tx.Skipped[1]) != "broken dependencies" {
+		t.Fatalf("skipped = %+v", tx.Skipped)
+	}
+	tx, err = ParsePreview([]byte("Package Arch Version Repository Size\nSkipping packages with broken dependencies:\n t3code x86_64 0.0.44-1.fc44 nimbus-terra 1 KiB\n"))
+	if err != nil || len(tx.Packages) != 0 || tx.Empty() {
+		t.Fatalf("only skipped: %+v %v", tx, err)
+	}
+}
+
 func TestParseCheckUpgrade(t *testing.T) {
 	ups, err := ParseCheckUpgrade(fixture(t, "check-upgrade"))
 	if err != nil {

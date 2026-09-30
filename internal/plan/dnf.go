@@ -24,6 +24,9 @@ type TxPackage struct {
 // Transaction is a parsed DNF5 preview.
 type Transaction struct {
 	Packages []TxPackage `json:"packages"`
+	// Skipped holds packages DNF leaves unchanged because their update
+	// conflicts or has broken dependencies. They are not part of the change.
+	Skipped []TxPackage `json:"skipped,omitempty"`
 	// NothingToDo is set when DNF reported nothing to change.
 	NothingToDo bool `json:"nothing_to_do,omitzero"`
 	// Download is DNF's own estimate of the inbound size, such as "3 GiB",
@@ -42,6 +45,11 @@ func (t *Transaction) Rows(section string) []TxPackage {
 	return rows
 }
 
+// Empty reports a preview that lists no package at all.
+func (t *Transaction) Empty() bool {
+	return len(t.Packages) == 0 && len(t.Skipped) == 0
+}
+
 // ResolveError is DNF's own explanation of an unresolvable transaction.
 type ResolveError struct {
 	Problems []string
@@ -54,16 +62,21 @@ func (e *ResolveError) Error() string {
 // Sections DNF5 prints in a preview. Any other heading is an error so a new
 // DNF behavior is never silently accepted.
 var knownSections = map[string]bool{
-	"installing":                   true,
-	"installing dependencies":      true,
-	"installing weak dependencies": true,
-	"upgrading":                    true,
-	"downgrading":                  true,
-	"reinstalling":                 true,
-	"removing":                     true,
-	"removing dependent packages":  true,
-	"removing unused dependencies": true,
+	"installing":                           true,
+	"installing dependencies":              true,
+	"installing weak dependencies":         true,
+	"upgrading":                            true,
+	"downgrading":                          true,
+	"reinstalling":                         true,
+	"removing":                             true,
+	"removing dependent packages":          true,
+	"removing unused dependencies":         true,
+	skippingPrefix + "conflicts":           true,
+	skippingPrefix + "broken dependencies": true,
 }
+
+// DNF5 upgrades print packages it cannot update under these headings.
+const skippingPrefix = "skipping packages with "
 
 // SectionReplaced holds the packages an upgrade or an obsoleting install
 // replaces. DNF5 prints them indented below the new package as
@@ -133,7 +146,12 @@ func ParsePreview(out []byte) (*Transaction, error) {
 			tx.Packages = append(tx.Packages, TxPackage{Name: fields[1], Arch: fields[2], EVR: fields[3], Repository: fields[4], Section: SectionReplaced})
 			continue
 		}
-		tx.Packages = append(tx.Packages, TxPackage{Name: fields[0], Arch: fields[1], EVR: fields[2], Repository: fields[3], Section: section})
+		row := TxPackage{Name: fields[0], Arch: fields[1], EVR: fields[2], Repository: fields[3], Section: section}
+		if strings.HasPrefix(section, skippingPrefix) {
+			tx.Skipped = append(tx.Skipped, row)
+			continue
+		}
+		tx.Packages = append(tx.Packages, row)
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
@@ -141,10 +159,15 @@ func ParsePreview(out []byte) (*Transaction, error) {
 	if len(problems) > 0 {
 		return nil, &ResolveError{Problems: problems}
 	}
-	if !tx.NothingToDo && len(tx.Packages) == 0 {
+	if !tx.NothingToDo && tx.Empty() {
 		return nil, fmt.Errorf("no transaction table in dnf5 output")
 	}
 	return tx, nil
+}
+
+// SkipReason names why DNF skipped a row, such as "broken dependencies".
+func SkipReason(row TxPackage) string {
+	return strings.TrimPrefix(row.Section, skippingPrefix)
 }
 
 // DownloadSize extracts DNF's inbound size from the line that states it,

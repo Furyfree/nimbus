@@ -340,16 +340,14 @@ func writeSourceTransactionInto(lines *[]string, tx *plan.Transaction) {
 
 // writeUpdates renders cached information for the native system upgrade.
 func writeUpdates(b *bytes.Buffer, u plan.Updates) {
-	if u.Transaction != nil && u.Unavailable == "" && len(u.Transaction.Packages) > 0 {
+	switch {
+	case u.Transaction != nil && u.Unavailable == "" && len(u.Transaction.Packages) > 0:
 		fmt.Fprintln(b, "\nupgrade the system (declared RPM sources enforced, system Flatpak updates):")
 		var lines []string
 		writeSourceTransactionInto(&lines, u.Transaction)
 		for _, line := range lines {
 			fmt.Fprintln(b, line)
 		}
-		return
-	}
-	switch {
 	case u.Unavailable != "":
 		fmt.Fprintf(b, "\nupgrade the system (dnf5 upgrade, flatpak update): %s\n", u.Unavailable)
 	case len(u.Available) == 0:
@@ -361,6 +359,13 @@ func writeUpdates(b *bytes.Buffer, u plan.Updates) {
 		}
 		fmt.Fprintf(b, "\nupgrade the system (dnf5 upgrade, flatpak update), %d package updates:\n", len(u.Available))
 		writeWrapped(b, "  ", items, ", ", ",", "  ")
+	}
+	if u.Transaction != nil && u.Unavailable == "" {
+		items := make([]string, 0, len(u.Transaction.Skipped))
+		for _, r := range u.Transaction.Skipped {
+			items = append(items, r.Name+"-"+r.EVR+" ("+plan.SkipReason(r)+")")
+		}
+		writeWrapped(b, "  DNF skips: ", items, ", ", ",", "    ")
 	}
 }
 

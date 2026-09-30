@@ -27,10 +27,10 @@ func systemUpdatesPending(src native.Source, root definitions.Root, reviewed ...
 	if err != nil {
 		return false, fmt.Errorf("DNF update check failed: %w", err)
 	}
-	if runErr != nil && len(tx.Packages) == 0 {
+	if runErr != nil && tx.Empty() {
 		return false, fmt.Errorf("DNF update check failed: %w", runErr)
 	}
-	if !tx.NothingToDo && len(tx.Packages) == 0 {
+	if !tx.NothingToDo && tx.Empty() {
 		return false, fmt.Errorf("DNF update check returned no usable transaction")
 	}
 	pending := len(tx.Packages) > 0
