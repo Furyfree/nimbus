@@ -107,6 +107,12 @@ project = "furyfree/obsidian-installer"
 key = "08AA 10EF D0D0 DBA4 DBAC 92CB 36AB 159C 3A80 FBFC"
 priority = 136
 
+[repositories.claude-desktop-installer]
+kind = "copr"
+project = "furyfree/claude-desktop-installer"
+key = "9F4E D67E 5D89 4218 5532 65F3 9C95 5276 A33A B75A"
+priority = 137
+
 [repositories.woeusb]
 kind = "copr"
 project = "furyfree/woeusb"

@@ -7,6 +7,7 @@ packages = [
   "vscodium:codium",
   "terra:t3code",
   "chatgpt:chatgpt",
+  "claude-desktop-installer:claude-desktop-installer",
   "woeusb:woeusb",
 ]
 
